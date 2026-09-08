@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
-GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/"]
+GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", ".idea/", ".vscode/"]
 CLAUDE_MARKER = "marestail gate"
 
 
