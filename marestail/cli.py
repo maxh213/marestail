@@ -26,11 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_run(commands.add_parser("run", help="run the role pipeline on a task"))
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
+    commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     return parser
 
 
 def add_gate(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--tier", choices=["fast", "full", "qa", "all"], default="fast")
+    parser.add_argument("--tier", choices=["fast", "sonar", "full", "qa", "all"], default="fast")
     parser.add_argument("--scope", choices=["all", "changed"], default="all")
     parser.add_argument("--only", help="comma separated gate names")
     parser.add_argument("--json", action="store_true")
@@ -42,7 +43,7 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("task", help="path to the task file")
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="stop", default=None)
-    parser.add_argument("--auto", action="store_true", help="skip the approval pause after the specifier")
+    parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
     parser.add_argument("--model", default=None)
     parser.add_argument("--retries", type=int, default=3)
     parser.set_defaults(handler=run_command)
@@ -105,6 +106,13 @@ def install_command(args: argparse.Namespace) -> int:
     from marestail.install import install
 
     install(Path(args.target).resolve())
+    return 0
+
+
+def graph_command(args: argparse.Namespace) -> int:
+    from marestail.graph import render as render_graph
+
+    print(render_graph(config_module.load(Path.cwd())))
     return 0
 
 

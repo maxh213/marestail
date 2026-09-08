@@ -5,6 +5,7 @@ from marestail.context import Context
 from marestail.report import Result
 
 FAST = "fast"
+SONAR = "sonar"
 FULL = "full"
 QA = "qa"
 
@@ -35,7 +36,7 @@ def registry() -> list[Gate]:
         Gate("comments", FAST, None, comments.run_gate),
         Gate("py.mutation", FULL, "python", py_mutation.run_gate),
         Gate("ts.mutation", FULL, "ts", ts_mutation.run_gate),
-        Gate("sonar", FULL, "sonar", sonar.run_gate),
+        Gate("sonar", SONAR, "sonar", sonar.run_gate),
         Gate("qa", QA, "qa", qa.run_gate),
     ]
 
@@ -46,4 +47,4 @@ def select(tier: str, only: set[str] | None) -> list[Gate]:
 
 
 def tiers_for(tier: str) -> set[str]:
-    return {FAST: {FAST}, FULL: {FAST, FULL}, QA: {FAST, QA}, "all": {FAST, FULL, QA}}[tier]
+    return {FAST: {FAST}, SONAR: {FAST, SONAR}, FULL: {FAST, SONAR, FULL}, QA: {FAST, QA}, "all": {FAST, SONAR, FULL, QA}}[tier]

@@ -19,7 +19,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 | Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube |
 | acceptance | any command in `[qa]` | |
 
-Tiers: `fast` (everything quick), `full` (adds mutation and Sonar), `qa`.
+Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
 
 ## Use
 
@@ -30,12 +30,31 @@ marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
-marestail run tasks/001.md   # specifier → coder → cleaner → hardener → qa, each in a fresh claude -p
+marestail graph              # module dependency graph, for the architect and for you
+marestail run tasks/001.md   # the pipeline below, each role in a fresh claude -p
 ```
 
-Each role gets a short prompt from `roles/`, the task, the earlier handoffs, and one instruction: loop on `marestail gate` until it passes. The runner reruns the gate itself after every role and sends the agent back with the report if it disagrees.
+## Pipeline
 
-The Stop hook makes interactive Claude Code sessions do the same: it refuses to stop while the fast gate fails on changed files, up to five times per session.
+| Step | Kind | Gate | Does |
+|---|---|---|---|
+| specifier | worker | none | Gherkin scenarios and a QA procedure from the task |
+| critic | judge | none | judges the spec against the task; bounces to a fresh specifier, twice at most; then a human approval pause |
+| coder | worker | fast | implements; must trace every scenario to a test in its handoff |
+| cleaner | worker | sonar | readability without comments, CRAP, Sonar |
+| architect | worker | sonar | draws module boundaries, moves code, tightens the dependency contracts |
+| hardener | judge | full | judges the diff and the mutation report; bounces to a fresh coder, three times at most |
+| qa | worker | qa | turns the QA procedure into an executable end-to-end test |
+
+Workers edit and commit. Judges write one verdict file and nothing else; the runner discards any other edit a judge makes. Every role runs in a fresh session with a short prompt: the role file, the task, the earlier handoffs, and how to finish. Judges also get the gate report.
+
+After every worker the runner checks, deterministically: the handoff exists, the tree is committed, no frozen file changed, the gate for that tier passes, and for the coder that every scenario in the feature file is traced to a test that exists. Anything failing goes back to the same role as feedback, three attempts at most. A judge's gate failing is a bounce regardless of what the judge wrote.
+
+## Frozen files
+
+Workers cannot change what the gate measures or what the spec says. `marestail.toml`, `sonar-project.properties`, `pyproject.toml`, `setup.cfg`, the coverage, Stryker, vitest, eslint, tsconfig and dependency-cruiser configs, `CLAUDE.md`, the Stop hook, `features/`, `qa/` and `tasks/` are rejected in any worker commit. The specifier may edit `features/` and `qa/`; the architect may edit the dependency contracts. Override with `[freeze]` in `marestail.toml` (`paths`, `spec`, `allow`).
+
+The Stop hook makes interactive Claude Code sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session.
 
 ## Adapting for new languages
 
