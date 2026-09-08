@@ -84,7 +84,8 @@ def report_task(ctx: Context) -> dict[str, str]:
 
 
 def collect(client: Client, key: str) -> list[str]:
-    findings = [f"quality gate {status}" for status in [gate_status(client, key)] if status != "OK"]
+    findings = reopened(client, key)
+    findings += [f"quality gate {status}" for status in [gate_status(client, key)] if status != "OK"]
     findings += issues(client, key)
     findings += hotspots(client, key)
     findings += measures(client, key)
@@ -93,6 +94,16 @@ def collect(client: Client, key: str) -> list[str]:
 
 def gate_status(client: Client, key: str) -> str:
     return client.get("api/qualitygates/project_status", projectKey=key)["projectStatus"]["status"]
+
+
+def reopened(client: Client, key: str) -> list[str]:
+    data = client.get("api/issues/search", componentKeys=key, issueStatuses="ACCEPTED,FALSE_POSITIVE", ps=500)
+    findings = []
+    for issue in data.get("issues", []):
+        client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
+        where = f"{issue.get('component', '').split(':', 1)[-1]}:{issue.get('line', 0)}"
+        findings.append(f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties")
+    return findings
 
 
 def issues(client: Client, key: str) -> list[str]:

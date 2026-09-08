@@ -73,13 +73,13 @@ def run_step(state: Run, step: Step) -> bool:
 
 def run_judge_loop(state: Run, judge: Judge) -> bool:
     for bounce in range(judge.bounces + 1):
-        verdict, report = run_judge(state, judge)
+        verdict, target, report = run_judge(state, judge)
         if verdict == PASS:
             return True
         if bounce == judge.bounces:
             print(f"{judge.name} still bouncing after {judge.bounces} rounds; stopping for a human")
             return False
-        worker = find(judge.bounce_to)
+        worker = find(target or judge.bounce_to)
         if not isinstance(worker, Worker) or not run_worker(state, worker, report):
             return False
     return False
@@ -100,7 +100,7 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     return False
 
 
-def run_judge(state: Run, judge: Judge) -> tuple[str, str]:
+def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
     gate_report, gate_ok = gate_for(judge.tier)
     for attempt in range(1, state.retries + 1):
         report = state.next_report(judge.name)
@@ -108,18 +108,19 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str]:
         prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report)
         invoke(state, report.stem, prompt)
         discard_edits(state.config, keep=report)
-        verdict = parse_verdict(report)
-        if verdict is None:
+        parsed = parse_verdict(report)
+        if parsed is None:
             print(f"{judge.name} wrote no verdict; retrying")
             continue
+        verdict, target = parsed
         text = report.read_text()
         if not gate_ok:
-            verdict = BOUNCE
+            verdict, target = BOUNCE, None
             text = gate_report + "\n\n" + text
         commit(state.config, report, f"{judge.name} verdict: {verdict}\n\nBy {judge.name}.")
-        print(f"   verdict {verdict}")
-        return verdict, text
-    return BOUNCE, f"{judge.name} produced no verdict after {state.retries} attempts"
+        print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
+        return verdict, target, text
+    return BOUNCE, None, f"{judge.name} produced no verdict after {state.retries} attempts"
 
 
 def gate_for(tier: str | None) -> tuple[str, bool]:
@@ -129,12 +130,15 @@ def gate_for(tier: str | None) -> tuple[str, bool]:
     return render(results), all(result.ok for result in results)
 
 
-def parse_verdict(report: Path) -> str | None:
+def parse_verdict(report: Path) -> tuple[str, str | None] | None:
     if not report.exists():
         return None
     first = report.read_text().strip().splitlines()[:1]
-    match = re.match(r"VERDICT:\s*(PASS|BOUNCE)", first[0].strip(), re.IGNORECASE) if first else None
-    return match.group(1).upper() if match else None
+    match = re.match(r"VERDICT:\s*(PASS|BOUNCE)(?:\s+(\w+))?", first[0].strip(), re.IGNORECASE) if first else None
+    if not match:
+        return None
+    target = match.group(2).lower() if match.group(2) else None
+    return match.group(1).upper(), target
 
 
 def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:

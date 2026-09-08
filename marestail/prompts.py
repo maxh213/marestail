@@ -88,6 +88,8 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path) -> s
 def verdict_instructions(report: Path) -> str:
     return (
         f"Write your verdict to {report} and nothing else. Do not edit any other file; the runner discards other edits.\n"
-        "First line: `VERDICT: PASS` or `VERDICT: BOUNCE`. Then numbered findings, each naming the file, scenario or "
-        "step concerned and the fix required. Under 40 lines."
+        "First line: `VERDICT: PASS`, or `VERDICT: BOUNCE` to send the work back to the usual role, or "
+        "`VERDICT: BOUNCE <role>` to send it to a different one, for example `VERDICT: BOUNCE specifier` when the "
+        "defect is in the feature file or the QA procedure rather than the code. Then numbered findings, each naming "
+        "the file, scenario or step concerned and the fix required. Under 40 lines."
     )
