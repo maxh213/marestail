@@ -6,7 +6,7 @@ PLAN="${2:-$HERE/dryrun-plan.txt}"
 rm -rf "$WORK/repo" && mkdir -p "$WORK/repo" && cd "$WORK/repo"
 git init -q -b main && git config user.email dryrun@marestail && git config user.name dryrun
 printf '[git]\nbase = "main"\n' > marestail.toml
-printf '.marestail/*\n!.marestail/handoffs/\n' > .gitignore
+printf '.marestail/\n' > .gitignore
 mkdir tasks && echo "# Add one" > tasks/t.md
 git add -A && git commit -qm init
 cp "$PLAN" "$WORK/plan.txt"

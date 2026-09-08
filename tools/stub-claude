@@ -20,7 +20,7 @@ if words[0] == "specify":
     Path("features/t.feature").write_text("Feature: t\n  Scenario: Adds one\n    Given x\n  Scenario Outline: Rejects bad input\n    Given y\n")
     Path("qa/t.md").write_text("1. open\n")
     commit("specifier", "features", "qa")
-    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text("spec written\n"); commit("specifier", str(h))
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text("spec written\n")
 elif words[0] == "judge":
     if "EDIT" in words:
         Path("src.py").write_text("tampered\n")
@@ -39,9 +39,9 @@ elif words[0] == "code":
     h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
     audit = "" if "bad-audit" in words else "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Rejects bad input -> tests/test_src.py::test_rejects_bad_input\n"
     explain = "## Config change\nTests moved, so the test path must follow.\n" if "explain" in words else ""
-    h.write_text(f"coded\n{audit}{explain}"); commit("coder", str(h))
+    h.write_text(f"coded\n{audit}{explain}")
 elif words[0] == "worker":
     role = words[1]
     Path("note.txt").write_text(action + "\n"); commit(role, "note.txt")
-    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text(f"{role} done\n"); commit(role, str(h))
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text(f"{role} done\n")
 print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0.01, "result": action}))

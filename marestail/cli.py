@@ -87,6 +87,7 @@ def hook_command(args: argparse.Namespace) -> int:
     payload = json.loads(sys.stdin.read() or "{}")
     config = config_module.load(Path(payload.get("cwd", Path.cwd())))
     counter = config.work / f"hook-{payload.get('session_id', 'default')}.count"
+    sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
     results = run_gates("fast", True, None)
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
@@ -95,6 +96,14 @@ def hook_command(args: argparse.Namespace) -> int:
     counter.write_text(str(blocked + 1))
     sys.stderr.write(render(results) + "\nFix these before stopping.\n")
     return 2
+
+
+def sweep_counters(work: Path, keep: Path) -> None:
+    import time
+
+    for stale in work.glob("hook-*.count"):
+        if stale != keep and time.time() - stale.stat().st_mtime > 86400:
+            stale.unlink(missing_ok=True)
 
 
 def run_command(args: argparse.Namespace) -> int:

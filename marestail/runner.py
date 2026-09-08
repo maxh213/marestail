@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -61,6 +62,7 @@ def run_pipeline(task: Path, start: str | None, stop: str | None, auto: bool, mo
             break
     else:
         print("pipeline complete")
+        archive_handoffs(state)
     print(proposals_summary(state))
     return outcome
 
@@ -94,6 +96,7 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
+            fold_handoff(state.config, worker.name, report, before)
             return True
         feedback = problems
         print(problems)
@@ -117,7 +120,7 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
         if not gate_ok:
             verdict, target = BOUNCE, None
             text = gate_report + "\n\n" + text
-        commit(state.config, report, f"{judge.name} verdict: {verdict}\n\nBy {judge.name}.")
+        record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name)
         print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
         return verdict, target, text
     return BOUNCE, None, f"{judge.name} produced no verdict after {state.retries} attempts"
@@ -146,8 +149,6 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     problems = []
     if not report.exists():
         problems.append(f"missing handoff {report.relative_to(config.root)}")
-    else:
-        commit_if_stray(config, report, worker.name)
     dirty = changed_paths(config, ["git", "status", "--porcelain", "--untracked-files=all"])
     if dirty:
         problems.append("uncommitted changes:\n" + "\n".join(dirty[:20]))
@@ -170,12 +171,13 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     config = state.config
     justification = config_change_section(report)
     _, diff = run(["git", "diff", f"{before}..HEAD", "--", *frozen], cwd=config.root)
-    revert(config, before, frozen, f"Revert change to frozen files by {report.stem}\n\nBy runner.")
     if justification is None:
+        revert(config, before, frozen, f"Revert change to frozen files by {report.stem}\n\nBy runner.")
         return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
+    body = f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n"
+    revert(config, before, frozen, f"Revert change to frozen files by {report.stem}, recorded as a proposal\n\n{body}\nBy runner.")
     proposal = state.next_report("proposal")
-    proposal.write_text(f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n")
-    commit(config, proposal, f"Record config proposal from {report.stem}\n\nBy runner.")
+    proposal.write_text(body)
     return [
         f"{', '.join(frozen)}: frozen, reverted. Your reason was recorded as {proposal.relative_to(config.root)} "
         "for a human to consider after the run. Find a way within the current configuration."
@@ -220,15 +222,33 @@ def discard_edits(config: Config, keep: Path) -> None:
     run(["git", "clean", "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
 
 
-def commit_if_stray(config: Config, report: Path, role: str) -> None:
-    _, status = run(["git", "status", "--porcelain", "--", str(report)], cwd=config.root)
-    if status.strip():
-        commit(config, report, f"Handoff from {role}\n\nBy {role}.")
+def fold_handoff(config: Config, role: str, report: Path, before: str) -> None:
+    body = report.read_text().strip()
+    if head(config) == before:
+        record_commit(config, f"{role} handoff", body, role)
+        return
+    _, original = run(["git", "log", "-1", "--format=%B"], cwd=config.root)
+    message = strip_byline(original, role) + f"\n\n{body}\n\nBy {role}."
+    run(["git", "commit", "--amend", "-q", "-m", message], cwd=config.root)
 
 
-def commit(config: Config, path: Path, message: str) -> None:
-    run(["git", "add", str(path)], cwd=config.root)
-    run(["git", "commit", "-q", "-m", message], cwd=config.root)
+def strip_byline(message: str, role: str) -> str:
+    lines = message.rstrip().splitlines()
+    if lines and lines[-1].strip() == f"By {role}.":
+        lines = lines[:-1]
+    return "\n".join(lines).rstrip()
+
+
+def record_commit(config: Config, subject: str, body: str, role: str) -> None:
+    run(["git", "commit", "--allow-empty", "-q", "-m", f"{subject}\n\n{body.strip()}\n\nBy {role}."], cwd=config.root)
+
+
+def archive_handoffs(state: Run) -> None:
+    if not state.handoffs.exists():
+        return
+    destination = state.folder / f"handoffs-{time.strftime('%Y%m%dT%H%M%S')}"
+    state.folder.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(state.handoffs), str(destination))
 
 
 def head(config: Config) -> str:

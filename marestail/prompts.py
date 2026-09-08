@@ -63,7 +63,18 @@ def qa_files(config: Config, task_name: str) -> list[Path]:
 def handoffs(config: Config, task_name: str) -> str:
     folder = config.work / "handoffs" / task_name
     files = sorted(folder.glob("*.md")) if folder.exists() else []
-    return "\n\n".join(f"## {f.stem}\n{f.read_text().strip()}" for f in files) or "none"
+    if files:
+        return "\n\n".join(f"## {f.stem}\n{f.read_text().strip()}" for f in files)
+    return handoffs_from_history(config) or "none"
+
+
+def handoffs_from_history(config: Config) -> str:
+    from marestail.shell import run
+
+    base = config.get("git", "base", "origin/master")
+    _, log = run(["git", "log", "--reverse", "--format=## %s%n%b%n", f"{base}..HEAD"], cwd=config.root)
+    entries = [entry for entry in log.split("## ") if "By " in entry]
+    return "\n".join(f"## {entry.strip()}" for entry in entries)
 
 
 def finishing(config: Config, worker: Worker, task_name: str, report: Path) -> str:
