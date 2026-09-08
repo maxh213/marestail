@@ -1,0 +1,15 @@
+specify
+judge BOUNCE
+specify
+judge EDIT PASS
+code bad-audit
+code freeze explain
+code good
+worker cleaner
+worker architect
+judge BOUNCE specifier
+specify
+judge BOUNCE
+code good
+judge PASS
+worker qa

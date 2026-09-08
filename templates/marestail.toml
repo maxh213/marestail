@@ -17,6 +17,11 @@ crap_max = 4
 project_key = "change-me"
 project_name = "Change Me"
 
+[deadcode]
+min_confidence = 60
+python_ignore_names = []
+ts_kinds = ["files", "exports", "types"]
+
 [comments]
 paths = ["server", "client/app"]
 

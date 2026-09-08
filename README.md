@@ -17,6 +17,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 | types and lint | mypy strict, ruff | tsc strict, eslint |
 | no comments, no docstrings | tokenizer | typescript scanner |
 | no pass-through functions, no imports of private modules | ast | typescript AST |
+| no unreachable definitions | vulture | knip |
 | Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube |
 | acceptance | any command in `[qa]` | |
 
@@ -58,6 +59,12 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 ## Deep modules
 
 `marestail depth` prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow. It is a report for the architect, not a gate. Two rules from it are gates: no function whose whole body forwards its own arguments to another call, and no import of a `_private` module from outside its package. The dependency-cruiser template adds the TypeScript equivalent: other code enters a module directory only through its `index.ts`. The architect prompt carries the opinions behind this: few deep modules, narrow general interfaces, complexity pulled down rather than pushed to callers.
+
+## Dead code
+
+The coverage rule has a side effect: the cheapest way to cover a dead function is to test it, so dead code gains tests and mutants instead of disappearing. The `deadcode` gate reports definitions nothing reaches from the program's entry points: vulture for Python, knip for TypeScript. Tests are excluded from the analysis on purpose, so a function only a test calls is dead.
+
+It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate.
 
 ## Frozen files
 

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+import json, os, re, subprocess, sys
+from pathlib import Path
+prompt = sys.stdin.read()
+plan = Path(os.environ["STUB_PLAN"])
+lines = plan.read_text().splitlines()
+action, rest = lines[0], lines[1:]
+plan.write_text("\n".join(rest) + "\n")
+root = Path.cwd()
+def sh(*cmd): subprocess.run(cmd, cwd=root, check=True, capture_output=True)
+def commit(role, *paths):
+    sh("git", "add", *paths); sh("git", "commit", "-q", "--allow-empty", "-m", f"{action}\n\nBy {role}.")
+def handoff_path():
+    return root / re.search(r"Write (\.marestail/\S+?):", prompt).group(1)
+def verdict_path():
+    return Path(re.search(r"Write your verdict to (\S+) and", prompt).group(1))
+words = action.split()
+if words[0] == "specify":
+    Path("features").mkdir(exist_ok=True); Path("qa").mkdir(exist_ok=True)
+    Path("features/t.feature").write_text("Feature: t\n  Scenario: Adds one\n    Given x\n  Scenario Outline: Rejects bad input\n    Given y\n")
+    Path("qa/t.md").write_text("1. open\n")
+    commit("specifier", "features", "qa")
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text("spec written\n"); commit("specifier", str(h))
+elif words[0] == "judge":
+    if "EDIT" in words:
+        Path("src.py").write_text("tampered\n")
+    v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
+    verdict = " ".join(w for w in words[1:] if w != "EDIT")
+    v.write_text(f"VERDICT: {verdict}\n1. finding\n")
+elif words[0] == "code":
+    Path("src.py").write_text("def add_one(x):\n    return x + 1\n")
+    Path("tests").mkdir(exist_ok=True); Path("tests/test_src.py").write_text("def test_adds_one():\n    pass\ndef test_rejects_bad_input():\n    pass\n")
+    paths = ["src.py", "tests"]
+    if "revert" in words:
+        Path("marestail.toml").write_text('[git]\nbase = "main"\n'); paths.append("marestail.toml")
+    if "freeze" in words:
+        Path("marestail.toml").write_text(Path("marestail.toml").read_text() + "\n[python]\ncrap_max = 99\n"); paths.append("marestail.toml")
+    commit("coder", *paths)
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
+    audit = "" if "bad-audit" in words else "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Rejects bad input -> tests/test_src.py::test_rejects_bad_input\n"
+    explain = "## Config change\nTests moved, so the test path must follow.\n" if "explain" in words else ""
+    h.write_text(f"coded\n{audit}{explain}"); commit("coder", str(h))
+elif words[0] == "worker":
+    role = words[1]
+    Path("note.txt").write_text(action + "\n"); commit(role, "note.txt")
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text(f"{role} done\n"); commit(role, str(h))
+print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0.01, "result": action}))
