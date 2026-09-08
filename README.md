@@ -9,7 +9,7 @@ Marestail is gauntlet of deterministic gates for coding agents, after Uncle Bob'
 | Gate | Python | TypeScript |
 |---|---|---|
 | tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 |
-| CRAP ≤ 6 per function | radon + coverage | typescript AST + istanbul |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul |
 | mutation testing, changed files | mutmut | Stryker |
 | dependency direction | import-linter | dependency-cruiser |
 | types and lint | mypy strict, ruff | tsc strict, eslint |

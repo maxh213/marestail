@@ -5,13 +5,13 @@ base = "origin/master"
 root = "server"
 venv = ".venv"
 sources = ["."]
-crap_max = 6
+crap_max = 4
 mutation_workers = 4
 
 [ts]
 root = "client/app"
 source = "src"
-crap_max = 6
+crap_max = 4
 
 [sonar]
 project_key = "change-me"

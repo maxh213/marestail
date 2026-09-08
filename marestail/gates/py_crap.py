@@ -17,7 +17,7 @@ def run_gate(ctx: Context) -> Result:
     if code != 0:
         return Result("py.crap", False, "radon failed", output.splitlines()[-10:], time.time() - started)
     functions = scored(json.loads(output), json.loads(coverage_path.read_text()), ctx)
-    limit = float(ctx.python("crap_max", 6))
+    limit = float(ctx.python("crap_max", 4))
     offenders = [f for f in functions if f["crap"] > limit]
     findings = [describe(f) for f in sorted(offenders, key=lambda f: -f["crap"])]
     summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}"

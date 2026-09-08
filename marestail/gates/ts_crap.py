@@ -22,7 +22,7 @@ def run_gate(ctx: Context) -> Result:
     code, output = run(["node", str(SCRIPT), str(ctx.ts_root()), *files], cwd=ctx.ts_root())
     if code != 0:
         return Result("ts.crap", False, "complexity script failed", output.splitlines()[-10:], time.time() - started)
-    limit = float(ctx.ts("crap_max", 6))
+    limit = float(ctx.ts("crap_max", 4))
     functions = [score(fn, coverage[fn["file"]], ctx) for fn in json.loads(output)]
     offenders = sorted((f for f in functions if f["crap"] > limit), key=lambda f: -f["crap"])
     summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}"
