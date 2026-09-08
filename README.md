@@ -61,7 +61,9 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 
 ## Frozen files
 
-Workers cannot change what the gate measures or what the spec says. `marestail.toml`, `sonar-project.properties`, `pyproject.toml`, `setup.cfg`, the coverage, Stryker, vitest, eslint, tsconfig and dependency-cruiser configs, `CLAUDE.md`, the Stop hook, `features/`, `qa/` and `tasks/` are rejected in any worker commit. The specifier may edit `features/` and `qa/`; the architect may edit the dependency contracts. Override with `[freeze]` in `marestail.toml` (`paths`, `spec`, `allow`).
+Workers cannot change what the gate measures or what the spec says. `marestail.toml`, `sonar-project.properties`, `pyproject.toml`, `setup.cfg`, the coverage, Stryker, vitest, eslint, tsconfig and dependency-cruiser configs, `CLAUDE.md`, the Stop hook, `features/`, `qa/` and `tasks/` are frozen for workers. The specifier may edit `features/` and `qa/`; the architect may edit the dependency contracts. Override with `[freeze]` in `marestail.toml` (`paths`, `spec`, `allow`).
+
+A worker that changes a frozen file has the change reverted and goes again within the current configuration. If it explained the change under `## Config change` in its handoff, the runner records the reason and the diff as a proposal in the handoffs directory and lists every proposal at the end of the run, so you decide in one place whether any of them should be made by hand.
 
 The Stop hook makes interactive Claude Code sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session.
 

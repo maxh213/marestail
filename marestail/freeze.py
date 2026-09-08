@@ -14,14 +14,10 @@ ALLOWED = {
 }
 
 
-def violations(config: Config, role: str, paths: list[str]) -> list[str]:
+def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
     allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
-    return [
-        f"{path} is frozen for {role}; revert it"
-        for path in paths
-        if matches_any(path, frozen) and not matches_any(path, allowed)
-    ]
+    return [path for path in paths if matches_any(path, frozen) and not matches_any(path, allowed)]
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:

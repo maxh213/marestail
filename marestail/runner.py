@@ -16,6 +16,7 @@ from marestail.shell import run
 
 PASS = "PASS"
 BOUNCE = "BOUNCE"
+CONFIG_CHANGE = "## Config change"
 LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b", re.IGNORECASE)
 LIMIT_WAIT_SECONDS = 600
 LIMIT_WAITS = 12
@@ -49,14 +50,19 @@ class Run:
 def run_pipeline(task: Path, start: str | None, stop: str | None, auto: bool, model: str | None, retries: int) -> int:
     config = config_module.load(Path.cwd())
     state = Run(config=config, task=task.resolve(), model=model, retries=retries)
+    outcome = 0
     for step in window(start, stop):
         if not run_step(state, step):
             print(f"pipeline stopped at {step.name}")
-            return 1
+            outcome = 1
+            break
         if step.pause_after and not auto and not approve(state):
-            return 1
-    print("pipeline complete")
-    return 0
+            outcome = 1
+            break
+    else:
+        print("pipeline complete")
+    print(proposals_summary(state))
+    return outcome
 
 
 def run_step(state: Run, step: Step) -> bool:
@@ -142,7 +148,11 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     if dirty:
         problems.append("uncommitted changes:\n" + "\n".join(dirty[:20]))
     touched = changed_paths(config, ["git", "diff", "--name-only", f"{before}..HEAD"]) + dirty
-    problems.extend(freeze.violations(config, worker.name, touched))
+    frozen = freeze.frozen_paths(config, worker.name, touched)
+    if frozen and not dirty:
+        problems.extend(reject_config_change(state, worker, report, before, frozen))
+    elif frozen:
+        problems.extend(f"{path} is frozen for {worker.name}" for path in frozen)
     if worker.audit and report.exists():
         problems.extend(audit.problems(config, state.task_name, report.read_text()))
     if worker.tier:
@@ -150,6 +160,44 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
         if not all(result.ok for result in results):
             problems.append(render(results))
     return "\n\n".join(problems)
+
+
+def reject_config_change(state: Run, worker: Worker, report: Path, before: str, frozen: list[str]) -> list[str]:
+    config = state.config
+    justification = config_change_section(report)
+    _, diff = run(["git", "diff", f"{before}..HEAD", "--", *frozen], cwd=config.root)
+    revert(config, before, frozen, f"Revert change to frozen files by {report.stem}\n\nBy runner.")
+    if justification is None:
+        return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
+    proposal = state.next_report("proposal")
+    proposal.write_text(f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n")
+    commit(config, proposal, f"Record config proposal from {report.stem}\n\nBy runner.")
+    return [
+        f"{', '.join(frozen)}: frozen, reverted. Your reason was recorded as {proposal.relative_to(config.root)} "
+        "for a human to consider after the run. Find a way within the current configuration."
+    ]
+
+
+def config_change_section(report: Path) -> str | None:
+    text = report.read_text() if report.exists() else ""
+    if CONFIG_CHANGE not in text:
+        return None
+    section = text.split(CONFIG_CHANGE, 1)[1]
+    return section.split("\n## ", 1)[0].strip()
+
+
+def revert(config: Config, before: str, paths: list[str], message: str) -> None:
+    run(["git", "checkout", before, "--", *paths], cwd=config.root)
+    run(["git", "add", "-A", "--", *paths], cwd=config.root)
+    run(["git", "commit", "-q", "-m", message], cwd=config.root)
+
+
+def proposals_summary(state: Run) -> str:
+    files = sorted(state.handoffs.glob("*-proposal.md")) if state.handoffs.exists() else []
+    if not files:
+        return ""
+    body = "\n\n".join(f"### {f.stem}\n{f.read_text().strip()}" for f in files)
+    return f"\n## Config changes the agents asked for and were refused\nDecide whether to make any of these yourself.\n\n{body}"
 
 
 def changed_paths(config: Config, command: list[str]) -> list[str]:

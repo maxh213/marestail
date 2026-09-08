@@ -77,7 +77,11 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path) -> s
         f"Write {report.relative_to(config.root)}: what you did, what is left, what the next role must know. "
         "Under 40 lines, plus the audit section if one is required."
     )
-    steps.append("Never change gate configuration, the feature files, or the QA procedure; the runner rejects such commits.")
+    steps.append(
+        "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
+        "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
+        "sees it after the run. Then find a way within the current configuration."
+    )
     return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, start=1))
 
 
