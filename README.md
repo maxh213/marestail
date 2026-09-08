@@ -4,7 +4,7 @@ It's called marestail because working with LLMs reminds me of hacking away at we
 
 Marestail is gauntlet of deterministic gates for coding agents, after Uncle Bob's approach: don't tell the agent to be clean, measure cleanliness and make it loop until the measurement passes.
 
-This whole project is very opinionated on what I consider to be clean code / good practices which I want to force an LLM into.
+This whole project is very opinionated on what I consider to be clean code / good practices which I want to force an LLM into implementing.
 
 ## Gates
 
