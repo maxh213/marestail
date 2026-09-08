@@ -1,0 +1,25 @@
+[git]
+base = "origin/master"
+
+[python]
+root = "server"
+venv = ".venv"
+sources = ["."]
+crap_max = 6
+mutation_workers = 4
+
+[ts]
+root = "client/app"
+source = "src"
+crap_max = 6
+
+[sonar]
+project_key = "change-me"
+project_name = "Change Me"
+
+[comments]
+paths = ["server", "client/app"]
+
+[qa]
+cmd = "npx playwright test"
+cwd = "client/app"

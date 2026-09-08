@@ -1,0 +1,16 @@
+services:
+  sonarqube:
+    image: sonarqube:community
+    container_name: marestail-sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    volumes:
+      - marestail_sonar_data:/opt/sonarqube/data
+      - marestail_sonar_extensions:/opt/sonarqube/extensions
+      - marestail_sonar_logs:/opt/sonarqube/logs
+volumes:
+  marestail_sonar_data:
+  marestail_sonar_extensions:
+  marestail_sonar_logs:

@@ -1,0 +1,9 @@
+{
+  "hooks": [
+    {
+      "type": "command",
+      "command": "marestail gate --hook",
+      "timeout": 900
+    }
+  ]
+}
