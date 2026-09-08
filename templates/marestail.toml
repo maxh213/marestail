@@ -23,8 +23,8 @@ python_ignore_names = []
 ts_kinds = ["files", "exports", "types"]
 
 [docs]
-files = ["README.md", "documentation/*.md"]
-routes_file = "documentation/routes.md"
+files = ["README.md"]
+routes_file = "README.md"
 sources = ["server", "client/app/src"]
 path_prefixes = ["server/", "client/", "documentation/", "tasks/"]
 ignore_env = []

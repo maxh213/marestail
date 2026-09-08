@@ -8,7 +8,7 @@ from marestail.report import Result
 ROUTE_PATTERNS = [r"""@\w+\.route\(\s*["']([^"']+)["']""", r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']"""]
 ENV_PATTERNS = [r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']""", r"""os\.environ(?:\.get\(|\[)\s*["']([A-Z][A-Z0-9_]+)["']""", r"""process\.env\.([A-Z][A-Z0-9_]+)"""]
 IGNORED_ENV = ["K_REVISION", "K_SERVICE", "PORT", "HOME", "PATH"]
-LEDGER_ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
+LEDGER_ROW = re.compile(r"^\|\s*`(/[^`]*)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
 GONE = {"retired", "removed", "gone"}
 SKIP_DIRS = {"node_modules", ".venv", "mutants", "dist", ".git", "tests", "test", "__pycache__", ".marestail"}
