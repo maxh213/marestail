@@ -66,7 +66,7 @@ def ts_findings(ctx: Context) -> list[str]:
     start = output.find("{")
     if start < 0:
         return [f"knip produced no report: {output.strip()[-200:]}"]
-    report = json.loads(output[start:])
+    report, _ = json.JSONDecoder().raw_decode(output[start:])
     prefix = ts_root.relative_to(ctx.root)
     findings = [f"{prefix / file} unused file" for file in report.get("files", []) if "files" in kinds]
     for issue in report.get("issues", []):
