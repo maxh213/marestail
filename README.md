@@ -78,6 +78,8 @@ The Stop hook makes interactive Claude Code sessions loop the same way: it refus
 
 Copy the shape, not the tools. Per-language gates live in `marestail/gates/`; a new language is one file per gate plus a section in `marestail.toml`.
 
+Also there is a claude skill in the repo which should make this process relatively (?) trivial.
+
 ## Inspo
 
 Inspiration for this came from this brilliant interview with uncle bob, would recommend it if you're interested in ideas around delivering quality software in the age of AI! https://www.youtube.com/watch?v=zcLPGC-tvgk&t=1s
