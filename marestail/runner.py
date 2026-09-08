@@ -229,7 +229,7 @@ def fold_handoff(config: Config, role: str, report: Path, before: str) -> None:
         return
     _, original = run(["git", "log", "-1", "--format=%B"], cwd=config.root)
     message = strip_byline(original, role) + f"\n\n{body}\n\nBy {role}."
-    run(["git", "commit", "--amend", "-q", "-m", message], cwd=config.root)
+    run(["git", "commit", "--amend", "--allow-empty", "-q", "-m", message], cwd=config.root)
 
 
 def strip_byline(message: str, role: str) -> str:
