@@ -19,8 +19,8 @@ PASS = "PASS"
 BOUNCE = "BOUNCE"
 CONFIG_CHANGE = "## Config change"
 LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b", re.IGNORECASE)
-LIMIT_WAIT_SECONDS = 600
-LIMIT_WAITS = 12
+LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
+LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
 
 
 @dataclass

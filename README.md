@@ -37,6 +37,10 @@ marestail graph              # module dependency graph, for the architect and fo
 marestail run tasks/001.md   # the pipeline below, each role in a fresh claude -p
 ```
 
+## Overnight
+
+`tools/overnight.sh tasks/000.md tasks/002.md ...` runs tasks in order, each to the hardener by default (`STOP_AT=qa` to include QA), stops at the first failure, waits out rate limits for up to six hours, and writes `.marestail/runs/overnight-<stamp>.md` with one section per task: exit code, minutes, HEAD, the role and verdict lines, and any config proposals. Start it detached: `nohup setsid tools/overnight.sh ... > /dev/null 2>&1 &`.
+
 ## Pipeline
 
 | Step | Kind | Gate | Does |
