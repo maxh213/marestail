@@ -10,6 +10,8 @@ CLAUDE_MARKER = "marestail gate"
 def install(target: Path) -> None:
     copy_if_missing(TEMPLATES / "marestail.toml", target / "marestail.toml")
     copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
+    (target / "tasks").mkdir(exist_ok=True)
+    copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     append_claude_md(target / "CLAUDE.md")
     merge_hook(target / ".claude" / "settings.json")
     extend_gitignore(target / ".gitignore")
