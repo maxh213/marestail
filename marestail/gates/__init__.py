@@ -21,7 +21,7 @@ class Gate:
 
 
 def registry() -> list[Gate]:
-    from marestail.gates import comments, py_crap, py_deps, py_lint, py_mutation, py_tests, qa, sonar
+    from marestail.gates import comments, depth, py_crap, py_deps, py_lint, py_mutation, py_tests, qa, sonar
     from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
 
     return [
@@ -34,6 +34,7 @@ def registry() -> list[Gate]:
         Gate("ts.lint", FAST, "ts", ts_lint.run_gate),
         Gate("ts.deps", FAST, "ts", ts_deps.run_gate),
         Gate("comments", FAST, None, comments.run_gate),
+        Gate("depth", FAST, None, depth.run_gate),
         Gate("py.mutation", FULL, "python", py_mutation.run_gate),
         Gate("ts.mutation", FULL, "ts", ts_mutation.run_gate),
         Gate("sonar", SONAR, "sonar", sonar.run_gate),

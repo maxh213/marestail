@@ -27,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
+    commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
 
 
@@ -113,6 +114,13 @@ def graph_command(args: argparse.Namespace) -> int:
     from marestail.graph import render as render_graph
 
     print(render_graph(config_module.load(Path.cwd())))
+    return 0
+
+
+def depth_command(args: argparse.Namespace) -> int:
+    from marestail import depth
+
+    print(depth.report(depth.analyse(config_module.load(Path.cwd()))))
     return 0
 
 

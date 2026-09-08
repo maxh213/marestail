@@ -16,6 +16,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 | dependency direction | import-linter | dependency-cruiser |
 | types and lint | mypy strict, ruff | tsc strict, eslint |
 | no comments, no docstrings | tokenizer | typescript scanner |
+| no pass-through functions, no imports of private modules | ast | typescript AST |
 | Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube |
 | acceptance | any command in `[qa]` | |
 
@@ -49,6 +50,10 @@ marestail run tasks/001.md   # the pipeline below, each role in a fresh claude -
 Workers edit and commit. Judges write one verdict file and nothing else; the runner discards any other edit a judge makes. Every role runs in a fresh session with a short prompt: the role file, the task, the earlier handoffs, and how to finish. Judges also get the gate report.
 
 After every worker the runner checks, deterministically: the handoff exists, the tree is committed, no frozen file changed, the gate for that tier passes, and for the coder that every scenario in the feature file is traced to a test that exists. Anything failing goes back to the same role as feedback, three attempts at most. A judge's gate failing is a bounce regardless of what the judge wrote.
+
+## Deep modules
+
+`marestail depth` prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow. It is a report for the architect, not a gate. Two rules from it are gates: no function whose whole body forwards its own arguments to another call, and no import of a `_private` module from outside its package. The dependency-cruiser template adds the TypeScript equivalent: other code enters a module directory only through its `index.ts`. The architect prompt carries the opinions behind this: few deep modules, narrow general interfaces, complexity pulled down rather than pushed to callers.
 
 ## Frozen files
 
