@@ -35,6 +35,6 @@ Each role gets a short prompt from `roles/`, the task, the earlier handoffs, and
 
 The Stop hook makes interactive Claude Code sessions do the same: it refuses to stop while the fast gate fails on changed files, up to five times per session.
 
-## Adapting
+## Adapting for new languages
 
 Copy the shape, not the tools. Per-language gates live in `marestail/gates/`; a new language is one file per gate plus a section in `marestail.toml`.
