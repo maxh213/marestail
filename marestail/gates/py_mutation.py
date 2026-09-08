@@ -1,3 +1,4 @@
+import json
 import shutil
 import time
 from pathlib import Path
@@ -6,7 +7,12 @@ from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run, tail
 
-PASSING = {"killed", "skipped"}
+STATUS_BY_EXIT_CODE = {
+    1: "killed", 3: "killed", 0: "survived", 5: "no tests", 33: "no tests", 34: "skipped", 35: "suspicious",
+    36: "timeout", 37: "caught by type check", -24: "timeout", 24: "timeout", 152: "timeout", 255: "timeout",
+    2: "interrupted", None: "not checked",
+}
+PASSING = {"killed", "skipped", "caught by type check"}
 
 
 def run_gate(ctx: Context) -> Result:
@@ -22,8 +28,10 @@ def run_gate(ctx: Context) -> Result:
     )
     if code != 0 and "mutants" not in output.lower():
         return Result("py.mutation", False, "mutmut failed", tail(output), time.time() - started)
-    survivors = surviving(ctx, patterns)
-    summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
+    total, survivors = surviving(ctx, patterns)
+    if total == 0:
+        return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
+    summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
     return Result("py.mutation", not survivors, summary, survivors, time.time() - started)
 
 
@@ -41,15 +49,16 @@ def module_name(root: Path, file: Path) -> str:
     return ".".join(relative.with_suffix("").parts)
 
 
-def surviving(ctx: Context, patterns: list[str]) -> list[str]:
-    _, output = run([ctx.python_bin("mutmut"), "results"], cwd=ctx.python_root(), timeout=600)
+def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str]]:
     prefixes = tuple(pattern.rstrip("*") for pattern in patterns)
+    total = 0
     findings = []
-    for line in output.splitlines():
-        name, _, status = line.strip().partition(": ")
-        if not status or status in PASSING or (prefixes and not name.startswith(prefixes)):
-            continue
-        findings.append(f"{name}: {status}")
-    return findings
-
-
+    for meta in sorted((ctx.python_root() / "mutants").rglob("*.meta")):
+        for name, code in json.loads(meta.read_text()).get("exit_code_by_key", {}).items():
+            if prefixes and not name.startswith(prefixes):
+                continue
+            total += 1
+            status = STATUS_BY_EXIT_CODE.get(code, "suspicious")
+            if status not in PASSING:
+                findings.append(f"{name}: {status}")
+    return total, findings
