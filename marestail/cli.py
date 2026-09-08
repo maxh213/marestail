@@ -47,6 +47,7 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
     parser.add_argument("--model", default=None)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--agent", choices=["claude", "agy"], default=None, help="agent backend (claude or agy)")
     parser.set_defaults(handler=run_command)
 
 
@@ -85,16 +86,25 @@ def parse_only(value: str | None) -> set[str] | None:
 
 def hook_command(args: argparse.Namespace) -> int:
     payload = json.loads(sys.stdin.read() or "{}")
-    config = config_module.load(Path(payload.get("cwd", Path.cwd())))
-    counter = config.work / f"hook-{payload.get('session_id', 'default')}.count"
+    root_path = payload.get("cwd") or (payload.get("workspacePaths") or [None])[0] or Path.cwd()
+    config = config_module.load(Path(root_path))
+    session_id = payload.get("session_id") or payload.get("conversationId", "default")
+    counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
     results = run_gates("fast", True, None)
+    is_agy = "conversationId" in payload
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
+        if is_agy:
+            print(json.dumps({}))
         return 0
     counter.write_text(str(blocked + 1))
-    sys.stderr.write(render(results) + "\nFix these before stopping.\n")
+    message = render(results) + "\nFix these before stopping.\n"
+    if is_agy:
+        print(json.dumps({"decision": "continue", "reason": message}))
+        return 0
+    sys.stderr.write(message)
     return 2
 
 
@@ -109,7 +119,7 @@ def sweep_counters(work: Path, keep: Path) -> None:
 def run_command(args: argparse.Namespace) -> int:
     from marestail.runner import run_pipeline
 
-    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries)
+    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent)
 
 
 def install_command(args: argparse.Namespace) -> int:

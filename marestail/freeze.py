@@ -5,7 +5,8 @@ from marestail.config import Config
 GATE_CONFIG = [
     "marestail.toml", "sonar-project.properties", "pyproject.toml", "**/setup.cfg", ".importlinter",
     "**/.coveragerc", "**/.dependency-cruiser.cjs", "**/stryker.config.*", "**/vite.config.*",
-    "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*", ".claude/settings.json", "CLAUDE.md",
+    "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
+    ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {

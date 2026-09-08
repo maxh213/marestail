@@ -29,12 +29,12 @@ Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` 
 ```sh
 export PATH="$PATH:/path/to/marestail/bin"
 cd your-repo
-marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.md line, Stop hook
+marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.md / AGENTS.md, Stop hooks
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
 marestail graph              # module dependency graph, for the architect and for you
-marestail run tasks/001.md   # the pipeline below, each role in a fresh claude -p
+marestail run tasks/001.md   # role pipeline via Claude (default) or agy (--agent agy / MARESTAIL_AGENT=agy)
 ```
 
 ## Overnight
@@ -77,17 +77,17 @@ The `docs` gate keeps a repo's documentation honest without reading prose, and i
 
 ## Frozen files
 
-Workers cannot change what the gate measures or what the spec says. `marestail.toml`, `sonar-project.properties`, `pyproject.toml`, `setup.cfg`, the coverage, Stryker, vitest, eslint, tsconfig and dependency-cruiser configs, `CLAUDE.md`, the Stop hook, `features/`, `qa/` and `tasks/` are frozen for workers. The specifier may edit `features/` and `qa/`; the architect may edit the dependency contracts. Override with `[freeze]` in `marestail.toml` (`paths`, `spec`, `allow`).
+Workers cannot change what the gate measures or what the spec says. `marestail.toml`, `sonar-project.properties`, `pyproject.toml`, `setup.cfg`, the coverage, Stryker, vitest, eslint, tsconfig and dependency-cruiser configs, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, the Stop hooks, `features/`, `qa/` and `tasks/` are frozen for workers. The specifier may edit `features/` and `qa/`; the architect may edit the dependency contracts. Override with `[freeze]` in `marestail.toml` (`paths`, `spec`, `allow`).
 
 A worker that changes a frozen file has the change reverted and goes again within the current configuration. If it explained the change under `## Config change` in its handoff, the runner records the reason and the diff as a proposal in the handoffs directory and lists every proposal at the end of the run, so you decide in one place whether any of them should be made by hand.
 
-The Stop hook makes interactive Claude Code sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session.
+The Stop hook makes interactive Claude Code and Antigravity (`agy`) sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session.
 
 ## Adapting for new languages
 
 Copy the shape, not the tools. Per-language gates live in `marestail/gates/`; a new language is one file per gate plus a section in `marestail.toml`.
 
-Also there is a claude skill in the repo which should make this process relatively (?) trivial.
+Also there is a skill in the repo (`.claude/skills/add-language/` and `.agents/skills/add-language/`) which should make this process relatively (?) trivial.
 
 ## Inspo
 

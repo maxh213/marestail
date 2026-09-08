@@ -12,10 +12,14 @@ mkdir -p .marestail/runs
   echo "# Overnight run started $(date '+%F %T') on $(git branch --show-current) at $(git rev-parse --short HEAD)"
   echo
 } > "$SUMMARY"
+AGENT_FLAG=()
+if [ -n "${AGENT:-}" ]; then
+  AGENT_FLAG=("--agent" "$AGENT")
+fi
 for task in "$@"; do
   start=$(date +%s)
   echo "### $task ($(date '+%T'))" >> "$SUMMARY"
-  marestail run "$task" --to "$STOP_AT" --auto >> "$LOG" 2>&1
+  marestail run "$task" --to "$STOP_AT" --auto "${AGENT_FLAG[@]}" >> "$LOG" 2>&1
   code=$?
   minutes=$(( ($(date +%s) - start) / 60 ))
   {
