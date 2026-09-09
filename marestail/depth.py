@@ -11,6 +11,7 @@ TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
 SHALLOW_MAX_RATIO = 6.0
+LONG_FILE_LINES = 300
 
 
 @dataclass
@@ -20,6 +21,11 @@ class Module:
     statements: int
     pass_throughs: list[str] = field(default_factory=list)
     private_imports: list[str] = field(default_factory=list)
+    lines: int = 0
+
+    @property
+    def long(self) -> bool:
+        return self.lines > LONG_FILE_LINES
 
     @property
     def ratio(self) -> float:
@@ -30,8 +36,14 @@ class Module:
         return len(self.public) >= SHALLOW_MIN_PUBLIC and self.ratio < SHALLOW_MAX_RATIO
 
 
-def analyse(config: Config) -> list[Module]:
-    return python_modules(config) + ts_modules(config) + elixir_modules(config) + ruby_modules(config)
+def raw_modules(config: Config) -> list[Module]:
+    return (
+        python_modules(config)
+        + ts_modules(config)
+        + elixir_modules(config)
+        + ruby_modules(config)
+        + gleam_modules(config)
+    )
 
 
 def python_modules(config: Config) -> list[Module]:
@@ -186,12 +198,49 @@ def ruby_modules(config: Config) -> list[Module]:
     return modules
 
 
+def gleam_modules(config: Config) -> list[Module]:
+    if config.section("gleam") is None:
+        return []
+    from marestail.context import Context
+    from marestail.gleam import gleam_sources, scan
+
+    ctx = Context(config=config)
+    files = gleam_sources(ctx)
+    if not files:
+        return []
+    code, output = scan(ctx, "depth", files)
+    if code != 0:
+        return []
+    modules = []
+    for item in json.loads(output or "[]"):
+        rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
+        modules.append(Module(
+            path=rel,
+            public=item.get("public", []),
+            statements=item.get("statements", 0),
+            pass_throughs=[
+                f"{rel}:{p['line']} {p['name']} only forwards its arguments"
+                for p in item.get("pass_throughs", [])
+            ],
+        ))
+    return modules
+
+
 def report(modules: list[Module]) -> str:
-    lines = ["module                                             public  stmts  ratio"]
+    lines = ["module                                             public  stmts  ratio  lines"]
     for module in sorted(modules, key=lambda m: m.ratio):
-        mark = "  shallow" if module.shallow else ""
-        lines.append(f"{module.path:<50} {len(module.public):>6} {module.statements:>6} {module.ratio:>6.1f}{mark}")
+        marks = [mark for mark, on in (("shallow", module.shallow), ("long", module.long)) if on]
+        suffix = "  " + ", ".join(marks) if marks else ""
+        lines.append(f"{module.path:<50} {len(module.public):>6} {module.statements:>6} {module.ratio:>6.1f} {module.lines:>6}{suffix}")
     problems = [p for m in modules for p in m.pass_throughs + m.private_imports]
     if problems:
         lines += ["", "hard rules:", *problems]
     return "\n".join(lines)
+
+
+def analyse(config: Config) -> list[Module]:
+    modules = raw_modules(config)
+    for module in modules:
+        path = config.root / module.path
+        module.lines = len(path.read_text().splitlines()) if path.is_file() else 0
+    return modules

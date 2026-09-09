@@ -19,7 +19,7 @@ from marestail.shell import run
 PASS = "PASS"
 BOUNCE = "BOUNCE"
 CONFIG_CHANGE = "## Config change"
-LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE)
+LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|session limit|resets \d|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE)
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
 GROK_ENV = {

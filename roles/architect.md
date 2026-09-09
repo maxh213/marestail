@@ -7,3 +7,5 @@ Prefer a few deep modules over many shallow ones: a small public interface hidin
 For the code this task touched, decide what the modules should be: one responsibility each, dependencies pointing one way, IO at the edges, domain logic in the middle with no framework imports. Move code to match. Then encode the decision in the contracts so the gate enforces it from now on. Contracts may only get stricter.
 
 Add no features. Weaken no tests. Say in the handoff which boundaries you drew, which interfaces you narrowed, and why.
+
+Length is a reading signal, not a rule. `marestail depth` marks files over 300 lines as long. A long file whose parts change for different reasons is two modules; a long file with one reason to change stays one module, but its internals need names a reader can navigate by. Split by the knowledge a module hides, never because a number was crossed.
