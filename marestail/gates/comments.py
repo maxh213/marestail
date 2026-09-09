@@ -11,14 +11,15 @@ from marestail.report import Result
 from marestail.shell import run
 
 SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "reports", "__pycache__"}
+EX_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "comments.exs"
+SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "cover", "reports", "__pycache__"}
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 MARKUP = re.compile(r"<!--|\{#")
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -74,6 +75,16 @@ def ts_findings(ctx: Context) -> list[str]:
     code, output = run(["node", str(SCRIPT), str(ctx.root / ts_root), *map(str, paths)], cwd=ctx.root)
     if code != 0:
         return [f"comment scanner failed: {output.strip()[-200:]}"]
+    return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output)]
+
+
+def elixir_findings(ctx: Context) -> list[str]:
+    paths = files(ctx, (".ex", ".exs"))
+    if not paths:
+        return []
+    code, output = run(["elixir", str(EX_SCRIPT), *map(str, paths)], cwd=ctx.root)
+    if code != 0:
+        return [f"elixir comment scanner failed: {output.strip()[-200:]}"]
     return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output)]
 
 

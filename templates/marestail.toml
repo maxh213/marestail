@@ -13,6 +13,10 @@ root = "client/app"
 source = "src"
 crap_max = 4
 
+[elixir]
+root = "."
+crap_max = 4
+
 [sonar]
 project_key = "change-me"
 project_name = "Change Me"

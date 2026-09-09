@@ -21,7 +21,7 @@ class Gate:
 
 
 def registry() -> list[Gate]:
-    from marestail.gates import comments, deadcode, depth, docs, py_crap, py_deps, py_lint, py_mutation, py_tests, qa, sonar
+    from marestail.gates import comments, deadcode, depth, docs, ex_crap, ex_deps, ex_lint, ex_mutation, ex_tests, py_crap, py_deps, py_lint, py_mutation, py_tests, qa, sonar
     from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
 
     return [
@@ -33,12 +33,17 @@ def registry() -> list[Gate]:
         Gate("ts.crap", FAST, "ts", ts_crap.run_gate),
         Gate("ts.lint", FAST, "ts", ts_lint.run_gate),
         Gate("ts.deps", FAST, "ts", ts_deps.run_gate),
+        Gate("ex.tests", FAST, "elixir", ex_tests.run_gate),
+        Gate("ex.crap", FAST, "elixir", ex_crap.run_gate),
+        Gate("ex.lint", FAST, "elixir", ex_lint.run_gate),
+        Gate("ex.deps", FAST, "elixir", ex_deps.run_gate),
         Gate("comments", FAST, None, comments.run_gate),
         Gate("depth", FAST, None, depth.run_gate),
         Gate("deadcode", FAST, None, deadcode.run_gate),
         Gate("docs", FAST, "docs", docs.run_gate),
         Gate("py.mutation", FULL, "python", py_mutation.run_gate),
         Gate("ts.mutation", FULL, "ts", ts_mutation.run_gate),
+        Gate("ex.mutation", FULL, "elixir", ex_mutation.run_gate),
         Gate("sonar", SONAR, "sonar", sonar.run_gate),
         Gate("qa", QA, "qa", qa.run_gate),
     ]

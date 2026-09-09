@@ -15,7 +15,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -44,3 +44,12 @@ def ts_graph(config: Config) -> str:
     _, output = run(command, cwd=ts_root)
     lines = [line for line in output.splitlines() if line.strip() and not line.startswith("npm notice")]
     return "## TypeScript modules\n" + "\n".join(lines)
+
+
+def elixir_graph(config: Config) -> str:
+    if config.section("elixir") is None:
+        return ""
+    root = config.root / config.get("elixir", "root", ".")
+    _, output = run(["mix", "xref", "graph"], cwd=root)
+    lines = [line for line in output.splitlines() if line.strip() and not line.startswith("==>")]
+    return "## Elixir modules\n" + "\n".join(lines)

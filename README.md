@@ -8,19 +8,19 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript |
-|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul |
-| mutation testing, changed files | mutmut | Stryker |
-| dependency direction | import-linter | dependency-cruiser |
-| types and lint | mypy strict, ruff | tsc strict, eslint |
-| no comments, no docstrings | tokenizer | typescript scanner |
-| no pass-through functions, no imports of private modules | ast | typescript AST |
-| no unreachable definitions | vulture | knip |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube |
-| acceptance | any command in `[qa]` | |
+| Gate | Python | TypeScript | Elixir |
+|---|---|---|---|
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 | mix test --cover |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover |
+| mutation testing, changed files | mutmut | Stryker | (skipped; see README) |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST |
+| no unreachable definitions | vulture | knip | mix xref unreachable |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube |
+| acceptance | any command in `[qa]` | | |
 
 Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
 

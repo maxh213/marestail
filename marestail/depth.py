@@ -6,8 +6,9 @@ from pathlib import Path
 from marestail.config import Config
 from marestail.shell import run
 
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "reports"}
+SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports"}
 TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
+EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
 SHALLOW_MAX_RATIO = 6.0
 
@@ -30,7 +31,7 @@ class Module:
 
 
 def analyse(config: Config) -> list[Module]:
-    return python_modules(config) + ts_modules(config)
+    return python_modules(config) + ts_modules(config) + elixir_modules(config)
 
 
 def python_modules(config: Config) -> list[Module]:
@@ -133,6 +134,28 @@ def ts_modules(config: Config) -> list[Module]:
             public=entry["exports"],
             statements=entry["statements"],
             pass_throughs=[f"{label}:{p['line']} {p['name']} only forwards its arguments" for p in entry["passThroughs"]],
+        ))
+    return modules
+
+
+def elixir_modules(config: Config) -> list[Module]:
+    if config.section("elixir") is None:
+        return []
+    root = config.root / config.get("elixir", "root", ".")
+    files = sorted(p for p in root.rglob("*.ex") if not skipped(p, root) and not p.name.endswith("_test.exs"))
+    if not files:
+        return []
+    code, output = run(["elixir", str(EX_SCRIPT), *map(str, files)], cwd=root)
+    if code != 0:
+        return []
+    modules = []
+    for item in json.loads(output):
+        rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
+        modules.append(Module(
+            path=rel,
+            public=item.get("public", []),
+            statements=item.get("statements", 0),
+            pass_throughs=item.get("pass_throughs", []),
         ))
     return modules
 
