@@ -87,6 +87,7 @@ def gate_command(args: argparse.Namespace) -> int:
 
 
 def run_gates(tier: str, scope_changed: bool, only: set[str] | None) -> list[Result]:
+    os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
     ctx = context_module.build(config, scope_changed)
     results = []

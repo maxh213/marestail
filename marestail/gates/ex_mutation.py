@@ -38,6 +38,12 @@ def command(ctx: Context) -> list[str]:
     preset = ctx.elixir("muex_preset")
     if preset:
         parts += ["--preset", str(preset)]
+    concurrency = ctx.elixir("muex_concurrency", 4)
+    if concurrency:
+        parts += ["--concurrency", str(concurrency)]
+    max_mutations = ctx.elixir("muex_max_mutations")
+    if max_mutations:
+        parts += ["--max-mutations", str(max_mutations)]
     if ctx.scope_changed:
         parts += ["--since", str(ctx.config.get("git", "base", "origin/master"))]
     return parts
