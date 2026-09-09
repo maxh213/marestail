@@ -8,6 +8,7 @@ GATE_CONFIG = [
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
     "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
+    "gleam.toml", "manifest.toml",
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
     ".grok/hooks/**", ".grok/config.toml",
     ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",

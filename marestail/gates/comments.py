@@ -19,7 +19,7 @@ MARKUP = re.compile(r"<!--|\{#")
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + gleam_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -100,6 +100,42 @@ def ruby_findings(ctx: Context) -> list[str]:
     if code != 0:
         return [f"ruby comment scanner failed: {output.strip()[-200:]}"]
     return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output or "[]")]
+
+
+def gleam_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("gleam") is None:
+        return []
+    findings = []
+    for path in files(ctx, (".gleam",)):
+        label = str(path.relative_to(ctx.root))
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.lstrip()
+            if stripped.startswith("//"):
+                findings.append(f"{label}:{number} comment: {stripped[:80]}")
+                continue
+            in_string = False
+            escape = False
+            i = 0
+            while i < len(line) - 1:
+                ch = line[i]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    i += 1
+                    continue
+                if ch == '"':
+                    in_string = True
+                    i += 1
+                    continue
+                if ch == "/" and line[i + 1] == "/":
+                    findings.append(f"{label}:{number} comment: {line[i:].strip()[:80]}")
+                    break
+                i += 1
+    return findings
 
 
 def markup_findings(ctx: Context) -> list[str]:

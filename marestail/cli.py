@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -141,7 +142,12 @@ def cursor_hook_command(payload: dict) -> int:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
-    results = run_gates("fast", True, None)
+    previous = Path.cwd()
+    try:
+        os.chdir(config.root)
+        results = run_gates("fast", True, None)
+    finally:
+        os.chdir(previous)
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT or loop_count >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
         print(json.dumps({}))

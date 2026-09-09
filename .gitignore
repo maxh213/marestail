@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+marestail/gl/build/
+tools/samples/**/build/
+tools/samples/**/.marestail/

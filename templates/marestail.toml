@@ -30,6 +30,11 @@ root = "."
 crap_max = 4
 sources = ["app", "lib"]
 
+[gleam]
+root = "."
+crap_max = 4
+sources = ["src"]
+
 [sonar]
 project_key = "change-me"
 project_name = "Change Me"

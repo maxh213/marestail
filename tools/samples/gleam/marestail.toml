@@ -1,0 +1,10 @@
+[git]
+base = "HEAD"
+
+[gleam]
+root = "."
+crap_max = 4
+sources = ["src"]
+
+[comments]
+paths = ["src"]
