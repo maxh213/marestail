@@ -20,6 +20,7 @@ def install(target: Path) -> None:
     merge_hook(target / ".claude" / "settings.json")
     merge_agy_hook(target / ".agents" / "hooks.json")
     merge_grok_hook(target / ".grok" / "hooks" / "marestail-gate.json")
+    merge_cursor_hook(target / ".cursor" / "hooks.json")
     extend_gitignore(target / ".gitignore")
     trust_grok_folder(target)
     print(f"installed into {target}; edit marestail.toml and sonar-project.properties")
@@ -64,6 +65,18 @@ def merge_grok_hook(path: Path) -> None:
     stops = settings.setdefault("hooks", {}).setdefault("Stop", [])
     if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
         stops.extend(template.get("hooks", {}).get("Stop", []))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def merge_cursor_hook(path: Path) -> None:
+    settings = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
+    template = json.loads((TEMPLATES / "cursor-hooks.json").read_text())
+    settings.setdefault("version", template.get("version", 1))
+    hooks = settings.setdefault("hooks", {})
+    stops = hooks.setdefault("stop", [])
+    if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
+        stops.extend(template.get("hooks", {}).get("stop", []))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
 

@@ -9,6 +9,7 @@ GATE_CONFIG = [
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
     ".grok/hooks/**", ".grok/config.toml",
+    ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {

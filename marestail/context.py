@@ -28,6 +28,9 @@ class Context:
     def elixir(self, key: str, default=None):
         return self.config.get("elixir", key, default)
 
+    def ruby(self, key: str, default=None):
+        return self.config.get("ruby", key, default)
+
     def python_bin(self, tool: str) -> str:
         venv = self.root / self.python("venv", ".venv")
         return str(venv / "bin" / tool)
@@ -40,6 +43,9 @@ class Context:
 
     def elixir_root(self) -> Path:
         return self.root / self.elixir("root", ".")
+
+    def ruby_root(self) -> Path:
+        return self.root / self.ruby("root", ".")
 
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)

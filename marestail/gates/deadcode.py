@@ -16,7 +16,7 @@ TS_KINDS = ["files", "exports", "types"]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx)
     if ctx.scope_changed:
         findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     summary = ("nothing unreachable" if not findings else f"{len(findings)} dead definitions") + elixir_note(ctx)
@@ -83,6 +83,21 @@ def describe(file: Path, kind: str, item) -> str:
     name = item.get("name", "") if isinstance(item, dict) else str(item)
     line = item.get("line", 0) if isinstance(item, dict) else 0
     return f"{file}:{line} unused {kind.rstrip('s')} '{name}'"
+
+
+def ruby_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("ruby") is None:
+        return []
+    from marestail.gates.rb_crap import ruby_sources
+    from marestail.ruby import scan
+
+    files = ruby_sources(ctx)
+    if not files:
+        return []
+    code, output = scan(ctx, "dead", files)
+    if code != 0:
+        return [f"ruby deadcode scanner failed: {output.strip()[-200:]}"]
+    return json.loads(output or "[]")
 
 
 def elixir_findings(ctx: Context) -> list[str]:

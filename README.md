@@ -34,7 +34,7 @@ marestail sonar setup        # local SonarQube in docker, token in ~/.config/mar
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
 marestail graph              # module dependency graph, for the architect and for you
-marestail run tasks/001.md   # Claude (default), or --agent agy|grok / MARESTAIL_AGENT
+marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor / MARESTAIL_AGENT
 ```
 
 ## Overnight
@@ -69,7 +69,7 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 
 The coverage rule has a side effect: the cheapest way to cover a dead function is to test it, so dead code gains tests and mutants instead of disappearing. The `deadcode` gate reports definitions nothing reaches from the program's entry points: vulture for Python, knip for TypeScript. Tests are excluded from the analysis on purpose, so a function only a test calls is dead.
 
-It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. There is no reachability tool for Elixir (`mix xref unreachable` left Elixir in 1.10), so the gate says so in its summary rather than pretending.
+It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. There is no reachability tool for Elixir (`mix xref unreachable` left Elixir in 1.10), so the gate says so in its summary rather than pretending. Elixir mutation testing uses muex, opt-in per repo with `[elixir] mutation = true` once `{:muex, "~> 0.9", only: [:dev, :test], runtime: false}` is in `mix.exs`; muex also covers Erlang.
 
 ## Docs drift
 
@@ -81,9 +81,11 @@ Workers cannot change what the gate measures or what the spec says. `marestail.t
 
 A worker that changes a frozen file has the change reverted and goes again within the current configuration. If it explained the change under `## Config change` in its handoff, the runner records the reason and the diff as a proposal in the handoffs directory and lists every proposal at the end of the run, so you decide in one place whether any of them should be made by hand.
 
-The Stop hook makes interactive Claude Code, Antigravity (`agy`), and Grok sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session. `marestail install` writes `.grok/hooks/` and records the repo in `~/.grok/trusted_folders.toml` so Grok will actually run those hooks; pipeline runs also pass `--trust`. The hook is idempotent per turn, so Grok loading both `.grok/hooks/` and `.claude/settings.json` does not double-count.
+The Stop hook makes interactive Claude Code, Antigravity (`agy`), Grok, and Cursor sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session. `marestail install` writes `.grok/hooks/` and records the repo in `~/.grok/trusted_folders.toml` so Grok will actually run those hooks; pipeline runs also pass `--trust`. The hook is idempotent per turn, so Grok loading both `.grok/hooks/` and `.claude/settings.json` does not double-count. Cursor gets `.cursor/hooks.json`; its stop hook replies with `followup_message` rather than an exit code.
 
 Grok's headless mode does not read the prompt from stdin, so `marestail run --agent grok` writes the role prompt to a file and passes `--prompt-file`. Pipeline runs pass `--always-approve --no-plan --trust`, read JSON from stdout only, and turn off cross-session memory, `ask_user_question`, workflows, and Claude-compat hooks so a role cannot hang waiting for a human, leak context into the next one, or fire the Stop gate twice. Grok has no `--print-timeout`; the runner's four-hour subprocess limit is the cap. If an org policy locks always-approve, the run stops immediately rather than waiting on permission prompts.
+
+Cursor pipeline runs use `cursor-agent` (override with `MARESTAIL_CURSOR`) with `--print --force --trust --sandbox disabled`, prompt on stdin, and JSON on stdout. Prefer `cursor-agent` over bare `agent` so a Grok `agent` on `PATH` is not picked up by mistake.
 
 ## Adapting for new languages
 

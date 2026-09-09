@@ -6,7 +6,7 @@ from pathlib import Path
 from marestail.config import Config
 from marestail.shell import run
 
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports"}
+SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports", "vendor", "tmp", "spec"}
 TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
@@ -31,7 +31,7 @@ class Module:
 
 
 def analyse(config: Config) -> list[Module]:
-    return python_modules(config) + ts_modules(config) + elixir_modules(config)
+    return python_modules(config) + ts_modules(config) + elixir_modules(config) + ruby_modules(config)
 
 
 def python_modules(config: Config) -> list[Module]:
@@ -150,6 +150,32 @@ def elixir_modules(config: Config) -> list[Module]:
         return []
     modules = []
     for item in json.loads(output):
+        rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
+        modules.append(Module(
+            path=rel,
+            public=item.get("public", []),
+            statements=item.get("statements", 0),
+            pass_throughs=item.get("pass_throughs", []),
+        ))
+    return modules
+
+
+def ruby_modules(config: Config) -> list[Module]:
+    if config.section("ruby") is None:
+        return []
+    from marestail.context import Context
+    from marestail.ruby import scan
+
+    root = config.root / config.get("ruby", "root", ".")
+    files = sorted(p for p in root.rglob("*.rb") if not skipped(p, root) and not p.name.endswith("_spec.rb"))
+    if not files:
+        return []
+    ctx = Context(config=config)
+    code, output = scan(ctx, "depth", files)
+    if code != 0:
+        return []
+    modules = []
+    for item in json.loads(output or "[]"):
         rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
         modules.append(Module(
             path=rel,

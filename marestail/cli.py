@@ -47,7 +47,12 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
     parser.add_argument("--model", default=None)
     parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--agent", choices=["claude", "agy", "grok"], default=None, help="agent backend (claude, agy, or grok)")
+    parser.add_argument(
+        "--agent",
+        choices=["claude", "agy", "grok", "cursor"],
+        default=None,
+        help="agent backend (claude, agy, grok, or cursor)",
+    )
     parser.set_defaults(handler=run_command)
 
 
@@ -88,6 +93,8 @@ def hook_command(args: argparse.Namespace) -> int:
     payload = json.loads(sys.stdin.read() or "{}")
     if "hookEventName" in payload:
         return grok_hook_command(payload)
+    if is_cursor_hook(payload):
+        return cursor_hook_command(payload)
     root_path = payload.get("cwd") or (payload.get("workspacePaths") or [None])[0] or Path.cwd()
     config = config_module.load(Path(root_path))
     session_id = payload.get("session_id") or payload.get("conversationId", "default")
@@ -108,6 +115,38 @@ def hook_command(args: argparse.Namespace) -> int:
         return 0
     sys.stderr.write(message)
     return 2
+
+
+def is_cursor_hook(payload: dict) -> bool:
+    return "cursor_version" in payload or payload.get("hook_event_name") == "stop"
+
+
+def cursor_hook_command(payload: dict) -> int:
+    if payload.get("hook_event_name") not in (None, "", "stop"):
+        return 0
+    roots = payload.get("workspace_roots") or []
+    root_path = roots[0] if roots else payload.get("cwd") or Path.cwd()
+    try:
+        config = config_module.load(Path(root_path))
+    except SystemExit:
+        return 0
+    session_id = payload.get("conversation_id") or payload.get("session_id") or "default"
+    loop_count = int(payload.get("loop_count") or 0)
+    counter = config.work / f"hook-{session_id}.count"
+    sweep_counters(config.work, keep=counter)
+    blocked = int(counter.read_text()) if counter.exists() else 0
+    results = run_gates("fast", True, None)
+    if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT or loop_count >= HOOK_BLOCK_LIMIT:
+        counter.unlink(missing_ok=True)
+        print(json.dumps({}))
+        return 0
+    if payload.get("status") not in (None, "", "completed"):
+        print(json.dumps({}))
+        return 0
+    counter.write_text(str(blocked + 1))
+    message = render(results) + "\nFix these before stopping.\n"
+    print(json.dumps({"followup_message": message}))
+    return 0
 
 
 def grok_hook_command(payload: dict) -> int:

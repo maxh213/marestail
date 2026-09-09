@@ -350,6 +350,19 @@ def agent_command(state: Run) -> list[str]:
         if state.model:
             command += ["--model", state.model]
         return command
+    if backend == "cursor":
+        binary = os.environ.get("MARESTAIL_CURSOR", "cursor-agent")
+        command = [
+            binary,
+            "-p",
+            "--output-format", "json",
+            "--force",
+            "--trust",
+            "--sandbox", "disabled",
+        ]
+        if state.model:
+            command += ["--model", state.model]
+        return command
     command = [os.environ.get("MARESTAIL_CLAUDE", "claude"), "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
     if state.model:
         command += ["--model", state.model]
@@ -470,9 +483,17 @@ def summary(output: str) -> str:
     if "total_cost_usd" in data:
         cost = data.get("total_cost_usd", 0)
         return f"turns={data.get('num_turns')} api-equivalent=${cost:.2f} {str(data.get('result', ''))[:120]!r}"
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    if data.get("type") == "result" or ("inputTokens" in usage or "outputTokens" in usage):
+        text = repr(str(data.get("result") or "")[:120])
+        tokens = usage.get("total_tokens")
+        if tokens is None and ("inputTokens" in usage or "outputTokens" in usage):
+            tokens = int(usage.get("inputTokens") or 0) + int(usage.get("outputTokens") or 0)
+        token_info = f"tokens={tokens} " if tokens is not None else ""
+        return f"{token_info}{text}".strip()
     turns = data.get("num_turns", "?")
     text = repr(str(data.get("result") or data.get("response") or "")[:120])
-    tokens = data.get("usage", {}).get("total_tokens")
+    tokens = usage.get("total_tokens")
     token_info = f"tokens={tokens} " if tokens else ""
     return f"turns={turns} {token_info}{text}".strip()
 

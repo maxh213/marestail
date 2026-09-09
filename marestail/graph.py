@@ -15,7 +15,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -44,6 +44,26 @@ def ts_graph(config: Config) -> str:
     _, output = run(command, cwd=ts_root)
     lines = [line for line in output.splitlines() if line.strip() and not line.startswith("npm notice")]
     return "## TypeScript modules\n" + "\n".join(lines)
+
+
+def ruby_graph(config: Config) -> str:
+    if config.section("ruby") is None:
+        return ""
+    from marestail.context import Context
+    from marestail.gates.rb_crap import ruby_sources
+    from marestail.ruby import scan
+
+    ctx = Context(config=config)
+    files = ruby_sources(ctx)
+    if not files:
+        return ""
+    _, output = scan(ctx, "deps", files, extra=[str(config.root)])
+    try:
+        edges = json.loads(output or "[]")
+    except json.JSONDecodeError:
+        return "## Ruby modules\n" + output.strip()
+    lines = [f"{e.get('from')} -> {e.get('to')} ({e.get('constant')})" for e in edges]
+    return "## Ruby modules\n" + "\n".join(lines)
 
 
 def elixir_graph(config: Config) -> str:

@@ -2,7 +2,7 @@
 base = "origin/master"
 
 # [agent]
-# backend = "claude"  # claude | agy | grok
+# backend = "claude"  # claude | agy | grok | cursor
 
 [python]
 root = "server"
@@ -17,6 +17,8 @@ source = "src"
 crap_max = 4
 
 [elixir]
+mutation = false
+muex_optimize = true
 root = "."
 crap_max = 4
 
