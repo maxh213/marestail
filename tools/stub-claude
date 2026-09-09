@@ -26,7 +26,7 @@ elif words[0] == "judge":
         Path("src.py").write_text("tampered\n")
     v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
     verdict = " ".join(w for w in words[1:] if w != "EDIT")
-    v.write_text(f"VERDICT: {verdict}\n1. finding\n")
+    v.write_text(f"VERDICT: {verdict}\n1. finding from {v.stem}\n")
 elif words[0] == "code":
     Path("src.py").write_text("def add_one(x):\n    return x + 1\n")
     Path("tests").mkdir(exist_ok=True); Path("tests/test_src.py").write_text("def test_adds_one():\n    pass\ndef test_rejects_bad_input():\n    pass\n")
