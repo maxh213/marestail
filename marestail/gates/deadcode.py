@@ -16,7 +16,7 @@ TS_KINDS = ["files", "exports", "types"]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + gleam_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + gleam_findings(ctx) + dotnet_findings(ctx)
     if ctx.scope_changed:
         findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
@@ -98,6 +98,20 @@ def ruby_findings(ctx: Context) -> list[str]:
     if code != 0:
         return [f"ruby deadcode scanner failed: {output.strip()[-200:]}"]
     return json.loads(output or "[]")
+
+
+def dotnet_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("dotnet") is None:
+        return []
+    from marestail import dotnet
+
+    files = dotnet.sources(ctx)
+    if not files:
+        return []
+    data, error = dotnet.scan(ctx, "dead", files)
+    if error:
+        return [f"C# deadcode scanner failed: {error}"]
+    return [f"{e['file']}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
 
 
 def elixir_findings(ctx: Context) -> list[str]:

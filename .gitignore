@@ -3,3 +3,11 @@ __pycache__/
 marestail/gl/build/
 tools/samples/**/build/
 tools/samples/**/.marestail/
+marestail/cs/scan/bin/
+marestail/cs/scan/obj/
+tools/samples/**/bin/
+tools/samples/**/obj/
+tools/samples/**/.sonarqube/
+tools/samples/**/TestResults/
+StrykerOutput/
+.sonarqube/

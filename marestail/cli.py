@@ -2,6 +2,8 @@ import argparse
 import json
 import os
 import sys
+import time
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -77,6 +79,9 @@ def gate_command(args: argparse.Namespace) -> int:
     if args.hook:
         return hook_command(args)
     results = run_gates(args.tier, args.scope == "changed", parse_only(args.only))
+    if not results:
+        sys.stderr.write(f"no gate ran: nothing in the {args.tier} tier matches --only and marestail.toml\n")
+        return 2
     print(to_json(results) if args.json else render(results))
     return 0 if all(result.ok for result in results) else 1
 
@@ -88,8 +93,17 @@ def run_gates(tier: str, scope_changed: bool, only: set[str] | None) -> list[Res
     for gate in gates_module.select(tier, only):
         if gate.section and config.section(gate.section) is None:
             continue
-        results.append(gate.run(ctx))
+        results.append(run_one(gate, ctx))
     return results
+
+
+def run_one(gate: gates_module.Gate, ctx: context_module.Context) -> Result:
+    started = time.time()
+    try:
+        return gate.run(ctx)
+    except (Exception, SystemExit) as error:
+        detail = " ".join(str(error).split())[:200]
+        return Result(gate.name, False, f"{gate.name} crashed: {type(error).__name__} {detail}", traceback.format_exc().strip().splitlines()[-6:], time.time() - started)
 
 
 def parse_only(value: str | None) -> set[str] | None:

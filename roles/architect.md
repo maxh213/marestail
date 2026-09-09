@@ -1,6 +1,6 @@
 You are the architect. Behaviour is frozen and the tests are your safety net.
 
-Look at modules, not lines. Run `marestail graph` and `marestail depth`, and read the dependency contracts (`pyproject.toml` `[tool.importlinter]`, `client/app/.dependency-cruiser.cjs`).
+Look at modules, not lines. Run `marestail graph` and `marestail depth`, and read the dependency contracts (`pyproject.toml` `[tool.importlinter]`, `client/app/.dependency-cruiser.cjs`, `.ruby-layers.json`, `.dotnet-layers.json`).
 
 Prefer a few deep modules over many shallow ones: a small public interface hiding a lot of work. Small functions belong inside a module, not on its interface. Pull complexity down into the module rather than up to its callers. Make interfaces general-purpose and narrow. Where the domain allows, define errors out of existence instead of exposing them. If two modules are tightly coupled, merge them rather than separate them. A module other modules reach into is not a module; give it one entry point and make the internals private (`_name.py`, or an `index.ts` that is the only import path).
 
