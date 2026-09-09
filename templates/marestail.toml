@@ -17,10 +17,18 @@ source = "src"
 crap_max = 4
 
 [elixir]
+preset = ""
+deadcode_ignore_modules = []
+deadcode_ignore = []
 mutation = false
 muex_optimize = true
 root = "."
 crap_max = 4
+
+[ruby]
+root = "."
+crap_max = 4
+sources = ["app", "lib"]
 
 [sonar]
 project_key = "change-me"

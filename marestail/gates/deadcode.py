@@ -19,7 +19,7 @@ def run_gate(ctx: Context) -> Result:
     findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx)
     if ctx.scope_changed:
         findings = [f for f in findings if f.split(":")[0] in ctx.changed]
-    summary = ("nothing unreachable" if not findings else f"{len(findings)} dead definitions") + elixir_note(ctx)
+    summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
     return Result("deadcode", not findings, summary, findings, time.time() - started)
 
 
@@ -101,10 +101,32 @@ def ruby_findings(ctx: Context) -> list[str]:
 
 
 def elixir_findings(ctx: Context) -> list[str]:
-    return []
-
-
-def elixir_note(ctx: Context) -> str:
     if ctx.config.section("elixir") is None:
-        return ""
-    return "; elixir not checked, no reachability tool"
+        return []
+    root = ctx.elixir_root()
+    out = ctx.work / "ex-deadcode.json"
+    out.unlink(missing_ok=True)
+    code, output = run(elixir_command(ctx, out), cwd=root, timeout=900)
+    if code != 0 or not out.exists():
+        return [f"elixir dead code analysis failed: {output.strip()[-200:]}"]
+    findings = []
+    for entry in json.loads(out.read_text()):
+        file = (root / entry["file"]).resolve()
+        label = str(file.relative_to(ctx.root)) if file.is_relative_to(ctx.root) else entry["file"]
+        findings.append(f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}")
+    return findings
+
+
+def elixir_command(ctx: Context, out: Path) -> list[str]:
+    script = Path(__file__).resolve().parent.parent / "ex" / "deadcode.exs"
+    command = ["mix", "run", "--no-start", str(script), "--out", str(out)]
+    preset = ctx.elixir("preset")
+    if preset:
+        command += ["--preset", str(preset)]
+    modules = ctx.elixir("deadcode_ignore_modules", [])
+    if modules:
+        command += ["--ignore-modules", ",".join(modules)]
+    names = ctx.elixir("deadcode_ignore", [])
+    if names:
+        command += ["--ignore", ",".join(names)]
+    return command

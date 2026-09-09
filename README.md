@@ -8,19 +8,19 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript | Elixir |
-|---|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 | mix test --cover |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover |
-| mutation testing, changed files | mutmut | Stryker | (skipped; see README) |
-| dependency direction | import-linter | dependency-cruiser | mix xref cycles |
-| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile |
-| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner |
-| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST |
-| no unreachable definitions | vulture | knip | mix xref unreachable |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube |
-| acceptance | any command in `[qa]` | | |
+| Gate | Python | TypeScript | Elixir | Ruby / Rails |
+|---|---|---|---|---|
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 | mix test --cover | rspec + SimpleCov |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov |
+| mutation testing, changed files | mutmut | Stryker | (skipped; see README) | (skipped; mutant exists but is not wired) |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper |
+| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube |
+| acceptance | any command in `[qa]` | | | |
 
 Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
 
@@ -69,7 +69,7 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 
 The coverage rule has a side effect: the cheapest way to cover a dead function is to test it, so dead code gains tests and mutants instead of disappearing. The `deadcode` gate reports definitions nothing reaches from the program's entry points: vulture for Python, knip for TypeScript. Tests are excluded from the analysis on purpose, so a function only a test calls is dead.
 
-It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. There is no reachability tool for Elixir (`mix xref unreachable` left Elixir in 1.10), so the gate says so in its summary rather than pretending. Elixir mutation testing uses muex, opt-in per repo with `[elixir] mutation = true` once `{:muex, "~> 0.9", only: [:dev, :test], runtime: false}` is in `mix.exs`; muex also covers Erlang.
+It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. Elixir has no maintained tool for this, and `mix xref unreachable` never was one, so `marestail/ex/deadcode.exs` reads the compiled BEAM files: every export nobody calls or captures from any module of the app is reported, behaviour callbacks and the usual lifecycle functions are skipped, `[elixir] preset = \"phoenix\"` skips the module kinds the framework calls dynamically, and `deadcode_ignore` names the rest. Elixir mutation testing uses muex, opt-in per repo with `[elixir] mutation = true` once `{:muex, "~> 0.9", only: [:dev, :test], runtime: false}` is in `mix.exs`; muex also covers Erlang. Ruby deadcode is unused private methods the Ripper scan never sees called; mutation is skipped (mutant exists, it is not wired). Rails tests and rubocop run through `[ruby] exec`, so a Docker Compose app can set `exec = ["docker", "compose", "run", "--rm", "-T", "backend", "bundle", "exec"]`. The comment/complexity scanner uses host `ruby` or, if that is missing, `ruby:3.2-slim` via Docker.
 
 ## Docs drift
 
