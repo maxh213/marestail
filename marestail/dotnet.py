@@ -155,6 +155,14 @@ def coverage_excluded(ctx: Context, relative: str) -> bool:
     return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
 
 
+def mutation_excluded(ctx: Context, relative: str) -> bool:
+    prefix = rel(ctx, ctx.dotnet_root())
+    prefix = "" if prefix == "." else prefix + "/"
+    configured = listify(ctx.dotnet("mutation_exclude", [])) or listify(ctx.dotnet("coverage_exclude", []))
+    patterns = [p if p.startswith(prefix) else prefix + p.strip("/") for p in configured]
+    return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
+
+
 def load_coverage(ctx: Context) -> dict | None:
     path = ctx.work / COVERAGE_JSON
     return json.loads(path.read_text()) if path.exists() else None

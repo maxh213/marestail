@@ -74,6 +74,8 @@ def run_pipeline(
     agent: str | None = None,
 ) -> int:
     config = config_module.load(Path.cwd())
+    if model is None:
+        model = config.get("agent", "model")
     state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent)
     outcome = 0
     for step in window(start, stop):

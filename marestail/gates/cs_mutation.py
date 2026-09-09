@@ -42,7 +42,12 @@ def run_gate(ctx: Context) -> Result:
     if not report.exists():
         return Result("cs.mutation", False, dotnet.hint(code, output) or f"stryker produced no report (exit {code})", tail(output), time.time() - started)
     files = json.loads(report.read_text()).get("files", {})
-    mutants = [(dotnet.rel(ctx, file), mutant) for file, data in files.items() for mutant in data.get("mutants", [])]
+    mutants = [
+        (dotnet.rel(ctx, file), mutant)
+        for file, data in files.items()
+        for mutant in data.get("mutants", [])
+        if not dotnet.mutation_excluded(ctx, dotnet.rel(ctx, file))
+    ]
     if not mutants:
         return Result("cs.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
@@ -56,6 +61,12 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "--test-project", str(tests), "--project", product.name,
         "-O", str(out), "-r", "json", "-r", "progress",
     ]
+    excludes = dotnet.listify(ctx.dotnet("mutation_exclude", [])) or dotnet.listify(ctx.dotnet("coverage_exclude", []))
+    for pattern in excludes:
+        name = pattern.strip("/")
+        if name.startswith(dotnet.rel(ctx, ctx.dotnet_root()) + "/"):
+            name = name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")
+        args += ["-m", f"!**/{name}"]
     if ctx.scope_changed:
         for name in targets:
             args += ["-m", "**/" + name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")]
