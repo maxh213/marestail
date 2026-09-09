@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Sample</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives under this one's directory, so its sources have to
+         be removed from this project's default glob. -->
+    <Compile Remove="Sample.Tests/**/*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+# Shipped red on purpose, like the ruby sample: two comments, a pass-through, an unused
+# private method, a missing brace (IDE0011), Domain -> Services, uncovered arms, Classify
+# at complexity 5, and boundary mutants no test kills.
+
+[git]
+base = "HEAD"
+
+[dotnet]
+root = "."
+project = "Sample.csproj"
+test_project = "Sample.Tests/Sample.Tests.csproj"
+crap_max = 4
+mutation = true
+
+[comments]
+paths = ["Domain", "Services"]
+
+[sonar]
+project_key = "marestail-sample"
+project_name = "marestail sample"

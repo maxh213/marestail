@@ -1,0 +1,6 @@
+{
+  "layers": [
+    {"from": "Domain", "forbid": ["Services"], "forbid_external": ["Microsoft.AspNetCore.*"]},
+    {"from": "Services", "forbid": [], "forbid_external": ["Microsoft.AspNetCore.*"]}
+  ]
+}

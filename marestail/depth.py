@@ -43,6 +43,7 @@ def raw_modules(config: Config) -> list[Module]:
         + elixir_modules(config)
         + ruby_modules(config)
         + gleam_modules(config)
+        + dotnet_modules(config)
     )
 
 
@@ -224,6 +225,30 @@ def gleam_modules(config: Config) -> list[Module]:
             ],
         ))
     return modules
+
+
+def dotnet_modules(config: Config) -> list[Module]:
+    if config.section("dotnet") is None:
+        return []
+    from marestail import dotnet
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = dotnet.sources(ctx)
+    if not files:
+        return []
+    data, error = dotnet.scan(ctx, "depth", files)
+    if error:
+        return []
+    return [
+        Module(
+            path=item["file"],
+            public=item["public"],
+            statements=item["statements"],
+            pass_throughs=[f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]],
+        )
+        for item in data
+    ]
 
 
 def report(modules: list[Module]) -> str:

@@ -15,7 +15,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config), dotnet_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -64,6 +64,23 @@ def ruby_graph(config: Config) -> str:
         return "## Ruby modules\n" + output.strip()
     lines = [f"{e.get('from')} -> {e.get('to')} ({e.get('constant')})" for e in edges]
     return "## Ruby modules\n" + "\n".join(lines)
+
+
+def dotnet_graph(config: Config) -> str:
+    if config.section("dotnet") is None:
+        return ""
+    from marestail import dotnet
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = dotnet.sources(ctx)
+    if not files:
+        return ""
+    data, error = dotnet.scan(ctx, "deps", files)
+    if error:
+        return "## C# modules\n" + error
+    lines = [f"{e['from']} -> {e['to']} ({e['symbol']})" for e in data["edges"]]
+    return "## C# modules\n" + "\n".join(lines)
 
 
 def elixir_graph(config: Config) -> str:

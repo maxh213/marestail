@@ -8,6 +8,9 @@ GATE_CONFIG = [
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
     "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
+    "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*",
+    "**/*.csproj", "**/*.sln", "**/*.props", "**/*.targets", "**/NuGet.config", "**/nuget.config", "**/dotnet-tools.json",
+    "**/.editorconfig", "**/.globalconfig", "**/*.runsettings", "**/stryker-config.*", ".dotnet-layers.json",
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
     ".grok/hooks/**", ".grok/config.toml",
     ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
@@ -15,7 +18,7 @@ GATE_CONFIG = [
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
-    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json"],
+    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json"],
 }
 
 

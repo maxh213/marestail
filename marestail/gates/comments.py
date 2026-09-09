@@ -19,7 +19,7 @@ MARKUP = re.compile(r"<!--|\{#")
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -100,6 +100,20 @@ def ruby_findings(ctx: Context) -> list[str]:
     if code != 0:
         return [f"ruby comment scanner failed: {output.strip()[-200:]}"]
     return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output or "[]")]
+
+
+def dotnet_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("dotnet") is None:
+        return []
+    from marestail import dotnet
+
+    paths = dotnet.in_scope(ctx, dotnet.files(ctx))
+    if not paths:
+        return []
+    data, error = dotnet.scan(ctx, "comments", paths)
+    if error:
+        return [f"C# comment scanner failed: {error}"]
+    return [f"{c['file']}:{c['line']} comment: {c['text']}" for c in data]
 
 
 def markup_findings(ctx: Context) -> list[str]:

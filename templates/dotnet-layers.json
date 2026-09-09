@@ -1,0 +1,8 @@
+{
+  "layers": [
+    {"from": "Models", "forbid": ["Controllers", "Services", "Repositories"], "forbid_external": ["MongoDB.*", "Microsoft.AspNetCore.*"]},
+    {"from": "Repositories", "forbid": ["Controllers", "Services"], "forbid_external": ["Microsoft.AspNetCore.*"]},
+    {"from": "Services", "forbid": ["Controllers"], "forbid_external": ["Microsoft.AspNetCore.Mvc*", "MongoDB.*"]},
+    {"from": "Controllers", "forbid": ["Repositories"], "forbid_external": ["MongoDB.*"]}
+  ]
+}

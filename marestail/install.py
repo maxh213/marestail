@@ -6,13 +6,15 @@ import tomllib
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
-GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", ".idea/", ".vscode/"]
+GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", "StrykerOutput/", ".sonarqube/", ".idea/", ".vscode/"]
 GATE_MARKER = "marestail gate"
 
 
 def install(target: Path) -> None:
+    dotnet = uses_dotnet(target)
     copy_if_missing(TEMPLATES / "marestail.toml", target / "marestail.toml")
-    copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
+    if not dotnet:
+        copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     append_instructions(target / "CLAUDE.md")
@@ -24,6 +26,14 @@ def install(target: Path) -> None:
     extend_gitignore(target / ".gitignore")
     trust_grok_folder(target)
     print(f"installed into {target}; edit marestail.toml and sonar-project.properties")
+
+
+def uses_dotnet(target: Path) -> bool:
+    config = target / "marestail.toml"
+    if not config.exists():
+        return False
+    with config.open("rb") as handle:
+        return "dotnet" in tomllib.load(handle)
 
 
 def copy_if_missing(source: Path, destination: Path) -> None:

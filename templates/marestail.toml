@@ -15,6 +15,7 @@ mutation_workers = 4
 root = "client/app"
 source = "src"
 crap_max = 4
+runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]
 
 [elixir]
 preset = ""
@@ -30,9 +31,18 @@ root = "."
 crap_max = 4
 sources = ["app", "lib"]
 
+[dotnet]
+root = "."
+project = "App.csproj"
+test_project = "App.Tests/App.Tests.csproj"
+coverage_exclude = ["Program.cs"]
+crap_max = 4
+mutation = false
+
 [sonar]
 project_key = "change-me"
 project_name = "Change Me"
+exclusions = []  # ant globs on top of the defaults; a [dotnet] repo has no sonar-project.properties
 
 [deadcode]
 min_confidence = 60

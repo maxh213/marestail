@@ -47,6 +47,12 @@ class Context:
     def ruby_root(self) -> Path:
         return self.root / self.ruby("root", ".")
 
+    def dotnet(self, key: str, default=None):
+        return self.config.get("dotnet", key, default)
+
+    def dotnet_root(self) -> Path:
+        return self.root / self.dotnet("root", ".")
+
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)
         return sorted(
