@@ -46,7 +46,13 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--to", dest="stop", default=None)
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
     parser.add_argument("--model", default=None)
-    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        metavar="N",
+        help="attempts per role; 0 means unlimited (default)",
+    )
     parser.add_argument(
         "--agent",
         choices=["claude", "agy", "grok", "cursor"],

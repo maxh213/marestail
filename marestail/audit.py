@@ -4,7 +4,7 @@ from pathlib import Path
 from marestail.config import Config
 
 SCENARIO = re.compile(r"^\s*Scenario(?: Outline)?:\s*(.+?)\s*$", re.MULTILINE)
-TRACE = re.compile(r"^\s*-\s*(.+?)\s*->\s*(\S+?)::(\S+)\s*$", re.MULTILINE)
+TRACE = re.compile(r"^\s*-\s*(.+?)\s*->\s*(\S+?)::(.+?)\s*$", re.MULTILINE)
 
 
 def feature_files(config: Config, task_name: str) -> list[Path]:

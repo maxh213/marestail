@@ -126,9 +126,16 @@ def normalise_findings(report: str) -> list[str]:
     return [line for line in lines if re.match(r"^\d+\.", line)]
 
 
+def attempts(retries: int):
+    n = 1
+    while retries <= 0 or n <= retries:
+        yield n
+        n += 1
+
+
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     before = head(state.config)
-    for attempt in range(1, state.retries + 1):
+    for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
         prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback)
@@ -144,7 +151,7 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
 
 def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
     gate_report, gate_ok = gate_for(judge.tier)
-    for attempt in range(1, state.retries + 1):
+    for attempt in attempts(state.retries):
         report = state.next_report(judge.name)
         print(f"== {judge.name} ({report.stem}) attempt {attempt}")
         prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report)
@@ -162,7 +169,8 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
         record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name)
         print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
         return verdict, target, text
-    return BOUNCE, None, f"{judge.name} produced no verdict after {state.retries} attempts"
+    shown = "unlimited" if state.retries <= 0 else str(state.retries)
+    return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
 
 
 def gate_for(tier: str | None) -> tuple[str, bool]:
