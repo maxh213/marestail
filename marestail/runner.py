@@ -98,17 +98,32 @@ def run_step(state: Run, step: Step) -> bool:
 
 
 def run_judge_loop(state: Run, judge: Judge) -> bool:
-    for bounce in range(judge.bounces + 1):
+    previous = ""
+    bounce = 0
+    while True:
         verdict, target, report = run_judge(state, judge)
         if verdict == PASS:
             return True
-        if bounce == judge.bounces:
+        if same_findings(previous, report):
+            print(f"{judge.name} repeated the same findings twice; the worker is not making progress, stopping for a human")
+            return False
+        if judge.bounces and bounce >= judge.bounces:
             print(f"{judge.name} still bouncing after {judge.bounces} rounds; stopping for a human")
             return False
+        previous = report
+        bounce += 1
         worker = find(target or judge.bounce_to)
         if not isinstance(worker, Worker) or not run_worker(state, worker, report):
             return False
-    return False
+
+
+def same_findings(previous: str, current: str) -> bool:
+    return bool(previous) and normalise_findings(previous) == normalise_findings(current)
+
+
+def normalise_findings(report: str) -> list[str]:
+    lines = [re.sub(r"\s+", " ", line.strip()) for line in report.splitlines()]
+    return [line for line in lines if re.match(r"^\d+\.", line)]
 
 
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:

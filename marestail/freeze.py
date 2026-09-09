@@ -8,6 +8,7 @@ GATE_CONFIG = [
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
+    ".grok/hooks/**", ".grok/config.toml",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {

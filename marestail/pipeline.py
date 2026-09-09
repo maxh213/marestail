@@ -14,7 +14,7 @@ class Judge:
     name: str
     tier: str | None
     bounce_to: str
-    bounces: int = 3
+    bounces: int = 0
     pause_after: bool = False
 
 
@@ -22,11 +22,11 @@ Step = Worker | Judge
 
 PIPELINE: list[Step] = [
     Worker("specifier", None),
-    Judge("critic", None, bounce_to="specifier", bounces=2, pause_after=True),
+    Judge("critic", None, bounce_to="specifier", pause_after=True),
     Worker("coder", "fast", audit=True),
     Worker("cleaner", "sonar"),
     Worker("architect", "sonar"),
-    Judge("hardener", "full", bounce_to="coder", bounces=3),
+    Judge("hardener", "full", bounce_to="coder"),
     Worker("qa", "qa"),
 ]
 

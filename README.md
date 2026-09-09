@@ -34,7 +34,7 @@ marestail sonar setup        # local SonarQube in docker, token in ~/.config/mar
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
 marestail graph              # module dependency graph, for the architect and for you
-marestail run tasks/001.md   # role pipeline via Claude (default) or agy (--agent agy / MARESTAIL_AGENT=agy)
+marestail run tasks/001.md   # Claude (default), or --agent agy|grok / MARESTAIL_AGENT
 ```
 
 ## Overnight
@@ -46,16 +46,16 @@ marestail run tasks/001.md   # role pipeline via Claude (default) or agy (--agen
 | Step | Kind | Gate | Does |
 |---|---|---|---|
 | specifier | worker | none | Gherkin scenarios and a QA procedure from the task |
-| critic | judge | none | judges the spec against the task; bounces to a fresh specifier, twice at most; then a human approval pause |
+| critic | judge | none | judges the spec against the task; bounces to a fresh specifier until it passes; then a human approval pause |
 | coder | worker | fast | implements; must trace every scenario to a test in its handoff |
 | cleaner | worker | sonar | readability without comments, CRAP, Sonar |
 | architect | worker | sonar | draws module boundaries, moves code, tightens the dependency contracts |
-| hardener | judge | full | judges the diff and the mutation report; bounces to a fresh coder, three times at most |
+| hardener | judge | full | judges the diff and the mutation report; bounces to a fresh coder until it passes |
 | qa | worker | qa | turns the QA procedure into an executable end-to-end test |
 
 Workers edit and commit. Judges write one verdict file and nothing else; the runner discards any other edit a judge makes. Handoff and verdict files are runtime state under `.marestail/`, never committed: when a worker passes verification the runner folds its handoff into that role's commit message, and a judge's verdict becomes an empty commit carrying the verdict. `git log` on the branch is the record, and a role in a fresh clone reads its predecessors from there. When a pipeline completes, the task's handoff files are archived under `.marestail/runs/`. Every role runs in a fresh session with a short prompt: the role file, the task, the earlier handoffs, and how to finish. Judges also get the gate report.
 
-After every worker the runner checks, deterministically: the handoff exists, the tree is committed, no frozen file changed, the gate for that tier passes, and for the coder that every scenario in the feature file is traced to a test that exists. Anything failing goes back to the same role as feedback, three attempts at most. A judge's gate failing is a bounce regardless of what the judge wrote.
+After every worker the runner checks, deterministically: the handoff exists, the tree is committed, no frozen file changed, the gate for that tier passes, and for the coder that every scenario in the feature file is traced to a test that exists. Anything failing goes back to the same role as feedback, three attempts at most. A judge's gate failing is a bounce regardless of what the judge wrote. A judge bounces as many times as it takes, with one stop: if it writes the same numbered findings twice in a row, the worker is not making progress and the pipeline stops for a human.
 
 ## Writing tasks
 
@@ -81,13 +81,15 @@ Workers cannot change what the gate measures or what the spec says. `marestail.t
 
 A worker that changes a frozen file has the change reverted and goes again within the current configuration. If it explained the change under `## Config change` in its handoff, the runner records the reason and the diff as a proposal in the handoffs directory and lists every proposal at the end of the run, so you decide in one place whether any of them should be made by hand.
 
-The Stop hook makes interactive Claude Code and Antigravity (`agy`) sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session.
+The Stop hook makes interactive Claude Code, Antigravity (`agy`), and Grok sessions loop the same way: it refuses to stop while the fast gate fails on changed files, up to five times per session. `marestail install` writes `.grok/hooks/` and records the repo in `~/.grok/trusted_folders.toml` so Grok will actually run those hooks; pipeline runs also pass `--trust`. The hook is idempotent per turn, so Grok loading both `.grok/hooks/` and `.claude/settings.json` does not double-count.
+
+Grok's headless mode does not read the prompt from stdin, so `marestail run --agent grok` writes the role prompt to a file and passes `--prompt-file`. Pipeline runs pass `--always-approve --no-plan --trust`, read JSON from stdout only, and turn off cross-session memory, `ask_user_question`, workflows, and Claude-compat hooks so a role cannot hang waiting for a human, leak context into the next one, or fire the Stop gate twice. Grok has no `--print-timeout`; the runner's four-hour subprocess limit is the cap. If an org policy locks always-approve, the run stops immediately rather than waiting on permission prompts.
 
 ## Adapting for new languages
 
 Copy the shape, not the tools. Per-language gates live in `marestail/gates/`; a new language is one file per gate plus a section in `marestail.toml`.
 
-Also there is a skill in the repo (`.claude/skills/add-language/` and `.agents/skills/add-language/`) which should make this process relatively (?) trivial.
+Also there is a skill in the repo (`.claude/skills/add-language/` and `.agents/skills/add-language/`; Grok scans both) which should make this process relatively (?) trivial.
 
 ## Inspo
 

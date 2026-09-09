@@ -47,7 +47,7 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
     parser.add_argument("--model", default=None)
     parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--agent", choices=["claude", "agy"], default=None, help="agent backend (claude or agy)")
+    parser.add_argument("--agent", choices=["claude", "agy", "grok"], default=None, help="agent backend (claude, agy, or grok)")
     parser.set_defaults(handler=run_command)
 
 
@@ -86,6 +86,8 @@ def parse_only(value: str | None) -> set[str] | None:
 
 def hook_command(args: argparse.Namespace) -> int:
     payload = json.loads(sys.stdin.read() or "{}")
+    if "hookEventName" in payload:
+        return grok_hook_command(payload)
     root_path = payload.get("cwd") or (payload.get("workspacePaths") or [None])[0] or Path.cwd()
     config = config_module.load(Path(root_path))
     session_id = payload.get("session_id") or payload.get("conversationId", "default")
@@ -106,6 +108,61 @@ def hook_command(args: argparse.Namespace) -> int:
         return 0
     sys.stderr.write(message)
     return 2
+
+
+def grok_hook_command(payload: dict) -> int:
+    if payload.get("reason") not in (None, "", "end_turn"):
+        return 0
+    root_path = payload.get("cwd") or payload.get("workspaceRoot") or Path.cwd()
+    try:
+        config = config_module.load(Path(root_path))
+    except SystemExit:
+        return 0
+    session_id = payload.get("sessionId") or "default"
+    turn_id = str(payload.get("promptId") or "")
+    replayed = grok_replay_hook(config.work, session_id, turn_id)
+    if replayed is not None:
+        return grok_emit_hook(replayed[0], replayed[1])
+    counter = config.work / f"hook-{session_id}.count"
+    sweep_counters(config.work, keep=counter)
+    blocked = int(counter.read_text()) if counter.exists() else 0
+    results = run_gates("fast", True, None)
+    if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
+        counter.unlink(missing_ok=True)
+        grok_remember_hook(config.work, session_id, turn_id, True, "")
+        return grok_emit_hook(True, "")
+    counter.write_text(str(blocked + 1))
+    message = render(results) + "\nFix these before stopping.\n"
+    grok_remember_hook(config.work, session_id, turn_id, False, message)
+    return grok_emit_hook(False, message)
+
+
+def grok_emit_hook(allow: bool, message: str) -> int:
+    if allow:
+        return 0
+    print(json.dumps({"decision": "block", "reason": message}))
+    return 0
+
+
+def grok_replay_hook(work: Path, session_id: str, turn_id: str) -> tuple[bool, str] | None:
+    if not turn_id:
+        return None
+    stamp = work / f"hook-{session_id}.turn"
+    if not stamp.exists():
+        return None
+    recorded_id, _, rest = stamp.read_text().partition("\n")
+    if recorded_id != turn_id:
+        return None
+    decision, _, message = rest.partition("\n")
+    return decision == "allow", message
+
+
+def grok_remember_hook(work: Path, session_id: str, turn_id: str, allow: bool, message: str) -> None:
+    if not turn_id:
+        return
+    work.mkdir(parents=True, exist_ok=True)
+    body = "allow\n" if allow else f"block\n{message}"
+    (work / f"hook-{session_id}.turn").write_text(f"{turn_id}\n{body}")
 
 
 def sweep_counters(work: Path, keep: Path) -> None:

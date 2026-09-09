@@ -1,6 +1,9 @@
 [git]
 base = "origin/master"
 
+# [agent]
+# backend = "claude"  # claude | agy | grok
+
 [python]
 root = "server"
 venv = ".venv"
