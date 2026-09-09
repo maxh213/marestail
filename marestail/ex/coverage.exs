@@ -1,5 +1,8 @@
 [coverdata, out_json | _] = System.argv()
 Path.wildcard("_build/**/ebin") |> Enum.each(&:code.add_pathz(String.to_charlist(&1)))
+{:ok, dev} = StringIO.open("")
+old_leader = Process.group_leader()
+Process.group_leader(self(), dev)
 :cover.start()
 :cover.import(String.to_charlist(coverdata))
 
@@ -38,8 +41,10 @@ files =
     end
   end)
 
+Process.group_leader(self(), old_leader)
 tot_covered = Enum.sum(Enum.map(Map.values(files), & &1["covered"]))
 tot_lines = Enum.sum(Enum.map(Map.values(files), & &1["total"]))
 pct = if tot_lines > 0, do: (tot_covered / tot_lines) * 100.0, else: 100.0
 result = %{"totals" => %{"percent_covered" => pct}, "files" => files}
-File.write!(out_json, :json.encode(result))
+json = :json.encode(result)
+if out_json == "-", do: IO.puts(json), else: File.write!(out_json, json)
