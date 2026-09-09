@@ -16,10 +16,14 @@ AGENT_FLAG=()
 if [ -n "${AGENT:-}" ]; then
   AGENT_FLAG=("--agent" "$AGENT")
 fi
+START_FLAG=()
+if [ -n "${START_FROM:-}" ]; then
+  START_FLAG=("--from" "$START_FROM")
+fi
 for task in "$@"; do
   start=$(date +%s)
   echo "### $task ($(date '+%T'))" >> "$SUMMARY"
-  marestail run "$task" --to "$STOP_AT" --auto "${AGENT_FLAG[@]}" >> "$LOG" 2>&1
+  marestail run "$task" "${START_FLAG[@]}" --to "$STOP_AT" --auto "${AGENT_FLAG[@]}" >> "$LOG" 2>&1
   code=$?
   minutes=$(( ($(date +%s) - start) / 60 ))
   {
