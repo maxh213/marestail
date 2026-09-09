@@ -8,19 +8,20 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript | Elixir | Ruby / Rails |
-|---|---|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 | mix test --cover | rspec + SimpleCov |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov |
-| mutation testing, changed files | mutmut | Stryker | (skipped; see README) | (skipped; mutant exists but is not wired) |
-| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` |
-| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop |
-| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper |
-| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper |
-| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube |
-| acceptance | any command in `[qa]` | | | |
+| Gate | Python | TypeScript | Elixir | Ruby / Rails | Gleam |
+|---|---|---|---|---|---|
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 | mix test --cover | rspec + SimpleCov | `gleam test` (no source-line coverage tool) |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | complexity cap (coverage unavailable) |
+| mutation testing, changed files | mutmut | Stryker | muex (opt-in) | (skipped; mutant exists but is not wired) | (skipped; none exists) |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | import cycles + `internal/` leaks |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | `gleam format --check`, `gleam build` |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | `//` / `///` scanner |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | gleam scanner |
+| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private functions |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube |
+
+Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 
 Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
 
@@ -69,7 +70,7 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 
 The coverage rule has a side effect: the cheapest way to cover a dead function is to test it, so dead code gains tests and mutants instead of disappearing. The `deadcode` gate reports definitions nothing reaches from the program's entry points: vulture for Python, knip for TypeScript. Tests are excluded from the analysis on purpose, so a function only a test calls is dead.
 
-It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. Elixir has no maintained tool for this, and `mix xref unreachable` never was one, so `marestail/ex/deadcode.exs` reads the compiled BEAM files: every export nobody calls or captures from any module of the app is reported, behaviour callbacks and the usual lifecycle functions are skipped, `[elixir] preset = \"phoenix\"` skips the module kinds the framework calls dynamically, and `deadcode_ignore` names the rest. Elixir mutation testing uses muex, opt-in per repo with `[elixir] mutation = true` once `{:muex, "~> 0.9", only: [:dev, :test], runtime: false}` is in `mix.exs`; muex also covers Erlang. Ruby deadcode is unused private methods the Ripper scan never sees called; mutation is skipped (mutant exists, it is not wired). Rails tests and rubocop run through `[ruby] exec`, so a Docker Compose app can set `exec = ["docker", "compose", "run", "--rm", "-T", "backend", "bundle", "exec"]`. The comment/complexity scanner uses host `ruby` or, if that is missing, `ruby:3.2-slim` via Docker.
+It is deliberately narrow. Python counts unused functions, methods, classes, imports, properties and unreachable code; unused attributes and variables are left out because assignments on framework objects look identical to dead ones. Flask and Click decorators are ignored, and `[deadcode] python_ignore_names` in `marestail.toml` records the dynamic cases a human has checked. TypeScript counts unused files, exports and types; add `"dependencies"` to `[deadcode] ts_kinds` once the project's dependency list is settled. Deleting a live thing breaks a scenario, and the hardener bounces deletions made to satisfy a gate. Elixir has no maintained tool for this, and `mix xref unreachable` never was one, so `marestail/ex/deadcode.exs` reads the compiled BEAM files: every export nobody calls or captures from any module of the app is reported, behaviour callbacks and the usual lifecycle functions are skipped, `[elixir] preset = \"phoenix\"` skips the module kinds the framework calls dynamically, and `deadcode_ignore` names the rest. Elixir mutation testing uses muex, opt-in per repo with `[elixir] mutation = true` once `{:muex, "~> 0.9", only: [:dev, :test], runtime: false}` is in `mix.exs`; muex also covers Erlang. Ruby deadcode is unused private methods the Ripper scan never sees called; mutation is skipped (mutant exists, it is not wired). Rails tests and rubocop run through `[ruby] exec`, so a Docker Compose app can set `exec = ["docker", "compose", "run", "--rm", "-T", "backend", "bundle", "exec"]`. The comment/complexity scanner uses host `ruby` or, if that is missing, `ruby:3.2-slim` via Docker. Gleam has no source-line coverage tool (`cover` only sees generated Erlang), so `gl.tests` requires `gleam test` and does not invent coverage percentages; `gl.crap` enforces a complexity cap rather than CRAP; mutation is skipped; deadcode is unused private functions the scanner never sees called; `gl.deps` fails on import cycles and on imports of `packagename/internal` from outside that tree.
 
 ## Docs drift
 
