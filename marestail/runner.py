@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -18,9 +19,23 @@ from marestail.shell import run
 PASS = "PASS"
 BOUNCE = "BOUNCE"
 CONFIG_CHANGE = "## Config change"
-LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b", re.IGNORECASE)
+LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE)
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
+GROK_ENV = {
+    "GROK_MEMORY": "0",
+    "GROK_ASK_USER_QUESTION": "0",
+    "GROK_WORKFLOWS": "0",
+    "GROK_CLAUDE_HOOKS_ENABLED": "0",
+}
+GROK_LIMIT_PATTERN = re.compile(
+    r"rate.?limit|usage limit|overloaded|capacity|too many requests|\b529\b|\b503\b",
+    re.IGNORECASE,
+)
+GROK_APPROVE_LOCK = re.compile(
+    r"always-approve|always approve|bypassPermissions|yolo.{0,40}(disabled|locked|forbidden)|disable_bypass",
+    re.I,
+)
 
 
 @dataclass
@@ -267,13 +282,33 @@ def head(config: Config) -> str:
 
 def invoke(state: Run, label: str, prompt: str) -> None:
     state.folder.mkdir(parents=True, exist_ok=True)
-    (state.folder / f"{label}.prompt.md").write_text(prompt)
+    prompt_file = state.folder / f"{label}.prompt.md"
+    prompt_file.write_text(prompt)
+    if resolve_agent(state) == "grok":
+        invoke_grok(state, label, prompt_file)
+        return
     for _ in range(LIMIT_WAITS):
         started = time.time()
         code, output = run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600)
         (state.folder / f"{label}.json").write_text(output)
         if not rate_limited(code, output):
             print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {summary(output)}")
+            return
+        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+        time.sleep(LIMIT_WAIT_SECONDS)
+    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
+
+
+def invoke_grok(state: Run, label: str, prompt_file: Path) -> None:
+    for _ in range(LIMIT_WAITS):
+        started = time.time()
+        code, output = grok_run(state, prompt_file)
+        (state.folder / f"{label}.json").write_text(output)
+        if grok_always_approve_locked(code, output):
+            print(f"   {label}: grok always-approve is locked; cannot run unattended")
+            return
+        if not grok_rate_limited(code, output):
+            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {grok_summary(output)}")
             return
         print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
         time.sleep(LIMIT_WAIT_SECONDS)
@@ -304,6 +339,100 @@ def agent_command(state: Run) -> list[str]:
     if state.model:
         command += ["--model", state.model]
     return command
+
+
+def grok_run(state: Run, prompt_file: Path) -> tuple[int, str]:
+    from marestail.shell import clean
+
+    command = grok_command(state, prompt_file)
+    merged = {**os.environ, **GROK_ENV}
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=state.config.root,
+            env=merged,
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=4 * 3600,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        return 127, f"{command[0]}: not found ({error})"
+    except subprocess.TimeoutExpired:
+        return 124, f"{' '.join(command)}: timed out after {4 * 3600}s"
+    text = completed.stdout
+    if completed.returncode != 0 and not (completed.stdout or "").strip():
+        text = completed.stderr
+    return completed.returncode, clean(text)
+
+
+def grok_command(state: Run, prompt_file: Path) -> list[str]:
+    command = [
+        os.environ.get("MARESTAIL_GROK", "grok"),
+        "--prompt-file", str(prompt_file.resolve()),
+        "--output-format", "json",
+        "--always-approve",
+        "--no-plan",
+        "--trust",
+    ]
+    if state.model:
+        command += ["--model", state.model]
+    return command
+
+
+def grok_parse_json(output: str) -> dict | None:
+    text = output.strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    if start < 0:
+        return None
+    try:
+        data, _ = json.JSONDecoder().raw_decode(text[start:])
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def grok_rate_limited(code: int, output: str) -> bool:
+    data = grok_parse_json(output)
+    if data is None:
+        return code != 0 and bool(GROK_LIMIT_PATTERN.search(output))
+    blob = " ".join(str(data.get(key, "")) for key in ("message", "text", "type", "stopReason"))
+    is_error = data.get("type") == "error" or code != 0
+    return is_error and bool(GROK_LIMIT_PATTERN.search(blob) or GROK_LIMIT_PATTERN.search(output))
+
+
+def grok_summary(output: str) -> str:
+    data = grok_parse_json(output)
+    if data is None:
+        return output[-200:].replace("\n", " ")
+    text = str(data.get("text") or data.get("message") or "")[:120]
+    turns = data.get("num_turns", "?")
+    cost = data.get("total_cost_usd")
+    if cost is None:
+        models = data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else {}
+        parts = [row.get("costUSD") for row in models.values() if isinstance(row, dict)]
+        parts = [value for value in parts if value is not None]
+        cost = sum(parts) if parts else None
+    if cost is not None:
+        return f"turns={turns} api-equivalent=${float(cost):.2f} {text!r}"
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    tokens = usage.get("total_tokens")
+    token_info = f"tokens={tokens} " if tokens else ""
+    return f"turns={turns} {token_info}{text!r}".strip()
+
+
+def grok_always_approve_locked(code: int, output: str) -> bool:
+    if code == 0:
+        return False
+    data = grok_parse_json(output)
+    blob = output if data is None else str(data.get("message") or output)
+    return bool(GROK_APPROVE_LOCK.search(blob))
 
 
 def rate_limited(code: int, output: str) -> bool:
