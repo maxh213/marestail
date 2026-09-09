@@ -1,0 +1,10 @@
+[git]
+base = "main"
+
+[ruby]
+root = "."
+crap_max = 4
+sources = ["lib"]
+
+[comments]
+paths = ["lib"]

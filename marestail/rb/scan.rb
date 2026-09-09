@@ -64,6 +64,7 @@ end
 
 def complexity_of(node)
   return 0 unless node.is_a?(Array)
+  return node.sum { |child| complexity_of(child) } unless node[0].is_a?(Symbol)
 
   extra = case node[0]
           when :if, :unless, :elsif, :while, :until, :for, :when, :rescue, :if_mod, :unless_mod, :while_mod, :until_mod, :ifop
@@ -132,7 +133,7 @@ def depth(file)
 
     params = params_of(node[2])
     args = call_args(body_stmts[0])
-    if !params.empty? && params == args
+    if params == args
       pass << "#{file}:#{line_of(node[1])} #{fn} only forwards its arguments"
     end
   end

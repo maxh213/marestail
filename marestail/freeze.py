@@ -7,6 +7,7 @@ GATE_CONFIG = [
     "**/.coveragerc", "**/.dependency-cruiser.cjs", "**/stryker.config.*", "**/vite.config.*",
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
+    "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
     ".grok/hooks/**", ".grok/config.toml",
     ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
@@ -14,7 +15,7 @@ GATE_CONFIG = [
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
-    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs"],
+    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json"],
 }
 
 

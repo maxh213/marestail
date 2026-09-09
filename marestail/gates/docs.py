@@ -5,8 +5,8 @@ from pathlib import Path
 from marestail.context import Context
 from marestail.report import Result
 
-ROUTE_PATTERNS = [r"""@\w+\.route\(\s*["']([^"']+)["']""", r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']"""]
-ENV_PATTERNS = [r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']""", r"""os\.environ(?:\.get\(|\[)\s*["']([A-Z][A-Z0-9_]+)["']""", r"""process\.env\.([A-Z][A-Z0-9_]+)"""]
+ROUTE_PATTERNS = [r"""@\w+\.route\(\s*["']([^"']+)["']""", r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']""", r"""(?:get|post|put|patch|delete)\s+["'](/[^"']+)["']"""]
+ENV_PATTERNS = [r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']""", r"""os\.environ(?:\.get\(|\[)\s*["']([A-Z][A-Z0-9_]+)["']""", r"""process\.env\.([A-Z][A-Z0-9_]+)""", r"""ENV(?:\[|\.fetch\(\s*)["']([A-Z][A-Z0-9_]+)["']"""]
 IGNORED_ENV = ["K_REVISION", "K_SERVICE", "PORT", "HOME", "PATH"]
 LEDGER_ROW = re.compile(r"^\|\s*`(/[^`]*)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
@@ -35,7 +35,7 @@ def doc_text(ctx: Context) -> str:
 
 def source_files(ctx: Context) -> list[Path]:
     folders = ctx.config.get("docs", "sources", ["."])
-    suffixes = (".py", ".ts", ".tsx", ".js", ".mjs")
+    suffixes = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb")
     files = []
     for folder in folders:
         for path in (ctx.root / folder).rglob("*"):
