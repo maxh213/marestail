@@ -2,7 +2,7 @@
 base = "origin/master"
 
 # [agent]
-# backend = "claude"  # claude | agy | grok | cursor
+# backend = "claude"  # claude | agy | grok | cursor | kilo
 
 [python]
 root = "server"

@@ -38,12 +38,14 @@ marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
 marestail graph              # module dependency graph, for the architect and for you
 marestail depth              # prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow and files over 300 lines as long.
-marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor / MARESTAIL_AGENT
+marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo / MARESTAIL_AGENT
 ```
 
 ## Overnight
 
 `tools/overnight.sh tasks/000.md tasks/002.md ...` runs tasks in order, each to the hardener by default (`STOP_AT=qa` to include QA), stops at the first failure, waits out rate limits for up to six hours, and writes `.marestail/runs/overnight-<stamp>.md` with one section per task: exit code, minutes, HEAD, the role and verdict lines, and any config proposals. Start it detached: `nohup setsid tools/overnight.sh ... > /dev/null 2>&1 &`.
+
+Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
 
 ## Pipeline
 

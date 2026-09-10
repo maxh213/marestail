@@ -36,6 +36,8 @@ GROK_APPROVE_LOCK = re.compile(
     r"always-approve|always approve|bypassPermissions|yolo.{0,40}(disabled|locked|forbidden)|disable_bypass",
     re.I,
 )
+KILO_DEFAULT_MODEL = "kilo/stepfun/step-3.7-flash:free"
+KILO_DEFAULT_VARIANT = "high"
 
 
 @dataclass
@@ -159,10 +161,18 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
         prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report)
         invoke(state, report.stem, prompt)
         discard_edits(state.config, keep=report)
-        parsed = parse_verdict(report)
+        blob = ""
+        json_path = state.folder / f"{report.stem}.json"
+        if json_path.exists():
+            blob = json_path.read_text()
+        parsed = parse_verdict(report, blob)
         if parsed is None:
             print(f"{judge.name} wrote no verdict; retrying")
             continue
+        if not report.exists():
+            verdict, target = parsed
+            line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
+            report.write_text(line + "\n")
         verdict, target = parsed
         text = report.read_text()
         if not gate_ok:
@@ -182,11 +192,10 @@ def gate_for(tier: str | None) -> tuple[str, bool]:
     return render(results), all(result.ok for result in results)
 
 
-def parse_verdict(report: Path) -> tuple[str, str | None] | None:
-    if not report.exists():
-        return None
-    first = report.read_text().strip().splitlines()[:1]
-    match = re.match(r"VERDICT:\s*(PASS|BOUNCE)(?:\s+(\w+))?", first[0].strip(), re.IGNORECASE) if first else None
+def parse_verdict(report: Path, extra: str = "") -> tuple[str, str | None] | None:
+    text = report.read_text() if report.exists() else ""
+    blob = text + "\n" + extra
+    match = re.search(r"VERDICT:\s*(PASS|BOUNCE)(?:\s+(\w+))?", blob, re.IGNORECASE)
     if not match:
         return None
     target = match.group(2).lower() if match.group(2) else None
@@ -309,8 +318,12 @@ def invoke(state: Run, label: str, prompt: str) -> None:
     state.folder.mkdir(parents=True, exist_ok=True)
     prompt_file = state.folder / f"{label}.prompt.md"
     prompt_file.write_text(prompt)
-    if resolve_agent(state) == "grok":
+    backend = resolve_agent(state)
+    if backend == "grok":
         invoke_grok(state, label, prompt_file)
+        return
+    if backend == "kilo":
+        invoke_kilo(state, label, prompt)
         return
     for _ in range(LIMIT_WAITS):
         started = time.time()
@@ -334,6 +347,19 @@ def invoke_grok(state: Run, label: str, prompt_file: Path) -> None:
             return
         if not grok_rate_limited(code, output):
             print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {grok_summary(output)}")
+            return
+        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+        time.sleep(LIMIT_WAIT_SECONDS)
+    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
+
+
+def invoke_kilo(state: Run, label: str, prompt: str) -> None:
+    for _ in range(LIMIT_WAITS):
+        started = time.time()
+        code, output = kilo_run(state, prompt)
+        (state.folder / f"{label}.json").write_text(output)
+        if not kilo_rate_limited(code, output):
+            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {kilo_summary(output)}")
             return
         print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
         time.sleep(LIMIT_WAIT_SECONDS)
@@ -373,6 +399,8 @@ def agent_command(state: Run) -> list[str]:
         if state.model:
             command += ["--model", state.model]
         return command
+    if backend == "kilo":
+        return kilo_command(state)
     command = [os.environ.get("MARESTAIL_CLAUDE", "claude"), "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
     if state.model:
         command += ["--model", state.model]
@@ -416,7 +444,123 @@ def grok_command(state: Run, prompt_file: Path) -> list[str]:
     ]
     if state.model:
         command += ["--model", state.model]
+    effort = os.environ.get("MARESTAIL_GROK_EFFORT")
+    if effort:
+        command += ["--reasoning-effort", effort]
     return command
+
+
+def kilo_command(state: Run) -> list[str]:
+    model = state.model or KILO_DEFAULT_MODEL
+    command = [
+        os.environ.get("MARESTAIL_KILO", "kilo"),
+        "run",
+        "--auto",
+        "--format", "json",
+        "--log-level", "ERROR",
+        "--model", model,
+    ]
+    variant = os.environ.get("MARESTAIL_KILO_VARIANT")
+    if variant == "":
+        variant = None
+    elif variant is None and model == KILO_DEFAULT_MODEL:
+        variant = KILO_DEFAULT_VARIANT
+    if variant:
+        command += ["--variant", variant]
+    return command
+
+
+def kilo_run(state: Run, prompt: str) -> tuple[int, str]:
+    from marestail.shell import clean
+
+    command = kilo_command(state)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=state.config.root,
+            env=os.environ,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=4 * 3600,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        return 127, f"{command[0]}: not found ({error})"
+    except subprocess.TimeoutExpired:
+        return 124, f"{' '.join(command)}: timed out after {4 * 3600}s"
+    text = completed.stdout
+    if completed.returncode != 0 and not (completed.stdout or "").strip():
+        text = completed.stderr
+    return completed.returncode, clean(text)
+
+
+def kilo_events(output: str) -> list[dict]:
+    events = []
+    decoder = json.JSONDecoder()
+    for line in output.splitlines():
+        text = line.strip()
+        start = text.find("{")
+        if start < 0:
+            continue
+        try:
+            data, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            events.append(data)
+    return events
+
+
+def kilo_rate_limited(code: int, output: str) -> bool:
+    events = kilo_events(output)
+    if not events:
+        return code != 0 and bool(LIMIT_PATTERN.search(output))
+    errors = []
+    for event in events:
+        if event.get("type") != "error":
+            continue
+        err = event.get("error")
+        errors.append(str(err.get("message") if isinstance(err, dict) else err or event))
+    blob = " ".join(errors)
+    if not blob:
+        return False
+    return bool(LIMIT_PATTERN.search(blob))
+
+
+def kilo_summary(output: str) -> str:
+    events = kilo_events(output)
+    if not events:
+        return output[-200:].replace("\n", " ")
+    texts = []
+    error = ""
+    tokens = None
+    cost = None
+    for event in events:
+        kind = event.get("type")
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        if kind == "text":
+            text = str(part.get("text") or event.get("text") or "").strip()
+            if text:
+                texts.append(text)
+        elif kind == "error":
+            err = event.get("error")
+            error = str(err.get("message") if isinstance(err, dict) else err or "")[:120]
+        elif kind == "step_finish":
+            tokens = part.get("tokens") or part.get("total_tokens") or tokens
+            cost = part.get("cost") or part.get("costUSD") or cost
+    text = error or (texts[-1] if texts else "")
+    text = text[:120]
+    bits = []
+    if tokens is not None:
+        bits.append(f"tokens={tokens}")
+    if cost is not None:
+        try:
+            bits.append(f"api-equivalent=${float(cost):.2f}")
+        except (TypeError, ValueError):
+            bits.append(f"cost={cost}")
+    bits.append(repr(text))
+    return " ".join(bits)
 
 
 def grok_parse_json(output: str) -> dict | None:

@@ -58,9 +58,9 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent",
-        choices=["claude", "agy", "grok", "cursor"],
+        choices=["claude", "agy", "grok", "cursor", "kilo"],
         default=None,
-        help="agent backend (claude, agy, grok, or cursor)",
+        help="agent backend (claude, agy, grok, cursor, or kilo)",
     )
     parser.set_defaults(handler=run_command)
 
