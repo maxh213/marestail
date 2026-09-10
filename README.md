@@ -8,18 +8,18 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript | Elixir | Ruby / Rails | Gleam | C# / .NET |
-|---|---|---|---|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | `gleam test` + Erlang `cover` (Gleam line map) | dotnet test + coverlet |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | glance AST + cover | Roslyn scanner + coverlet |
-| mutation testing, changed files | mutmut | Stryker | muex (opt-in) | (skipped; mutant exists but is not wired) | (skipped; muex mutates Elixir/Erlang AST, not Gleam) | Stryker.NET (opt-in) |
-| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | import cycles (same-package `internal/` allowed) | Roslyn type resolution vs `.dotnet-layers.json`, cycles |
-| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | `gleam format --check`, `gleam build --warnings-as-errors` | Roslyn analyzers via SARIF |
-| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | `//` / `///` scanner | Roslyn scanner |
-| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | glance AST | Roslyn scanner (pass-throughs) |
-| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private functions (glance) | unused private members |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET |
+| Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET |
+|---|---|---|---|---|---|
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet |
+| mutation testing, changed files | mutmut | Stryker | muex (opt-in) | (skipped; mutant exists but is not wired) | Stryker.NET (opt-in) |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) |
+| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET |
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 

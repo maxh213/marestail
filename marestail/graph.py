@@ -16,7 +16,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config), gleam_graph(config), dotnet_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config), dotnet_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -93,20 +93,4 @@ def elixir_graph(config: Config) -> str:
     return "## Elixir modules\n" + "\n".join(lines)
 
 
-def gleam_graph(config: Config) -> str:
-    if config.section("gleam") is None:
-        return ""
-    from marestail.context import Context
-    from marestail.gleam import gleam_sources, scan
 
-    ctx = Context(config=config)
-    files = gleam_sources(ctx)
-    if not files:
-        return ""
-    _, output = scan(ctx, "deps", files)
-    try:
-        edges = json.loads(output or "[]")
-    except json.JSONDecodeError:
-        return "## Gleam modules\n" + output.strip()
-    lines = [f"{e.get('from')} -> {e.get('to')}" for e in edges]
-    return "## Gleam modules\n" + "\n".join(lines)

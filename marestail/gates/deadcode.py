@@ -16,7 +16,7 @@ TS_KINDS = ["files", "exports", "types"]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + gleam_findings(ctx) + dotnet_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx)
     if ctx.scope_changed:
         findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
@@ -146,35 +146,4 @@ def elixir_command(ctx: Context, out: Path) -> list[str]:
     return command
 
 
-def gleam_findings(ctx: Context) -> list[str]:
-    if ctx.config.section("gleam") is None:
-        return []
-    from marestail.gleam import gleam_sources, scan
 
-    files = gleam_sources(ctx)
-    if not files:
-        return []
-    code, output = scan(ctx, "dead", files)
-    if code != 0:
-        return [f"gleam deadcode scanner failed: {output.strip()[-200:]}"]
-    try:
-        entries = json.loads(output or "[]")
-    except json.JSONDecodeError:
-        return [f"gleam deadcode scanner produced non-JSON: {output.strip()[-200:]}"]
-    findings = []
-    for entry in entries:
-        if isinstance(entry, str):
-            path_part, _, rest = entry.partition(":")
-            try:
-                label = str(Path(path_part).resolve().relative_to(ctx.root.resolve()))
-            except ValueError:
-                label = path_part
-            findings.append(f"{label}:{rest}" if rest else label)
-            continue
-        path = Path(entry.get("file", ""))
-        try:
-            label = str((path if path.is_absolute() else ctx.gleam_root() / path).resolve().relative_to(ctx.root.resolve()))
-        except ValueError:
-            label = entry.get("file", "?")
-        findings.append(f"{label}:{entry.get('line', 0)} unused private function {entry.get('name')}")
-    return findings

@@ -31,9 +31,6 @@ class Context:
     def ruby(self, key: str, default=None):
         return self.config.get("ruby", key, default)
 
-    def gleam(self, key: str, default=None):
-        return self.config.get("gleam", key, default)
-
     def python_bin(self, tool: str) -> str:
         venv = self.root / self.python("venv", ".venv")
         return str(venv / "bin" / tool)
@@ -49,9 +46,6 @@ class Context:
 
     def ruby_root(self) -> Path:
         return self.root / self.ruby("root", ".")
-
-    def gleam_root(self) -> Path:
-        return self.root / self.gleam("root", ".")
 
     def dotnet(self, key: str, default=None):
         return self.config.get("dotnet", key, default)

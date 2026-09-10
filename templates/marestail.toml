@@ -31,11 +31,6 @@ root = "."
 crap_max = 4
 sources = ["app", "lib"]
 
-[gleam]
-root = "."
-crap_max = 4
-sources = ["src"]
-
 [dotnet]
 root = "."
 project = "App.csproj"

@@ -42,7 +42,6 @@ def raw_modules(config: Config) -> list[Module]:
         + ts_modules(config)
         + elixir_modules(config)
         + ruby_modules(config)
-        + gleam_modules(config)
         + dotnet_modules(config)
     )
 
@@ -195,34 +194,6 @@ def ruby_modules(config: Config) -> list[Module]:
             public=item.get("public", []),
             statements=item.get("statements", 0),
             pass_throughs=item.get("pass_throughs", []),
-        ))
-    return modules
-
-
-def gleam_modules(config: Config) -> list[Module]:
-    if config.section("gleam") is None:
-        return []
-    from marestail.context import Context
-    from marestail.gleam import gleam_sources, scan
-
-    ctx = Context(config=config)
-    files = gleam_sources(ctx)
-    if not files:
-        return []
-    code, output = scan(ctx, "depth", files)
-    if code != 0:
-        return []
-    modules = []
-    for item in json.loads(output or "[]"):
-        rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
-        modules.append(Module(
-            path=rel,
-            public=item.get("public", []),
-            statements=item.get("statements", 0),
-            pass_throughs=[
-                f"{rel}:{p['line']} {p['name']} only forwards its arguments"
-                for p in item.get("pass_throughs", [])
-            ],
         ))
     return modules
 
