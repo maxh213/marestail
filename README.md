@@ -19,11 +19,14 @@ This whole project is very opinionated on what I consider to be clean code / goo
 | no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) |
 | no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members |
 | docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
+| the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — |
 | Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET |
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 
 Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
+
+`py.runtime` exists because every other gate runs in the repo's virtualenv, which is not what production runs. It reads the version off the last `FROM` in the Dockerfile (override with `[python] deploy_files`, or state it outright with `[python] runtime = "3.12"`), requires every version the tooling asserts to equal it, and parses each source at that version. Keeping mypy's `python_version` honest is half the point: typeshed then rejects stdlib names the shipped interpreter does not have. It skips when nothing declares a deployed interpreter.
 
 A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gate runs the repo's own `node_modules/.bin/jest` with `--coverageProvider=babel` (v8 cannot express branch arms) and needs `[ts] sources` so untested files still appear in the report.
 
