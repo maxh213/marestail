@@ -57,6 +57,11 @@ def add_run(parser: argparse.ArgumentParser) -> None:
         help="attempts per role; 0 means unlimited (default)",
     )
     parser.add_argument(
+        "--effort",
+        default=None,
+        help="reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant); stamped on every commit",
+    )
+    parser.add_argument(
         "--agent",
         choices=["claude", "agy", "grok", "cursor", "kilo"],
         default=None,
@@ -242,7 +247,7 @@ def sweep_counters(work: Path, keep: Path) -> None:
 def run_command(args: argparse.Namespace) -> int:
     from marestail.runner import run_pipeline
 
-    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent)
+    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort)
 
 
 def install_command(args: argparse.Namespace) -> int:

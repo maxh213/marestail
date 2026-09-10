@@ -3,6 +3,8 @@ base = "origin/master"
 
 # [agent]
 # backend = "claude"  # claude | agy | grok | cursor | kilo
+# model = "claude-opus-5"
+# effort = "high"  # reasoning effort or variant; stamped on every commit
 
 [python]
 root = "server"

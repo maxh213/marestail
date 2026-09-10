@@ -11,6 +11,7 @@ from marestail.runner import (
     KILO_DEFAULT_VARIANT,
     Run,
     agent_command,
+    agent_label,
     grok_command,
     kilo_command,
     kilo_events,
@@ -18,6 +19,7 @@ from marestail.runner import (
     kilo_summary,
     parse_verdict,
     resolve_agent,
+    stamped,
 )
 
 ROOT = Path("/tmp/marestail-agent-test")
@@ -25,8 +27,8 @@ TASK = Path("/tmp/t.md")
 PROMPT = Path("/tmp/p.md")
 
 
-def state(agent=None, model="mymodel", raw=None):
-    return Run(config=Config(root=ROOT, raw=raw or {}), task=TASK, model=model, retries=0, agent=agent)
+def state(agent=None, model="mymodel", raw=None, effort=None):
+    return Run(config=Config(root=ROOT, raw=raw or {}), task=TASK, model=model, retries=0, agent=agent, effort=effort)
 
 
 def expect(name, got, wanted):
@@ -114,6 +116,25 @@ def env_overrides():
     expect("flag-wins", resolve_agent(state("cursor", model=None, raw={"agent": {"backend": "kilo"}})), "cursor")
 
 
+def labels():
+    expect("label-model-only", agent_label(state("claude")), "mymodel")
+    expect("label-with-effort", agent_label(state("claude", effort="high")), "mymodel high")
+    expect("label-no-model", agent_label(state("claude", model=None)), "claude")
+    expect("label-kilo-default", agent_label(state("kilo", model=None)), f"{KILO_DEFAULT_MODEL} {KILO_DEFAULT_VARIANT}")
+    expect("label-kilo-plain", agent_label(state("kilo", model="kilo/other")), "kilo/other")
+    effortful = state("grok", effort="xhigh")
+    expect("label-grok", agent_label(effortful), "mymodel xhigh")
+    expect("grok-effort-flag", grok_command(effortful, PROMPT)[-2:], ["--reasoning-effort", "xhigh"])
+    expect("claude-effort-flag", agent_command(state("claude", effort="xhigh"))[-2:], ["--effort", "xhigh"])
+    expect("agy-effort-flag", agent_command(state("agy", effort="high"))[-2:], ["--effort", "high"])
+    expect("cursor-effort-unflagged", agent_command(state("cursor", effort="high"))[-2:], ["--model", "mymodel"])
+    expect("kilo-effort-flag", kilo_command(state("kilo", model="kilo/other", effort="low"))[-2:], ["--variant", "low"])
+    expect("kilo-effort-off", kilo_command(state("kilo", model=None, effort=""))[-2:], ["--model", KILO_DEFAULT_MODEL])
+    expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
+    expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")
+    expect("stamp-unlabelled", stamped("coder handoff", ""), "coder handoff")
+
+
 def kilo_output():
     output = "\n".join(
         [
@@ -152,6 +173,7 @@ if __name__ == "__main__":
     snapshot_existing()
     kilo_defaults()
     env_overrides()
+    labels()
     kilo_output()
     verdict_parse()
     print("agent backends ok")

@@ -12,7 +12,7 @@ from marestail import audit, freeze, prompts
 from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
-from marestail.pipeline import Judge, Step, Worker, find, window
+from marestail.pipeline import Judge, Step, Worker, find, names, window
 from marestail.report import render
 from marestail.shell import run
 
@@ -47,6 +47,7 @@ class Run:
     model: str | None
     retries: int
     agent: str | None = None
+    effort: str | None = None
 
     @property
     def task_name(self) -> str:
@@ -74,11 +75,14 @@ def run_pipeline(
     model: str | None,
     retries: int,
     agent: str | None = None,
+    effort: str | None = None,
 ) -> int:
     config = config_module.load(Path.cwd())
     if model is None:
         model = config.get("agent", "model")
-    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent)
+    if effort is None:
+        effort = config.get("agent", "effort")
+    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort)
     outcome = 0
     for step in window(start, stop):
         if not run_step(state, step):
@@ -142,11 +146,11 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
-        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback)
+        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state))
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
-            fold_handoff(state.config, worker.name, report, before)
+            fold_handoff(state.config, worker.name, report, before, agent_label(state))
             return True
         feedback = problems
         print(problems)
@@ -178,7 +182,7 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
         if not gate_ok:
             verdict, target = BOUNCE, None
             text = gate_report + "\n\n" + text
-        record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name)
+        record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
         print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
         return verdict, target, text
     shown = "unlimited" if state.retries <= 0 else str(state.retries)
@@ -195,10 +199,12 @@ def gate_for(tier: str | None) -> tuple[str, bool]:
 def parse_verdict(report: Path, extra: str = "") -> tuple[str, str | None] | None:
     text = report.read_text() if report.exists() else ""
     blob = text + "\n" + extra
-    match = re.search(r"VERDICT:\s*(PASS|BOUNCE)(?:\s+(\w+))?", blob, re.IGNORECASE)
+    match = re.search(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", blob, re.IGNORECASE)
     if not match:
         return None
     target = match.group(2).lower() if match.group(2) else None
+    if target and target not in names():
+        target = None
     return match.group(1).upper(), target
 
 
@@ -228,12 +234,13 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
 def reject_config_change(state: Run, worker: Worker, report: Path, before: str, frozen: list[str]) -> list[str]:
     config = state.config
     justification = config_change_section(report)
+    label = agent_label(state)
     _, diff = run(["git", "diff", f"{before}..HEAD", "--", *frozen], cwd=config.root)
     if justification is None:
-        revert(config, before, frozen, f"Revert change to frozen files by {report.stem}\n\nBy runner.")
+        revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}\n\nBy runner.", label))
         return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
     body = f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n"
-    revert(config, before, frozen, f"Revert change to frozen files by {report.stem}, recorded as a proposal\n\n{body}\nBy runner.")
+    revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}, recorded as a proposal\n\n{body}\nBy runner.", label))
     proposal = state.next_report("proposal")
     proposal.write_text(body)
     return [
@@ -280,13 +287,14 @@ def discard_edits(config: Config, keep: Path) -> None:
     run(["git", "clean", "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
 
 
-def fold_handoff(config: Config, role: str, report: Path, before: str) -> None:
+def fold_handoff(config: Config, role: str, report: Path, before: str, label: str) -> None:
     body = report.read_text().strip()
     if head(config) == before:
-        record_commit(config, f"{role} handoff", body, role)
+        record_commit(config, f"{role} handoff", body, role, label)
         return
+    stamp_history(config, before, label)
     _, original = run(["git", "log", "-1", "--format=%B"], cwd=config.root)
-    message = strip_byline(original, role) + f"\n\n{body}\n\nBy {role}."
+    message = stamped(strip_byline(original, role), label) + f"\n\n{body}\n\nBy {role}."
     run(["git", "commit", "--amend", "--allow-empty", "-q", "-m", message], cwd=config.root)
 
 
@@ -297,8 +305,40 @@ def strip_byline(message: str, role: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-def record_commit(config: Config, subject: str, body: str, role: str) -> None:
-    run(["git", "commit", "--allow-empty", "-q", "-m", f"{subject}\n\n{body.strip()}\n\nBy {role}."], cwd=config.root)
+def record_commit(config: Config, subject: str, body: str, role: str, label: str) -> None:
+    message = stamped(f"{subject}\n\n{body.strip()}\n\nBy {role}.", label)
+    run(["git", "commit", "--allow-empty", "-q", "-m", message], cwd=config.root)
+
+
+def stamped(message: str, label: str) -> str:
+    prefix = f"[{label}]"
+    if not label or message.startswith(prefix):
+        return message
+    return f"{prefix} {message}"
+
+
+def stamp_history(config: Config, before: str, label: str) -> None:
+    commits = rev_list(config, before, ["--no-merges"])
+    if not label or not commits or commits != rev_list(config, before, []):
+        return
+    parent = before
+    for sha in commits:
+        parent = restamp(config, sha, parent, label)
+    run(["git", "reset", "--hard", "-q", parent], cwd=config.root)
+
+
+def rev_list(config: Config, before: str, options: list[str]) -> list[str]:
+    _, output = run(["git", "rev-list", "--reverse", *options, f"{before}..HEAD"], cwd=config.root)
+    return output.split()
+
+
+def restamp(config: Config, sha: str, parent: str, label: str) -> str:
+    _, details = run(["git", "log", "-1", "--format=%an%n%ae%n%aI%n%B", sha], cwd=config.root)
+    name, email, date, message = details.split("\n", 3)
+    author = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date}
+    tree = f"{sha}^{{tree}}"
+    _, created = run(["git", "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label)], cwd=config.root, env=author)
+    return created.split()[0]
 
 
 def archive_handoffs(state: Run) -> None:
@@ -378,6 +418,26 @@ def resolve_agent(state: Run) -> str:
     return "claude"
 
 
+def agent_label(state: Run) -> str:
+    return " ".join(part for part in (model_name(state), effort_name(state)) if part)
+
+
+def model_name(state: Run) -> str:
+    if state.model:
+        return state.model
+    backend = resolve_agent(state)
+    return KILO_DEFAULT_MODEL if backend == "kilo" else backend
+
+
+def effort_name(state: Run) -> str:
+    backend = resolve_agent(state)
+    if backend == "kilo":
+        return kilo_variant(state) or ""
+    if backend == "grok":
+        return grok_effort(state) or ""
+    return state.effort or ""
+
+
 def agent_command(state: Run) -> list[str]:
     backend = resolve_agent(state)
     if backend == "agy":
@@ -385,6 +445,8 @@ def agent_command(state: Run) -> list[str]:
         command = [binary, "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "4h"]
         if state.model:
             command += ["--model", state.model]
+        if state.effort:
+            command += ["--effort", state.effort]
         return command
     if backend == "cursor":
         binary = os.environ.get("MARESTAIL_CURSOR", "cursor-agent")
@@ -404,6 +466,8 @@ def agent_command(state: Run) -> list[str]:
     command = [os.environ.get("MARESTAIL_CLAUDE", "claude"), "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
     if state.model:
         command += ["--model", state.model]
+    if state.effort:
+        command += ["--effort", state.effort]
     return command
 
 
@@ -444,10 +508,14 @@ def grok_command(state: Run, prompt_file: Path) -> list[str]:
     ]
     if state.model:
         command += ["--model", state.model]
-    effort = os.environ.get("MARESTAIL_GROK_EFFORT")
+    effort = grok_effort(state)
     if effort:
         command += ["--reasoning-effort", effort]
     return command
+
+
+def grok_effort(state: Run) -> str | None:
+    return state.effort or os.environ.get("MARESTAIL_GROK_EFFORT")
 
 
 def kilo_command(state: Run) -> list[str]:
@@ -460,14 +528,19 @@ def kilo_command(state: Run) -> list[str]:
         "--log-level", "ERROR",
         "--model", model,
     ]
-    variant = os.environ.get("MARESTAIL_KILO_VARIANT")
-    if variant == "":
-        variant = None
-    elif variant is None and model == KILO_DEFAULT_MODEL:
-        variant = KILO_DEFAULT_VARIANT
+    variant = kilo_variant(state)
     if variant:
         command += ["--variant", variant]
     return command
+
+
+def kilo_variant(state: Run) -> str | None:
+    variant = state.effort if state.effort is not None else os.environ.get("MARESTAIL_KILO_VARIANT")
+    if variant == "":
+        return None
+    if variant is None and (state.model or KILO_DEFAULT_MODEL) == KILO_DEFAULT_MODEL:
+        return KILO_DEFAULT_VARIANT
+    return variant
 
 
 def kilo_run(state: Run, prompt: str) -> tuple[int, str]:
