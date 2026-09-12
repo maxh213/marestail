@@ -27,8 +27,8 @@ def run_gate(ctx: Context) -> Result:
 def files(ctx: Context, suffixes: tuple[str, ...]) -> list[Path]:
     roots = [ctx.root / folder for folder in ctx.config.get("comments", "paths", ["."])]
     found = sorted({path for root in roots for path in root.rglob("*") if path.suffix in suffixes and not skipped(path, ctx)})
-    if ctx.scope_changed:
-        found = [path for path in found if str(path.relative_to(ctx.root)) in ctx.changed]
+    if ctx.scoped:
+        found = [path for path in found if ctx.in_scope(str(path.relative_to(ctx.root)))]
     return found
 
 

@@ -18,7 +18,7 @@ PASSING = {"killed", "skipped", "caught by type check"}
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     patterns = mutant_patterns(ctx)
-    if ctx.scope_changed and not patterns:
+    if ctx.scoped and not patterns:
         return Result.skipped("py.mutation", "no changed python sources")
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
     workers = str(ctx.python("mutation_workers", 4))
@@ -36,7 +36,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def mutant_patterns(ctx: Context) -> list[str]:
-    if not ctx.scope_changed:
+    if not ctx.scoped:
         return []
     root = ctx.python_root()
     files = ctx.changed_under(root, (".py",))

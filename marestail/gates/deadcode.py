@@ -17,8 +17,8 @@ TS_KINDS = ["files", "exports", "types"]
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx)
-    if ctx.scope_changed:
-        findings = [f for f in findings if f.split(":")[0] in ctx.changed]
+    if ctx.scoped:
+        findings = [f for f in findings if ctx.in_scope(f.split(":")[0])]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
     return Result("deadcode", not findings, summary, findings, time.time() - started)
 

@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 
 from marestail.context import Context
 from marestail.gates.py_tests import COVERAGE_JSON
@@ -20,7 +19,8 @@ def run_gate(ctx: Context) -> Result:
     limit = float(ctx.python("crap_max", 4))
     offenders = [f for f in functions if f["crap"] > limit]
     findings = [describe(f) for f in sorted(offenders, key=lambda f: -f["crap"])]
-    summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}"
+    scope = " on changed functions" if ctx.scoped else ""
+    summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}{scope}"
     return Result("py.crap", not offenders, summary, findings, time.time() - started)
 
 
@@ -32,18 +32,29 @@ def radon_command(ctx: Context) -> list[str]:
 def scored(radon: dict, coverage: dict, ctx: Context) -> list[dict]:
     result = []
     for file, blocks in radon.items():
-        if ctx.scope_changed and not in_scope(file, ctx):
-            continue
+        gated = scoped_lines(file, ctx)
         by_line = functions_by_line(coverage["files"].get(file, {}))
         for block in flatten(blocks):
+            if gated is not None and not intersects(block, gated):
+                continue
             covered = by_line.get(block["lineno"], 0.0)
             result.append(score(file, block, covered))
     return result
 
 
-def in_scope(file: str, ctx: Context) -> bool:
+def scoped_lines(file: str, ctx: Context) -> set[int] | None:
+    if not ctx.scoped:
+        return None
     relative = (ctx.python_root() / file).resolve().relative_to(ctx.root)
-    return str(relative) in ctx.changed
+    path = str(relative)
+    if not ctx.in_scope(path):
+        return set()
+    return ctx.gated_lines(path)
+
+
+def intersects(block: dict, lines: set[int]) -> bool:
+    start = block["lineno"]
+    return any(line in lines for line in range(start, block.get("endline", start) + 1))
 
 
 def functions_by_line(file_coverage: dict) -> dict[int, float]:
