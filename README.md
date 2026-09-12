@@ -32,6 +32,10 @@ Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` 
 
 A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gate runs the repo's own `node_modules/.bin/jest` with `--coverageProvider=babel` (v8 cannot express branch arms) and needs `[ts] sources` so untested files still appear in the report.
 
+## Scope
+
+`--scope changed` gates exactly the diff against `[git] base`: coverage counts only the changed lines and branches, CRAP only the functions the hunks land in, and lint, deps, mutation, comments, deadcode and depth only the changed files. The scope is the diff, so it follows the work — split one file into three or move a function into another existing file and the new hunks are gated wherever they land. `--focus PATH` (repeatable, or `[focus] paths` in marestail.toml) adds whole files or folders on top and treats them as fully changed; combined with `--scope all` it is a usage error. Sonar is filtered, not rescoped: the scanner still sees the whole project and the open issues, duplication and hotspots are cut down to the scope afterwards. `docs`, `qa` and `py.runtime` stay global by nature and print a scope note saying so. `--scope all` is unchanged and remains the default.
+
 ## Use
 
 ```sh
@@ -42,6 +46,7 @@ marestail install . --gitignore-generated   # also gitignore features/, qa/, tas
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
+marestail gate --focus app/services   # the diff, plus a whole folder treated as fully changed
 marestail graph              # module dependency graph, for the architect and for you
 marestail depth              # prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow and files over 300 lines as long.
 marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo|kimi / MARESTAIL_AGENT

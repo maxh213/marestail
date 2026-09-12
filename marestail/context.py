@@ -123,6 +123,11 @@ class Context:
             summary += " + focus: " + ", ".join(sorted(self.focus))
         return summary
 
+    def global_note(self, summary: str) -> str:
+        if not self.scoped:
+            return summary
+        return f"{summary} (global gate — scope: {self.scope_name})"
+
 
 def build(config: Config, scope_changed: bool, focus: set[str] | None = None) -> Context:
     base = config.get("git", "base", "origin/master")

@@ -3,4 +3,7 @@ from marestail.report import Result
 
 
 def run_gate(ctx: Context) -> Result:
-    return Result.skipped("er.mutation", "no mutation tester for Erlang; see README")
+    reason = "no mutation tester for Erlang; see README"
+    if ctx.scoped:
+        reason = f"{reason} (scope: {ctx.scope_name})"
+    return Result.skipped("er.mutation", reason)

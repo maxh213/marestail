@@ -14,12 +14,4 @@ def run_gate(ctx: Context) -> Result:
     cwd = ctx.root / ctx.config.get("qa", "cwd", ".")
     code, output = run(["bash", "-lc", command], cwd=cwd, timeout=3600)
     summary = "qa passed" if code == 0 else f"qa failed (exit {code})"
-    return Result("qa", code == 0, scope_note(ctx, summary), tail(output, 40) if code else [], time.time() - started)
-
-
-def scope_note(ctx: Context, summary: str) -> str:
-    if not ctx.scoped:
-        return summary
-    return f"{summary} (global gate — scope: {ctx.scope_name})"
-
-
+    return Result("qa", code == 0, ctx.global_note(summary), tail(output, 40) if code else [], time.time() - started)
