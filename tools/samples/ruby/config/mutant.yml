@@ -1,0 +1,11 @@
+---
+usage: opensource
+integration:
+  name: rspec
+includes:
+  - lib
+requires:
+  - box
+matcher:
+  subjects:
+    - Box*

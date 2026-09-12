@@ -1,0 +1,18 @@
+# Shipped red on purpose, like the ruby and dotnet samples: one % comment at the
+# top of src/box.erl, a pass-through box:value/1, an unused private
+# box_util:suffix/0, an unused variable in box_store:describe/1 (the one
+# compiler warning), an uncovered case arm in box:tag/1, box:classify/1 at
+# complexity 5, and a box <-> box_store call cycle.
+
+[git]
+base = "HEAD"
+
+[erlang]
+root = "."
+crap_max = 4
+
+[comments]
+paths = ["src"]
+
+[docs]
+files = ["README.md"]

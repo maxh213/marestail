@@ -1,0 +1,4 @@
+.marestail/
+.mutant/
+coverage/
+vendor/

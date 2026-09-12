@@ -16,7 +16,7 @@ TS_KINDS = ["files", "exports", "types"]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx)
     if ctx.scope_changed:
         findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
@@ -127,6 +127,35 @@ def elixir_findings(ctx: Context) -> list[str]:
     for entry in json.loads(out.read_text()):
         file = (root / entry["file"]).resolve()
         label = str(file.relative_to(ctx.root)) if file.is_relative_to(ctx.root) else entry["file"]
+        findings.append(f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}")
+    return findings
+
+
+def erlang_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("erlang") is None:
+        return []
+    from marestail import erlang
+
+    sources = erlang.source_files(ctx)
+    if not sources:
+        return []
+    ebin = erlang.fresh_dir(ctx.work / "er-deadcode-ebin")
+    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=900)
+    problem = erlang.hint(code, output)
+    if problem:
+        return [problem]
+    if code != 0:
+        return [f"erlang dead code analysis failed: {output.strip()[-200:]}"]
+    beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
+    ignore = erlang.listify(ctx.erlang("deadcode_ignore", []))
+    args = (["--ignore", ",".join(ignore)] if ignore else []) + beams
+    code, output = erlang.escript(ctx, "deadcode.escript", args, timeout=600)
+    if code != 0:
+        return [erlang.hint(code, output) or f"erlang dead code analysis failed: {output.strip()[-200:]}"]
+    labels = {path.stem: erlang.rel(ctx, path) for path in sources}
+    findings = []
+    for entry in json.loads(output):
+        label = labels.get(entry["module"], entry["module"])
         findings.append(f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}")
     return findings
 

@@ -17,6 +17,10 @@ from marestail.runner import (
     kilo_events,
     kilo_rate_limited,
     kilo_summary,
+    kimi_command,
+    kimi_events,
+    kimi_rate_limited,
+    kimi_summary,
     parse_verdict,
     resolve_agent,
     stamped,
@@ -86,8 +90,23 @@ def kilo_defaults():
     expect("kilo-via-agent-command", agent_command(state("kilo", model=None)), kilo_command(state("kilo", model=None)))
 
 
+def kimi_backend():
+    expect(
+        "kimi-command",
+        kimi_command(state("kimi"), "do the thing"),
+        ["kimi", "-p", "do the thing", "--output-format", "stream-json", "-m", "mymodel"],
+    )
+    expect(
+        "kimi-command-no-model",
+        kimi_command(state("kimi", model=None), "do the thing"),
+        ["kimi", "-p", "do the thing", "--output-format", "stream-json"],
+    )
+    expect("kimi-resolve", resolve_agent(state("kimi", model=None)), "kimi")
+    expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
+
+
 def env_overrides():
-    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT"]
+    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT", "MARESTAIL_KIMI"]
     previous = {key: os.environ.get(key) for key in keys}
     try:
         os.environ["MARESTAIL_AGENT"] = "kilo"
@@ -110,6 +129,10 @@ def env_overrides():
         kilo = kilo_command(state("kilo", model="kilo/other"))
         if kilo[-2:] != ["--variant", "high"]:
             raise SystemExit(f"kilo-variant-env: {kilo!r}")
+        os.environ["MARESTAIL_KIMI"] = "/opt/kimi"
+        expect("kimi-binary", kimi_command(state("kimi"), "p")[0], "/opt/kimi")
+        os.environ["MARESTAIL_AGENT"] = "kimi"
+        expect("env-agent-kimi", resolve_agent(state(None, model=None)), "kimi")
     finally:
         restore(keys, previous)
     expect("config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kilo"}})), "kilo")
@@ -130,6 +153,14 @@ def labels():
     expect("cursor-effort-unflagged", agent_command(state("cursor", effort="high"))[-2:], ["--model", "mymodel"])
     expect("kilo-effort-flag", kilo_command(state("kilo", model="kilo/other", effort="low"))[-2:], ["--variant", "low"])
     expect("kilo-effort-off", kilo_command(state("kilo", model=None, effort=""))[-2:], ["--model", KILO_DEFAULT_MODEL])
+    expect("label-kimi", agent_label(state("kimi")), "mymodel")
+    expect("label-kimi-no-model", agent_label(state("kimi", model=None)), "kimi")
+    expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "mymodel high")
+    expect(
+        "kimi-effort-unflagged",
+        kimi_command(state("kimi", effort="high"), "p"),
+        ["kimi", "-p", "p", "--output-format", "stream-json", "-m", "mymodel"],
+    )
     expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-unlabelled", stamped("coder handoff", ""), "coder handoff")
@@ -160,6 +191,38 @@ def kilo_output():
         raise SystemExit(f"kilo_summary missing tokens: {summary!r}")
 
 
+def kimi_output():
+    output = "\n".join(
+        [
+            "notice: not json",
+            '{"role":"meta","type":"system.version","version":"0.42.0"}',
+            '{"role":"assistant","content":"working on it"}',
+            "{malformed json",
+            '{"role":"assistant","content":"all done"}',
+            '{"role":"meta","type":"session.stats","num_turns":3,"total_cost_usd":0.25,"usage":{"total_tokens":42}}',
+        ]
+    )
+    events = kimi_events(output)
+    expect("kimi-event-count", len(events), 4)
+    expect("kimi-not-limited", kimi_rate_limited(0, output), False)
+    summary = kimi_summary(output)
+    if "all done" not in summary or "turns=3" not in summary or "tokens=42" not in summary or "api-equivalent=$0.25" not in summary:
+        raise SystemExit(f"kimi_summary: {summary!r}")
+    expect("kimi-summary-tail", kimi_summary("plain text failure"), "plain text failure")
+    limited = "\n".join(
+        [
+            '{"role":"assistant","content":"trying"}',
+            '{"role":"meta","type":"error","error":{"message":"rate limit exceeded, retry later"}}',
+        ]
+    )
+    expect("kimi-rate-limited-event", kimi_rate_limited(1, limited), True)
+    expect("kimi-error-summary", "rate limit exceeded" in kimi_summary(limited), True)
+    stderr_failure = '{"role":"meta","type":"system.version","version":"0.42.0"}\nerror: failed to run prompt: usage limit reached'
+    expect("kimi-rate-limited-stderr", kimi_rate_limited(1, stderr_failure), True)
+    expect("kimi-not-limited-clean-exit", kimi_rate_limited(0, "usage limit mentioned in passing"), False)
+    expect("kimi-not-limited-nonquota-error", kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'), False)
+
+
 def verdict_parse():
     report = Path("/tmp/marestail-verdict-test.md")
     report.write_text("Here is my judgement.\n\nVERDICT: BOUNCE specifier\n1. fix it\n")
@@ -167,13 +230,17 @@ def verdict_parse():
     expect("verdict-anywhere", parsed, ("BOUNCE", "specifier"))
     parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"text","part":{"text":"VERDICT: PASS"}}')
     expect("verdict-from-json", parsed, ("PASS", None))
+    parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"role":"assistant","content":"VERDICT: BOUNCE coder"}')
+    expect("verdict-from-kimi-json", parsed, ("BOUNCE", "coder"))
 
 
 if __name__ == "__main__":
     snapshot_existing()
     kilo_defaults()
+    kimi_backend()
     env_overrides()
     labels()
     kilo_output()
+    kimi_output()
     verdict_parse()
     print("agent backends ok")

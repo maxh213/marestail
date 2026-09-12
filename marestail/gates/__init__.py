@@ -23,6 +23,7 @@ class Gate:
 def registry() -> list[Gate]:
     from marestail.gates import comments, deadcode, depth, docs, ex_crap, ex_deps, ex_lint, ex_mutation, ex_tests, py_crap, py_deps, py_lint, py_mutation, py_runtime, py_tests, qa, sonar
     from marestail.gates import cs_crap, cs_deps, cs_lint, cs_mutation, cs_tests
+    from marestail.gates import er_crap, er_deps, er_lint, er_mutation, er_tests
     from marestail.gates import rb_crap, rb_deps, rb_lint, rb_mutation, rb_tests
     from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
 
@@ -48,6 +49,10 @@ def registry() -> list[Gate]:
         Gate("cs.crap", FAST, "dotnet", cs_crap.run_gate),
         Gate("cs.lint", FAST, "dotnet", cs_lint.run_gate),
         Gate("cs.deps", FAST, "dotnet", cs_deps.run_gate),
+        Gate("er.tests", FAST, "erlang", er_tests.run_gate),
+        Gate("er.crap", FAST, "erlang", er_crap.run_gate),
+        Gate("er.lint", FAST, "erlang", er_lint.run_gate),
+        Gate("er.deps", FAST, "erlang", er_deps.run_gate),
         Gate("comments", FAST, None, comments.run_gate),
         Gate("depth", FAST, None, depth.run_gate),
         Gate("deadcode", FAST, None, deadcode.run_gate),
@@ -57,6 +62,7 @@ def registry() -> list[Gate]:
         Gate("ex.mutation", FULL, "elixir", ex_mutation.run_gate),
         Gate("rb.mutation", FULL, "ruby", rb_mutation.run_gate),
         Gate("cs.mutation", FULL, "dotnet", cs_mutation.run_gate),
+        Gate("er.mutation", FULL, "erlang", er_mutation.run_gate),
         Gate("sonar", SONAR, "sonar", sonar.run_gate),
         Gate("qa", QA, "qa", qa.run_gate),
     ]
