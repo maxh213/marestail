@@ -36,7 +36,7 @@ A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gat
 export PATH="$PATH:/path/to/marestail/bin"
 cd your-repo
 marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.md / AGENTS.md, Stop hooks
-marestail install . --gitignore-generated   # also gitignore features/, qa/, tasks/, hook configs & co. — everything marestail generates except marestail.toml, for repos where not everyone runs marestail
+marestail install . --gitignore-generated   # also gitignore features/, qa/, tasks/ and the Stop-hook configs, for repos where not everyone runs marestail
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
@@ -56,7 +56,7 @@ Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, pr
 
 Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, prompt in argv, JSONL on stdout; `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
 
-`install --gitignore-generated` exists for repos where not everyone runs marestail: only `marestail.toml` is meant to be committed, so the flag adds everything else marestail creates — `features/`, `qa/`, `tasks/`, `sonar-project.properties`, the Stop-hook configs — to the target's `.gitignore`. `CLAUDE.md`/`AGENTS.md` are gitignored only when the installer created them; files that pre-date the install stay tracked.
+`install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, the Stop-hook configs — to the target's `.gitignore`. `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored.
 
 ## Pipeline
 
