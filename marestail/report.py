@@ -17,11 +17,12 @@ class Result:
         return cls(gate=gate, ok=True, summary=f"skipped: {why}")
 
 
-def render(results: list[Result]) -> str:
+def render(results: list[Result], scope: str | None = None) -> str:
     lines = [render_one(result) for result in results]
     failed = [result.gate for result in results if not result.ok]
     verdict = "GATE PASSED" if not failed else "GATE FAILED: " + ", ".join(failed)
-    return "\n".join([*lines, "", verdict])
+    header = [f"scope: {scope}", ""] if scope else []
+    return "\n".join([*header, *lines, "", verdict])
 
 
 def render_one(result: Result) -> str:
@@ -35,5 +36,6 @@ def render_one(result: Result) -> str:
     return "\n".join([head, *body])
 
 
-def to_json(results: list[Result]) -> str:
-    return json.dumps([asdict(result) for result in results], indent=2)
+def to_json(results: list[Result], scope: str = "all", focus: set[str] | None = None) -> str:
+    payload = {"scope": scope, "focus": sorted(focus or set()), "results": [asdict(result) for result in results]}
+    return json.dumps(payload, indent=2)
