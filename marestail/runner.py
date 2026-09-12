@@ -365,6 +365,9 @@ def invoke(state: Run, label: str, prompt: str) -> None:
     if backend == "kilo":
         invoke_kilo(state, label, prompt)
         return
+    if backend == "kimi":
+        invoke_kimi(state, label, prompt)
+        return
     for _ in range(LIMIT_WAITS):
         started = time.time()
         code, output = run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600)
@@ -400,6 +403,19 @@ def invoke_kilo(state: Run, label: str, prompt: str) -> None:
         (state.folder / f"{label}.json").write_text(output)
         if not kilo_rate_limited(code, output):
             print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {kilo_summary(output)}")
+            return
+        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+        time.sleep(LIMIT_WAIT_SECONDS)
+    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
+
+
+def invoke_kimi(state: Run, label: str, prompt: str) -> None:
+    for _ in range(LIMIT_WAITS):
+        started = time.time()
+        code, output = kimi_run(state, prompt)
+        (state.folder / f"{label}.json").write_text(output)
+        if not kimi_rate_limited(code, output):
+            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {kimi_summary(output)}")
             return
         print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
         time.sleep(LIMIT_WAIT_SECONDS)
@@ -625,6 +641,124 @@ def kilo_summary(output: str) -> str:
     text = error or (texts[-1] if texts else "")
     text = text[:120]
     bits = []
+    if tokens is not None:
+        bits.append(f"tokens={tokens}")
+    if cost is not None:
+        try:
+            bits.append(f"api-equivalent=${float(cost):.2f}")
+        except (TypeError, ValueError):
+            bits.append(f"cost={cost}")
+    bits.append(repr(text))
+    return " ".join(bits)
+
+
+def kimi_command(state: Run, prompt: str) -> list[str]:
+    command = [
+        os.environ.get("MARESTAIL_KIMI", "kimi"),
+        "-p", prompt,
+        "--output-format", "stream-json",
+    ]
+    if state.model:
+        command += ["-m", state.model]
+    return command
+
+
+def kimi_run(state: Run, prompt: str) -> tuple[int, str]:
+    from marestail.shell import clean
+
+    command = kimi_command(state, prompt)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=state.config.root,
+            env=os.environ,
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=4 * 3600,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        return 127, f"{command[0]}: not found ({error})"
+    except subprocess.TimeoutExpired:
+        return 124, f"{command[0]}: timed out after {4 * 3600}s"
+    text = completed.stdout
+    if completed.returncode != 0:
+        text = (text + "\n" + completed.stderr).strip()
+    return completed.returncode, clean(text)
+
+
+def kimi_events(output: str) -> list[dict]:
+    events = []
+    decoder = json.JSONDecoder()
+    for line in output.splitlines():
+        text = line.strip()
+        start = text.find("{")
+        if start < 0:
+            continue
+        try:
+            data, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            events.append(data)
+    return events
+
+
+def kimi_texts(events: list[dict]) -> list[str]:
+    texts = []
+    for event in events:
+        if event.get("role") != "assistant" and event.get("type") != "assistant":
+            continue
+        message = event.get("message") if isinstance(event.get("message"), dict) else {}
+        for content in (event.get("content"), message.get("content")):
+            if isinstance(content, str) and content.strip():
+                texts.append(content.strip())
+            elif isinstance(content, list):
+                texts.extend(str(part["text"]).strip() for part in content if isinstance(part, dict) and part.get("text"))
+    return texts
+
+
+def kimi_errors(events: list[dict]) -> list[str]:
+    errors = []
+    for event in events:
+        err = event.get("error")
+        if isinstance(err, dict):
+            errors.append(str(err.get("message") or err))
+        elif err:
+            errors.append(str(err))
+        elif "error" in str(event.get("type") or "") or "error" in str(event.get("role") or ""):
+            errors.append(str(event.get("message") or event.get("content") or event))
+    return errors
+
+
+def kimi_rate_limited(code: int, output: str) -> bool:
+    errors = kimi_errors(kimi_events(output))
+    if errors:
+        return bool(LIMIT_PATTERN.search(" ".join(errors)))
+    return code != 0 and bool(LIMIT_PATTERN.search(output))
+
+
+def kimi_summary(output: str) -> str:
+    events = kimi_events(output)
+    if not events:
+        return output[-200:].replace("\n", " ")
+    texts = kimi_texts(events)
+    errors = kimi_errors(events)
+    turns = None
+    tokens = None
+    cost = None
+    for event in events:
+        turns = event.get("num_turns", turns)
+        cost = event.get("total_cost_usd", cost)
+        usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+        tokens = usage.get("total_tokens") or tokens
+        if tokens is None and ("input_tokens" in usage or "output_tokens" in usage):
+            tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    text = (errors[-1] if errors else (texts[-1] if texts else ""))[:120]
+    bits = []
+    if turns is not None:
+        bits.append(f"turns={turns}")
     if tokens is not None:
         bits.append(f"tokens={tokens}")
     if cost is not None:
