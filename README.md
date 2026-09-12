@@ -12,7 +12,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 |---|---|---|---|---|---|
 | tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet |
 | CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet |
-| mutation testing, changed files | mutmut | Stryker | muex (opt-in) | (skipped; mutant exists but is not wired) | Stryker.NET (opt-in) |
+| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET |
 | dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles |
 | types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF |
 | no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner |
@@ -36,22 +36,27 @@ A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gat
 export PATH="$PATH:/path/to/marestail/bin"
 cd your-repo
 marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.md / AGENTS.md, Stop hooks
+marestail install . --gitignore-generated   # also gitignore features/, qa/, tasks/, hook configs & co. — everything marestail generates except marestail.toml, for repos where not everyone runs marestail
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
 marestail graph              # module dependency graph, for the architect and for you
 marestail depth              # prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow and files over 300 lines as long.
-marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo / MARESTAIL_AGENT
+marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo|kimi / MARESTAIL_AGENT
 marestail run tasks/001.md --model claude-opus-5 --effort high   # both are stamped on every commit
 ```
 
-`--effort` names the reasoning effort for the run and every backend carries it in the commit stamp. Claude takes it as `--effort` (`low`, `medium`, `high`, `xhigh`, `max`), agy as `--effort` (`low`, `medium`, `high`), Grok as `--reasoning-effort`, Kilo as `--variant`. Cursor has no flag for it: it goes inside the model, `--model 'claude-opus-4-8[context=1m,effort=high]'`, and `--effort` there only labels the commits. `[agent] effort` in `marestail.toml` sets the default; `MARESTAIL_GROK_EFFORT` and `MARESTAIL_KILO_VARIANT` still work for those two.
+`--effort` names the reasoning effort for the run and every backend carries it in the commit stamp. Claude takes it as `--effort` (`low`, `medium`, `high`, `xhigh`, `max`), agy as `--effort` (`low`, `medium`, `high`), Grok as `--reasoning-effort`, Kilo as `--variant`. Cursor has no flag for it: it goes inside the model, `--model 'claude-opus-4-8[context=1m,effort=high]'`, and `--effort` there only labels the commits. Kimi has no flag for it either, so `--effort` only labels the commits. `[agent] effort` in `marestail.toml` sets the default; `MARESTAIL_GROK_EFFORT` and `MARESTAIL_KILO_VARIANT` still work for those two.
 
 ## Overnight
 
 `tools/overnight.sh tasks/000.md tasks/002.md ...` runs tasks in order, each to the hardener by default (`STOP_AT=qa` to include QA), stops at the first failure, waits out rate limits for up to six hours, and writes `.marestail/runs/overnight-<stamp>.md` with one section per task: exit code, minutes, HEAD, the role and verdict lines, and any config proposals. `AGENT`, `MODEL` and `EFFORT` in the environment pass the matching flags through. Start it detached: `nohup setsid tools/overnight.sh ... > /dev/null 2>&1 &`.
 
 Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
+
+Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, prompt in argv, JSONL on stdout; `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
+
+`install --gitignore-generated` exists for repos where not everyone runs marestail: only `marestail.toml` is meant to be committed, so the flag adds everything else marestail creates — `features/`, `qa/`, `tasks/`, `sonar-project.properties`, the Stop-hook configs — to the target's `.gitignore`. `CLAUDE.md`/`AGENTS.md` are gitignored only when the installer created them; files that pre-date the install stay tracked.
 
 ## Pipeline
 
