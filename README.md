@@ -12,7 +12,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 |---|---|---|---|---|---|---|
 | tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover |
 | CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet | erl_parse AST + cover |
-| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | (none — visible skip, see below) |
+| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | built-in operator-swap escript |
 | dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles | beam call-graph cycles |
 | types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF | erlc strong warnings as errors |
 | no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner | escript scanner |
@@ -20,9 +20,9 @@ This whole project is very opinionated on what I consider to be clean code / goo
 | no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members | escript scanner |
 | docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
 | the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — | — |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET | — |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET | local SonarQube, sonar-erlang plugin |
 
-The Erlang gates compile and run eunit themselves with erlc and escript (OTP 25+); no rebar3 is required. Erlang has no mutation tester — `er.mutation` reports a visible skip, not a fake pass — and no Sonar analyzer, so the sonar tier does not apply to erlang-only repos.
+The Erlang gates compile and run eunit themselves with erlc and escript (OTP 25+); no rebar3 is required. `er.mutation` is marestail's own mutation tester: an escript rewrites one operator at a time (comparison, arithmetic, andalso/orelse swaps), recompiles, and runs the eunit suite per mutant — survivors fail the gate, `mutation_max` caps the mutants checked when a full pass is too slow. For the sonar tier, `marestail sonar setup` builds the [sonar-erlang](https://github.com/evolution-gaming/sonar-erlang) plugin jar once with docker (pinned to a commit, cached under `~/.config/marestail/`, so the build does not recur), mounts it into the SonarQube container's `extensions/plugins` and restarts the container if the plugin is not loaded yet. The gate imports the coverage `er.tests` already produced: the eunit run exports `.marestail/eunit.coverdata` (via `cover:export`), which the plugin parses into line coverage. It then fails closed when SonarQube shows no Erlang lines or no coverage metric, on top of the usual quality gate, issue, coverage and duplication checks.
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 

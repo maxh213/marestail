@@ -22,7 +22,7 @@ tag(Box) ->
 
 classify(N) when is_integer(N) ->
     if
-        N > 10 ->
+        N >= 10 ->
             if
                 N > 20 ->
                     if

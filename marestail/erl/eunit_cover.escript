@@ -19,6 +19,7 @@ main([Ebin, TestEbin, OutJson]) ->
         ok -> ok;
         {error, WriteReason} -> fail("cannot write ~s: ~p", [OutJson, WriteReason])
     end,
+    export_coverdata(OutJson),
     cover:stop(),
     case Result of
         ok -> halt(0);
@@ -58,6 +59,13 @@ instrument(Mod) ->
     case cover:compile_beam(Mod) of
         {ok, Mod} -> ok;
         Error -> fail("cover cannot instrument ~p: ~p", [Mod, Error])
+    end.
+
+export_coverdata(OutJson) ->
+    Path = filename:join(filename:dirname(OutJson), "eunit.coverdata"),
+    case cover:export(Path) of
+        ok -> ok;
+        {error, Reason} -> fail("cannot export coverdata to ~s: ~p", [Path, Reason])
     end.
 
 run_eunit(Tests) ->
