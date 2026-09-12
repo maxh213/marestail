@@ -53,6 +53,10 @@ marestail run tasks/001.md --model claude-opus-5 --effort high   # both are stam
 
 Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
 
+## Watch
+
+`marestail watch [paths...]` opens a live curses TUI of every repo with a `.marestail` directory under the scan roots — with no paths it reads `~/workspace` when that exists, else the current directory. Each repo is a bed, and the active worker's row carries its role, elapsed time and a scrolling one-line tail of its latest output, so you can see what the fleet is doing without opening a single log. Enter on a worker opens its full conversation: the prompt it was sent, the handoff it wrote, the result it returned. Arrows or j/k move, Enter opens, q quits. Stdlib curses only, nothing to install. The panels are a registry built to be extended — module graph and coverage views are planned.
+
 ## Pipeline
 
 | Step | Kind | Gate | Does |

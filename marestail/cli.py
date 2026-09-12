@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_run(commands.add_parser("run", help="run the role pipeline on a task"))
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
+    add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
@@ -78,6 +79,12 @@ def add_install(parser: argparse.ArgumentParser) -> None:
 def add_sonar(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=["up", "down", "setup"])
     parser.set_defaults(handler=sonar_command)
+
+
+def add_watch(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("paths", nargs="*", help="directories to scan for repos with a .marestail directory")
+    parser.add_argument("--refresh", type=float, default=2.0, help="seconds between redraws")
+    parser.set_defaults(handler=watch_command)
 
 
 def gate_command(args: argparse.Namespace) -> int:
@@ -248,6 +255,18 @@ def run_command(args: argparse.Namespace) -> int:
     from marestail.runner import run_pipeline
 
     return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort)
+
+
+def watch_command(args: argparse.Namespace) -> int:
+    from marestail.tui import app as tui_app
+
+    paths = args.paths or default_watch_roots()
+    return tui_app.run([Path(p) for p in paths], args.refresh)
+
+
+def default_watch_roots() -> list[Path]:
+    workspace = Path.home() / "workspace"
+    return [workspace] if workspace.is_dir() else [Path.cwd()]
 
 
 def install_command(args: argparse.Namespace) -> int:
