@@ -110,7 +110,7 @@ def fmt_elapsed(worker: Worker) -> str:
 def worker_rows(fleet: Fleet | None) -> list[RepoState]:
     if fleet is None:
         return []
-    return [repo for repo in fleet.repos if repo.worker is not None]
+    return [repo for repo in fleet.repos if repo.worker is not None or repo.alive]
 
 
 def selected_repo(state: WatchState) -> RepoState | None:
@@ -128,9 +128,7 @@ def bed_index(fleet: Fleet, target: RepoState | None) -> int:
 
 
 def bed_height(repo: RepoState) -> int:
-    worker = repo.worker
-    extra = min(TAIL_ROWS, len(worker.tail_lines)) if worker is not None else 0
-    return BED_H + extra
+    return BED_H + min(TAIL_ROWS, len(tail_lines_of(repo)))
 
 
 def bed_span(heights: list[int], first: int, last: int) -> int:
@@ -159,14 +157,23 @@ def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, st
 
 
 def tail_lines_of(repo: RepoState) -> list[str]:
-    if repo.worker is None:
-        return []
-    return repo.worker.tail_lines[:TAIL_ROWS]
+    worker = repo.worker
+    lines = worker.tail_lines if worker is not None else []
+    if not lines:
+        lines = repo.tail_lines
+    return lines[:TAIL_ROWS]
 
 
 def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
     worker = repo.worker
     if worker is None:
+        if repo.alive:
+            text = f"{GLYPH_RUNNING} between steps"
+            if selected:
+                put(win, y, x, text.ljust(width)[:width], state.theme.selected)
+                return
+            put(win, y, x, text, state.theme.worker)
+            return
         put(win, y, x, f"{GLYPH_IDLE} idle", state.theme.idle)
         return
     head = f"{GLYPH_RUNNING} {worker.step.role} {worker.step.label} {fmt_elapsed(worker)} "
@@ -253,40 +260,64 @@ class FleetPanel(Panel):
 class ConversationPanel(Panel):
     title = "conversation"
 
-    def __init__(self, worker: Worker) -> None:
-        self.worker = worker
-        self.sections = conversation_for(worker)
+    def __init__(self, repo: RepoState) -> None:
+        self.repo = repo
+        self.sections = conversation_for(repo)
+        self.follow = True
         self.scroll = 0
         self.page = 1
         self.built_for = -1
         self.lines: list[tuple[str, bool]] = []
+
+    def sync(self, fleet: Fleet | None) -> None:
+        if fleet is None:
+            return
+        repo = next((r for r in fleet.repos if r.root == self.repo.root), None)
+        if repo is None:
+            return
+        self.repo = repo
+        self.sections = conversation_for(repo)
+        self.built_for = -1
+
+    def heading(self) -> str:
+        worker = self.repo.worker
+        if worker is None:
+            return f"{GLYPH_SECTION} {self.repo.name} · live"
+        return f"{GLYPH_SECTION} {worker.step.label} · {worker.step.role}"
 
     def render(self, win: curses.window, rect: Rect, focused: bool, state: WatchState) -> None:
         width = rect.w - 1
         if width != self.built_for:
             self.lines = build_lines(self.sections, width)
             self.built_for = width
-        put(win, rect.y, rect.x, f"{GLYPH_SECTION} {self.worker.step.label} · {self.worker.step.role}"[:rect.w], state.theme.heading)
+        put(win, rect.y, rect.x, self.heading()[:rect.w], state.theme.heading)
         self.page = max(1, rect.h - 1)
-        self.scroll = clamp(self.scroll, 0, max(0, len(self.lines) - self.page))
+        bottom = max(0, len(self.lines) - self.page)
+        if self.follow:
+            self.scroll = bottom
+        self.scroll = clamp(self.scroll, 0, bottom)
         for row, (text, head) in enumerate(self.lines[self.scroll : self.scroll + self.page]):
             put(win, rect.y + 1 + row, rect.x, text, state.theme.heading if head else 0)
 
     def on_key(self, key: int, state: WatchState) -> str | None:
         if key in (ord("q"), 27):
             return "back"
+        if key == curses.KEY_END:
+            self.follow = True
+            return "handled"
         if key in (curses.KEY_UP, ord("k")):
+            self.follow = False
             self.scroll -= 1
         elif key in (curses.KEY_DOWN, ord("j")):
             self.scroll += 1
         elif key == curses.KEY_PPAGE:
+            self.follow = False
             self.scroll -= self.page
         elif key == curses.KEY_NPAGE:
             self.scroll += self.page
         elif key == curses.KEY_HOME:
+            self.follow = False
             self.scroll = 0
-        elif key == curses.KEY_END:
-            self.scroll = len(self.lines)
         else:
             return None
         self.scroll = max(0, self.scroll)

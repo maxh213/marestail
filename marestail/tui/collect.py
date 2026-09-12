@@ -14,6 +14,7 @@ FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")
 QUOTED_RE = re.compile(r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*$""")
 TAIL_BYTES = 65536
+CONV_BYTES = 262144
 TAIL_STALE_S = 900
 TAIL_LIMIT = 3
 TAIL_CHARS = 90
@@ -53,7 +54,10 @@ def collect_repo(root: Path) -> RepoState:
     running = state.steps[-1] if state.steps and state.steps[-1].status == "running" else None
     if running is not None:
         state.worker = build_worker(state, running, rows, real)
-        state.worker.tail_lines = transcript_tail(real)
+    if state.alive:
+        state.tail_lines = transcript_tail(real)
+        if state.worker is not None:
+            state.worker.tail_lines = state.tail_lines
     return state
 
 
@@ -62,17 +66,22 @@ def collect_fleet(roots: list[Path]) -> Fleet:
     return Fleet(repos=repos, scanned_at=time.time())
 
 
-def conversation_for(worker: Worker) -> list[tuple[str, str]]:
+def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
     sections: list[tuple[str, str]] = []
-    prompt = read_text(worker.prompt_path)
-    if prompt is not None:
-        sections.append(("prompt", prompt))
-    handoff = read_text(worker.handoff_path)
-    if handoff is not None:
-        sections.append(("handoff", handoff))
-    result = result_text(worker.result_path)
-    if result is not None:
-        sections.append(("result", result))
+    worker = repo.worker
+    if worker is not None:
+        prompt = read_text(worker.prompt_path)
+        if prompt is not None:
+            sections.append(("prompt", prompt))
+        handoff = read_text(worker.handoff_path)
+        if handoff is not None:
+            sections.append(("handoff", handoff))
+        result = result_text(worker.result_path)
+        if result is not None:
+            sections.append(("result", result))
+    live = transcript_conversation(real_path(repo.root))
+    if live:
+        sections.append(("live", "\n".join(live)))
     return sections
 
 
@@ -175,16 +184,20 @@ def collapse(text: str) -> str:
 
 
 def transcript_tail(root: Path) -> list[str]:
+    return transcript_conversation(root, TAIL_LIMIT, TAIL_BYTES)
+
+
+def transcript_conversation(root: Path, max_lines: int = 200, window: int = CONV_BYTES) -> list[str]:
     path = live_transcript(root)
     if path is None:
         return []
     entries = [
         entry
-        for line in transcript_lines(path)
+        for line in transcript_lines(path, window)
         for entry in [format_entry(line)]
         if entry
     ]
-    return entries[-TAIL_LIMIT:]
+    return entries[-max_lines:]
 
 
 def live_transcript(root: Path) -> Path | None:
@@ -202,16 +215,16 @@ def live_transcript(root: Path) -> Path | None:
     return newest
 
 
-def transcript_lines(path: Path) -> list[str]:
+def transcript_lines(path: Path, window: int = TAIL_BYTES) -> list[str]:
     try:
         size = path.stat().st_size
         with path.open("rb") as handle:
-            handle.seek(max(0, size - TAIL_BYTES))
+            handle.seek(max(0, size - window))
             raw = handle.read()
     except OSError:
         return []
     lines = raw.decode(errors="replace").splitlines()
-    return lines[1:] if size > TAIL_BYTES else lines
+    return lines[1:] if size > window else lines
 
 
 def format_entry(line: str) -> str | None:

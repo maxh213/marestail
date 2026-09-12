@@ -29,6 +29,8 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bo
         now = time.monotonic()
         if now - collected >= refresh:
             refresh_fleet(roots, state, show_all)
+            if detail is not None:
+                detail.sync(state.fleet)
             collected = now
         draw(stdscr, panels[active], detail, state)
         key = stdscr.getch()
@@ -52,8 +54,8 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bo
             return 0
         if action == "open":
             repo = selected_repo(state)
-            if repo is not None and repo.worker is not None:
-                detail = ConversationPanel(repo.worker)
+            if repo is not None:
+                detail = ConversationPanel(repo)
 
 
 def hide_cursor() -> None:
@@ -106,6 +108,8 @@ def status_text(state: WatchState) -> str:
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:
     if detail is not None:
         hints = "j/k scroll · PgUp/PgDn · q back"
+        if detail.follow:
+            hints += " ⇊"
     else:
         hints = "↑↓ select · enter open · tab panel · r refresh · q quit"
     put(win, height - 1, 1, hints, state.theme.secondary)

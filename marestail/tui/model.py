@@ -42,6 +42,7 @@ class RepoState:
     steps: list[Step] = field(default_factory=list)
     worker: Worker | None = None
     alive: bool = False
+    tail_lines: list[str] = field(default_factory=list)
 
 
 @dataclass
