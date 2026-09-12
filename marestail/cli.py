@@ -63,15 +63,16 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent",
-        choices=["claude", "agy", "grok", "cursor", "kilo"],
+        choices=["claude", "agy", "grok", "cursor", "kilo", "kimi"],
         default=None,
-        help="agent backend (claude, agy, grok, cursor, or kilo)",
+        help="agent backend (claude, agy, grok, cursor, kilo, or kimi)",
     )
     parser.set_defaults(handler=run_command)
 
 
 def add_install(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("target", nargs="?", default=".")
+    parser.add_argument("--gitignore-generated", action="store_true", help="add the files marestail generates to the target's .gitignore")
     parser.set_defaults(handler=install_command)
 
 
@@ -253,7 +254,7 @@ def run_command(args: argparse.Namespace) -> int:
 def install_command(args: argparse.Namespace) -> int:
     from marestail.install import install
 
-    install(Path(args.target).resolve())
+    install(Path(args.target).resolve(), gitignore_generated=args.gitignore_generated)
     return 0
 
 

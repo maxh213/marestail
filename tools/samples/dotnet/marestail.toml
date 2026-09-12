@@ -10,7 +10,6 @@ root = "."
 project = "Sample.csproj"
 test_project = "Sample.Tests/Sample.Tests.csproj"
 crap_max = 4
-mutation = true
 
 [comments]
 paths = ["Domain", "Services"]

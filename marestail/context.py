@@ -53,6 +53,12 @@ class Context:
     def dotnet_root(self) -> Path:
         return self.root / self.dotnet("root", ".")
 
+    def erlang(self, key: str, default=None):
+        return self.config.get("erlang", key, default)
+
+    def erlang_root(self) -> Path:
+        return self.root / self.erlang("root", ".")
+
 
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)

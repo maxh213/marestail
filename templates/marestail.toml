@@ -23,7 +23,6 @@ runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "
 preset = ""
 deadcode_ignore_modules = []
 deadcode_ignore = []
-mutation = false
 muex_optimize = true
 root = "."
 crap_max = 4
@@ -33,13 +32,18 @@ root = "."
 crap_max = 4
 sources = ["app", "lib"]
 
+[erlang]
+root = "."
+crap_max = 4
+sources = ["src"]
+test_dirs = ["test", "tests"]
+
 [dotnet]
 root = "."
 project = "App.csproj"
 test_project = "App.Tests/App.Tests.csproj"
 coverage_exclude = ["Program.cs"]
 crap_max = 4
-mutation = false
 
 
 [sonar]
