@@ -6,10 +6,12 @@ services:
       - "9000:9000"
     environment:
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_PLUGINS_RISK_CONSENT: "ACCEPTED"
     volumes:
       - marestail_sonar_data:/opt/sonarqube/data
       - marestail_sonar_extensions:/opt/sonarqube/extensions
       - marestail_sonar_logs:/opt/sonarqube/logs
+      - ${MARESTAIL_SONAR_PLUGINS}:/opt/sonarqube/extensions/plugins
 volumes:
   marestail_sonar_data:
   marestail_sonar_extensions:

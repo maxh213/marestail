@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 
-from marestail import dotnet
+from marestail import dotnet, erlang
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run, tail
@@ -40,6 +40,8 @@ def run_gate(ctx: Context) -> Result:
     if error:
         return Result("sonar", False, "analysis did not complete", [error, *tail(output, 15)], time.time() - started)
     findings = collect(client, key) + (dotnet_findings(ctx, client, key) if is_dotnet else [])
+    if ctx.config.section("erlang") is not None:
+        findings += erlang_findings(ctx, client, key)
     summary = "sonar clean" if not findings else f"{len(findings)} sonar findings"
     return Result("sonar", not findings, summary, findings, time.time() - started)
 
@@ -118,6 +120,17 @@ def dotnet_findings(ctx: Context, client: Client, key: str) -> list[str]:
         findings.append(f"{dotnet.rel(ctx, ctx.dotnet_root())}:1 SonarQube received no C# lines (languages: {values.get('ncloc_language_distribution') or 'none'})")
     if "coverage" not in values:
         findings.append("marestail.toml:1 SonarQube imported no coverage; run cs.tests first so its OpenCover report exists")
+    return findings
+
+
+def erlang_findings(ctx: Context, client: Client, key: str) -> list[str]:
+    data = client.get("api/measures/component", component=key, metricKeys="coverage,ncloc_language_distribution")
+    values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
+    findings = []
+    if "erlang=" not in values.get("ncloc_language_distribution", ""):
+        findings.append(f"{erlang.rel(ctx, ctx.erlang_root())}:1 SonarQube received no Erlang lines (languages: {values.get('ncloc_language_distribution') or 'none'}); run: marestail sonar setup")
+    if "coverage" not in values:
+        findings.append("marestail.toml:1 SonarQube imported no erlang coverage; run er.tests first so .marestail/eunit.coverdata exists")
     return findings
 
 
