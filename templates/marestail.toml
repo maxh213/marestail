@@ -37,6 +37,7 @@ root = "."
 crap_max = 4
 sources = ["src"]
 test_dirs = ["test", "tests"]
+# mutation_max = 0  # cap mutants checked per run; 0 = no cap
 
 [dotnet]
 root = "."

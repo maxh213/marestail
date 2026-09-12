@@ -2,7 +2,8 @@
 # top of src/box.erl, a pass-through box:value/1, an unused private
 # box_util:suffix/0, an unused variable in box_store:describe/1 (the one
 # compiler warning), an uncovered case arm in box:tag/1, box:classify/1 at
-# complexity 5, and a box <-> box_store call cycle.
+# complexity 5, a box <-> box_store call cycle, and one surviving mutant:
+# box:classify/1 guards with N >= 10 but no test exercises the boundary 10.
 
 [git]
 base = "HEAD"

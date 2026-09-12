@@ -17,11 +17,20 @@ classify_tiny_test() ->
 classify_small_test() ->
     ?assertEqual(small, box:classify(15)).
 
+classify_boundary_small_test() ->
+    ?assertEqual(small, box:classify(20)).
+
 classify_mid_test() ->
     ?assertEqual(mid, box:classify(25)).
 
+classify_boundary_mid_test() ->
+    ?assertEqual(mid, box:classify(30)).
+
 classify_big_test() ->
     ?assertEqual(big, box:classify(35)).
+
+classify_boundary_big_test() ->
+    ?assertEqual(big, box:classify(40)).
 
 classify_huge_test() ->
     ?assertEqual(huge, box:classify(45)).
