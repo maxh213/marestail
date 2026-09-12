@@ -22,6 +22,7 @@ BED_H = 5
 BED_GAP = 1
 STRIP_STEPS = 12
 MARQUEE_PAUSE_TICKS = 12
+TAIL_ROWS = 3
 
 
 @dataclass(frozen=True)
@@ -126,12 +127,21 @@ def bed_index(fleet: Fleet, target: RepoState | None) -> int:
     return 0
 
 
-def scroll_to(top: int, current: int, visible: int, total: int) -> int:
-    if current < top:
-        return current
-    if current >= top + visible:
-        return current - visible + 1
-    return min(top, max(0, total - visible))
+def bed_height(repo: RepoState) -> int:
+    worker = repo.worker
+    extra = min(TAIL_ROWS, len(worker.tail_lines)) if worker is not None else 0
+    return BED_H + extra
+
+
+def bed_span(heights: list[int], first: int, last: int) -> int:
+    return sum(heights[first : last + 1]) + BED_GAP * (last - first)
+
+
+def fit_top(heights: list[int], top: int, current: int, height: int) -> int:
+    top = min(top, current)
+    while top < current and bed_span(heights, top, current) > height:
+        top += 1
+    return top
 
 
 def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, state: WatchState) -> None:
@@ -142,7 +152,16 @@ def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, st
     put(win, rect.y, rect.x + 2, f" {repo.name} {GLYPH_FLOURISH} {repo.branch} @{repo.head} "[:inner], state.theme.heading)
     put(win, rect.y + 1, rect.x + 2, f"task: {repo.task or 'none'}"[:inner], state.theme.secondary)
     draw_worker_row(win, rect.y + 2, rect.x + 2, inner, repo, selected, state)
-    draw_strip(win, rect.y + 3, rect.x + 2, inner, repo.steps, state)
+    tails = tail_lines_of(repo)
+    for offset, line in enumerate(tails):
+        put(win, rect.y + 3 + offset, rect.x + 2, line[:inner], state.theme.secondary)
+    draw_strip(win, rect.y + 3 + len(tails), rect.x + 2, inner, repo.steps, state)
+
+
+def tail_lines_of(repo: RepoState) -> list[str]:
+    if repo.worker is None:
+        return []
+    return repo.worker.tail_lines[:TAIL_ROWS]
 
 
 def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
@@ -151,7 +170,7 @@ def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoSt
         put(win, y, x, f"{GLYPH_IDLE} idle", state.theme.idle)
         return
     head = f"{GLYPH_RUNNING} {worker.step.role} {worker.step.label} {fmt_elapsed(worker)} "
-    tail = marquee(clean(worker.step.summary), width - len(head), state.tick)
+    tail = "" if worker.tail_lines else marquee(clean(worker.step.summary), width - len(head), state.tick)
     if selected:
         put(win, y, x, (head + tail).ljust(width)[:width], state.theme.selected)
         return
@@ -204,13 +223,17 @@ class FleetPanel(Panel):
         if state.fleet is None or not state.fleet.repos:
             put(win, rect.y, rect.x + 2, "no beds found — waiting for pipelines", state.theme.secondary)
             return
-        per = BED_H + BED_GAP
-        visible = max(1, rect.h // per)
+        repos = state.fleet.repos
+        heights = [bed_height(repo) for repo in repos]
         current_repo = selected_repo(state)
-        self.top = scroll_to(self.top, bed_index(state.fleet, current_repo), visible, len(state.fleet.repos))
-        for row, repo in enumerate(state.fleet.repos[self.top : self.top + visible]):
-            bed = Rect(rect.y + row * per, rect.x, BED_H, rect.w)
-            draw_bed(win, bed, repo, repo is current_repo, state)
+        self.top = fit_top(heights, self.top, bed_index(state.fleet, current_repo), rect.h)
+        y = rect.y
+        for index in range(self.top, len(repos)):
+            if y >= rect.y + rect.h:
+                break
+            bed = Rect(y, rect.x, heights[index], rect.w)
+            draw_bed(win, bed, repos[index], repos[index] is current_repo, state)
+            y += heights[index] + BED_GAP
 
     def on_key(self, key: int, state: WatchState) -> str | None:
         rows = len(worker_rows(state.fleet))

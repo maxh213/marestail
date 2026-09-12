@@ -13,6 +13,10 @@ STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")
 QUOTED_RE = re.compile(r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*$""")
+TAIL_BYTES = 65536
+TAIL_STALE_S = 900
+TAIL_LIMIT = 3
+TAIL_CHARS = 90
 
 ProcRow = tuple[int, int, list[str]]
 
@@ -49,6 +53,7 @@ def collect_repo(root: Path) -> RepoState:
     running = state.steps[-1] if state.steps and state.steps[-1].status == "running" else None
     if running is not None:
         state.worker = build_worker(state, running, rows, real)
+        state.worker.tail_lines = transcript_tail(real)
     return state
 
 
@@ -167,6 +172,92 @@ def summary_of(rest: str) -> str:
 
 def collapse(text: str) -> str:
     return " ".join(text.split())
+
+
+def transcript_tail(root: Path) -> list[str]:
+    path = live_transcript(root)
+    if path is None:
+        return []
+    entries = [
+        entry
+        for line in transcript_lines(path)
+        for entry in [format_entry(line)]
+        if entry
+    ]
+    return entries[-TAIL_LIMIT:]
+
+
+def live_transcript(root: Path) -> Path | None:
+    slug = str(root).replace("/", "-")
+    projects = Path.home() / ".claude" / "projects" / slug
+    try:
+        logs = [p for p in projects.iterdir() if p.is_file() and p.suffix == ".jsonl"]
+    except OSError:
+        return None
+    if not logs:
+        return None
+    newest = max(logs, key=dir_mtime)
+    if time.time() - dir_mtime(newest) > TAIL_STALE_S:
+        return None
+    return newest
+
+
+def transcript_lines(path: Path) -> list[str]:
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            handle.seek(max(0, size - TAIL_BYTES))
+            raw = handle.read()
+    except OSError:
+        return []
+    lines = raw.decode(errors="replace").splitlines()
+    return lines[1:] if size > TAIL_BYTES else lines
+
+
+def format_entry(line: str) -> str | None:
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or data.get("type") != "assistant":
+        return None
+    message = data.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if isinstance(block, dict):
+            rendered = render_block(block)
+            if rendered:
+                return rendered
+    return None
+
+
+def render_block(block: dict[str, object]) -> str | None:
+    kind = block.get("type")
+    if kind == "thinking":
+        text = collapse(str(block.get("thinking") or ""))[:TAIL_CHARS]
+        return f"💭 {text}" if text else None
+    if kind == "text":
+        text = collapse(str(block.get("text") or ""))
+        return text or None
+    if kind == "tool_use":
+        name = collapse(str(block.get("name") or ""))
+        detail = tool_detail(block.get("input"))
+        return f"⚒ {name} {detail}".rstrip() if name else None
+    return None
+
+
+def tool_detail(value: object) -> str:
+    if not isinstance(value, dict):
+        return ""
+    for key in ("file_path", "command", "pattern"):
+        detail = value.get(key)
+        if isinstance(detail, str) and detail.strip():
+            return collapse(detail)[:TAIL_CHARS]
+    return ""
 
 
 def build_worker(state: RepoState, step: Step, rows: list[ProcRow], real: Path) -> Worker:

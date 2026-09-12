@@ -28,6 +28,7 @@ class Worker:
     result_path: Path | None
     prompt_path: Path | None
     handoff_path: Path | None
+    tail_lines: list[str] = field(default_factory=list)
 
 
 @dataclass
