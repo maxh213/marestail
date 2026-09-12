@@ -15,7 +15,7 @@ BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     mutate = changed_sources(ctx)
-    if ctx.scope_changed and not mutate:
+    if ctx.scoped and not mutate:
         return Result.skipped("ts.mutation", "no changed typescript sources")
     command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
     if mutate:
@@ -36,7 +36,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def changed_sources(ctx: Context) -> list[str]:
-    if not ctx.scope_changed:
+    if not ctx.scoped:
         return []
     files = ctx.changed_under(ctx.ts_root(), (".ts", ".tsx"))
     root = ctx.ts_root().relative_to(ctx.root)
@@ -47,6 +47,8 @@ def surviving(report: dict, ctx: Context) -> list[str]:
     findings = []
     for file, data in report.get("files", {}).items():
         name = relative(file, ctx)
+        if not ctx.in_scope(name):
+            continue
         for mutant in data.get("mutants", []):
             if mutant["status"] in BAD:
                 line = mutant["location"]["start"]["line"]

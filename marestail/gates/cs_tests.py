@@ -47,7 +47,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("cs.tests", False, "coverage report names no source file; check [dotnet] root and coverage_exclude", tail(output), time.time() - started)
     (ctx.work / dotnet.COVERAGE_JSON).write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)
-    scope = " on changed files" if ctx.scope_changed else ""
+    scope = " on changed files" if ctx.scoped else ""
     summary = f"{passed} passed, coverage {coverage['totals']['percent_covered']:.1f}%, {len(findings)} gaps{scope} (need 0)"
     return Result("cs.tests", not findings, summary, findings, time.time() - started)
 
@@ -55,6 +55,8 @@ def run_gate(ctx: Context) -> Result:
 def attribute_findings(ctx: Context) -> list[str]:
     findings = []
     for path in dotnet.sources(ctx):
+        if not ctx.in_scope(dotnet.rel(ctx, path)):
+            continue
         for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
             if ATTRIBUTE in line:
                 findings.append(f"{dotnet.rel(ctx, path)}:{number} [{ATTRIBUTE}] hides code from the coverage ratio")
@@ -138,8 +140,11 @@ def normalise(ctx: Context, raw: dict) -> dict:
 def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     findings = []
     for file, data in sorted(coverage["files"].items()):
-        if ctx.scope_changed and file not in ctx.changed:
+        if not ctx.in_scope(file):
             continue
-        findings.extend(f"{file}:{line} not covered" for line in data["missing_lines"])
-        findings.extend(f"{file}:{line} branch arm {arm} not taken" for line, arm in data["missing_branches"])
+        gated = ctx.gated_lines(file)
+        missing_lines = data["missing_lines"] if gated is None else [line for line in data["missing_lines"] if line in gated]
+        missing_branches = data["missing_branches"] if gated is None else [[line, arm] for line, arm in data["missing_branches"] if line in gated]
+        findings.extend(f"{file}:{line} not covered" for line in missing_lines)
+        findings.extend(f"{file}:{line} branch arm {arm} not taken" for line, arm in missing_branches)
     return findings

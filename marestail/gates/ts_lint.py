@@ -14,6 +14,8 @@ TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>.+)$"
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
+    if ctx.scoped and not ctx.changed_under(ctx.ts_root(), (".ts", ".tsx", ".js", ".jsx")):
+        return Result.skipped("ts.lint", "no changed typescript files")
     findings = tsc_findings(ctx) + eslint_findings(ctx)
     summary = "tsc and eslint clean" if not findings else f"{len(findings)} problems"
     return Result("ts.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
@@ -27,8 +29,13 @@ def tsc_findings(ctx: Context) -> list[str]:
     if code == 0:
         return []
     lines = meaningful(output)
-    parsed = [tsc_finding(match, ctx) for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
-    return parsed or [f"tsc: {line}" for line in lines]
+    matches = [match for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
+    if not matches:
+        return [f"tsc: {line}" for line in lines]
+    findings = [tsc_finding(match, ctx) for match in matches]
+    if ctx.scoped:
+        findings = [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
+    return findings
 
 
 def tsc_finding(match: re.Match, ctx: Context) -> str:
@@ -43,6 +50,9 @@ def eslint_findings(ctx: Context) -> list[str]:
     report = parse(output)
     if report is None:
         return [f"eslint: {line}" for line in meaningful(output)]
+    if ctx.scoped:
+        report = [file for file in report if ctx.in_scope(relative(file.get("filePath", ""), ctx))]
+        return [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
     findings = [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
     return findings or [f"eslint: {line}" for line in meaningful(output)] or [f"marestail.toml:1 eslint exited {code} without a message"]
 

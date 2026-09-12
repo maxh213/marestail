@@ -16,17 +16,27 @@ def run_gate(ctx: Context) -> Result:
     if not coverage_path.exists():
         return Result("ts.crap", False, "no coverage data; ts.tests must run first", [], 0.0)
     coverage = json.loads(coverage_path.read_text())
-    files = [file for file in coverage if not ctx.scope_changed or relative(file, ctx) in ctx.changed]
+    files = [file for file in coverage if ctx.in_scope(relative(file, ctx))]
     if not files:
         return Result.skipped("ts.crap", "no files in scope")
     code, output = run(["node", str(SCRIPT), str(ctx.ts_root()), *files], cwd=ctx.ts_root())
     if code != 0:
         return Result("ts.crap", False, "complexity script failed", output.splitlines()[-10:], time.time() - started)
     limit = float(ctx.ts("crap_max", 4))
-    functions = [score(fn, coverage[fn["file"]], ctx) for fn in json.loads(output)]
+    parsed = json.loads(output)
+    if ctx.scoped:
+        parsed = [fn for fn in parsed if touches_hunk(fn, ctx)]
+    functions = [score(fn, coverage[fn["file"]], ctx) for fn in parsed]
     offenders = sorted((f for f in functions if f["crap"] > limit), key=lambda f: -f["crap"])
     summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}"
     return Result("ts.crap", not offenders, summary, [describe(f) for f in offenders], time.time() - started)
+
+
+def touches_hunk(fn: dict, ctx: Context) -> bool:
+    gated = ctx.gated_lines(relative(fn["file"], ctx))
+    if gated is None:
+        return True
+    return any(fn["line"] <= line <= fn["endLine"] for line in gated)
 
 
 def relative(file: str, ctx: Context) -> str:

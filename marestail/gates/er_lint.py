@@ -20,7 +20,7 @@ STRONG_WARNINGS = [
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.erlang_root()
-    if ctx.scope_changed and not ctx.changed_under(root, (".erl", ".hrl")):
+    if ctx.scoped and not ctx.changed_under(root, (".erl", ".hrl")):
         return Result.skipped("er.lint", "no changed erlang files")
     sources = erlang.source_files(ctx)
     tests = erlang.test_files(ctx)
@@ -40,8 +40,6 @@ def run_gate(ctx: Context) -> Result:
             return Result("er.lint", False, problem, [problem], time.time() - started)
         if code != 0:
             findings.extend(lint_findings(output, ctx))
-    if ctx.scope_changed:
-        findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     summary = "erlc strong warnings clean" if not findings else f"{len(findings)} problems"
     return Result("er.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
 
@@ -53,5 +51,7 @@ def lint_findings(output: str, ctx: Context) -> list[str]:
         if match:
             findings.append(f"{erlang.rel(ctx, match.group(1))}:{match.group(2)} {match.group(3)}")
     if not findings:
-        findings.extend(line for line in output.splitlines() if line.strip())
+        return [line for line in output.splitlines() if line.strip()]
+    if ctx.scoped:
+        findings = [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
     return findings

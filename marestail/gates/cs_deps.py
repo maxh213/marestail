@@ -24,8 +24,8 @@ def run_gate(ctx: Context) -> Result:
     if error:
         return Result("cs.deps", False, error, [], time.time() - started)
     findings = layer_findings(ctx, layers, data) + cycle_findings(data["edges"])
-    if ctx.scope_changed:
-        findings = [f for f in findings if f.split(":")[0] in ctx.changed]
+    if ctx.scoped:
+        findings = [f for f in findings if ctx.in_scope(f.split(":", 1)[0])]
     summary = "layer contracts kept" if not findings else f"{len(findings)} layer breaks"
     return Result("cs.deps", not findings, summary, findings[:MAX_LINES], time.time() - started)
 
