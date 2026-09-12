@@ -7,7 +7,7 @@ defmodule Complexity do
   defp analyse_file(file) do
     case File.read(file) do
       {:ok, text} ->
-        case Code.string_to_quoted(text) do
+        case Code.string_to_quoted(text, token_metadata: true) do
           {:ok, ast} ->
             extract_functions(ast, file)
           _ ->
@@ -26,6 +26,7 @@ defmodule Complexity do
         fn_info = %{
           "file" => file,
           "line" => meta[:line] || 0,
+          "end_line" => end_line(meta),
           "name" => "#{name}/#{arity}",
           "complexity" => cc
         }
@@ -34,6 +35,13 @@ defmodule Complexity do
         {node, acc}
     end)
     Enum.reverse(functions)
+  end
+
+  defp end_line(meta) do
+    case meta[:end] do
+      [line: line] -> line
+      _ -> meta[:line] || 0
+    end
   end
 
   defp count_complexity(ast) do
