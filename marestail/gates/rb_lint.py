@@ -13,7 +13,7 @@ MAX_LINES = 60
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.ruby_root()
-    if ctx.scope_changed and not ctx.changed_under(root, (".rb", ".rake", ".jbuilder")):
+    if ctx.scoped and not ctx.changed_under(root, (".rb", ".rake", ".jbuilder")):
         return Result.skipped("rb.lint", "no changed ruby files")
     code, output = run(bundle(ctx, "rubocop", "--format", "json", "--force-exclusion"), cwd=root, timeout=900)
     if code == 127:
@@ -34,7 +34,7 @@ def parse(output: str, ctx: Context) -> list[str]:
     findings = []
     for file in report.get("files", []):
         rel = relative(file.get("path", ""), ctx)
-        if ctx.scope_changed and rel not in ctx.changed:
+        if ctx.scoped and not ctx.in_scope(rel):
             continue
         for offense in file.get("offenses", []):
             line = (offense.get("location") or {}).get("line", 0)

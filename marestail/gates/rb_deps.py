@@ -24,18 +24,23 @@ def run_gate(ctx: Context) -> Result:
         return Result("rb.deps", False, "dependency scanner failed", output.splitlines()[-10:], time.time() - started)
     edges = json.loads(output or "[]")
     layers = load_layers(ctx)
+    findings = violations(edges, layers, ctx)
+    summary = "layer contracts kept" if not findings else f"{len(findings)} layer breaks"
+    return Result("rb.deps", not findings, summary, findings[:60], time.time() - started)
+
+
+def violations(edges: list[dict], layers: list[dict], ctx: Context) -> list[str]:
     findings = []
     for edge in edges:
         src = relative(edge.get("from", ""), ctx)
         dst = relative(edge.get("to", ""), ctx)
-        if ctx.scope_changed and src not in ctx.changed:
+        if ctx.scoped and not ctx.in_scope(src):
             continue
         for layer in layers:
             if src.startswith(layer["from"].rstrip("/") + "/") or src.startswith(layer["from"]):
                 if any(dst.startswith(ban.rstrip("/") + "/") or dst == ban for ban in layer["forbid"]):
                     findings.append(f"{src}:{edge.get('line', 1)} {src} must not depend on {dst} ({edge.get('constant', '')})")
-    summary = "layer contracts kept" if not findings else f"{len(findings)} layer breaks"
-    return Result("rb.deps", not findings, summary, findings[:60], time.time() - started)
+    return findings
 
 
 def load_layers(ctx: Context) -> list[dict]:
