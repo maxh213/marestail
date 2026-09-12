@@ -8,6 +8,7 @@ GATE_CONFIG = [
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
     "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
+    "**/mutant.yml", "**/mutant.yaml",
     "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*",
     "**/*.csproj", "**/*.sln", "**/*.props", "**/*.targets", "**/NuGet.config", "**/nuget.config", "**/dotnet-tools.json",
     "**/.editorconfig", "**/.globalconfig", "**/*.runsettings", "**/stryker-config.*", ".dotnet-layers.json",

@@ -10,8 +10,11 @@ PASSING = {"killed", "invalid", "equivalent"}
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if not ctx.elixir("mutation", False):
-        return Result.skipped("ex.mutation", "muex not enabled: add {:muex, \"~> 0.9\", only: [:dev, :test], runtime: false} to mix.exs and set [elixir] mutation = true")
+    code, output = run(["mix", "help", "muex"], cwd=ctx.elixir_root(), timeout=120)
+    if code == 127:
+        return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
+    if code != 0:
+        return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.9", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
     code, output = run(command(ctx), cwd=ctx.elixir_root(), env={"MIX_ENV": "test"}, timeout=7200)
     start = output.find("{")
     if start < 0:

@@ -14,13 +14,11 @@ REPORT = Path("reports") / "mutation-report.json"
 BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 SENTRY = re.compile(r'<PackageReference\s+Include="Sentry', re.IGNORECASE)
 SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerator>"
-SKIP = "stryker not enabled: `dotnet tool install dotnet-stryker` in the .NET root and set [dotnet] mutation = true"
+INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if not ctx.dotnet("mutation", False):
-        return Result.skipped("cs.mutation", SKIP)
     product, tests, error = dotnet.projects(ctx)
     if error:
         return Result("cs.mutation", False, error, [], 0.0)
@@ -36,11 +34,13 @@ def run_gate(ctx: Context) -> Result:
     shutil.rmtree(out, ignore_errors=True)
     code, output = dotnet.dotnet(ctx, ["tool", "restore"], timeout=900)
     if code != 0:
-        return Result("cs.mutation", False, dotnet.hint(code, output) or "dotnet tool restore failed", tail(output), time.time() - started)
+        message = dotnet.hint(code, output) or f"dotnet tool restore failed: {INSTALL}"
+        return Result("cs.mutation", False, message, tail(output), time.time() - started)
     code, output = dotnet.dotnet(ctx, command(ctx, product, tests, out, targets), timeout=7200)
     report = out / REPORT
     if not report.exists():
-        return Result("cs.mutation", False, dotnet.hint(code, output) or f"stryker produced no report (exit {code})", tail(output), time.time() - started)
+        message = dotnet.hint(code, output) or missing(output, code)
+        return Result("cs.mutation", False, message, tail(output), time.time() - started)
     files = json.loads(report.read_text()).get("files", {})
     mutants = [
         (dotnet.rel(ctx, file), mutant)
@@ -53,6 +53,12 @@ def run_gate(ctx: Context) -> Result:
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
     return Result("cs.mutation", not findings, summary, findings, time.time() - started)
+
+
+def missing(output: str, code: int) -> str:
+    if "cannot find a tool" in output.lower() or "was not found" in output.lower():
+        return INSTALL
+    return f"stryker produced no report (exit {code})"
 
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
