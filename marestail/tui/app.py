@@ -12,12 +12,12 @@ MIN_H = 20
 TICK_MS = 125
 
 
-def run(roots: list[Path], refresh: float = 2.0) -> int:
+def run(roots: list[Path], refresh: float = 2.0, show_all: bool = False) -> int:
     locale.setlocale(locale.LC_ALL, "")
-    return curses.wrapper(_main, roots, refresh)
+    return curses.wrapper(_main, roots, refresh, show_all)
 
 
-def _main(stdscr: curses.window, roots: list[Path], refresh: float) -> int:
+def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bool) -> int:
     hide_cursor()
     stdscr.timeout(TICK_MS)
     state = WatchState(fleet=None, theme=init_theme(), tick=0)
@@ -28,7 +28,7 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float) -> int:
     while True:
         now = time.monotonic()
         if now - collected >= refresh:
-            refresh_fleet(roots, state)
+            refresh_fleet(roots, state, show_all)
             collected = now
         draw(stdscr, panels[active], detail, state)
         key = stdscr.getch()
@@ -63,9 +63,12 @@ def hide_cursor() -> None:
         pass
 
 
-def refresh_fleet(roots: list[Path], state: WatchState) -> None:
+def refresh_fleet(roots: list[Path], state: WatchState, show_all: bool) -> None:
     try:
-        state.fleet = collect_fleet(roots)
+        fleet = collect_fleet(roots)
+        if not show_all:
+            fleet.repos = [repo for repo in fleet.repos if repo.alive]
+        state.fleet = fleet
         state.error = None
     except Exception as error:
         state.error = f"collect failed: {error}"[:60]

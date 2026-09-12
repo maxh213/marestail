@@ -85,6 +85,7 @@ def add_sonar(parser: argparse.ArgumentParser) -> None:
 def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("paths", nargs="*", help="directories to scan for repos with a .marestail directory")
     parser.add_argument("--refresh", type=float, default=2.0, help="seconds between redraws")
+    parser.add_argument("--all", action="store_true", help="show every repo with a .marestail directory, not just those with a running pipeline")
     parser.set_defaults(handler=watch_command)
 
 
@@ -262,7 +263,7 @@ def watch_command(args: argparse.Namespace) -> int:
     from marestail.tui import app as tui_app
 
     paths = args.paths or default_watch_roots()
-    return tui_app.run([Path(p) for p in paths], args.refresh)
+    return tui_app.run([Path(p) for p in paths], args.refresh, args.all)
 
 
 def default_watch_roots() -> list[Path]:
