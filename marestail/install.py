@@ -7,25 +7,41 @@ from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", "StrykerOutput/", ".sonarqube/", ".idea/", ".vscode/"]
+GITIGNORE_GENERATED_LINES = ["features/", "qa/", "tasks/", "sonar-project.properties", ".claude/settings.json", ".agents/hooks.json", ".grok/", ".cursor/hooks.json"]
 GATE_MARKER = "marestail gate"
 
 
-def install(target: Path) -> None:
+def install(target: Path, gitignore_generated: bool = False) -> None:
     dotnet = uses_dotnet(target)
     copy_if_missing(TEMPLATES / "marestail.toml", target / "marestail.toml")
     if not dotnet:
         copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
-    append_instructions(target / "CLAUDE.md")
-    append_instructions(target / "AGENTS.md")
+    claude = target / "CLAUDE.md"
+    agents = target / "AGENTS.md"
+    claude_fresh = not claude.exists()
+    agents_fresh = not agents.exists()
+    append_instructions(claude)
+    append_instructions(agents)
     merge_hook(target / ".claude" / "settings.json")
     merge_agy_hook(target / ".agents" / "hooks.json")
     merge_grok_hook(target / ".grok" / "hooks" / "marestail-gate.json")
     merge_cursor_hook(target / ".cursor" / "hooks.json")
-    extend_gitignore(target / ".gitignore")
+    extend_gitignore(target / ".gitignore", generated_lines(gitignore_generated, claude_fresh, agents_fresh))
     trust_grok_folder(target)
     print(f"installed into {target}; edit marestail.toml and sonar-project.properties")
+
+
+def generated_lines(gitignore_generated: bool, claude_fresh: bool, agents_fresh: bool) -> list[str]:
+    if not gitignore_generated:
+        return []
+    lines = list(GITIGNORE_GENERATED_LINES)
+    if claude_fresh:
+        lines.append("CLAUDE.md")
+    if agents_fresh:
+        lines.append("AGENTS.md")
+    return lines
 
 
 def uses_dotnet(target: Path) -> bool:
@@ -117,9 +133,9 @@ def trust_grok_folder(root: Path) -> None:
     print(f"trusted {key} for grok project hooks")
 
 
-def extend_gitignore(path: Path) -> None:
+def extend_gitignore(path: Path, extra: list[str] | None = None) -> None:
     existing = path.read_text().splitlines() if path.exists() else []
-    missing = [line for line in GITIGNORE_LINES if line not in existing]
+    missing = [line for line in [*GITIGNORE_LINES, *(extra or [])] if line not in existing]
     if missing:
         header = [] if "# marestail" in existing else ["", "# marestail"]
         path.write_text("\n".join([*existing, *header, *missing]) + "\n")
