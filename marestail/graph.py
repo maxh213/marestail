@@ -16,7 +16,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), ruby_graph(config), dotnet_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), erlang_graph(config), ruby_graph(config), dotnet_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -82,6 +82,29 @@ def dotnet_graph(config: Config) -> str:
         return "## C# modules\n" + error
     lines = [f"{e['from']} -> {e['to']} ({e['symbol']})" for e in data["edges"]]
     return "## C# modules\n" + "\n".join(lines)
+
+
+def erlang_graph(config: Config) -> str:
+    if config.section("erlang") is None:
+        return ""
+    from marestail import erlang
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = erlang.source_files(ctx)
+    if not files:
+        return ""
+    ebin = erlang.fresh_dir(ctx.work / "er-graph-ebin")
+    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, files)])
+    if code != 0:
+        return "## Erlang modules\n" + output.strip()[-300:]
+    beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
+    code, output = erlang.escript(ctx, "deps.escript", beams)
+    if code != 0:
+        return "## Erlang modules\n" + output.strip()[-300:]
+    edges = json.loads(output)
+    lines = [f"{e['from']} -> {e['to']} ({e['fun']})" for e in edges]
+    return "## Erlang modules\n" + "\n".join(lines)
 
 
 def elixir_graph(config: Config) -> str:

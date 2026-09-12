@@ -1,0 +1,4 @@
+.marestail/
+ebin/
+*.coverdata
+cover/

@@ -41,6 +41,7 @@ def raw_modules(config: Config) -> list[Module]:
         python_modules(config)
         + ts_modules(config)
         + elixir_modules(config)
+        + erlang_modules(config)
         + ruby_modules(config)
         + dotnet_modules(config)
     )
@@ -168,6 +169,31 @@ def elixir_modules(config: Config) -> list[Module]:
             public=item.get("public", []),
             statements=item.get("statements", 0),
             pass_throughs=item.get("pass_throughs", []),
+        ))
+    return modules
+
+
+def erlang_modules(config: Config) -> list[Module]:
+    if config.section("erlang") is None:
+        return []
+    from marestail import erlang
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = erlang.source_files(ctx)
+    if not files:
+        return []
+    code, output = erlang.escript(ctx, "depth.escript", list(map(str, files)))
+    if code != 0:
+        return []
+    modules = []
+    for item in json.loads(output):
+        rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
+        modules.append(Module(
+            path=rel,
+            public=item.get("public", []),
+            statements=item.get("statements", 0),
+            pass_throughs=[f"{rel}:{p['line']} {p['name']} only forwards its arguments" for p in item.get("pass_throughs", [])],
         ))
     return modules
 

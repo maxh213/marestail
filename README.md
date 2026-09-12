@@ -8,19 +8,21 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET |
-|---|---|---|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet |
-| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET |
-| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles |
-| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF |
-| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner |
-| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) |
-| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
-| the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET |
+| Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET | Erlang |
+|---|---|---|---|---|---|---|
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet | erl_parse AST + cover |
+| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | (none — visible skip, see below) |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles | beam call-graph cycles |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF | erlc strong warnings as errors |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner | escript scanner |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) | escript scanner (pass-throughs) |
+| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members | escript scanner |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
+| the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — | — |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET | — |
+
+The Erlang gates compile and run eunit themselves with erlc and escript (OTP 25+); no rebar3 is required. Erlang has no mutation tester — `er.mutation` reports a visible skip, not a fake pass — and no Sonar analyzer, so the sonar tier does not apply to erlang-only repos.
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 

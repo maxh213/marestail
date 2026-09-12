@@ -19,7 +19,7 @@ MARKUP = re.compile(r"<!--|\{#")
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -85,6 +85,18 @@ def elixir_findings(ctx: Context) -> list[str]:
     code, output = run(["elixir", str(EX_SCRIPT), *map(str, paths)], cwd=ctx.root)
     if code != 0:
         return [f"elixir comment scanner failed: {output.strip()[-200:]}"]
+    return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output)]
+
+
+def erlang_findings(ctx: Context) -> list[str]:
+    paths = files(ctx, (".erl", ".hrl"))
+    if not paths:
+        return []
+    from marestail import erlang
+
+    code, output = erlang.escript(ctx, "comments.escript", list(map(str, paths)))
+    if code != 0:
+        return [erlang.hint(code, output) or f"erlang comment scanner failed: {output.strip()[-200:]}"]
     return [f"{Path(c['file']).relative_to(ctx.root)}:{c['line']} comment: {c['text']}" for c in json.loads(output)]
 
 

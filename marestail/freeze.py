@@ -7,6 +7,7 @@ GATE_CONFIG = [
     "**/.coveragerc", "**/.dependency-cruiser.cjs", "**/stryker.config.*", "**/vite.config.*",
     "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
     "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
+    "rebar.config", "rebar.lock", "**/*.app.src",
     "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
     "**/mutant.yml", "**/mutant.yaml",
     "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*",
