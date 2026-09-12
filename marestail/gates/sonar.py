@@ -39,9 +39,16 @@ def run_gate(ctx: Context) -> Result:
     error = wait_for_analysis(client, task_file)
     if error:
         return Result("sonar", False, "analysis did not complete", [error, *tail(output, 15)], time.time() - started)
-    findings = collect(client, key) + (dotnet_findings(ctx, client, key) if is_dotnet else [])
-    summary = "sonar clean" if not findings else f"{len(findings)} sonar findings"
-    return Result("sonar", not findings, summary, findings, time.time() - started)
+    findings, status = collect(ctx, client, key)
+    findings += dotnet_findings(ctx, client, key) if is_dotnet else []
+    return Result("sonar", not findings, summarize(ctx, findings, status), findings, time.time() - started)
+
+
+def summarize(ctx: Context, findings: list[str], status: str) -> str:
+    base = "sonar clean" if not findings else f"{len(findings)} sonar findings"
+    if not ctx.scoped:
+        return base
+    return f"{base} in scope (global quality gate {status}; scope: {ctx.scope_summary()})"
 
 
 def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
@@ -142,43 +149,58 @@ def report_task(path: Path) -> dict[str, str]:
     return {key: value for key, _, value in pairs}
 
 
-def collect(client: Client, key: str) -> list[str]:
-    findings = reopened(client, key)
-    findings += [f"quality gate {status}" for status in [gate_status(client, key)] if status != "OK"]
-    findings += issues(client, key)
-    findings += hotspots(client, key)
-    findings += measures(client, key)
-    return findings
+def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
+    status = gate_status(client, key)
+    findings = reopened(ctx, client, key)
+    if not ctx.scoped and status != "OK":
+        findings.append(f"quality gate {status}")
+    findings += issues(ctx, client, key)
+    findings += hotspots(ctx, client, key)
+    findings += measures(ctx, client, key)
+    return findings, status
 
 
 def gate_status(client: Client, key: str) -> str:
     return client.get("api/qualitygates/project_status", projectKey=key)["projectStatus"]["status"]
 
 
-def reopened(client: Client, key: str) -> list[str]:
+def issue_path(component: dict) -> str:
+    return component.get("component", "").split(":", 1)[-1]
+
+
+def reopened(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, issueStatuses="ACCEPTED,FALSE_POSITIVE", ps=500)
     findings = []
     for issue in data.get("issues", []):
+        if not ctx.in_scope(issue_path(issue)):
+            continue
         client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
-        where = f"{issue.get('component', '').split(':', 1)[-1]}:{issue.get('line', 0)}"
+        where = f"{issue_path(issue)}:{issue.get('line', 0)}"
         findings.append(f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties")
     return findings
 
 
-def issues(client: Client, key: str) -> list[str]:
+def issues(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, resolved="false", ps=500)
     return [
-        f"{issue.get('component', '').split(':', 1)[-1]}:{issue.get('line', 0)} {issue['severity']} {issue['rule']}: {issue['message']}"
+        f"{issue_path(issue)}:{issue.get('line', 0)} {issue['severity']} {issue['rule']}: {issue['message']}"
         for issue in data.get("issues", [])
+        if ctx.in_scope(issue_path(issue))
     ]
 
 
-def hotspots(client: Client, key: str) -> list[str]:
+def hotspots(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/hotspots/search", project=key, status="TO_REVIEW", ps=500)
-    return [f"{h.get('component', '').split(':', 1)[-1]}:{h.get('line', 0)} hotspot: {h['message']}" for h in data.get("hotspots", [])]
+    return [
+        f"{issue_path(hotspot)}:{hotspot.get('line', 0)} hotspot: {hotspot['message']}"
+        for hotspot in data.get("hotspots", [])
+        if ctx.in_scope(issue_path(hotspot))
+    ]
 
 
-def measures(client: Client, key: str) -> list[str]:
+def measures(ctx: Context, client: Client, key: str) -> list[str]:
+    if ctx.scoped:
+        return scoped_duplication(ctx, client, key)
     data = client.get("api/measures/component", component=key, metricKeys="coverage,duplicated_lines_density")
     values = {m["metric"]: float(m.get("value", 0)) for m in data["component"].get("measures", [])}
     findings = []
@@ -186,4 +208,15 @@ def measures(client: Client, key: str) -> list[str]:
         findings.append(f"sonar coverage {values['coverage']:.1f}% (need 100)")
     if values.get("duplicated_lines_density", 0.0) > 0.0:
         findings.append(f"sonar duplication {values['duplicated_lines_density']:.1f}% (need 0)")
+    return findings
+
+
+def scoped_duplication(ctx: Context, client: Client, key: str) -> list[str]:
+    data = client.get("api/measures/component_tree", component=key, metricKeys="duplicated_lines_density", qualifiers="FIL", ps=500)
+    findings = []
+    for component in data.get("components", []):
+        path = component.get("path") or component.get("key", "").split(":", 1)[-1]
+        values = {m["metric"]: float(m.get("value", 0)) for m in component.get("measures", [])}
+        if ctx.in_scope(path) and values.get("duplicated_lines_density", 0.0) > 0.0:
+            findings.append(f"{path}:1 sonar duplication {values['duplicated_lines_density']:.1f}% (need 0)")
     return findings

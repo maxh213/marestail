@@ -31,7 +31,13 @@ def run_gate(ctx: Context) -> Result:
     findings = agreement_findings(ctx, shipped, source) + parse_findings(ctx, root, shipped)
     named = f"{name(shipped)} from {source}"
     summary = f"{named}; tooling agrees and every source parses" if not findings else f"{len(findings)} findings against {named}"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, scope_note(ctx, summary), findings, time.time() - started)
+
+
+def scope_note(ctx: Context, summary: str) -> str:
+    if not ctx.scoped:
+        return summary
+    return f"{summary} (global gate — scope: {ctx.scope_name})"
 
 
 def name(version: Version) -> str:

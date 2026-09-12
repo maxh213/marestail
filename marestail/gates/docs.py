@@ -21,7 +21,13 @@ def run_gate(ctx: Context) -> Result:
     docs = doc_text(ctx)
     findings = route_findings(ctx) + env_findings(ctx, docs) + path_findings(ctx)
     summary = "docs match the code" if not findings else f"{len(findings)} drift findings"
-    return Result("docs", not findings, summary, findings, time.time() - started)
+    return Result("docs", not findings, scope_note(ctx, summary), findings, time.time() - started)
+
+
+def scope_note(ctx: Context, summary: str) -> str:
+    if not ctx.scoped:
+        return summary
+    return f"{summary} (global gate — scope: {ctx.scope_name})"
 
 
 def doc_files(ctx: Context) -> list[Path]:
