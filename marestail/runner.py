@@ -13,6 +13,7 @@ from marestail import audit, freeze, prompts
 from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
+from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
 from marestail.report import render
@@ -50,6 +51,7 @@ class Run:
     retries: int
     agent: str | None = None
     effort: str | None = None
+    perf_changes: str = ""
 
     @property
     def task_name(self) -> str:
@@ -99,6 +101,8 @@ def run_pipeline(
         print("pipeline complete")
         archive_handoffs(state)
     print(proposals_summary(state))
+    if state.perf_changes:
+        print(state.perf_changes)
     return outcome
 
 
@@ -165,11 +169,12 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
 
 def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
     gate_report, gate_ok = gate_for(judge.tier)
+    feedback = ""
     for attempt in attempts(state.retries):
         report = state.next_report(judge.name)
         print(f"== {judge.name} ({report.stem}) attempt {attempt}")
         with measuring(state, judge) as session:
-            outcome = judge_attempt(state, judge, report, (gate_report, gate_ok), session)
+            outcome, feedback = judge_attempt(state, judge, report, (gate_report, gate_ok), session, feedback)
         if outcome is not None:
             return outcome
     shown = "unlimited" if state.retries <= 0 else str(state.retries)
@@ -185,10 +190,12 @@ def measuring(state: Run, judge: Judge):
         yield session
 
 
-def judge_attempt(state: Run, judge: Judge, report: Path, gate: tuple[str, bool], session: perf_trees.Session | None) -> tuple[str, str | None, str] | None:
+def judge_attempt(
+    state: Run, judge: Judge, report: Path, gate: tuple[str, bool], session: perf_trees.Session | None, feedback: str
+) -> tuple[tuple[str, str | None, str] | None, str]:
     gate_report, gate_ok = gate
     trees = perf_trees.prompt_section(state.config, session) if session else ""
-    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees)
+    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback)
     invoke(state, report.stem, prompt)
     discard_edits(state.config, keep=report, writes=judge.writes)
     blob = ""
@@ -198,7 +205,7 @@ def judge_attempt(state: Run, judge: Judge, report: Path, gate: tuple[str, bool]
     parsed = parse_verdict(report, blob)
     if parsed is None:
         print(f"{judge.name} wrote no verdict; retrying")
-        return None
+        return None, feedback
     if not report.exists():
         verdict, target = parsed
         line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
@@ -210,10 +217,25 @@ def judge_attempt(state: Run, judge: Judge, report: Path, gate: tuple[str, bool]
     if not gate_ok:
         verdict, target = BOUNCE, None
         text = gate_report + "\n\n" + text
+    if session is not None:
+        problems = review_measurements(state, session, report, verdict, text)
+        if problems:
+            print(f"   {judge.name} verdict rejected; retrying")
+            return None, problems
     stage_writes(state.config, judge.writes)
     record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
     print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
-    return verdict, target, text
+    return (verdict, target, text), ""
+
+
+def review_measurements(state: Run, session: perf_trees.Session, report: Path, verdict: str, text: str) -> str:
+    outcome = perf_review.review(state.config, session, report, verdict)
+    if outcome.problems:
+        return "\n".join(f"- {problem}" for problem in outcome.problems)
+    state.perf_changes = perf_review.changes_summary(outcome, text)
+    if verdict == PASS:
+        perf_review.record_table(state.config, session, outcome)
+    return ""
 
 
 def gate_for(tier: str | None) -> tuple[str, bool]:

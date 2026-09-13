@@ -24,14 +24,14 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [x] Verify (test-perf ok, agent backends ok, dryrun exit 0, 0 plan lines, 1 worktree) + commit
 
 ## Phase 3: Sampling, results, audit, table, summary
-- [ ] `marestail perf run` (no --db)
-- [ ] compile/validate/classify results
-- [ ] audit + retry with feedback
-- [ ] PERFORMANCE.md matrix on PASS
-- [ ] `## Performance changes` summary + overnight.sh
-- [ ] stub `perf PASS|BOUNCE` + plan lines
-- [ ] tests
-- [ ] Verify + commit
+- [x] `marestail perf run` (no --db)
+- [x] compile/validate/classify results
+- [x] audit + retry with feedback
+- [x] PERFORMANCE.md matrix on PASS
+- [x] `## Performance changes` summary + overnight.sh
+- [x] stub `perf PASS|BOUNCE` + plan lines
+- [x] tests
+- [x] Verify (test-perf ok, agent backends ok, dryrun exit 0, 0 plan lines, table header and rows as specified, BOUNCE before PASS, bench tracked 100755, 1 worktree) + commit
 
 ## Phase 4: The performance database
 - [ ] image detection
@@ -70,6 +70,15 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - A failing `[perf] setup` does not stop the step: the failure goes into the `# Trees` prompt section as a note, so the agent sees it. A failing `git worktree add` raises, and `measuring` still cleans up what was created.
 - When the pipeline completes with no handoffs folder to archive into, `start-commit` is deleted rather than kept, so a re-run still records a fresh start.
 - The table header includes `Rows` from the start (`| Task | Commit | Date | Rows |`); the prompt's decision 18 template text predates the `Rows` column.
+- Phase 3 modules: `samples.py` (`marestail perf run`, which runs the bench with its own `subprocess.run` so stdout JSON can be parsed apart from stderr; `shell.run` merges them), `results.py` (`Measurement`, `Classified`, p50/p95, validation, classification, audit), `review.py` (loads samples, writes `<report>.results.json`, runs the audit, writes and stages the table, builds the summary), `table.py` (parse/upsert/render). `templates/PERFORMANCE.md` was created in Phase 3 because the table writer needs it; Phase 6 wires it into install.
+- `perf run --db` exits 2 with `configure [perf.db] migrate in marestail.toml` until Phase 4 implements the database.
+- A rejected perf verdict is not committed; `judge_attempt` returns the problems as feedback and `run_judge` passes them into the next attempt's prompt under `# Why your verdict was rejected`. Each attempt gets fresh trees and an empty `samples.jsonl`.
+- A PASS with zero measurements (no benches, no existing columns) writes no table row. Writing an empty row would make the table "have rows" and permanently skip the pre-marestail measurement.
+- Deviation from decision 13's `f"{value:g}"`: values render with `f"{value:.10g}"`. `:g` keeps only 6 significant digits, so a value like 1234567 would render as `1.23457e+06`; `.10g` still renders `20.0` as `20` and `0.02` as `0.02`.
+- `percent_change` computes `(head - baseline) * 100 / baseline` and rounds to 9 decimals, so exactly 10% compares as 10.0 and counts as changed.
+- The audit reports one unflagged problem per target, using its first (p50) measurement. A dict comprehension first kept the p95 item; caught by the retry test.
+- The summary lives on `Run.perf_changes` and is printed after the proposals summary. It is set on any accepted perf verdict, including BOUNCE, so a pipeline stopped after a perf bounce still reports it.
+- `tools/overnight.sh`: the `## Config changes` capture now stops before `## Performance changes`, and a second `sed` captures the performance section.
 - The verdict instructions now depend on the judge: a judge with writes is told which files it may edit, and a pinned judge is told only PASS or BOUNCE (to its `bounce_to`).
 
 ## Gate exclusion mechanisms changed

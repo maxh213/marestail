@@ -37,7 +37,8 @@ for task in "$@"; do
   {
     echo "- exit $code after ${minutes} min, HEAD $(git rev-parse --short HEAD)"
     grep -E "^== |finished in|verdict" "$LOG" | tail -n 40 | sed 's/^/    /'
-    sed -n '/^## Config changes/,$p' "$LOG" | tail -n 60 | sed 's/^/    /'
+    sed -n '/^## Config changes/,/^## Performance changes/{/^## Performance changes/!p;}' "$LOG" | tail -n 60 | sed 's/^/    /'
+    sed -n '/^## Performance changes/,$p' "$LOG" | tail -n 40 | sed 's/^/    /'
     echo
   } >> "$SUMMARY"
   if [ "$code" -ne 0 ]; then

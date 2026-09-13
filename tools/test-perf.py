@@ -13,25 +13,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import freeze, runner
 from marestail.config import Config
+from marestail.perf import results, samples, table
+from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import find, names
 from marestail.runner import Run, run_judge, run_step
 
-BOUNCING_JUDGE = """#!/usr/bin/env python3
-import json, re, sys
-from pathlib import Path
-prompt = sys.stdin.read()
-verdict = Path(re.search(r"Write your verdict to (\\S+) and", prompt).group(1))
-verdict.parent.mkdir(parents=True, exist_ok=True)
-verdict.write_text("VERDICT: BOUNCE specifier\\n1. slow\\n")
-Path("perf").mkdir(exist_ok=True)
-Path("perf/bench_x.py").write_text("print(1)\\n")
-Path("src.py").write_text("tampered\\n")
-Path("stray.txt").write_text("stray\\n")
-Path("PERFORMANCE.md").write_text("agent edit\\n")
-print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0, "result": "ok"}))
-"""
+CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
+BENCH = (
+    "#!/usr/bin/env python3\n"
+    "import json, os\n"
+    'value = {"pre-marestail": 8, "baseline": 10, "head": 20}[os.environ["MARESTAIL_PERF_TREE"]]\n'
+    'print(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "value": value}))\n'
+)
 TABLE_WITH_ROW = "# Performance\n\n| Task | Commit | Date | Rows |\n|---|---|---|---|\n| t | abc1234 | 2026-09-13 | — |\n"
+ALL_TREES = ("baseline", "head", "pre-marestail")
 
 
 def expect(name, got, wanted):
@@ -63,8 +59,8 @@ def new_repo(tmp: str, readme_first: bool = False) -> Path:
     return root
 
 
-def state(root: Path, raw=None) -> Run:
-    return Run(config=Config(root=root, raw=raw or {"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude")
+def state(root: Path, raw=None, retries: int = 1) -> Run:
+    return Run(config=Config(root=root, raw=raw or {"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=retries, agent="claude")
 
 
 def worktree_count(root: Path) -> int:
@@ -74,6 +70,52 @@ def worktree_count(root: Path) -> int:
 def commit_change(root: Path, content: str) -> None:
     (root / "src.py").write_text(content)
     git(root, "commit", "-qam", "change")
+
+
+def verdict_file(prompt: str) -> Path:
+    return Path(re.search(r"Write your verdict to (\S+) and", prompt).group(1))
+
+
+def write_script(root: Path, name: str, body: str, executable: bool = True) -> None:
+    path = root / "perf" / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("#!/usr/bin/env python3\nimport json, os, sys, time\n" + body + "\n")
+    path.chmod(0o755 if executable else 0o644)
+
+
+def head_only_trees(root: Path) -> Config:
+    config = Config(root=root, raw={})
+    perf_trees.write_trees(config, perf_trees.Session("t", [perf_trees.Tree("head", git(root, "rev-parse", "HEAD"), root)]))
+    return config
+
+
+def sampling_judge(verdict: str) -> str:
+    return "\n".join(
+        [
+            "#!/usr/bin/env python3",
+            "import json, re, subprocess, sys",
+            "from pathlib import Path",
+            "prompt = sys.stdin.read()",
+            'Path("perf").mkdir(exist_ok=True)',
+            f'Path("perf/bench_x.py").write_text({BENCH!r})',
+            'Path("perf/bench_x.py").chmod(0o755)',
+            'for tree in json.loads(Path(".marestail/perf/trees.json").read_text())["trees"]:',
+            f'    subprocess.run([sys.executable, {str(CLI)!r}, "perf", "run", "perf/bench_x.py", "--tree", tree["tree"], "--samples", "10"], check=True, capture_output=True)',
+            'Path("src.py").write_text("tampered\\n")',
+            'Path("stray.txt").write_text("stray\\n")',
+            'Path("PERFORMANCE.md").write_text("agent edit\\n")',
+            'verdict = Path(re.search(r"Write your verdict to (\\S+) and", prompt).group(1))',
+            f"verdict.write_text({verdict!r})",
+            'print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0, "result": "ok"}))',
+            "",
+        ]
+    )
+
+
+@contextlib.contextmanager
+def quiet():
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        yield
 
 
 @contextlib.contextmanager
@@ -105,6 +147,18 @@ def replaced_invoke(replacement):
         runner.invoke = original
 
 
+def measurement(baseline, head, better="lower", target="add_one", metric="p50", pre=None, unit="ms"):
+    return results.Measurement(target, metric, unit, better, pre, baseline, head, 10, "perf/bench_t")
+
+
+def record(tree, target="t", value=1.0, script="perf/bench_t", db=False, unit="ms"):
+    return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": db, "reset_ms": None, "target": target, "unit": unit, "better": "lower", "value": value}
+
+
+def absent(tree, target="t", script="perf/bench_t"):
+    return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": False, "reset_ms": None, "target": target, "absent": True}
+
+
 def pipeline_order():
     expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "perf", "hardener", "qa"])
     perf = find("perf")
@@ -122,14 +176,16 @@ def freeze_paths():
 def pinned_bounce_keeps_only_writes():
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
-        with agent_stub(Path(tmp), BOUNCING_JUDGE), contextlib.redirect_stdout(io.StringIO()):
-            verdict, target, _ = run_judge(state(root), find("perf"))
-        expect("pinned-verdict", (verdict, target), ("BOUNCE", None))
+        verdict = "VERDICT: BOUNCE specifier\n1. add_one is twice as slow; batch it in src.py:1\n"
+        with agent_stub(Path(tmp), sampling_judge(verdict)), quiet():
+            outcome, target, _ = run_judge(state(root), find("perf"))
+        expect("pinned-verdict", (outcome, target), ("BOUNCE", None))
         expect("pinned-subject", git(root, "log", "-1", "--format=%s").endswith("perf verdict: BOUNCE"), True)
         expect("verdict-commit-files", git(root, "show", "--name-only", "--format=", "HEAD"), "perf/bench_x.py")
+        expect("bench-executable", git(root, "ls-files", "-s", "perf/bench_x.py").split()[0], "100755")
         expect("src-restored", (root / "src.py").read_text(), "original\n")
         expect("stray-removed", (root / "stray.txt").exists(), False)
-        expect("table-edit-removed", (root / "PERFORMANCE.md").exists(), False)
+        expect("table-not-written-on-bounce", (root / "PERFORMANCE.md").exists(), False)
         expect("tree-clean", git(root, "status", "--porcelain"), "")
 
 
@@ -202,9 +258,9 @@ def trees_during_attempt():
             seen["paths"] = [Path(tree["path"]) for tree in data["trees"] if tree["tree"] != "head"]
             seen["checked_out"] = [git(path, "rev-parse", "HEAD") for path in seen["paths"]]
             seen["prompt"] = prompt
-            Path(re.search(r"Write your verdict to (\S+) and", prompt).group(1)).write_text("VERDICT: PASS\n")
+            verdict_file(prompt).write_text("VERDICT: PASS\n")
 
-        with replaced_invoke(inspecting), contextlib.redirect_stdout(io.StringIO()):
+        with replaced_invoke(inspecting), quiet():
             run_judge(run_state, find("perf"))
         expect("trees-listed", seen["trees"], {"baseline": start, "head": head, "pre-marestail": readme})
         expect("trees-checked-out", seen["checked_out"], [start, readme])
@@ -212,6 +268,7 @@ def trees_during_attempt():
         expect("trees-removed", [path.exists() for path in seen["paths"]], [False, False])
         expect("trees-pruned", worktree_count(root), 1)
         expect("trees-file-removed", perf_trees.trees_file(run_state.config).exists(), False)
+        expect("empty-pass-writes-no-table", (root / "PERFORMANCE.md").exists(), False)
 
 
 def trees_removed_when_invoke_raises():
@@ -225,7 +282,7 @@ def trees_removed_when_invoke_raises():
             seen["paths"] = [Path(tree["path"]) for tree in data["trees"] if tree["tree"] != "head"]
             raise RuntimeError("agent crashed")
 
-        with replaced_invoke(raising), contextlib.redirect_stdout(io.StringIO()):
+        with replaced_invoke(raising), quiet():
             try:
                 run_judge(run_state, find("perf"))
             except RuntimeError:
@@ -234,6 +291,191 @@ def trees_removed_when_invoke_raises():
         expect("raise-trees-removed", [path.exists() for path in seen["paths"]], [False, False])
         expect("raise-trees-pruned", worktree_count(root), 1)
         expect("raise-trees-file-removed", perf_trees.trees_file(run_state.config).exists(), False)
+
+
+def perf_run_exit_codes():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = new_repo(tmp)
+        (root / "marestail.toml").write_text('[git]\nbase = "main"\n\n[perf]\nsample_timeout = 1\n')
+        write_script(root, "bench_ok.py", 'print(json.dumps({"target": "a", "unit": "ms", "better": "lower", "value": 1}))')
+        with contextlib.chdir(root), quiet():
+            expect("run-no-trees", samples.run_command("perf/bench_ok.py", "head", 1, False), 2)
+            head_only_trees(root)
+            expect("run-ok", samples.run_command("perf/bench_ok.py", "head", 3, False), 0)
+            expect("run-unknown-tree", samples.run_command("perf/bench_ok.py", "baseline", 1, False), 2)
+            write_script(root, "helper.py", "print(1)")
+            expect("run-not-bench", samples.run_command("perf/helper.py", "head", 1, False), 2)
+            write_script(root, "bench_plain.py", "print(1)", executable=False)
+            expect("run-not-executable", samples.run_command("perf/bench_plain.py", "head", 1, False), 2)
+            write_script(root, "bench_fail.py", "sys.exit(3)")
+            expect("run-failing", samples.run_command("perf/bench_fail.py", "head", 1, False), 1)
+            write_script(root, "bench_silent.py", 'print("warming up")')
+            expect("run-silent", samples.run_command("perf/bench_silent.py", "head", 1, False), 1)
+            write_script(root, "bench_slow.py", "time.sleep(3)")
+            expect("run-timeout", samples.run_command("perf/bench_slow.py", "head", 1, False), 1)
+            expect("run-db-unconfigured", samples.run_command("perf/bench_ok.py", "head", 1, True), 2)
+        expect("run-ok-recorded", len(perf_trees.samples_file(Config(root=root, raw={})).read_text().splitlines()), 3)
+
+
+def perf_run_records():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = new_repo(tmp)
+        write_script(
+            root,
+            "bench_mixed.py",
+            'print("warming up")\nprint(json.dumps({"target": "a", "unit": "ms", "better": "lower", "value": 2.5}))\nprint(json.dumps({"target": "b", "absent": True}))',
+        )
+        config = head_only_trees(root)
+        sha = git(root, "rev-parse", "HEAD")
+        with contextlib.chdir(root), quiet():
+            expect("records-exit", samples.run_command("perf/bench_mixed.py", "head", 1, False), 0)
+        lines = [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
+        base = {"tree": "head", "sha": sha, "script": "perf/bench_mixed.py", "sample": 1, "db": False, "reset_ms": None}
+        expect("records", lines, [base | {"target": "a", "unit": "ms", "better": "lower", "value": 2.5}, base | {"target": "b", "absent": True}])
+
+
+def percentiles():
+    expect("percentiles", results.percentiles([float(value) for value in range(20, 0, -1)]), (10.5, 19.0))
+    expect("percentiles-single", results.percentiles([4.0]), (4.0, 4.0))
+
+
+def validation_errors():
+    trees = ["baseline", "head"]
+
+    def problems(records, benches=("perf/bench_t",)):
+        return results.compile_records(records, trees, list(benches), 2)[1]
+
+    def has(name, found, fragment):
+        expect(name, any(fragment in problem for problem in found), True)
+
+    valid = [record("baseline"), record("baseline"), record("head"), record("head")]
+    expect("valid", problems(valid), [])
+    has("unit", problems(valid + [record("head", unit="s")]), "`t` reports more than one unit: ms, s")
+    has("both", problems(valid + [absent("head")]), "`t` has both values and absent on the head tree")
+    other = [record("baseline", target="o"), record("baseline", target="o"), record("head", target="o"), record("head", target="o")]
+    has("unmeasured", problems(valid[:2] + other), "`t` was not measured on the head tree")
+    has("min-runs", problems(valid[1:]), "`t` has 1 samples on the baseline tree; min_runs is 2")
+    has("db", problems([record("baseline", db=True), record("baseline", db=True), record("head"), record("head")]), "`perf/bench_t` was run with --db on some trees and without it on others")
+    has("bench", problems(valid, ("perf/bench_t", "perf/bench_u")), "`perf/bench_u` has no samples on the baseline tree")
+    has("both-null", problems([absent("baseline"), absent("head")]), "`t` is absent on both the baseline and head trees")
+    measured, _ = results.compile_records(valid + [absent("pre-marestail")], ["baseline", "head", "pre-marestail"], ["perf/bench_t"], 2)
+    expect("pre-null", [item.pre_marestail for item in measured], [None, None])
+
+
+def classification():
+    def status(item, threshold=10):
+        found = results.classify(item, threshold)
+        return found.status, found.change
+
+    expect("degraded-at-threshold", status(measurement(10, 11)), ("degraded", 10.0))
+    expect("improved-at-threshold", status(measurement(10, 9)), ("improved", -10.0))
+    expect("higher-is-better", status(measurement(10, 11, better="higher")), ("improved", 10.0))
+    expect("higher-worse", status(measurement(10, 9, better="higher")), ("degraded", -10.0))
+    expect("below-threshold", status(measurement(10, 10.99))[0], "unchanged")
+    expect("new", status(measurement(None, 5)), ("new", None))
+    expect("removed", status(measurement(5, None)), ("removed", None))
+    expect("zero-both", status(measurement(0, 0)), ("unchanged", 0.0))
+    expect("zero-baseline", status(measurement(0, 5)), ("degraded", 100.0))
+
+
+def audits():
+    degraded = results.classify(measurement(10, 20), 10)
+    benches = ["perf/bench_t"]
+    expect("audit-unflagged", results.audit([degraded], [], "VERDICT: PASS\n", "PASS", benches), ["`add_one` is degraded (+100.0% p50) but the verdict does not name it"])
+    expect("audit-flagged", results.audit([degraded], [], "VERDICT: PASS\n- add_one: +100% p50, accepted\n", "PASS", benches), [])
+    expect(
+        "audit-missing-column",
+        results.audit([degraded], ["add_one p50", "gone p95"], "VERDICT: PASS\n- add_one\n", "PASS", benches),
+        ["column `gone p95` in PERFORMANCE.md was not re-measured; every existing bench runs on every tree every time"],
+    )
+    expect("audit-empty-pass", results.audit([], [], "VERDICT: PASS\n", "PASS", []), [])
+    expect("audit-empty-bounce", len(results.audit([], [], "VERDICT: BOUNCE\n", "BOUNCE", [])), 1)
+    expect("audit-empty-with-benches", len(results.audit([], [], "VERDICT: PASS\n", "PASS", benches)), 1)
+
+
+def snapshot(task, classified, pre_commit=None, rows="—", commit="abc1234"):
+    return table.Snapshot(task, commit, "2026-09-13", rows, pre_commit, classified)
+
+
+def table_writes():
+    template = table.TEMPLATE.read_text()
+    prefix = template[: template.index("| Task |")]
+    p50 = results.classify(measurement(10, 20, pre=8), 10)
+    p95 = results.classify(measurement(10, 20, pre=8, metric="p95"), 10)
+    first = table.render(table.upsert(table.parse(template), snapshot("t", [p50, p95], pre_commit="0000000")))
+    expect(
+        "table-first",
+        first,
+        prefix
+        + "| Task | Commit | Date | Rows | add_one p50 | add_one p95 |\n|---|---|---|---|---|---|\n"
+        + "| pre-marestail | 0000000 | 2026-09-13 | — | 8ms | 8ms |\n"
+        + "| t | abc1234 | 2026-09-13 | — | 20ms (+100.0%) ⚠ | 20ms (+100.0%) ⚠ |\n",
+    )
+    steady = results.classify(measurement(12.4, 12.1), 10)
+    fresh = results.classify(measurement(None, 0.02, target="sub_one"), 10)
+    second = table.render(table.upsert(table.parse(first), snapshot("u", [steady, fresh], commit="def5678")))
+    lines = second[len(prefix) :].splitlines()
+    expect("table-second-header", lines[0], "| Task | Commit | Date | Rows | add_one p50 | add_one p95 | sub_one p50 |")
+    expect("table-second-pre", lines[2], "| pre-marestail | 0000000 | 2026-09-13 | — | 8ms | 8ms | — |")
+    expect("table-second-t", lines[3], "| t | abc1234 | 2026-09-13 | — | 20ms (+100.0%) ⚠ | 20ms (+100.0%) ⚠ | — |")
+    expect("table-second-u", lines[4], "| u | def5678 | 2026-09-13 | — | 12.1ms (-2.4%) | — | 0.02ms (new) |")
+    faster = results.classify(measurement(12.4, 9), 10)
+    gone = results.classify(measurement(5, None, metric="p95"), 10)
+    rerun = table.render(table.upsert(table.parse(second), snapshot("t", [faster, gone], commit="9999999", rows="50000000")))
+    rerun_lines = rerun[len(prefix) :].splitlines()
+    expect("table-rerun-order", [line.split(" | ")[0] for line in rerun_lines[2:]], ["| pre-marestail", "| t", "| u"])
+    expect("table-rerun-t", rerun_lines[3], "| t | 9999999 | 2026-09-13 | 50000000 | 9ms (-27.4%) ✓ | removed | — |")
+    without_pre = table.render(table.upsert(table.parse(template), snapshot("t", [p50])))
+    expect("table-no-pre", "pre-marestail" in without_pre, False)
+    piped = results.classify(measurement(None, 3, target="GET /a|b"), 10)
+    piped_text = table.render(table.upsert(table.parse(template), snapshot("t", [piped])))
+    expect("table-pipe-escaped", "| GET /a\\|b p50 |" in piped_text, True)
+    expect("table-pipe-parsed", table.parse(piped_text).columns, ["GET /a|b p50"])
+    custom = "# Mine\n\nNotes | with a pipe, and *emphasis*.\n\n| Task | Commit | Date | Rows |\n|---|---|---|---|\n\nTrailing prose.\n"
+    kept = table.render(table.upsert(table.parse(custom), snapshot("t", [p50])))
+    expect("table-prose-before", kept.startswith("# Mine\n\nNotes | with a pipe, and *emphasis*.\n\n| Task |"), True)
+    expect("table-prose-after", kept.endswith("\n\nTrailing prose.\n"), True)
+
+
+def rows_cell():
+    config = Config(root=Path("/tmp"), raw={"perf": {"db": {"rows": 1000}}})
+    previous = os.environ.pop("MARESTAIL_PERF_DB_ROWS", None)
+    try:
+        expect("rows-without-db", perf_review.rows_cell(config, False), "—")
+        expect("rows-with-db", perf_review.rows_cell(config, True), "1000")
+    finally:
+        if previous is not None:
+            os.environ["MARESTAIL_PERF_DB_ROWS"] = previous
+
+
+def rejected_verdict_retried_with_feedback():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = new_repo(tmp, readme_first=True)
+        run_state = state(root, retries=5)
+        prompts_seen = []
+        plan = [(2, "VERDICT: PASS\n"), (10, "VERDICT: PASS\n"), (10, "VERDICT: PASS\n## Degradations\n- add_one: +100% p50, accepted: Adds one\n")]
+
+        def judging(current, label, prompt):
+            count, verdict = plan[len(prompts_seen)]
+            prompts_seen.append(prompt)
+            write_script(root, "bench_x.py", BENCH.split("\n", 2)[2])
+            with contextlib.chdir(root):
+                for tree in ALL_TREES:
+                    samples.run_command("perf/bench_x.py", tree, count, False)
+            verdict_file(prompt).write_text(verdict)
+
+        with replaced_invoke(judging), quiet():
+            outcome = run_judge(run_state, find("perf"))
+        expect("retry-outcome", outcome[0], "PASS")
+        expect("retry-attempts", len(prompts_seen), 3)
+        expect("retry-first-clean", "# Why your verdict was rejected" in prompts_seen[0], False)
+        expect("retry-min-runs", "`add_one` has 2 samples on the baseline tree; min_runs is 10" in prompts_seen[1], True)
+        expect("retry-unflagged", "`add_one` is degraded (+100.0% p50) but the verdict does not name it" in prompts_seen[2], True)
+        expect("retry-commit-files", sorted(git(root, "show", "--name-only", "--format=", "HEAD").splitlines()), ["PERFORMANCE.md", "perf/bench_x.py"])
+        rows = table.load(root).rows
+        expect("retry-table-rows", [row["Task"] for row in rows], ["pre-marestail", "t"])
+        expect("retry-table-cell", rows[1]["add_one p50"], "20ms (+100.0%) ⚠")
+        expect("retry-summary", run_state.perf_changes.splitlines()[:3], ["## Performance changes", "- degraded +100.0% `add_one p50`", "- degraded +100.0% `add_one p95`"])
 
 
 if __name__ == "__main__":
@@ -246,4 +488,13 @@ if __name__ == "__main__":
     pre_marestail_commit()
     trees_during_attempt()
     trees_removed_when_invoke_raises()
+    perf_run_exit_codes()
+    perf_run_records()
+    percentiles()
+    validation_errors()
+    classification()
+    audits()
+    table_writes()
+    rows_cell()
+    rejected_verdict_retried_with_feedback()
     print("perf ok")

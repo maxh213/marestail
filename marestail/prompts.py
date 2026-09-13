@@ -20,7 +20,7 @@ def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, re
     return "\n\n".join(parts)
 
 
-def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "") -> str:
+def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "", feedback: str = "") -> str:
     parts = [
         role_text(judge.name),
         section("Task", task.read_text()),
@@ -34,6 +34,8 @@ def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, repor
         section("Handoffs so far", handoffs(config, task_name)),
         section("Verdict", verdict_instructions(report, judge)),
     ]
+    if feedback:
+        parts.append(section("Why your verdict was rejected", feedback))
     return "\n\n".join(parts)
 
 

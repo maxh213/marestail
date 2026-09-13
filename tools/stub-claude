@@ -28,8 +28,14 @@ elif words[0] == "judge":
     verdict = " ".join(w for w in words[1:] if w != "EDIT")
     v.write_text(f"VERDICT: {verdict}\n1. finding from {v.stem}\n")
 elif words[0] == "perf":
+    bench = Path("perf/bench_t.py"); bench.parent.mkdir(exist_ok=True)
+    bench.write_text('#!/usr/bin/env python3\nimport json, os\nvalue = {"pre-marestail": 8, "baseline": 10, "head": 20}[os.environ["MARESTAIL_PERF_TREE"]]\nprint(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "value": value}))\n')
+    bench.chmod(0o755)
+    for tree in json.loads(Path(".marestail/perf/trees.json").read_text())["trees"]:
+        sh("marestail", "perf", "run", "perf/bench_t.py", "--tree", tree["tree"], "--samples", "10")
     v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
-    v.write_text(f"VERDICT: {words[1]}\n")
+    body = "1. add_one is twice as slow; batch the work in src.py:1\n" if words[1] == "BOUNCE" else "## Degradations\n- add_one: +100% p50, accepted: Adds one\n"
+    v.write_text(f"VERDICT: {words[1]}\n{body}")
 elif words[0] == "code":
     Path("src.py").write_text("def add_one(x):\n    return x + 1\n")
     Path("tests").mkdir(exist_ok=True); Path("tests/test_src.py").write_text("def test_adds_one():\n    pass\ndef test_rejects_bad_input():\n    pass\n")

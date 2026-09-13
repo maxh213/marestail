@@ -30,9 +30,26 @@ def build_parser() -> argparse.ArgumentParser:
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
+    add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
+
+
+def add_perf(parser: argparse.ArgumentParser) -> None:
+    actions = parser.add_subparsers(dest="perf_command", required=True)
+    sample = actions.add_parser("run", help="take samples of one perf/bench_* script on one tree")
+    sample.add_argument("script")
+    sample.add_argument("--tree", required=True)
+    sample.add_argument("--samples", type=int, default=1)
+    sample.add_argument("--db", action="store_true", help="reset the tree's performance database before every sample")
+    sample.set_defaults(handler=perf_run_command)
+
+
+def perf_run_command(args: argparse.Namespace) -> int:
+    from marestail.perf import samples
+
+    return samples.run_command(args.script, args.tree, args.samples, args.db)
 
 
 def add_gate(parser: argparse.ArgumentParser) -> None:

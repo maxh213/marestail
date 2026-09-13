@@ -41,6 +41,14 @@ def samples_file(config: Config) -> Path:
     return work(config) / "samples.jsonl"
 
 
+def active(config: Config) -> dict[str, Tree] | None:
+    path = trees_file(config)
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    return {entry["tree"]: Tree(entry["tree"], entry["sha"], Path(entry["path"])) for entry in data["trees"]}
+
+
 def start_file(config: Config, task: str) -> Path:
     return config.work / "runs" / task / "start-commit"
 
