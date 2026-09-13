@@ -38,6 +38,8 @@ A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gat
 
 `--scope changed` gates exactly the diff against `[git] base`: coverage counts only the changed lines and branches, CRAP only the functions the hunks land in, and lint, deps, mutation, comments, deadcode and depth only the changed files. The scope is the diff, so it follows the work — split one file into three or move a function into another existing file and the new hunks are gated wherever they land. `--focus PATH` (repeatable, or `[focus] paths` in marestail.toml) adds whole files or folders on top and treats them as fully changed; combined with `--scope all` it is a usage error. Sonar is filtered, not rescoped: the scanner still sees the whole project and the open issues, duplication and hotspots are cut down to the scope afterwards. `docs`, `qa` and `py.runtime` stay global by nature and print a scope note saying so. `--scope all` is unchanged and remains the default.
 
+Mutation testing always runs on the diff: even without `--scope changed`, each mutation gate defaults to the files changed against `[git] base` (an empty diff skips the gate), because a whole-repo mutation pass is too slow to run on every gate. Set `[<lang>] mutation_scope = "all"` (e.g. `[elixir] mutation_scope = "all"`) to opt back into whole-repo runs; any other value fails the gate. An explicit `--scope changed` / `--focus` still wins over the config, and a repo whose `[git] base` ref does not resolve falls back to a full run, noted in the gate summary.
+
 ## Use
 
 ```sh

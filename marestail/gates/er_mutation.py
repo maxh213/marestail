@@ -21,12 +21,12 @@ def run_gate(ctx: Context) -> Result:
     sources = erlang.source_files(ctx)
     if not sources:
         return Result.skipped("er.mutation", "no erlang sources under [erlang] sources (default src/)")
-    mutate = sources
-    if ctx.scoped:
-        changed = set(ctx.changed_under(ctx.erlang_root(), (".erl",)))
-        mutate = [path for path in sources if erlang.rel(ctx, path) in changed]
-        if not mutate:
-            return Result.skipped("er.mutation", "no changed erlang sources")
+    scope = ctx.mutation_files("erlang", ctx.erlang_root(), (".erl",))
+    if scope.mode == "error":
+        return Result("er.mutation", False, scope.note, [], time.time() - started)
+    mutate = mutate_files(ctx, sources, scope.files)
+    if scope.mode != "full" and not mutate:
+        return Result.skipped("er.mutation", "no changed erlang sources")
     tests = erlang.test_files(ctx)
     if not tests:
         return Result("er.mutation", False, "no eunit test files", ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"], time.time() - started)
@@ -42,7 +42,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("er.mutation", False, "no mutant manifest written", tail(output), time.time() - started)
     mutants = json.loads(manifest.read_text()).get("mutants", [])
     if not mutants:
-        where = " in the changed erlang sources" if ctx.scoped else " in the erlang sources"
+        where = " in the changed erlang sources" if scope.mode != "full" else " in the erlang sources"
         return Result("er.mutation", False, "no mutants were generated", [f"no mutable comparison, arithmetic or boolean operators found{where}"], time.time() - started)
     apply_cap(mutants, ctx)
     ebin_base = scratch / "ebin-base"
@@ -96,7 +96,15 @@ def run_gate(ctx: Context) -> Result:
         notes.append(f"{len(capped)} skipped by mutation_max")
     base = f"{len(survived)} of {len(counted)} mutants not killed" if findings else f"all {len(counted)} mutants killed"
     summary = base + (f" ({'; '.join(notes)})" if notes else "")
+    summary += f" {scope.note}" if scope.note else ""
     return Result("er.mutation", not findings, summary, findings, time.time() - started)
+
+
+def mutate_files(ctx: Context, sources: list[Path], files: list[str] | None) -> list[Path]:
+    if files is None:
+        return sources
+    wanted = set(files)
+    return [path for path in sources if erlang.rel(ctx, path) in wanted]
 
 
 def apply_cap(mutants: list[dict], ctx: Context) -> None:

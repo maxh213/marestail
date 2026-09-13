@@ -330,11 +330,13 @@ def check_deps(root, lines_map):
 
 def check_mutation(root, lines_map):
     unscoped = make_ctx(root, scoped=False)
-    check("mutation unscoped mutates everything", rb_mutation.changed_subjects(unscoped) == [])
+    check("mutation unscoped mutates everything", rb_mutation.changed_subjects(unscoped, []) == [])
     scoped = make_ctx(root, changed={"app/models/dirty.rb", "lib/moved.rb"}, lines_map=lines_map)
-    check("mutation scoped subjects from changed files", rb_mutation.changed_subjects(scoped) == ["Dirty*", "Moved*"])
+    scope = scoped.mutation_files("ruby", scoped.ruby_root(), (".rb",))
+    check("mutation scoped subjects from changed files", rb_mutation.changed_subjects(scoped, scope.files or []) == ["Dirty*", "Moved*"])
     focused = make_ctx(root, focus={"app/services"})
-    check("mutation focus adds focused subjects", rb_mutation.changed_subjects(focused) == ["Focused*"])
+    focus_scope = focused.mutation_files("ruby", focused.ruby_root(), (".rb",))
+    check("mutation focus adds focused subjects", rb_mutation.changed_subjects(focused, focus_scope.files or []) == ["Focused*"])
 
 
 def main():

@@ -17,8 +17,11 @@ PASSING = {"killed", "skipped", "caught by type check"}
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    patterns = mutant_patterns(ctx)
-    if ctx.scoped and not patterns:
+    scope = ctx.mutation_files("python", ctx.python_root(), (".py",))
+    if scope.mode == "error":
+        return Result("py.mutation", False, scope.note, [], time.time() - started)
+    patterns = mutant_patterns(ctx, scope.files or [])
+    if scope.mode != "full" and not patterns:
         return Result.skipped("py.mutation", "no changed python sources")
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
     workers = str(ctx.python("mutation_workers", 4))
@@ -32,14 +35,12 @@ def run_gate(ctx: Context) -> Result:
     if total == 0:
         return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
+    summary += f" {scope.note}" if scope.note else ""
     return Result("py.mutation", not survivors, summary, survivors, time.time() - started)
 
 
-def mutant_patterns(ctx: Context) -> list[str]:
-    if not ctx.scoped:
-        return []
+def mutant_patterns(ctx: Context, files: list[str]) -> list[str]:
     root = ctx.python_root()
-    files = ctx.changed_under(root, (".py",))
     modules = [module_name(root, ctx.root / file) for file in files if "tests" not in Path(file).parts]
     return [f"{module}.*" for module in modules if module]
 

@@ -22,8 +22,11 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.ruby_root()
     if ctx.ruby("mutation", True) is False:
         return Result.skipped("rb.mutation", "disabled: [ruby] mutation = false")
-    subjects = changed_subjects(ctx)
-    if ctx.scoped and not subjects:
+    scope = ctx.mutation_files("ruby", root, (".rb",))
+    if scope.mode == "error":
+        return Result("rb.mutation", False, scope.note, [], time.time() - started)
+    subjects = changed_subjects(ctx, scope.files or [])
+    if scope.mode != "full" and not subjects:
         return Result.skipped("rb.mutation", "no changed ruby sources")
     code, output = run([*bundler(ctx), "info", "mutant"], cwd=root, timeout=120)
     if code == 127:
@@ -34,14 +37,14 @@ def run_gate(ctx: Context) -> Result:
     code, output = run(bundle(ctx, "mutant", "run", *subjects), cwd=root, timeout=7200)
     created = sessions(root) - before
     if created:
-        return session_result(ctx, created, output, started)
+        return session_result(ctx, created, output, started, scope.note)
     match = RESULTS_LINE.search(output)
     if not match:
         return Result("rb.mutation", False, f"mutant produced no report (exit {code})", tail(output), time.time() - started)
-    return verdict(int(match.group(1)), stdout_findings(output, ctx), output, started)
+    return verdict(int(match.group(1)), stdout_findings(output, ctx), output, started, scope.note)
 
 
-def session_result(ctx: Context, created: set[Path], output: str, started: float) -> Result:
+def session_result(ctx: Context, created: set[Path], output: str, started: float, note: str = "") -> Result:
     try:
         report = json.loads(max(created, key=lambda path: path.stat().st_mtime).read_text())
     except (OSError, json.JSONDecodeError):
@@ -57,10 +60,10 @@ def session_result(ctx: Context, created: set[Path], output: str, started: float
                 continue
             kind = result.get("mutation_result", {}).get("mutation_type", "evil")
             failures.append((path, line, syntax, kind))
-    return verdict(total, failures, output, started)
+    return verdict(total, failures, output, started, note)
 
 
-def verdict(total: int, failures: list[tuple[str, int, str, str]], output: str, started: float) -> Result:
+def verdict(total: int, failures: list[tuple[str, int, str, str]], output: str, started: float, note: str = "") -> Result:
     if total == 0:
         return Result("rb.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     counts: dict[tuple[str, int, str, str], int] = {}
@@ -68,6 +71,7 @@ def verdict(total: int, failures: list[tuple[str, int, str, str]], output: str, 
         counts[failure] = counts.get(failure, 0) + 1
     findings = [describe(path, line, syntax, kind, count) for (path, line, syntax, kind), count in counts.items()]
     summary = f"{len(failures)} of {total} mutants not killed" if findings else f"all {total} mutants killed"
+    summary += f" {note}" if note else ""
     return Result("rb.mutation", not findings, summary, findings[:MAX_FINDINGS], time.time() - started)
 
 
@@ -89,11 +93,9 @@ def sessions(root: Path) -> set[Path]:
     return set(folder.glob("*.json")) if folder.is_dir() else set()
 
 
-def changed_subjects(ctx: Context) -> list[str]:
-    if not ctx.scoped:
-        return []
+def changed_subjects(ctx: Context, files: list[str]) -> list[str]:
     names = set()
-    for file in ctx.changed_under(ctx.ruby_root(), (".rb",)):
+    for file in files:
         path = Path(file)
         if not any(part in SKIP_DIRS for part in path.parts):
             names.update(constants(ctx.root / path))

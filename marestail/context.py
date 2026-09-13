@@ -1,8 +1,15 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from marestail.changes import changed_files, changed_lines, file_lines
+from marestail.changes import base_exists, changed_files, changed_lines, file_lines
 from marestail.config import Config
+
+
+@dataclass(frozen=True)
+class MutationScope:
+    mode: str
+    files: list[str] | None = None
+    note: str = ""
 
 
 @dataclass
@@ -133,6 +140,26 @@ class Context:
         if not self.scoped:
             return summary
         return f"{summary} (global gate — scope: {self.scope_name})"
+
+    def mutation_files(self, lang_key: str, root: Path, suffixes: tuple[str, ...]) -> MutationScope:
+        setting = self.config.get(lang_key, "mutation_scope", "changed")
+        if setting not in ("changed", "all"):
+            return MutationScope("error", note=f"[{lang_key}] mutation_scope must be \"changed\" or \"all\", got {setting!r}")
+        if self.scoped:
+            files = self.changed_under(root, suffixes)
+            return MutationScope("scoped", files) if files else MutationScope("skip", [])
+        if setting == "all":
+            return MutationScope("full")
+        base = self.config.get("git", "base", "origin/master")
+        if not base_exists(self.root, base):
+            return MutationScope("full", note=f"(no base {base}; full run)")
+        relative = root.relative_to(self.root)
+        files = sorted(
+            path
+            for path in changed_files(self.root, base)
+            if path.endswith(suffixes) and Path(path).is_relative_to(relative)
+        )
+        return MutationScope("scoped", files) if files else MutationScope("skip", [])
 
 
 def build(config: Config, scope_changed: bool, focus: set[str] | None = None) -> Context:

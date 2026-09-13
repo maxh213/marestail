@@ -27,8 +27,11 @@ def run_gate(ctx: Context) -> Result:
     csproj = product.read_text(errors="replace")
     if SENTRY.search(csproj) and SENTRY_SWITCH not in csproj:
         return Result("cs.mutation", False, "stryker cannot roll back mutants in Sentry's generated code", [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"], 0.0)
-    targets = [dotnet.rel(ctx, path) for path in dotnet.sources(ctx) if ctx.in_scope(dotnet.rel(ctx, path))] if ctx.scoped else []
-    if ctx.scoped and not targets:
+    scope = ctx.mutation_files("dotnet", ctx.dotnet_root(), (".cs",))
+    if scope.mode == "error":
+        return Result("cs.mutation", False, scope.note, [], time.time() - started)
+    targets = mutation_targets(ctx, scope.files)
+    if scope.mode != "full" and not targets:
         return Result.skipped("cs.mutation", "no changed C# sources")
     out = ctx.work / OUTPUT_DIR
     shutil.rmtree(out, ignore_errors=True)
@@ -52,7 +55,15 @@ def run_gate(ctx: Context) -> Result:
         return Result("cs.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
+    summary += f" {scope.note}" if scope.note else ""
     return Result("cs.mutation", not findings, summary, findings, time.time() - started)
+
+
+def mutation_targets(ctx: Context, files: list[str] | None) -> list[str]:
+    if files is None:
+        return []
+    wanted = set(files)
+    return [dotnet.rel(ctx, path) for path in dotnet.sources(ctx) if dotnet.rel(ctx, path) in wanted]
 
 
 def missing(output: str, code: int) -> str:

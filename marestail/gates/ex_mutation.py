@@ -12,9 +12,12 @@ PASSING = {"killed", "invalid", "equivalent"}
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.elixir_root()
-    files = scoped_sources(ctx, root) if ctx.scoped else []
-    if ctx.scoped and not files:
-        return Result.skipped("ex.mutation", "no elixir files in scope")
+    scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
+    if scope.mode == "error":
+        return Result("ex.mutation", False, scope.note, [], time.time() - started)
+    files = scoped_sources(ctx, root, scope.files or [])
+    if scope.mode != "full" and not files:
+        return Result.skipped("ex.mutation", "no changed elixir sources")
     code, output = run(["mix", "help", "muex"], cwd=root, timeout=120)
     if code == 127:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
@@ -34,6 +37,7 @@ def run_gate(ctx: Context) -> Result:
     findings = [describe(ctx, m) for m in mutations if m.get("status", "").lower() not in PASSING]
     counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
     summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
+    summary += f" {scope.note}" if scope.note else ""
     return Result("ex.mutation", not findings, summary, findings, time.time() - started)
 
 
@@ -59,7 +63,7 @@ def command(ctx: Context, files: list[str]) -> list[str]:
     max_mutations = ctx.elixir("muex_max_mutations")
     if max_mutations:
         parts += ["--max-mutations", str(max_mutations)]
-    if ctx.scoped:
+    if files:
         parts += ["--files", ",".join(files)]
     return parts
 

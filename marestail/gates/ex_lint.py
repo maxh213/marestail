@@ -26,7 +26,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def scoped_run(ctx: Context, root: Path, started: float) -> Result:
-    files = scoped_sources(ctx, root)
+    files = scoped_sources(ctx, root, ctx.changed_under(root, (".ex", ".exs")))
     if not files:
         return Result.skipped("ex.lint", "no elixir files in scope")
     findings = []
@@ -42,9 +42,9 @@ def scoped_run(ctx: Context, root: Path, started: float) -> Result:
     return Result("ex.lint", not findings, summary, findings, time.time() - started)
 
 
-def scoped_sources(ctx: Context, root: Path) -> list[str]:
+def scoped_sources(ctx: Context, root: Path, files: list[str]) -> list[str]:
     prefix = root.relative_to(ctx.root)
-    relatives = [strip_prefix(path, prefix) for path in ctx.changed_under(root, (".ex", ".exs"))]
+    relatives = [strip_prefix(path, prefix) for path in files]
     return sorted(str(path) for path in relatives if (root / path).is_file())
 
 

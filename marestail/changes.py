@@ -73,6 +73,11 @@ def untracked(root: Path) -> set[str]:
     return {parse_line(line) for line in output.splitlines() if line.startswith("??")}
 
 
+def base_exists(root: Path, base: str) -> bool:
+    code, _ = run(["git", "rev-parse", "--verify", "--quiet", base], cwd=root)
+    return code == 0
+
+
 def file_lines(path: Path) -> set[int] | None:
     try:
         raw = path.read_bytes()

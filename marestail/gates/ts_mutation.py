@@ -14,12 +14,13 @@ BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    mutate = changed_sources(ctx)
-    if ctx.scoped and not mutate:
+    scope = ctx.mutation_files("ts", ctx.ts_root(), (".ts", ".tsx"))
+    if scope.mode == "error":
+        return Result("ts.mutation", False, scope.note, [], time.time() - started)
+    mutate = changed_sources(ctx, scope.files or [])
+    if scope.mode != "full" and not mutate:
         return Result.skipped("ts.mutation", "no changed typescript sources")
-    command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
-    if mutate:
-        command += ["--mutate", ",".join(mutate)]
+    command = mutation_command(mutate)
     temp = ctx.ts_root() / TEMP_DIR
     report = ctx.ts_root() / REPORT
     shutil.rmtree(temp, ignore_errors=True)
@@ -32,13 +33,18 @@ def run_gate(ctx: Context) -> Result:
     finally:
         shutil.rmtree(temp, ignore_errors=True)
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
+    summary += f" {scope.note}" if scope.note else ""
     return Result("ts.mutation", not survivors, summary, survivors, time.time() - started)
 
 
-def changed_sources(ctx: Context) -> list[str]:
-    if not ctx.scoped:
-        return []
-    files = ctx.changed_under(ctx.ts_root(), (".ts", ".tsx"))
+def mutation_command(mutate: list[str]) -> list[str]:
+    command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
+    if mutate:
+        command += ["--mutate", ",".join(mutate)]
+    return command
+
+
+def changed_sources(ctx: Context, files: list[str]) -> list[str]:
     root = ctx.ts_root().relative_to(ctx.root)
     return [str(Path(file).relative_to(root)) for file in files if ".test." not in file and ".spec." not in file]
 
