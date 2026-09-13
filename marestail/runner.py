@@ -102,6 +102,9 @@ def run_pipeline(
 def run_step(state: Run, step: Step) -> bool:
     if isinstance(step, Worker):
         return run_worker(state, step, "")
+    if step.optional and state.config.get(step.name, "enabled", True) is False:
+        print(f"{step.name} disabled in marestail.toml; skipping")
+        return True
     return run_judge_loop(state, step)
 
 
@@ -164,7 +167,7 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
         print(f"== {judge.name} ({report.stem}) attempt {attempt}")
         prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report)
         invoke(state, report.stem, prompt)
-        discard_edits(state.config, keep=report)
+        discard_edits(state.config, keep=report, writes=judge.writes)
         blob = ""
         json_path = state.folder / f"{report.stem}.json"
         if json_path.exists():
@@ -178,10 +181,13 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
             line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
             report.write_text(line + "\n")
         verdict, target = parsed
+        if judge.pinned_bounce:
+            target = None
         text = report.read_text()
         if not gate_ok:
             verdict, target = BOUNCE, None
             text = gate_report + "\n\n" + text
+        stage_writes(state.config, judge.writes)
         record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
         print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
         return verdict, target, text
@@ -277,14 +283,42 @@ def changed_paths(config: Config, command: list[str]) -> list[str]:
     return [path.split(" -> ")[-1].strip() for path in paths if path.strip() and not path.strip().startswith(".marestail/")]
 
 
-def discard_edits(config: Config, keep: Path) -> None:
+def discard_edits(config: Config, keep: Path, writes: tuple[str, ...] = ()) -> None:
     keep_relative = str(keep.relative_to(config.root))
-    stray = [path for path in changed_paths(config, ["git", "status", "--porcelain", "--untracked-files=all"]) if path != keep_relative]
+    stray = [
+        path
+        for path in changed_paths(config, ["git", "status", "--porcelain", "--untracked-files=all"])
+        if path != keep_relative and not freeze.matches_any(path, list(writes))
+    ]
     if not stray:
         return
     print(f"   discarding edits a judge made: {', '.join(stray[:10])}")
+    if writes:
+        restore_paths(config, stray)
+        return
     run(["git", "checkout", "--", "."], cwd=config.root)
     run(["git", "clean", "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
+
+
+def restore_paths(config: Config, paths: list[str]) -> None:
+    _, listed = run(["git", "ls-tree", "-r", "--name-only", "HEAD", "--", *paths], cwd=config.root)
+    tracked = sorted(set(listed.splitlines()) & set(paths))
+    untracked = sorted(set(paths) - set(tracked))
+    if tracked:
+        run(["git", "checkout", "HEAD", "--", *tracked], cwd=config.root)
+    if untracked:
+        run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *untracked], cwd=config.root)
+    for path in untracked:
+        (config.root / path).unlink(missing_ok=True)
+
+
+def stage_writes(config: Config, writes: tuple[str, ...]) -> None:
+    if not writes:
+        return
+    changed = changed_paths(config, ["git", "status", "--porcelain", "--untracked-files=all"])
+    kept = [path for path in changed if freeze.matches_any(path, list(writes))]
+    if kept:
+        run(["git", "add", "-A", "--", *kept], cwd=config.root)
 
 
 def fold_handoff(config: Config, role: str, report: Path, before: str, label: str) -> None:

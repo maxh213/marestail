@@ -5,7 +5,7 @@ prompt = sys.stdin.read()
 plan = Path(os.environ["STUB_PLAN"])
 lines = plan.read_text().splitlines()
 action, rest = lines[0], lines[1:]
-plan.write_text("\n".join(rest) + "\n")
+plan.write_text("".join(line + "\n" for line in rest))
 root = Path.cwd()
 def sh(*cmd): subprocess.run(cmd, cwd=root, check=True, capture_output=True)
 def commit(role, *paths):
@@ -27,6 +27,9 @@ elif words[0] == "judge":
     v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
     verdict = " ".join(w for w in words[1:] if w != "EDIT")
     v.write_text(f"VERDICT: {verdict}\n1. finding from {v.stem}\n")
+elif words[0] == "perf":
+    v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
+    v.write_text(f"VERDICT: {words[1]}\n")
 elif words[0] == "code":
     Path("src.py").write_text("def add_one(x):\n    return x + 1\n")
     Path("tests").mkdir(exist_ok=True); Path("tests/test_src.py").write_text("def test_adds_one():\n    pass\ndef test_rejects_bad_input():\n    pass\n")

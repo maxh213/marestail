@@ -30,7 +30,7 @@ def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, repor
         parts.append(section("Gate report", gate_report))
     parts += [
         section("Handoffs so far", handoffs(config, task_name)),
-        section("Verdict", verdict_instructions(report)),
+        section("Verdict", verdict_instructions(report, judge)),
     ]
     return "\n\n".join(parts)
 
@@ -97,11 +97,26 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
     return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, start=1))
 
 
-def verdict_instructions(report: Path) -> str:
+def verdict_instructions(report: Path, judge: Judge) -> str:
     return (
-        f"Write your verdict to {report} and nothing else. Do not edit any other file; the runner discards other edits.\n"
+        f"Write your verdict to {report} and {allowed_edits(judge)}; the runner discards other edits.\n"
+        f"{bounce_choices(judge)} Then numbered findings, each naming "
+        "the file, scenario or step concerned and the fix required. Under 40 lines."
+    )
+
+
+def allowed_edits(judge: Judge) -> str:
+    if not judge.writes:
+        return "nothing else. Do not edit any other file"
+    patterns = ", ".join(f"`{pattern}`" for pattern in judge.writes)
+    return f"edit nothing else except files matching {patterns}"
+
+
+def bounce_choices(judge: Judge) -> str:
+    if judge.pinned_bounce:
+        return f"First line: `VERDICT: PASS`, or `VERDICT: BOUNCE` to send the work back to the {judge.bounce_to}."
+    return (
         "First line: `VERDICT: PASS`, or `VERDICT: BOUNCE` to send the work back to the usual role, or "
         "`VERDICT: BOUNCE <role>` to send it to a different one, for example `VERDICT: BOUNCE specifier` when the "
-        "defect is in the feature file or the QA procedure rather than the code. Then numbered findings, each naming "
-        "the file, scenario or step concerned and the fix required. Under 40 lines."
+        "defect is in the feature file or the QA procedure rather than the code."
     )

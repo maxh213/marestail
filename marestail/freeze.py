@@ -20,7 +20,7 @@ GATE_CONFIG = [
     ".grok/hooks/**", ".grok/config.toml",
     ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
 ]
-SPEC = ["features/**", "qa/**", "tasks/**"]
+SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md"]
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
     "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json"],

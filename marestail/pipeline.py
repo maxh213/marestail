@@ -16,6 +16,9 @@ class Judge:
     bounce_to: str
     bounces: int = 0
     pause_after: bool = False
+    writes: tuple[str, ...] = ()
+    pinned_bounce: bool = False
+    optional: bool = False
 
 
 Step = Worker | Judge
@@ -26,6 +29,7 @@ PIPELINE: list[Step] = [
     Worker("coder", "fast", audit=True),
     Worker("cleaner", "sonar"),
     Worker("architect", "sonar"),
+    Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True),
     Judge("hardener", "full", bounce_to="coder"),
     Worker("qa", "qa"),
 ]

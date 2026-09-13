@@ -10,6 +10,6 @@ printf '.marestail/\n' > .gitignore
 mkdir tasks && echo "# Add one" > tasks/t.md
 git add -A && git commit -qm init
 cp "$PLAN" "$WORK/plan.txt"
-export PATH="$PATH:$HERE/../bin" STUB_PLAN="$WORK/plan.txt" MARESTAIL_CLAUDE="$HERE/stub-claude"
+export PATH="$HERE/../bin:$PATH" STUB_PLAN="$WORK/plan.txt" MARESTAIL_CLAUDE="$HERE/stub-claude"
 marestail run tasks/t.md --auto
 echo "remaining plan lines: $(wc -l < "$WORK/plan.txt")"
