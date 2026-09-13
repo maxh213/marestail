@@ -15,13 +15,13 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [x] Verify (test-perf ok, agent backends ok, dryrun exit 0 with remaining plan lines: 0) + commit
 
 ## Phase 2: Commits, worktrees, trees.json
-- [ ] start-commit record, merge-base fallback, archive on completion
-- [ ] pre-marestail commit detection
-- [ ] worktrees + setup + trees.json + samples.jsonl truncate + finally cleanup
-- [ ] `# Trees` prompt section
-- [ ] dryrun.sh: README commit before marestail.toml
-- [ ] tests
-- [ ] Verify + commit
+- [x] start-commit record, merge-base fallback, archive on completion
+- [x] pre-marestail commit detection
+- [x] worktrees + setup + trees.json + samples.jsonl truncate + finally cleanup
+- [x] `# Trees` prompt section
+- [x] dryrun.sh: README commit before marestail.toml
+- [x] tests
+- [x] Verify (test-perf ok, agent backends ok, dryrun exit 0, 0 plan lines, 1 worktree) + commit
 
 ## Phase 3: Sampling, results, audit, table, summary
 - [ ] `marestail perf run` (no --db)
@@ -66,6 +66,10 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - `Judge` gained `writes`, `pinned_bounce` (the named target is dropped, so the bounce and commit subject always use `bounce_to`) and `optional` (`[<name>] enabled = false` skips it), instead of hard-coding `perf` in the runner.
 - `discard_edits` keeps the old `git checkout -- .` / `git clean` path for judges with no writes, so critic and hardener behave as before. Judges with writes get a per-path restore (tracked paths from HEAD; untracked paths unstaged and deleted).
 - `stage_writes` stages changed paths matching `writes` from `git status --porcelain --untracked-files=all`, which never lists ignored files. So ignored paths are skipped without an explicit `git check-ignore`.
+- Phase 2 layout: `marestail/perf/` package with `settings.py` (`[perf]` getters), `table.py` (parse `PERFORMANCE.md`; Phase 3 adds render) and `trees.py` (commits, worktrees, `trees.json`, prompt section). `runner.run_judge` wraps each attempt in `measuring()`, which opens trees only for the judge named `perf`, the same name-based precedent as `critic` in `prompts.py`. The attempt body moved into `judge_attempt`.
+- A failing `[perf] setup` does not stop the step: the failure goes into the `# Trees` prompt section as a note, so the agent sees it. A failing `git worktree add` raises, and `measuring` still cleans up what was created.
+- When the pipeline completes with no handoffs folder to archive into, `start-commit` is deleted rather than kept, so a re-run still records a fresh start.
+- The table header includes `Rows` from the start (`| Task | Commit | Date | Rows |`); the prompt's decision 18 template text predates the `Rows` column.
 - The verdict instructions now depend on the judge: a judge with writes is told which files it may edit, and a pinned judge is told only PASS or BOUNCE (to its `bounce_to`).
 
 ## Gate exclusion mechanisms changed

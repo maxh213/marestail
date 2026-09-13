@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from marestail import audit, freeze, prompts
 from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
+from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
 from marestail.report import render
 from marestail.shell import run
@@ -83,6 +85,7 @@ def run_pipeline(
     if effort is None:
         effort = config.get("agent", "effort")
     state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort)
+    perf_trees.record_start(config, state.task_name)
     outcome = 0
     for step in window(start, stop):
         if not run_step(state, step):
@@ -165,34 +168,52 @@ def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
     for attempt in attempts(state.retries):
         report = state.next_report(judge.name)
         print(f"== {judge.name} ({report.stem}) attempt {attempt}")
-        prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report)
-        invoke(state, report.stem, prompt)
-        discard_edits(state.config, keep=report, writes=judge.writes)
-        blob = ""
-        json_path = state.folder / f"{report.stem}.json"
-        if json_path.exists():
-            blob = json_path.read_text()
-        parsed = parse_verdict(report, blob)
-        if parsed is None:
-            print(f"{judge.name} wrote no verdict; retrying")
-            continue
-        if not report.exists():
-            verdict, target = parsed
-            line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
-            report.write_text(line + "\n")
-        verdict, target = parsed
-        if judge.pinned_bounce:
-            target = None
-        text = report.read_text()
-        if not gate_ok:
-            verdict, target = BOUNCE, None
-            text = gate_report + "\n\n" + text
-        stage_writes(state.config, judge.writes)
-        record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
-        print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
-        return verdict, target, text
+        with measuring(state, judge) as session:
+            outcome = judge_attempt(state, judge, report, (gate_report, gate_ok), session)
+        if outcome is not None:
+            return outcome
     shown = "unlimited" if state.retries <= 0 else str(state.retries)
     return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
+
+
+@contextlib.contextmanager
+def measuring(state: Run, judge: Judge):
+    if judge.name != "perf":
+        yield None
+        return
+    with perf_trees.measuring(state.config, state.task_name) as session:
+        yield session
+
+
+def judge_attempt(state: Run, judge: Judge, report: Path, gate: tuple[str, bool], session: perf_trees.Session | None) -> tuple[str, str | None, str] | None:
+    gate_report, gate_ok = gate
+    trees = perf_trees.prompt_section(state.config, session) if session else ""
+    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees)
+    invoke(state, report.stem, prompt)
+    discard_edits(state.config, keep=report, writes=judge.writes)
+    blob = ""
+    json_path = state.folder / f"{report.stem}.json"
+    if json_path.exists():
+        blob = json_path.read_text()
+    parsed = parse_verdict(report, blob)
+    if parsed is None:
+        print(f"{judge.name} wrote no verdict; retrying")
+        return None
+    if not report.exists():
+        verdict, target = parsed
+        line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
+        report.write_text(line + "\n")
+    verdict, target = parsed
+    if judge.pinned_bounce:
+        target = None
+    text = report.read_text()
+    if not gate_ok:
+        verdict, target = BOUNCE, None
+        text = gate_report + "\n\n" + text
+    stage_writes(state.config, judge.writes)
+    record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
+    print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
+    return verdict, target, text
 
 
 def gate_for(tier: str | None) -> tuple[str, bool]:
@@ -376,11 +397,11 @@ def restamp(config: Config, sha: str, parent: str, label: str) -> str:
 
 
 def archive_handoffs(state: Run) -> None:
-    if not state.handoffs.exists():
-        return
     destination = state.folder / f"handoffs-{time.strftime('%Y%m%dT%H%M%S')}"
-    state.folder.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(state.handoffs), str(destination))
+    if state.handoffs.exists():
+        state.folder.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(state.handoffs), str(destination))
+    perf_trees.archive_start(state.config, state.task_name, destination if destination.exists() else None)
 
 
 def head(config: Config) -> str:
