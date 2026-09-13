@@ -1,0 +1,17 @@
+# Shipped red on purpose, like the ruby, dotnet and erlang samples: one // comment
+# at the top of src/domain.rs, a pass-through domain::label forwarding to describe,
+# an unused pub Store::unused_helper, clippy's needless_return in Store::size, the
+# untested "other" arm of domain::tag, domain::classify at complexity 5 with three
+# arms uncovered, domain -> store breaking .rust-layers.json, a domain <-> store
+# module cycle, and surviving mutants: classify's boundaries are never tested.
+
+[git]
+base = "HEAD"
+
+[rust]
+root = "."
+crap_max = 4
+sources = ["src"]
+
+[comments]
+paths = ["src"]

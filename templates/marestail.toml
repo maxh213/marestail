@@ -46,6 +46,14 @@ test_project = "App.Tests/App.Tests.csproj"
 coverage_exclude = ["Program.cs"]
 crap_max = 4
 
+[rust]
+root = "."
+sources = ["src"]
+crap_max = 4
+mutation_jobs = 2
+# clippy_args = ["-D", "warnings", "-D", "clippy::pedantic"]
+# coverage_ignore_regex = "src/main\\.rs$"  # also skipped by rs.crap
+
 
 [sonar]
 project_key = "change-me"
