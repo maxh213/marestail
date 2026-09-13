@@ -4,12 +4,22 @@ import time
 from pathlib import Path
 
 from .collect import collect_fleet
-from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, put, selected_repo, worker_rows
-from .theme import GLYPH_FLOURISH, init_theme, vine
+from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
+from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
 
 MIN_W = 70
 MIN_H = 20
 TICK_MS = 125
+LEGEND = [
+    ("⚘", "running worker / between steps"),
+    ("✿", "step done"),
+    ("✶", "bounced by a judge"),
+    ("✔", "passed the judge"),
+    ("○", "idle (no live pipeline)"),
+    ("💭", "agent thought"),
+    ("⚒", "agent tool call"),
+    ("⇊", "conversation following, tail -f style"),
+]
 
 
 def run(roots: list[Path], refresh: float = 2.0, show_all: bool = False) -> int:
@@ -24,6 +34,7 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bo
     panels = [panel_cls() for panel_cls in PANELS]
     active = 0
     detail: ConversationPanel | None = None
+    legend = False
     collected = 0.0
     while True:
         now = time.monotonic()
@@ -32,12 +43,15 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bo
             if detail is not None:
                 detail.sync(state.fleet)
             collected = now
-        draw(stdscr, panels[active], detail, state)
+        draw(stdscr, panels[active], detail, state, legend)
         key = stdscr.getch()
         if key == -1:
             state.tick += 1
             continue
         if key == curses.KEY_RESIZE:
+            continue
+        if key == ord("?"):
+            legend = not legend
             continue
         if detail is not None:
             if detail.on_key(key, state) == "back":
@@ -77,7 +91,7 @@ def refresh_fleet(roots: list[Path], state: WatchState, show_all: bool) -> None:
     state.selected = max(0, min(state.selected, max(0, len(worker_rows(state.fleet)) - 1)))
 
 
-def draw(stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState) -> None:
+def draw(stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     if width < MIN_W or height < MIN_H:
@@ -88,8 +102,20 @@ def draw(stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, 
         draw_footer(stdscr, height, width, detail, state)
         target = detail if detail is not None else panel
         target.render(stdscr, Rect(2, 0, height - 3, width), True, state)
+        if legend:
+            draw_legend(stdscr, height, width, state)
     stdscr.noutrefresh()
     curses.doupdate()
+
+
+def draw_legend(win: curses.window, height: int, width: int, state: WatchState) -> None:
+    rows = [f" {glyph}  {meaning}" for glyph, meaning in LEGEND]
+    inner = max(len(row) for row in rows + [" key "])
+    rect = Rect(max(1, (height - len(rows) - 2) // 2), max(0, (width - inner - 2) // 2), len(rows) + 2, inner + 2)
+    draw_box(win, rect, ROUND, state.theme.border_focus)
+    put(win, rect.y, rect.x + 2, " key ", state.theme.heading)
+    for i, row in enumerate(rows):
+        put(win, rect.y + 1 + i, rect.x + 1, row, state.theme.secondary)
 
 
 def draw_header(win: curses.window, width: int, state: WatchState) -> None:
@@ -111,7 +137,7 @@ def draw_footer(win: curses.window, height: int, width: int, detail: Conversatio
         if detail.follow:
             hints += " ⇊"
     else:
-        hints = "↑↓ select · enter open · tab panel · r refresh · q quit"
+        hints = "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
     put(win, height - 1, 1, hints, state.theme.secondary)
     if state.error:
         put(win, height - 1, width - len(state.error) - 1, state.error, state.theme.bounced)
