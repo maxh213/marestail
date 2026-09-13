@@ -2,7 +2,7 @@ import curses
 import textwrap
 from dataclasses import dataclass
 
-from .collect import conversation_for
+from .collect import conversation_for, fmt_seconds
 from .model import Fleet, RepoState, Step, Worker
 from .theme import (
     GLYPH_FLOURISH,
@@ -91,14 +91,6 @@ def marquee(text: str, width: int, tick: int) -> str:
     return text[offset : offset + width]
 
 
-def fmt_seconds(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}m"
-    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
-
-
 def fmt_elapsed(worker: Worker) -> str:
     if worker.process is not None:
         return fmt_seconds(worker.process.elapsed_s)
@@ -128,7 +120,11 @@ def bed_index(fleet: Fleet, target: RepoState | None) -> int:
 
 
 def bed_height(repo: RepoState) -> int:
-    return BED_H + min(TAIL_ROWS, len(tail_lines_of(repo)))
+    return BED_H + gate_rows(repo) + min(TAIL_ROWS, len(tail_lines_of(repo)))
+
+
+def gate_rows(repo: RepoState) -> int:
+    return 1 if repo.gate_activity is not None else 0
 
 
 def bed_span(heights: list[int], first: int, last: int) -> int:
@@ -150,10 +146,14 @@ def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, st
     put(win, rect.y, rect.x + 2, f" {repo.name} {GLYPH_FLOURISH} {repo.branch} @{repo.head} "[:inner], state.theme.heading)
     put(win, rect.y + 1, rect.x + 2, f"task: {repo.task or 'none'}"[:inner], state.theme.secondary)
     draw_worker_row(win, rect.y + 2, rect.x + 2, inner, repo, selected, state)
+    row = rect.y + 3
+    if repo.gate_activity is not None:
+        put(win, row, rect.x + 2, f"⚒ gate: {repo.gate_activity}"[:inner], state.theme.secondary)
+        row += 1
     tails = tail_lines_of(repo)
     for offset, line in enumerate(tails):
-        put(win, rect.y + 3 + offset, rect.x + 2, line[:inner], state.theme.secondary)
-    draw_strip(win, rect.y + 3 + len(tails), rect.x + 2, inner, repo.steps, state)
+        put(win, row + offset, rect.x + 2, line[:inner], state.theme.secondary)
+    draw_strip(win, row + len(tails), rect.x + 2, inner, repo.steps, state)
 
 
 def tail_lines_of(repo: RepoState) -> list[str]:
@@ -168,7 +168,8 @@ def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoSt
     worker = repo.worker
     if worker is None:
         if repo.alive:
-            text = f"{GLYPH_RUNNING} between steps"
+            label = "in gate" if repo.gate_activity is not None else "between steps"
+            text = f"{GLYPH_RUNNING} {label}"
             if selected:
                 put(win, y, x, text.ljust(width)[:width], state.theme.selected)
                 return

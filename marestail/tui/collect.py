@@ -19,7 +19,7 @@ TAIL_STALE_S = 900
 TAIL_LIMIT = 3
 TAIL_CHARS = 90
 
-ProcRow = tuple[int, int, list[str]]
+ProcRow = tuple[int, int, int, list[str]]
 
 
 def discover(roots: list[Path]) -> list[Path]:
@@ -48,13 +48,15 @@ def collect_repo(root: Path) -> RepoState:
     )
     real = real_path(root)
     rows = proc_rows()
-    state.alive = any(
-        is_pipeline(tokens) and under_root(cwd_of(pid), real) for pid, _, tokens in rows
-    )
+    pipeline = [
+        pid for pid, _, _, tokens in rows if is_pipeline(tokens) and under_root(cwd_of(pid), real)
+    ]
+    state.alive = bool(pipeline)
     running = state.steps[-1] if state.steps and state.steps[-1].status == "running" else None
     if running is not None:
         state.worker = build_worker(state, running, rows, real)
     if state.alive:
+        state.gate_activity = gate_activity(rows, pipeline)
         state.tail_lines = transcript_tail(real)
         if state.worker is not None:
             state.worker.tail_lines = state.tail_lines
@@ -276,7 +278,7 @@ def tool_detail(value: object) -> str:
 def build_worker(state: RepoState, step: Step, rows: list[ProcRow], real: Path) -> Worker:
     found = [
         process
-        for pid, elapsed, tokens in rows
+        for pid, _, elapsed, tokens in rows
         for process in [agent_process(pid, elapsed, tokens)]
         if process is not None and under_root(cwd_of(pid), real)
     ]
@@ -300,17 +302,17 @@ def existing(path: Path) -> Path | None:
 def proc_rows() -> list[ProcRow]:
     try:
         out = subprocess.run(
-            ["ps", "-eo", "pid,etimes,args"], capture_output=True, text=True, timeout=10
+            ["ps", "-eo", "pid,ppid,etimes,args"], capture_output=True, text=True, timeout=10
         )
     except (OSError, subprocess.SubprocessError):
         return []
     rows: list[ProcRow] = []
     for line in out.stdout.splitlines()[1:]:
-        parts = line.split(None, 2)
-        if len(parts) < 3:
+        parts = line.split(None, 3)
+        if len(parts) < 4:
             continue
         try:
-            rows.append((int(parts[0]), int(parts[1]), parts[2].split()))
+            rows.append((int(parts[0]), int(parts[1]), int(parts[2]), parts[3].split()))
         except ValueError:
             continue
     return rows
@@ -321,6 +323,89 @@ def is_pipeline(tokens: list[str]) -> bool:
         os.path.basename(token) == "cli.py" and tokens[index + 1] == "run"
         for index, token in enumerate(tokens[:-1])
     )
+
+
+def gate_activity(rows: list[ProcRow], pipeline: list[int]) -> str | None:
+    children: dict[int, list[int]] = {}
+    for pid, ppid, _, _ in rows:
+        children.setdefault(ppid, []).append(pid)
+    by_pid = {pid: (elapsed, tokens) for pid, _, elapsed, tokens in rows}
+    found: list[tuple[int, str]] = []
+    stack = [child for pid in pipeline for child in children.get(pid, [])]
+    while stack:
+        pid = stack.pop()
+        elapsed, tokens = by_pid.get(pid, (0, []))
+        label = classify_gate(tokens)
+        if label is not None:
+            found.append((elapsed, label))
+        stack.extend(children.get(pid, []))
+    if not found:
+        return None
+    elapsed, label = max(found, key=lambda item: item[0])
+    return f"{label} {fmt_seconds(elapsed)}"
+
+
+def classify_gate(tokens: list[str]) -> str | None:
+    names = [os.path.basename(token) for token in tokens]
+    if is_pipeline(tokens) or any(name in BACKENDS for name in names):
+        return None
+    return gate_label(tokens, names)
+
+
+def gate_label(tokens: list[str], names: list[str]) -> str | None:
+    if "muex" in names:
+        return "muex"
+    mix = after(tokens, "mix")
+    if mix is not None:
+        return "mix test" if mix == "test" else "mix"
+    if after(tokens, "dotnet") == "test":
+        return "dotnet test"
+    if "sonar-scanner" in names or any("sonarqube" in token for token in tokens):
+        return "sonar"
+    if "java" in names and any("sonar" in token for token in tokens):
+        return "sonar"
+    bundle = bundle_inner(tokens)
+    if bundle is not None:
+        return bundle
+    docker = docker_inner(tokens)
+    if docker is not None:
+        return docker
+    for tool in ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vitest", "jest", "tsc", "eslint"):
+        if tool in names:
+            return tool
+    if "erlc" in names or any("eunit" in token for token in tokens):
+        return "eunit"
+    return None
+
+
+def after(tokens: list[str], name: str) -> str | None:
+    for index, token in enumerate(tokens[:-1]):
+        if os.path.basename(token) == name:
+            return tokens[index + 1]
+    return None
+
+
+def bundle_inner(tokens: list[str]) -> str | None:
+    for index, token in enumerate(tokens[:-2]):
+        if os.path.basename(token) == "bundle" and tokens[index + 1] == "exec":
+            return os.path.basename(tokens[index + 2])
+    return None
+
+
+def docker_inner(tokens: list[str]) -> str | None:
+    for index, token in enumerate(tokens[:-3]):
+        if os.path.basename(token) == "docker" and tokens[index + 1 : index + 3] == ["compose", "run"]:
+            inner = [t for t in tokens[index + 3 :] if not t.startswith("-")]
+            return os.path.basename(inner[1]) if len(inner) > 1 else None
+    return None
+
+
+def fmt_seconds(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
 def agent_process(pid: int, elapsed: int, tokens: list[str]) -> Process | None:
