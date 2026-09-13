@@ -29,6 +29,7 @@ PIPELINE: list[Step] = [
     Worker("coder", "fast", audit=True),
     Worker("cleaner", "sonar"),
     Worker("architect", "sonar"),
+    Judge("practices", None, bounce_to="coder", pinned_bounce=True, optional=True),
     Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True),
     Judge("hardener", "full", bounce_to="coder"),
     Worker("qa", "qa"),

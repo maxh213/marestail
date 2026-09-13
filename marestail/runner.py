@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from marestail import audit, freeze, prompts
+from marestail import audit, freeze, practices, prompts
 from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
@@ -112,6 +112,9 @@ def run_step(state: Run, step: Step) -> bool:
         return run_worker(state, step, "")
     if step.optional and state.config.get(step.name, "enabled", True) is False:
         print(f"{step.name} disabled in marestail.toml; skipping")
+        return True
+    if step.name == "practices" and not practices.files(state.config.root):
+        print("practices: no guidance files; skipping")
         return True
     return run_judge_loop(state, step)
 

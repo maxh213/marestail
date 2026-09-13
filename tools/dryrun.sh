@@ -10,6 +10,7 @@ git add README.md && git commit -qm readme
 printf '[git]\nbase = "main"\n' > marestail.toml
 printf '.marestail/\n' > .gitignore
 mkdir tasks && echo "# Add one" > tasks/t.md
+mkdir guidance && printf '# TypeScript practices\n\n- TS-1: prefer union types over enums\n' > guidance/ts.md
 git add -A && git commit -qm init
 cp "$PLAN" "$WORK/plan.txt"
 export PATH="$HERE/../bin:$PATH" STUB_PLAN="$WORK/plan.txt" MARESTAIL_CLAUDE="$HERE/stub-claude"
