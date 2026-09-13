@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import under_benchmarks
 from marestail.shell import run
 
 SCAN_DIR = Path(__file__).resolve().parent / "rs" / "scan"
@@ -60,7 +61,7 @@ def missing(code: int, output: str, tool: str) -> str | None:
 
 
 def skipped(ctx: Context, path: Path) -> bool:
-    return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
+    return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) or under_benchmarks(ctx.root, path)
 
 
 def sources(ctx: Context) -> list[Path]:

@@ -10,7 +10,7 @@ from marestail.shell import run
 VULTURE_LINE = re.compile(r"^(.+?):(\d+): (unused \w+|unreachable code) (.+?) \((\d+)% confidence\)$")
 PYTHON_KINDS = ["unused function", "unused method", "unused class", "unused import", "unused property", "unreachable code"]
 PYTHON_DECORATORS = ["@*.route", "@*.before_request", "@*.after_request", "@*.errorhandler", "@*.teardown_appcontext", "@*.cli.command", "@*.command"]
-PYTHON_EXCLUDES = ["*/tests/*", "*/test/*", "*/mutants/*", "*/.venv/*", "*/__pycache__/*"]
+PYTHON_EXCLUDES = ["*/tests/*", "*/test/*", "*/mutants/*", "*/.venv/*", "*/__pycache__/*", "perf/*"]
 TS_KINDS = ["files", "exports", "types"]
 
 

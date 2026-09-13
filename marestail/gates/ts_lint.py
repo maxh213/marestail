@@ -36,8 +36,7 @@ def tsc_finding(match: re.Match, ctx: Context) -> str:
 
 
 def eslint_findings(ctx: Context) -> list[str]:
-    command = ["npx", "eslint", ".", "--max-warnings", "0", "--format", "json"]
-    code, output = run(command, cwd=ctx.ts_root(), timeout=900)
+    code, output = run(eslint_command(ctx), cwd=ctx.ts_root(), timeout=900)
     if code == 0:
         return []
     report = parse(output)
@@ -45,6 +44,11 @@ def eslint_findings(ctx: Context) -> list[str]:
         return [f"eslint: {line}" for line in meaningful(output)]
     findings = [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
     return findings or [f"eslint: {line}" for line in meaningful(output)] or [f"marestail.toml:1 eslint exited {code} without a message"]
+
+
+def eslint_command(ctx: Context) -> list[str]:
+    benchmarks = ["--ignore-pattern", "perf/"] if ctx.ts_root().resolve() == ctx.root.resolve() else []
+    return ["npx", "eslint", ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
 
 
 def parse(output: str) -> list | None:

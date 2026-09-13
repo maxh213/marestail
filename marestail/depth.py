@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from marestail.config import Config
+from marestail.perf.scope import under_benchmarks
 from marestail.shell import run
 
 SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports", "vendor", "tmp", "spec", "target"}
@@ -57,7 +58,12 @@ def python_modules(config: Config) -> list[Module]:
 
 
 def skipped(path: Path, root: Path) -> bool:
-    return any(part in SKIP_DIRS or part.endswith("_tests.py") for part in path.relative_to(root).parts[:-1]) or path.name.endswith("_tests.py") or path.name.startswith("test_")
+    return (
+        any(part in SKIP_DIRS or part.endswith("_tests.py") for part in path.relative_to(root).parts[:-1])
+        or path.name.endswith("_tests.py")
+        or path.name.startswith("test_")
+        or under_benchmarks(root, path)
+    )
 
 
 def python_module(path: Path, root: Path, repo: Path) -> Module:

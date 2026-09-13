@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import is_benchmark
 from marestail.report import Result
 from marestail.shell import run, tail
 
@@ -40,7 +41,7 @@ def changed_sources(ctx: Context) -> list[str]:
         return []
     files = ctx.changed_under(ctx.ts_root(), (".ts", ".tsx"))
     root = ctx.ts_root().relative_to(ctx.root)
-    return [str(Path(file).relative_to(root)) for file in files if ".test." not in file and ".spec." not in file]
+    return [str(Path(file).relative_to(root)) for file in files if ".test." not in file and ".spec." not in file and not is_benchmark(file)]
 
 
 def surviving(report: dict, ctx: Context) -> list[str]:

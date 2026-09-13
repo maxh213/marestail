@@ -26,7 +26,7 @@ def run_gate(ctx: Context) -> Result:
 
 def radon_command(ctx: Context) -> list[str]:
     sources = ctx.python("sources", ["."])
-    return [ctx.python_bin("radon"), "cc", "-j", "-e", "mutants/*,.venv/*,__pycache__/*", *sources]
+    return [ctx.python_bin("radon"), "cc", "-j", "-e", "mutants/*,.venv/*,__pycache__/*,perf/*", *sources]
 
 
 def scored(radon: dict, coverage: dict, ctx: Context) -> list[dict]:

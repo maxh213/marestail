@@ -47,10 +47,10 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [ ] Verify + commit
 
 ## Phase 6: Install and gate exclusions
-- [ ] templates/PERFORMANCE.md + install + gitignore lines
-- [ ] exclude root perf/ from every gate (list below)
-- [ ] tests
-- [ ] Verify + commit
+- [x] templates/PERFORMANCE.md + install + gitignore lines
+- [x] exclude root perf/ from every gate (list below)
+- [x] tests
+- [x] Verify (test-perf ok incl. install and exclusion tests, agent backends ok, dryrun exit 0, 0 plan lines) + commit
 
 ## Phase 7: Documentation
 - [ ] README, templates/marestail.toml, tasks-README, hardener.md
@@ -91,3 +91,26 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - The verdict instructions now depend on the judge: a judge with writes is told which files it may edit, and a pinned judge is told only PASS or BOUNCE (to its `bounce_to`).
 
 ## Gate exclusion mechanisms changed
+Shared check: `marestail/perf/scope.py` — `is_benchmark(relative)` is true when the first path part is `perf`; `under_benchmarks(root, path)` applies it relative to a root. Deviation from decision 19's wording: instead of adding `perf` to the `SKIP_DIRS` sets (which match directory names at any depth and would also skip a nested product `perf/`), each walker checks the root-relative first component, so only the root-level `perf/` is skipped.
+
+Walkers (root-relative to the repo root, exact):
+- `marestail/gates/comments.py` `skipped` (comments gate, all languages via `files`, including markup)
+- `marestail/gates/docs.py` `source_files` (docs gate route and env scans)
+- `marestail/gates/py_runtime.py` `sources` (shebang claims and parse checks)
+- `marestail/rust.py` `skipped` (used by `sources` and `use_files`; rs.crap, rs.deps, rs.mutation, rust comments/deadcode/depth)
+- `marestail/dotnet.py` `generated` (C# `csprojs`, `files`, `sources`; cs.crap, cs.deps, cs.mutation, cs.tests, C# comments/deadcode/depth)
+
+Walkers relative to the language root (exact when that root is the repo root, which is the only case a root-level `perf/` is reachable; a nested `<language root>/perf/` is also skipped):
+- `marestail/depth.py` `skipped` (python, TypeScript, Elixir and Ruby module discovery for `marestail depth` and the depth gate)
+
+Tools that walk directories themselves:
+- `marestail/gates/deadcode.py` `PYTHON_EXCLUDES` gains `perf/*` (vulture; a `[deadcode] python_exclude` override replaces the defaults)
+- `marestail/gates/py_crap.py` radon `-e` gains `perf/*`
+- `marestail/gates/py_lint.py`: ruff check and ruff format get `--extend-exclude perf/**` when the python root is the repo root; changed-scope targets drop `perf/` files and the gate skips when only `perf/` files changed (so ruff is never run with no targets)
+- `marestail/gates/ts_lint.py`: `eslint .` gets `--ignore-pattern perf/` when the TS root is the repo root (new `eslint_command`)
+- `marestail/gates/sonar.py` `DOTNET_EXCLUSIONS` gains `perf/**`; `templates/sonar-project.properties` `sonar.exclusions` gains `perf/**` (non-.NET targets use their own properties file, so already-installed repos need that line added by hand)
+
+Changed-file pickers:
+- `marestail/gates/py_mutation.py` `mutant_patterns`, `marestail/gates/ts_mutation.py` `changed_sources`, `marestail/gates/rb_mutation.py` `changed_subjects` skip `perf/` files
+
+Audited and left alone (they only read configured source folders or their tool's own project config): mypy (config), pytest/coverage (`testpaths`/`--cov` config), tsc (`-p tsconfig`), knip (knip config), jest `collectCoverageFrom` (`[ts] sources`), dependency-cruiser and import-linter (contracts), mix compile/test/format (mix project and `.formatter.exs`), rubocop (`.rubocop.yml`), `rb_crap.ruby_sources` (`[ruby] sources`, default `app`, `lib`), `erlang.source_files` (`[erlang] sources`, default `src`), Stryker/Stryker.NET/cargo-mutants/muex (changed or configured sources). Caveat: an SDK-style `.csproj` at the repo root globs `**/*.cs`, so C# bench files in `perf/` would compile into that project; exclude them in the `.csproj` if that applies.

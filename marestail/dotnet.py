@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import under_benchmarks
 from marestail.shell import run
 
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
@@ -87,7 +88,7 @@ def rel(ctx: Context, path) -> str:
 
 def generated(ctx: Context, path: Path) -> bool:
     parts = path.relative_to(ctx.dotnet_root()).parts
-    return bool(set(parts[:-1]) & GENERATED_DIRS) or path.name.endswith(GENERATED_SUFFIXES)
+    return bool(set(parts[:-1]) & GENERATED_DIRS) or path.name.endswith(GENERATED_SUFFIXES) or under_benchmarks(ctx.root, path)
 
 
 def csprojs(ctx: Context) -> list[Path]:

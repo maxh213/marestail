@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import is_benchmark
 from marestail.report import Result
 from marestail.shell import run, tail
 
@@ -40,7 +41,7 @@ def mutant_patterns(ctx: Context) -> list[str]:
         return []
     root = ctx.python_root()
     files = ctx.changed_under(root, (".py",))
-    modules = [module_name(root, ctx.root / file) for file in files if "tests" not in Path(file).parts]
+    modules = [module_name(root, ctx.root / file) for file in files if "tests" not in Path(file).parts and not is_benchmark(file)]
     return [f"{module}.*" for module in modules if module]
 
 

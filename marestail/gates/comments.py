@@ -7,10 +7,11 @@ import tokenize
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import under_benchmarks
 from marestail.report import Result
 from marestail.shell import run
 
-SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
+SCRIPT =Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "comments.exs"
 SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "cover", "reports", "__pycache__", "vendor", "tmp", "log", "target"}
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
@@ -33,7 +34,7 @@ def files(ctx: Context, suffixes: tuple[str, ...]) -> list[Path]:
 
 
 def skipped(path: Path, ctx: Context) -> bool:
-    return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
+    return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) or under_benchmarks(ctx.root, path)
 
 
 def python_findings(ctx: Context) -> list[str]:

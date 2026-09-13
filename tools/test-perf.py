@@ -563,7 +563,67 @@ def disk_estimate():
     expect("disk-rows-zero", perf_db.refuses(0, prior, 0, 50), False)
 
 
+def install_template_and_gitignore():
+    from marestail.install import install
+
+    with tempfile.TemporaryDirectory() as tmp, env_var("GROK_HOME", str(Path(tmp) / "grok")), quiet():
+        plain = Path(tmp) / "plain"
+        plain.mkdir()
+        install(plain)
+        expect("install-table", (plain / "PERFORMANCE.md").read_text(), table.TEMPLATE.read_text())
+        plain_ignores = (plain / ".gitignore").read_text().splitlines()
+        expect("install-plain-ignores", ["PERFORMANCE.md" in plain_ignores, "perf/" in plain_ignores], [False, False])
+        (plain / "PERFORMANCE.md").write_text("mine\n")
+        install(plain)
+        expect("install-keeps-table", (plain / "PERFORMANCE.md").read_text(), "mine\n")
+        generated = Path(tmp) / "generated"
+        generated.mkdir()
+        install(generated, gitignore_generated=True)
+        generated_ignores = (generated / ".gitignore").read_text().splitlines()
+        expect("install-generated-ignores", ["PERFORMANCE.md" in generated_ignores, "perf/" in generated_ignores], [True, True])
+
+
+def gates_skip_benchmarks():
+    from marestail import depth, dotnet, rust
+    from marestail.context import Context
+    from marestail.gates import comments, deadcode, docs, py_crap, py_lint, py_mutation, py_runtime, sonar, ts_lint, ts_mutation
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp).resolve()
+        for relative in ("perf/bench_x.py", "perf/Bench.cs", "perf/bench.rs", "src/app.py", "src/App.cs", "src/lib.rs"):
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_text("x = 1\n")
+        at_root = {"docs": {"sources": ["."]}, "python": {"root": "."}, "ts": {"root": "."}, "dotnet": {"root": "."}, "rust": {"root": "."}}
+        ctx = Context(config=Config(root=root, raw=at_root))
+        nested = Context(config=Config(root=root, raw={"python": {"root": "src"}, "ts": {"root": "src"}}))
+        bench, app = root / "perf" / "bench_x.py", root / "src" / "app.py"
+        expect("comments-skip", [comments.skipped(bench, ctx), comments.skipped(app, ctx)], [True, False])
+        expect("docs-skip", [path.relative_to(root).as_posix() for path in docs.source_files(ctx)], ["src/app.py", "src/lib.rs"])
+        expect("py-runtime-skip", [path.relative_to(root).as_posix() for path in py_runtime.sources(ctx, root)], ["src/app.py"])
+        expect("rust-skip", [rust.skipped(ctx, root / "perf" / "bench.rs"), rust.skipped(ctx, root / "src" / "lib.rs")], [True, False])
+        expect("depth-skip", [depth.skipped(bench, root), depth.skipped(app, root)], [True, False])
+        expect("dotnet-skip", [dotnet.generated(ctx, root / "perf" / "Bench.cs"), dotnet.generated(ctx, root / "src" / "App.cs")], [True, False])
+        expect("vulture-exclude", "perf/*" in deadcode.PYTHON_EXCLUDES, True)
+        expect("radon-exclude", "perf/*" in py_crap.radon_command(ctx)[4].split(","), True)
+        expect("ruff-exclude-at-root", py_lint.benchmark_exclusion(ctx), ["--extend-exclude", "perf/**"])
+        expect("ruff-no-exclude-nested", py_lint.benchmark_exclusion(nested), [])
+        expect("eslint-exclude-at-root", ts_lint.eslint_command(ctx)[3:5], ["--ignore-pattern", "perf/"])
+        expect("eslint-no-exclude-nested", "--ignore-pattern" in ts_lint.eslint_command(nested), False)
+        expect("sonar-dotnet-exclude", "perf/**" in sonar.DOTNET_EXCLUSIONS, True)
+        expect("sonar-template-exclude", "perf/**" in (table.TEMPLATE.parent / "sonar-project.properties").read_text(), True)
+        changed = Context(
+            config=Config(root=root, raw={"python": {"root": "."}, "ts": {"root": "."}}),
+            scope_changed=True,
+            changed={"perf/bench_x.py", "src/app.py", "perf/bench.ts", "src/app.ts"},
+        )
+        expect("py-lint-changed", py_lint.changed_python(changed), ["src/app.py"])
+        expect("py-mutation-changed", py_mutation.mutant_patterns(changed), ["src.app.*"])
+        expect("ts-mutation-changed", ts_mutation.changed_sources(changed), ["src/app.ts"])
+
+
 if __name__ == "__main__":
+    install_template_and_gitignore()
+    gates_skip_benchmarks()
     image_detection()
     row_count()
     golden_names()

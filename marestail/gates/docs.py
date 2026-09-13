@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import under_benchmarks
 from marestail.report import Result
 
 ROUTE_PATTERNS = [r'\.route\(\s*"(/[^"]*)"', r'#\[(?:get|post|put|delete|patch)\(\s*"(/[^"]*)"', r"""@\w+\.route\(\s*["']([^"']+)["']""", r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']""", r"""(?:get|post|put|patch|delete)\s+["'](/[^"']+)["']"""]
@@ -39,7 +40,7 @@ def source_files(ctx: Context) -> list[Path]:
     files = []
     for folder in folders:
         for path in (ctx.root / folder).rglob("*"):
-            if path.suffix in suffixes and not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts):
+            if path.suffix in suffixes and not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) and not under_benchmarks(ctx.root, path):
                 files.append(path)
     return sorted(files)
 

@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import is_benchmark
 from marestail.report import Result
 from marestail.ruby import bundle, listify
 from marestail.shell import run, tail
@@ -95,7 +96,7 @@ def changed_subjects(ctx: Context) -> list[str]:
     names = set()
     for file in ctx.changed_under(ctx.ruby_root(), (".rb",)):
         path = Path(file)
-        if not any(part in SKIP_DIRS for part in path.parts):
+        if not any(part in SKIP_DIRS for part in path.parts) and not is_benchmark(path):
             names.update(constants(ctx.root / path))
     return sorted(f"{name}*" for name in names)
 

@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.perf.scope import under_benchmarks
 from marestail.report import Result
 
 GATE = "py.runtime"
@@ -121,7 +122,7 @@ def sources(ctx: Context, root: Path) -> list[Path]:
     return sorted(
         path
         for path in root.rglob("*.py")
-        if not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
+        if not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) and not under_benchmarks(ctx.root, path)
     )
 
 

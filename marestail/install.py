@@ -7,7 +7,7 @@ from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", "StrykerOutput/", ".sonarqube/", ".idea/", ".vscode/"]
-GITIGNORE_GENERATED_LINES = ["features/", "qa/", "tasks/", ".claude/settings.json", ".agents/hooks.json", ".grok/", ".cursor/hooks.json"]
+GITIGNORE_GENERATED_LINES = ["features/", "qa/", "tasks/", "PERFORMANCE.md", "perf/", ".claude/settings.json", ".agents/hooks.json", ".grok/", ".cursor/hooks.json"]
 GATE_MARKER = "marestail gate"
 
 
@@ -18,6 +18,7 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
         copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
+    copy_if_missing(TEMPLATES / "PERFORMANCE.md", target / "PERFORMANCE.md")
     claude = target / "CLAUDE.md"
     agents = target / "AGENTS.md"
     append_instructions(claude)

@@ -16,7 +16,7 @@ DOTNET_SCANNER_VERSION = "11.3.0"
 DOTNET_REPORT_TASK = Path(".sonarqube") / "out" / ".sonar" / "report-task.txt"
 DOTNET_EXCLUSIONS = [
     "**/node_modules/**", "**/.next/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.venv/**",
-    "**/mutants/**", "**/StrykerOutput/**", "**/coverage/**", ".sonarqube/**", ".marestail/**", ".scannerwork/**",
+    "**/mutants/**", "**/StrykerOutput/**", "**/coverage/**", ".sonarqube/**", ".marestail/**", ".scannerwork/**", "perf/**",
 ]
 
 
