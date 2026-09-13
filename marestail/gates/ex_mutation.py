@@ -15,7 +15,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
         return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.9", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    code, output = run(command(ctx), cwd=ctx.elixir_root(), env={"MIX_ENV": "test"}, timeout=7200)
+    code, output = run(command(ctx), cwd=ctx.elixir_root(), env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     start = output.find("{")
     if start < 0:
         return Result("ex.mutation", False, "muex produced no report", tail(output), time.time() - started)
@@ -30,6 +30,13 @@ def run_gate(ctx: Context) -> Result:
     counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
     summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
     return Result("ex.mutation", not findings, summary, findings, time.time() - started)
+
+
+def mutation_timeout(ctx: Context) -> int | None:
+    value = ctx.elixir("mutation_timeout", 7200)
+    if not value or str(value).lower() in {"0", "none", "false", "off"}:
+        return None
+    return int(value)
 
 
 def command(ctx: Context) -> list[str]:
