@@ -144,9 +144,9 @@ def sources(ctx: Context) -> list[Path]:
 
 
 def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
-    if not ctx.scope_changed:
+    if not ctx.scoped:
         return paths
-    return [path for path in paths if rel(ctx, path) in ctx.changed]
+    return [path for path in paths if ctx.in_scope(rel(ctx, path))]
 
 
 def coverage_excluded(ctx: Context, relative: str) -> bool:

@@ -33,8 +33,8 @@ def run_gate(ctx: Context) -> Result:
         if edge["from"] in modules and edge["to"] in modules
     ]
     findings = cycle_findings(project)
-    if ctx.scope_changed:
-        findings = [f for f in findings if f.split(":")[0] in ctx.changed]
+    if ctx.scoped:
+        findings = [f for f in findings if ctx.in_scope(f.split(":", 1)[0])]
     summary = "dependency graph acyclic" if not findings else f"{len(findings)} dependency cycles"
     return Result("er.deps", not findings, summary, findings[:MAX_LINES], time.time() - started)
 

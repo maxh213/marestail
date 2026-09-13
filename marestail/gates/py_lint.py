@@ -10,7 +10,7 @@ MAX_LINES = 60
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.scope_changed and not changed_python(ctx):
+    if ctx.scoped and not changed_python(ctx):
         return Result.skipped("py.lint", "no changed python files")
     findings: list[str] = []
     for label, command in commands(ctx):
@@ -40,13 +40,13 @@ def changed_python(ctx: Context) -> list[str]:
 
 
 def python_targets(ctx: Context) -> list[str]:
-    if ctx.scope_changed:
+    if ctx.scoped:
         return changed_python(ctx)
     return [str(ctx.python_root().relative_to(ctx.root))]
 
 
 def mypy_targets(ctx: Context) -> list[str]:
-    if ctx.scope_changed:
+    if ctx.scoped:
         return changed_python(ctx)
     return []
 

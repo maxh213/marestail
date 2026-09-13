@@ -26,7 +26,10 @@ def run_gate(ctx: Context) -> Result:
     coverage = json.loads(out_json.read_text())
     findings = coverage_findings(coverage, ctx)
     percent = coverage["totals"]["percent_covered"]
-    scope = " on changed files" if ctx.scope_changed else ""
+    scope = ""
+    if ctx.scoped:
+        percent = scoped_percent(coverage, ctx)
+        scope = " on changed lines"
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
     return Result("ex.tests", not findings, summary, findings, time.time() - started)
 
@@ -35,10 +38,27 @@ def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     findings = []
     for file_str, data in sorted(coverage["files"].items()):
         relative = relative_path(file_str, ctx)
-        if ctx.scope_changed and relative not in ctx.changed:
+        if not ctx.in_scope(relative):
             continue
-        findings.extend(f"{relative}:{line} not covered" for line in data.get("missing_lines", []))
+        findings.extend(f"{relative}:{line} not covered" for line in gated_missing(data, ctx.gated_lines(relative)))
     return findings
+
+
+def gated_missing(data: dict, gated: set[int] | None) -> list[int]:
+    missing = data.get("missing_lines", [])
+    if gated is None:
+        return missing
+    return [line for line in missing if line in gated]
+
+
+def scoped_percent(coverage: dict, ctx: Context) -> float:
+    covered = 0
+    total = 0
+    for file_str, data in coverage["files"].items():
+        if ctx.in_scope(relative_path(file_str, ctx)):
+            covered += data.get("covered", 0)
+            total += data.get("total", 0)
+    return (covered / total) * 100.0 if total else 100.0
 
 
 def relative_path(file_str: str, ctx: Context) -> str:

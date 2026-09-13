@@ -2,6 +2,7 @@ import json
 import time
 
 from marestail.context import Context
+from marestail.gates.ex_lint import scoped_sources
 from marestail.report import Result
 from marestail.shell import run, tail
 
@@ -10,12 +11,19 @@ PASSING = {"killed", "invalid", "equivalent"}
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    code, output = run(["mix", "help", "muex"], cwd=ctx.elixir_root(), timeout=120)
+    root = ctx.elixir_root()
+    scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
+    if scope.mode == "error":
+        return Result("ex.mutation", False, scope.note, [], time.time() - started)
+    files = scoped_sources(ctx, root, scope.files or [])
+    if scope.mode != "full" and not files:
+        return Result.skipped("ex.mutation", "no changed elixir sources")
+    code, output = run(["mix", "help", "muex"], cwd=root, timeout=120)
     if code == 127:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
         return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.9", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    code, output = run(command(ctx), cwd=ctx.elixir_root(), env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    code, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     start = output.find("{")
     if start < 0:
         return Result("ex.mutation", False, "muex produced no report", tail(output), time.time() - started)
@@ -29,6 +37,7 @@ def run_gate(ctx: Context) -> Result:
     findings = [describe(ctx, m) for m in mutations if m.get("status", "").lower() not in PASSING]
     counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
     summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
+    summary += f" {scope.note}" if scope.note else ""
     return Result("ex.mutation", not findings, summary, findings, time.time() - started)
 
 
@@ -39,7 +48,7 @@ def mutation_timeout(ctx: Context) -> int | None:
     return int(value)
 
 
-def command(ctx: Context) -> list[str]:
+def command(ctx: Context, files: list[str]) -> list[str]:
     parts = ["mix", "muex", "--format", "json", "--fail-at", "0"]
     if not ctx.elixir("muex_filter", False):
         parts.append("--no-filter")
@@ -54,8 +63,8 @@ def command(ctx: Context) -> list[str]:
     max_mutations = ctx.elixir("muex_max_mutations")
     if max_mutations:
         parts += ["--max-mutations", str(max_mutations)]
-    if ctx.scope_changed:
-        parts += ["--since", str(ctx.config.get("git", "base", "origin/master"))]
+    if files:
+        parts += ["--files", ",".join(files)]
     return parts
 
 

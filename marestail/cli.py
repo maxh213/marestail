@@ -72,7 +72,8 @@ def perf_run_command(args: argparse.Namespace) -> int:
 
 def add_gate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tier", choices=["fast", "sonar", "full", "qa", "all"], default="fast")
-    parser.add_argument("--scope", choices=["all", "changed"], default="all")
+    parser.add_argument("--scope", choices=["all", "changed"], default=None)
+    parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
     parser.add_argument("--only", help="comma separated gate names")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--hook", action="store_true", help="behave as a Claude Code Stop hook")
@@ -127,24 +128,67 @@ def add_watch(parser: argparse.ArgumentParser) -> None:
 def gate_command(args: argparse.Namespace) -> int:
     if args.hook:
         return hook_command(args)
-    results = run_gates(args.tier, args.scope == "changed", parse_only(args.only))
+    focus = {path for path in args.focus if path.strip()}
+    if focus and args.scope == "all":
+        sys.stderr.write("--focus cannot be combined with --scope all\n")
+        return 2
+    results, ctx = run_gates_with_context(args.tier, args.scope == "changed" or bool(focus), parse_only(args.only), focus)
     if not results:
         sys.stderr.write(f"no gate ran: nothing in the {args.tier} tier matches --only and marestail.toml\n")
         return 2
-    print(to_json(results) if args.json else render(results))
+    print(to_json(results, ctx.scope_name, ctx.focus) if args.json else render(results, scope_line(ctx)))
     return 0 if all(result.ok for result in results) else 1
 
 
-def run_gates(tier: str, scope_changed: bool, only: set[str] | None) -> list[Result]:
+def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None) -> list[Result]:
+    results, _ = run_gates_with_context(tier, scope_changed, only, focus)
+    return results
+
+
+def run_gates_with_context(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None) -> tuple[list[Result], context_module.Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
-    ctx = context_module.build(config, scope_changed)
+    ctx = context_module.build(config, scope_changed, resolve_focus(config, focus or set()))
     results = []
     for gate in gates_module.select(tier, only):
         if gate.section and config.section(gate.section) is None:
             continue
         results.append(run_one(gate, ctx))
-    return results
+    return results, ctx
+
+
+def resolve_focus(config: config_module.Config, focus: set[str]) -> set[str]:
+    resolved = {path: locate_focus(config, path) for path in focus}
+    missing = sorted(path for path, entry in resolved.items() if entry is None)
+    if missing:
+        raise SystemExit(f"focus path not found under {config.root}: {', '.join(missing)}")
+    return {entry for entry in resolved.values() if entry is not None}
+
+
+def locate_focus(config: config_module.Config, path: str) -> str | None:
+    candidate = Path(path.strip())
+    full = candidate if candidate.is_absolute() else config.root / candidate
+    if not full.exists():
+        return None
+    try:
+        return full.resolve().relative_to(config.root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def hook_focus(config: config_module.Config) -> set[str]:
+    found = set()
+    for path in config_module.focus_paths(config):
+        entry = locate_focus(config, path)
+        if entry is None:
+            sys.stderr.write(f"warning: ignoring missing focus path: {path}\n")
+        else:
+            found.add(entry)
+    return found
+
+
+def scope_line(ctx: context_module.Context) -> str | None:
+    return ctx.scope_summary() if ctx.scoped else None
 
 
 def run_one(gate: gates_module.Gate, ctx: context_module.Context) -> Result:
@@ -172,7 +216,7 @@ def hook_command(args: argparse.Namespace) -> int:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
-    results = run_gates("fast", True, None)
+    results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
     is_agy = "conversationId" in payload
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
@@ -180,7 +224,7 @@ def hook_command(args: argparse.Namespace) -> int:
             print(json.dumps({}))
         return 0
     counter.write_text(str(blocked + 1))
-    message = render(results) + "\nFix these before stopping.\n"
+    message = render(results, scope_line(ctx)) + "\nFix these before stopping.\n"
     if is_agy:
         print(json.dumps({"decision": "continue", "reason": message}))
         return 0
@@ -209,7 +253,7 @@ def cursor_hook_command(payload: dict) -> int:
     previous = Path.cwd()
     try:
         os.chdir(config.root)
-        results = run_gates("fast", True, None)
+        results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
     finally:
         os.chdir(previous)
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT or loop_count >= HOOK_BLOCK_LIMIT:
@@ -220,7 +264,7 @@ def cursor_hook_command(payload: dict) -> int:
         print(json.dumps({}))
         return 0
     counter.write_text(str(blocked + 1))
-    message = render(results) + "\nFix these before stopping.\n"
+    message = render(results, scope_line(ctx)) + "\nFix these before stopping.\n"
     print(json.dumps({"followup_message": message}))
     return 0
 
@@ -241,13 +285,13 @@ def grok_hook_command(payload: dict) -> int:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
-    results = run_gates("fast", True, None)
+    results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
         grok_remember_hook(config.work, session_id, turn_id, True, "")
         return grok_emit_hook(True, "")
     counter.write_text(str(blocked + 1))
-    message = render(results) + "\nFix these before stopping.\n"
+    message = render(results, scope_line(ctx)) + "\nFix these before stopping.\n"
     grok_remember_hook(config.work, session_id, turn_id, False, message)
     return grok_emit_hook(False, message)
 

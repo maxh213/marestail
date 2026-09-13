@@ -22,7 +22,7 @@ def run_gate(ctx: Context) -> Result:
     docs = doc_text(ctx)
     findings = route_findings(ctx) + env_findings(ctx, docs) + path_findings(ctx)
     summary = "docs match the code" if not findings else f"{len(findings)} drift findings"
-    return Result("docs", not findings, summary, findings, time.time() - started)
+    return Result("docs", not findings, ctx.global_note(summary), findings, time.time() - started)
 
 
 def doc_files(ctx: Context) -> list[Path]:

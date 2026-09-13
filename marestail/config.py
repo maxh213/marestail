@@ -38,3 +38,10 @@ def load(start: Path) -> Config:
     config = Config(root=root, raw=raw)
     config.work.mkdir(exist_ok=True)
     return config
+
+
+def focus_paths(config: Config) -> set[str]:
+    value = config.get("focus", "paths", [])
+    if isinstance(value, list):
+        return {str(part) for part in value}
+    return {str(value)}
