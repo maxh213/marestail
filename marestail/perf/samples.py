@@ -6,6 +6,7 @@ from pathlib import Path
 
 from marestail import config as config_module
 from marestail.config import Config
+from marestail.perf import db as perf_db
 from marestail.perf import settings, trees
 
 BETTER = ("lower", "higher")
@@ -22,10 +23,13 @@ def run_command(script: str, tree_name: str, samples: int, db: bool) -> int:
     tree = active.get(tree_name)
     if tree is None:
         return fail(f"unknown tree {tree_name}; choose from {', '.join(active)}", 2)
+    database = None
     if db:
-        return fail("configure [perf.db] migrate in marestail.toml", 2)
+        database, problem = perf_db.for_run(config)
+        if database is None:
+            return fail(problem, 2)
     for sample in range(1, samples + 1):
-        problem = take_sample(config, bench, tree, sample, db)
+        problem = take_sample(config, bench, tree, sample, database)
         if problem:
             return fail(problem, 1)
     return 0
@@ -49,10 +53,17 @@ def bench_path(config: Config, script: str) -> str | None:
     return relative.as_posix()
 
 
-def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, db: bool) -> str:
+def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, database: perf_db.Database | None) -> str:
     label = f"{bench} sample {sample} on {tree.name}"
     timeout = settings.sample_timeout(config)
     env = {"MARESTAIL_PERF_TREE": tree.name, "MARESTAIL_PERF_TREE_PATH": str(tree.path), "MARESTAIL_PERF_SAMPLE": str(sample)}
+    reset_ms = None
+    if database is not None:
+        try:
+            reset_ms, database_env = perf_db.reset(database, tree)
+        except perf_db.DatabaseError as error:
+            return f"{label}: {error}"
+        env |= database_env
     try:
         completed = subprocess.run(
             [str(config.root / bench)], cwd=tree.path, env={**os.environ, **env}, capture_output=True, text=True, timeout=timeout, check=False
@@ -69,7 +80,7 @@ def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, db: b
         return f"{label} exited {completed.returncode}"
     if not records:
         return f"{label} printed no JSON measurement"
-    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "sample": sample, "db": db, "reset_ms": None}
+    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "sample": sample, "db": database is not None, "reset_ms": reset_ms}
     with trees.samples_file(config).open("a") as handle:
         handle.writelines(json.dumps({**base, **record}) + "\n" for record in records)
     return ""

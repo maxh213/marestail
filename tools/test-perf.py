@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import freeze, runner
 from marestail.config import Config
-from marestail.perf import results, samples, table
+from marestail.perf import db as perf_db
+from marestail.perf import image as perf_image
+from marestail.perf import results, samples, settings, table
 from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import find, names
@@ -135,6 +137,22 @@ def agent_stub(folder: Path, body: str):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = previous[key]
+
+
+@contextlib.contextmanager
+def env_var(key: str, value: str | None):
+    previous = os.environ.get(key)
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
 
 
 @contextlib.contextmanager
@@ -478,7 +496,78 @@ def rejected_verdict_retried_with_feedback():
         expect("retry-summary", run_state.perf_changes.splitlines()[:3], ["## Performance changes", "- degraded +100.0% `add_one p50`", "- degraded +100.0% `add_one p95`"])
 
 
+def image_detection():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        expect("image-default", perf_image.resolve(root, None), ("postgres:18", "default"))
+        (root / ".tool-versions").write_text("nodejs 20.1.0\npostgres 14.9\n")
+        expect("image-tool-versions", perf_image.resolve(root, None), ("postgres:14", ".tool-versions"))
+        workflows = root / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "ci.yml").write_text("jobs:\n  test:\n    services:\n      db:\n        image: postgres:15-alpine\n")
+        expect("image-workflow", perf_image.resolve(root, None), ("postgres:15-alpine", ".github/workflows/ci.yml"))
+        (root / "docker-compose.yml").write_text("services:\n  db:\n    image: postgres:16\n")
+        expect("image-compose", perf_image.resolve(root, None), ("postgres:16", "docker-compose.yml"))
+        expect("image-explicit", perf_image.resolve(root, "postgres:17"), ("postgres:17", "marestail.toml"))
+    expect("helper-image-alpine", perf_image.helper_image("postgres:16-alpine"), "postgres:16")
+    expect("helper-image-plain", perf_image.helper_image("postgres:16"), "postgres:16")
+
+
+def row_count():
+    plain = Config(root=Path("/tmp"), raw={})
+    configured = Config(root=Path("/tmp"), raw={"perf": {"db": {"rows": 10000000}}})
+    with env_var(settings.ROWS_ENV, None):
+        expect("rows-default", settings.effective_rows(plain), (50000000, "default"))
+        expect("rows-config", settings.effective_rows(configured), (10000000, "marestail.toml"))
+        for bad in (-1, 1.5, "ten"):
+            try:
+                settings.effective_rows(Config(root=Path("/tmp"), raw={"perf": {"db": {"rows": bad}}}))
+                raise SystemExit(f"rows-invalid {bad!r}: no error")
+            except ValueError as error:
+                expect(f"rows-invalid-{bad}", str(error), f"[perf.db] rows must be a whole number ≥ 0, got {bad}")
+    with env_var(settings.ROWS_ENV, "0"):
+        expect("rows-env-wins", settings.effective_rows(configured), (0, settings.ROWS_ENV))
+    with env_var(settings.ROWS_ENV, "-1"):
+        try:
+            settings.effective_rows(plain)
+            raise SystemExit("rows-env-invalid: no error")
+        except ValueError as error:
+            expect("rows-env-invalid", str(error), "[perf.db] rows must be a whole number ≥ 0, got -1")
+
+
+def golden_names():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "perf").mkdir()
+        tree = perf_trees.Tree("head", "abc123", root)
+
+        def name(rows):
+            return perf_db.golden_name(perf_db.build_database(Config(root=root, raw={}), {"migrate": "true"}, rows, "test", "postgres:16", "test"), tree)
+
+        (root / "perf" / "seed.sql").write_text("insert into a select 1;\n")
+        expect("golden-rows-differ", name(10000000) != name(50000000), True)
+        seeded, empty = name(1000), name(0)
+        (root / "perf" / "seed.sql").write_text("insert into a select 2;\n")
+        expect("golden-seed-changes-name", name(1000) != seeded, True)
+        expect("golden-seed-ignored-at-zero", name(0), empty)
+        expect("golden-name-shape", re.fullmatch(r"golden_[0-9a-f]{16}", empty) is not None, True)
+
+
+def disk_estimate():
+    prior = [{"rows": 50000000, "bytes": 12500000000}]
+    expect("disk-estimate", perf_db.estimate_bytes(prior, 10000000, 50), 3000000000)
+    expect("disk-no-prior", perf_db.estimate_bytes([], 10000000, 50), 50 * 1024**3)
+    expect("disk-empty-prior-ignored", perf_db.estimate_bytes([{"rows": 0, "bytes": 90000000}], 10000000, 50), 50 * 1024**3)
+    expect("disk-refuses", perf_db.refuses(2999999999, prior, 10000000, 50), True)
+    expect("disk-allows", perf_db.refuses(3000000000, prior, 10000000, 50), False)
+    expect("disk-rows-zero", perf_db.refuses(0, prior, 0, 50), False)
+
+
 if __name__ == "__main__":
+    image_detection()
+    row_count()
+    golden_names()
+    disk_estimate()
     pipeline_order()
     freeze_paths()
     pinned_bounce_keeps_only_writes()

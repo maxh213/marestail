@@ -80,9 +80,11 @@ def rows_cell(config: Config, used_db: bool) -> str:
     return str(settings.effective_rows(config)[0]) if used_db else table.EMPTY
 
 
-def changes_summary(outcome: Review, verdict_text: str) -> str:
+def changes_summary(outcome: Review, verdict_text: str, session: trees.Session) -> str:
     changed = [item for item in outcome.classified if item.status in CHANGED]
     lines = ["## Performance changes"]
+    if session.image:
+        lines += [f"- Postgres image: {session.image} ({session.image_source})", f"- rows: {session.rows} ({session.rows_source})"]
     lines += [f"- {item.status} {change_text(item)}`{item.measurement.column}`" for item in changed] or ["- none"]
     setup = setup_needed(verdict_text)
     if setup:

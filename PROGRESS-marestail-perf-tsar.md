@@ -34,13 +34,13 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [x] Verify (test-perf ok, agent backends ok, dryrun exit 0, 0 plan lines, table header and rows as specified, BOUNCE before PASS, bench tracked 100755, 1 worktree) + commit
 
 ## Phase 4: The performance database
-- [ ] image detection
-- [ ] effective rows + validation
-- [ ] helper container, golden hash/build/META/disk check, status/url/prune/down
-- [ ] reset per --db sample, runner pre-build, finally cleanup
-- [ ] test-perf.py detection/rows/disk tests
-- [ ] tools/test-perf-db.py
-- [ ] Verify + commit
+- [x] image detection
+- [x] effective rows + validation
+- [x] helper container, golden hash/build/META/disk check, status/url/prune/down
+- [x] reset per --db sample, runner pre-build, finally cleanup
+- [x] test-perf.py detection/rows/disk tests
+- [x] tools/test-perf-db.py
+- [x] Verify (test-perf-db `perf db ok`, test-perf ok, agent backends ok, dryrun exit 0, no marestail-perf-test- containers or volume left, other containers untouched) + commit
 
 ## Phase 5: Scale check at 50M rows
 - [ ] tools/perf-db-scale.py, run, record line
@@ -79,6 +79,15 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - The audit reports one unflagged problem per target, using its first (p50) measurement. A dict comprehension first kept the p95 item; caught by the retry test.
 - The summary lives on `Run.perf_changes` and is printed after the proposals summary. It is set on any accepted perf verdict, including BOUNCE, so a pipeline stopped after a perf bounce still reports it.
 - `tools/overnight.sh`: the `## Config changes` capture now stops before `## Performance changes`, and a second `sed` captures the performance section.
+- Phase 4 modules: `image.py` (Postgres image detection, helper image) and `db.py` (settings, helper container, goldens, reset, CLI actions, `prepare`/`release`). `runner.measuring` calls `perf_db.prepare` after the trees exist and `perf_db.release` in a `finally` before the trees close.
+- Deviation from decision 16: `marestail perf db prune` removes only goldens whose `META.json` `root` is this repo, not every golden on the machine when no run is active. The volume is shared by every repo, so the literal rule would delete other repos' goldens. `META.json` gains `name` and `root` for this.
+- `MARESTAIL_PERF_DB_HOME` (default `~/.config/marestail`) sets where `perf-db.json` and `perf-db/<golden>.json|.log` live, so `tools/test-perf-db.py` never writes into the real config dir.
+- `perf/seed.sql` runs through psql with `-v rows=<n>`, so a SQL seed can use `:rows`; executable seeds get `MARESTAIL_PERF_ROWS`.
+- `trees.json` records `image`, `image_source`, `rows` and `rows_source`. Every later `perf run --db` and `perf db …` in that run uses the recorded values, so an agent's mid-run edit to a compose file (discarded afterwards) cannot change the image partway through.
+- Docker exec only passes `-i` when stdin is sent. `shell.run` otherwise inherits the parent's stdin, and an attached `-i` could wait on an agent's open pipe.
+- The count bench in `tools/test-perf-db.py` reads `count(*)` before inserting its row. The criterion is that both samples report the golden's row count, which a count taken after the insert could never show.
+- Readiness is `pg_isready -h 127.0.0.1` inside the container. The image's init-time temporary server listens on no TCP address, so this only succeeds once the real server is up.
+- The golden password is baked in at initdb. Deleting `perf-db.json` generates a new password that existing goldens do not accept; run `marestail perf db prune` (or remove the volume) after doing that.
 - The verdict instructions now depend on the judge: a judge with writes is told which files it may edit, and a pinned judge is told only PASS or BOUNCE (to its `bounce_to`).
 
 ## Gate exclusion mechanisms changed

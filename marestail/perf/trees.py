@@ -25,6 +25,10 @@ class Session:
     task: str
     trees: list[Tree] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    image: str | None = None
+    image_source: str = ""
+    rows: int | None = None
+    rows_source: str = ""
 
 
 def work(config: Config) -> Path:
@@ -39,6 +43,11 @@ def trees_file(config: Config) -> Path:
 
 def samples_file(config: Config) -> Path:
     return work(config) / "samples.jsonl"
+
+
+def recorded(config: Config) -> dict:
+    path = trees_file(config)
+    return json.loads(path.read_text()) if path.exists() else {}
 
 
 def active(config: Config) -> dict[str, Tree] | None:
@@ -139,6 +148,10 @@ def add_tree(config: Config, session: Session, name: str, sha: str) -> None:
 def write_trees(config: Config, session: Session) -> None:
     data = {
         "task": session.task,
+        "image": session.image,
+        "image_source": session.image_source,
+        "rows": session.rows,
+        "rows_source": session.rows_source,
         "trees": [{"tree": tree.name, "sha": tree.sha, "path": str(tree.path)} for tree in session.trees],
     }
     trees_file(config).write_text(json.dumps(data, indent=2) + "\n")
@@ -162,5 +175,10 @@ def prompt_section(config: Config, session: Session) -> str:
         f"- min_runs: {settings.min_runs(config)}",
         "- existing columns every run must re-measure: " + (", ".join(f"`{column}`" for column in existing) or "none"),
     ]
+    if session.image:
+        lines.append(
+            f"- performance database: {session.image} (from {session.image_source}), rows {session.rows} ({session.rows_source}); "
+            "connect each tree's app with `marestail perf db url --tree <tree>`"
+        )
     lines += [f"- note: {note}" for note in session.notes]
     return "\n".join(lines)

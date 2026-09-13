@@ -13,6 +13,7 @@ from marestail import audit, freeze, prompts
 from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
+from marestail.perf import db as perf_db
 from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
@@ -187,7 +188,11 @@ def measuring(state: Run, judge: Judge):
         yield None
         return
     with perf_trees.measuring(state.config, state.task_name) as session:
-        yield session
+        try:
+            perf_db.prepare(state.config, session)
+            yield session
+        finally:
+            perf_db.release(state.config, session)
 
 
 def judge_attempt(
@@ -232,7 +237,7 @@ def review_measurements(state: Run, session: perf_trees.Session, report: Path, v
     outcome = perf_review.review(state.config, session, report, verdict)
     if outcome.problems:
         return "\n".join(f"- {problem}" for problem in outcome.problems)
-    state.perf_changes = perf_review.changes_summary(outcome, text)
+    state.perf_changes = perf_review.changes_summary(outcome, text, session)
     if verdict == PASS:
         perf_review.record_table(state.config, session, outcome)
     return ""

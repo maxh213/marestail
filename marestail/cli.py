@@ -44,6 +44,24 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     sample.add_argument("--samples", type=int, default=1)
     sample.add_argument("--db", action="store_true", help="reset the tree's performance database before every sample")
     sample.set_defaults(handler=perf_run_command)
+    database = actions.add_parser("db", help="manage the local performance database")
+    db_actions = database.add_subparsers(dest="db_command", required=True)
+    golden = db_actions.add_parser("golden", help="build the seeded golden data directory for one tree")
+    golden.add_argument("--tree", required=True)
+    golden.add_argument("--wait", action="store_true", help="block until the build finishes instead of detaching")
+    golden.set_defaults(handler=perf_db_command)
+    db_actions.add_parser("status", help="print the golden status of every tree in the perf run").set_defaults(handler=perf_db_command)
+    url = db_actions.add_parser("url", help="print the database URL for one tree")
+    url.add_argument("--tree", required=True)
+    url.set_defaults(handler=perf_db_command)
+    db_actions.add_parser("prune", help="delete this repo's goldens the current perf run does not need").set_defaults(handler=perf_db_command)
+    db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(handler=perf_db_command)
+
+
+def perf_db_command(args: argparse.Namespace) -> int:
+    from marestail.perf import db
+
+    return db.command(args.db_command, getattr(args, "tree", None), getattr(args, "wait", False))
 
 
 def perf_run_command(args: argparse.Namespace) -> int:
