@@ -19,6 +19,8 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     copy_if_missing(TEMPLATES / "PERFORMANCE.md", target / "PERFORMANCE.md")
+    (target / "guidance").mkdir(exist_ok=True)
+    copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
     claude = target / "CLAUDE.md"
     agents = target / "AGENTS.md"
     append_instructions(claude)

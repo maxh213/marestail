@@ -10,10 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import freeze, practices, runner
+from marestail import freeze, install, practices, runner
 from marestail.config import Config
 from marestail.pipeline import find, names
 from marestail.runner import Run, run_judge, run_step
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def expect(name, got, wanted):
@@ -161,6 +163,44 @@ def role_file():
     expect("role-mentions-guidance", "guidance" in role.read_text(), True)
 
 
+def install_template():
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "target"
+        target.mkdir()
+        previous = os.environ.get("GROK_HOME")
+        os.environ["GROK_HOME"] = str(Path(tmp) / "grok")
+        try:
+            with quiet():
+                install.install(target)
+        finally:
+            if previous is None:
+                os.environ.pop("GROK_HOME", None)
+            else:
+                os.environ["GROK_HOME"] = previous
+        installed = target / "guidance" / "ts.md"
+        expect("install-creates-guidance", installed.is_file(), True)
+        expect("install-guidance-matches", installed.read_text(), (ROOT / "templates" / "guidance" / "ts.md").read_text())
+        installed.write_text("custom rules\n")
+        with quiet():
+            install.install(target)
+        expect("install-no-overwrite", installed.read_text(), "custom rules\n")
+        expect("gitignore-no-guidance", "guidance/" in (target / ".gitignore").read_text(), False)
+        with quiet():
+            install.install(target, gitignore_generated=True)
+        expect("gitignore-generated-no-guidance", "guidance/" in (target / ".gitignore").read_text(), False)
+
+
+def rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "ts.md").read_text()
+    ids = set(re.findall(r"\*\*TS-(\d+)", text))
+    expect("rule-count", len(ids) >= 40, True)
+    expect("rule-lines", len(text.splitlines()) <= 250, True)
+    for heading in ["## Language & types", "## Design & OOP", "## React", "## Next.js App Router"]:
+        expect(f"heading {heading}", heading in text, True)
+    for needle in ["useEffectEvent", "erasableSyntaxOnly", '"use cache"', "satisfies", "assertNever", "proxy.ts"]:
+        expect(f"mentions {needle}", needle in text, True)
+
+
 if __name__ == "__main__":
     pipeline_order()
     guidance_files()
@@ -169,4 +209,6 @@ if __name__ == "__main__":
     freeze_guidance()
     pass_commit()
     role_file()
+    install_template()
+    rulebook_content()
     print("practices ok")
