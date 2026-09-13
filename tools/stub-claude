@@ -29,7 +29,7 @@ elif words[0] == "judge":
     v.write_text(f"VERDICT: {verdict}\n1. finding from {v.stem}\n")
 elif words[0] == "perf":
     bench = Path("perf/bench_t.py"); bench.parent.mkdir(exist_ok=True)
-    bench.write_text('#!/usr/bin/env python3\nimport json, os\nvalue = {"pre-marestail": 8, "baseline": 10, "head": 20}[os.environ["MARESTAIL_PERF_TREE"]]\nprint(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "value": value}))\n')
+    bench.write_text('#!/usr/bin/env python3\nimport json, os\nvalue = {"pre-marestail": 8, "baseline": 10, "head": 20}[os.environ["MARESTAIL_PERF_TREE"]]\nprint(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "values": [value] * 200}))\n')
     bench.chmod(0o755)
     for tree in json.loads(Path(".marestail/perf/trees.json").read_text())["trees"]:
         sh("marestail", "perf", "run", "perf/bench_t.py", "--tree", tree["tree"], "--samples", "10")

@@ -13,6 +13,11 @@ base = "origin/master"
 # enabled = true  # the perf judge runs between architect and hardener unless false
 # threshold_percent = 10  # a change smaller than this is unchanged
 # min_runs = 10  # samples per tree per target
+# values_per_sample = 200  # request timings each sample must report in "values"
+# p95_min_values = 200  # pooled values per tree before p95 is classified
+# min_change = { ms = 1 }  # absolute change per unit below which nothing is flagged
+# bootstrap = 500  # resampling rounds for the confidence interval of each change
+# control = false  # true measures the baseline commit twice and requires changes to exceed that noise
 # sample_timeout = 600  # seconds per sample, excluding the database reset
 # setup = ""  # command run in each extra worktree, e.g. "uv sync"
 

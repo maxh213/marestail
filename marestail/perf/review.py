@@ -22,8 +22,9 @@ def review(config: Config, session: trees.Session, report: Path, verdict: str) -
     records = load_records(config)
     benches = bench_scripts(config)
     tree_names = [tree.name for tree in session.trees]
-    measurements, problems = results.compile_records(records, tree_names, benches, settings.min_runs(config))
-    classified = [results.classify(measurement, settings.threshold_percent(config)) for measurement in measurements]
+    policy = settings.policy(config)
+    measurements, problems = results.compile_records(records, tree_names, benches, policy)
+    classified = [results.classify(measurement, policy) for measurement in measurements]
     write_results(report, classified)
     problems += results.audit(classified, table.load(config.root).columns, report.read_text(), verdict, benches)
     problems += csharp_problems(config)

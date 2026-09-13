@@ -134,9 +134,19 @@ def measurement(line: str) -> dict | None:
         return None
     if data.get("absent") is True:
         return {"target": data["target"], "absent": True}
-    value = data.get("value")
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    timings = timing_fields(data)
+    if timings is None or not isinstance(data.get("unit"), str) or data.get("better") not in BETTER:
         return None
-    if not isinstance(data.get("unit"), str) or data.get("better") not in BETTER:
-        return None
-    return {"target": data["target"], "unit": data["unit"], "better": data["better"], "value": value}
+    return {"target": data["target"], "unit": data["unit"], "better": data["better"], **timings}
+
+
+def timing_fields(data: dict) -> dict | None:
+    if "values" in data:
+        values = data["values"]
+        valid = isinstance(values, list) and bool(values) and all(is_number(value) for value in values)
+        return {"values": values} if valid else None
+    return {"value": data["value"]} if is_number(data.get("value")) else None
+
+
+def is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)

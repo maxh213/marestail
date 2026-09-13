@@ -93,6 +93,8 @@ def task_cell(item: Classified) -> str:
     value = number(head) + item.measurement.unit
     if item.status == "new" or item.change is None:
         return f"{value} (new)"
+    if item.status == "thin":
+        return f"{value} (n={item.measurement.values})"
     return f"{value} ({item.change:+.1f}%){MARKS[item.status]}"
 
 

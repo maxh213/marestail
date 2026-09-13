@@ -27,8 +27,9 @@ BENCH = (
     "#!/usr/bin/env python3\n"
     "import json, os\n"
     'value = {"pre-marestail": 8, "baseline": 10, "head": 20}[os.environ["MARESTAIL_PERF_TREE"]]\n'
-    'print(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "value": value}))\n'
+    'print(json.dumps({"target": "add_one", "unit": "ms", "better": "lower", "values": [value] * 200}))\n'
 )
+POLICY = results.Policy()
 TABLE_WITH_ROW = "# Performance\n\n| Task | Commit | Date | Rows |\n|---|---|---|---|\n| t | abc1234 | 2026-09-13 | — |\n"
 ALL_TREES = ("baseline", "head", "pre-marestail")
 
@@ -169,8 +170,12 @@ def replaced_invoke(replacement):
         runner.invoke = original
 
 
-def measurement(baseline, head, better="lower", target="add_one", metric="p50", pre=None, unit="ms"):
-    return results.Measurement(target, metric, unit, better, pre, baseline, head, 10, "perf/bench_t")
+def measurement(baseline, head, better="lower", target="add_one", metric="p50", pre=None, unit="ms", values=1000, interval=None, control=None):
+    return results.Measurement(target, metric, unit, better, pre, baseline, head, 10, "perf/bench_t", values, interval, control)
+
+
+def pooled(tree, values, target="t", script="perf/bench_t"):
+    return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": False, "reset_ms": None, "target": target, "unit": "ms", "better": "lower", "values": values}
 
 
 def record(tree, target="t", value=1.0, script="perf/bench_t", db=False, unit="ms"):
@@ -367,7 +372,7 @@ def validation_errors():
     trees = ["baseline", "head"]
 
     def problems(records, benches=("perf/bench_t",)):
-        return results.compile_records(records, trees, list(benches), 2)[1]
+        return results.compile_records(records, trees, list(benches), results.Policy(min_runs=2))[1]
 
     def has(name, found, fragment):
         expect(name, any(fragment in problem for problem in found), True)
@@ -382,13 +387,13 @@ def validation_errors():
     has("db", problems([record("baseline", db=True), record("baseline", db=True), record("head"), record("head")]), "`perf/bench_t` was run with --db on some trees and without it on others")
     has("bench", problems(valid, ("perf/bench_t", "perf/bench_u")), "`perf/bench_u` has no samples on the baseline tree")
     has("both-null", problems([absent("baseline"), absent("head")]), "`t` is absent on both the baseline and head trees")
-    measured, _ = results.compile_records(valid + [absent("pre-marestail")], ["baseline", "head", "pre-marestail"], ["perf/bench_t"], 2)
+    measured, _ = results.compile_records(valid + [absent("pre-marestail")], ["baseline", "head", "pre-marestail"], ["perf/bench_t"], results.Policy(min_runs=2))
     expect("pre-null", [item.pre_marestail for item in measured], [None, None])
 
 
 def classification():
     def status(item, threshold=10):
-        found = results.classify(item, threshold)
+        found = results.classify(item, results.Policy(threshold_percent=threshold))
         return found.status, found.change
 
     expect("degraded-at-threshold", status(measurement(10, 11)), ("degraded", 10.0))
@@ -403,7 +408,7 @@ def classification():
 
 
 def audits():
-    degraded = results.classify(measurement(10, 20), 10)
+    degraded = results.classify(measurement(10, 20), POLICY)
     benches = ["perf/bench_t"]
     expect("audit-unflagged", results.audit([degraded], [], "VERDICT: PASS\n", "PASS", benches), ["`add_one` is degraded (+100.0% p50) but the verdict does not name it"])
     expect("audit-flagged", results.audit([degraded], [], "VERDICT: PASS\n- add_one: +100% p50, accepted\n", "PASS", benches), [])
@@ -424,8 +429,8 @@ def snapshot(task, classified, pre_commit=None, rows="—", commit="abc1234"):
 def table_writes():
     template = table.TEMPLATE.read_text()
     prefix = template[: template.index("| Task |")]
-    p50 = results.classify(measurement(10, 20, pre=8), 10)
-    p95 = results.classify(measurement(10, 20, pre=8, metric="p95"), 10)
+    p50 = results.classify(measurement(10, 20, pre=8), POLICY)
+    p95 = results.classify(measurement(10, 20, pre=8, metric="p95"), POLICY)
     first = table.render(table.upsert(table.parse(template), snapshot("t", [p50, p95], pre_commit="0000000")))
     expect(
         "table-first",
@@ -435,23 +440,23 @@ def table_writes():
         + "| pre-marestail | 0000000 | 2026-09-13 | — | 8ms | 8ms |\n"
         + "| t | abc1234 | 2026-09-13 | — | 20ms (+100.0%) ⚠ | 20ms (+100.0%) ⚠ |\n",
     )
-    steady = results.classify(measurement(12.4, 12.1), 10)
-    fresh = results.classify(measurement(None, 0.02, target="sub_one"), 10)
+    steady = results.classify(measurement(12.4, 12.1), POLICY)
+    fresh = results.classify(measurement(None, 0.02, target="sub_one"), POLICY)
     second = table.render(table.upsert(table.parse(first), snapshot("u", [steady, fresh], commit="def5678")))
     lines = second[len(prefix) :].splitlines()
     expect("table-second-header", lines[0], "| Task | Commit | Date | Rows | add_one p50 | add_one p95 | sub_one p50 |")
     expect("table-second-pre", lines[2], "| pre-marestail | 0000000 | 2026-09-13 | — | 8ms | 8ms | — |")
     expect("table-second-t", lines[3], "| t | abc1234 | 2026-09-13 | — | 20ms (+100.0%) ⚠ | 20ms (+100.0%) ⚠ | — |")
     expect("table-second-u", lines[4], "| u | def5678 | 2026-09-13 | — | 12.1ms (-2.4%) | — | 0.02ms (new) |")
-    faster = results.classify(measurement(12.4, 9), 10)
-    gone = results.classify(measurement(5, None, metric="p95"), 10)
+    faster = results.classify(measurement(12.4, 9), POLICY)
+    gone = results.classify(measurement(5, None, metric="p95"), POLICY)
     rerun = table.render(table.upsert(table.parse(second), snapshot("t", [faster, gone], commit="9999999", rows="50000000")))
     rerun_lines = rerun[len(prefix) :].splitlines()
     expect("table-rerun-order", [line.split(" | ")[0] for line in rerun_lines[2:]], ["| pre-marestail", "| t", "| u"])
     expect("table-rerun-t", rerun_lines[3], "| t | 9999999 | 2026-09-13 | 50000000 | 9ms (-27.4%) ✓ | removed | — |")
     without_pre = table.render(table.upsert(table.parse(template), snapshot("t", [p50])))
     expect("table-no-pre", "pre-marestail" in without_pre, False)
-    piped = results.classify(measurement(None, 3, target="GET /a|b"), 10)
+    piped = results.classify(measurement(None, 3, target="GET /a|b"), POLICY)
     piped_text = table.render(table.upsert(table.parse(template), snapshot("t", [piped])))
     expect("table-pipe-escaped", "| GET /a\\|b p50 |" in piped_text, True)
     expect("table-pipe-parsed", table.parse(piped_text).columns, ["GET /a|b p50"])
@@ -735,7 +740,85 @@ def scratch_discarded():
         expect("scratch-kept", sorted(path.relative_to(root).as_posix() for path in (root / "perf").rglob("*")), ["perf/__init__.py", "perf/_helper.py", "perf/bench_a.py"])
 
 
+def pooled_values():
+    expect("parse-values", samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]}'), {"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]})
+    for bad in ("[]", '[1, "x"]', "[true]", '"many"'):
+        expect(f"parse-values-invalid-{bad}", samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": ' + bad + "}"), None)
+    policy = results.Policy(min_runs=2, values_per_sample=3, p95_min_values=6)
+    trees = ["baseline", "head"]
+    records = [pooled("baseline", [1, 2, 3]), pooled("baseline", [4, 5, 6]), pooled("head", [2, 3, 4]), pooled("head", [5, 6, 7])]
+    measured, problems = results.compile_records(records, trees, ["perf/bench_t"], policy)
+    expect("pooled-problems", problems, [])
+    expect("pooled-stats", [(item.metric, item.baseline, item.head, item.runs, item.values) for item in measured], [("p50", 3.5, 4.5, 2, 6), ("p95", 6, 7, 2, 6)])
+    short = records[:3] + [pooled("head", [5, 6])]
+    expect(
+        "pooled-short",
+        results.compile_records(short, trees, ["perf/bench_t"], policy)[1],
+        ["`t` has 1 samples on the head tree with fewer than 3 values each; time at least 3 requests per sample"],
+    )
+    single = [record("baseline"), record("baseline"), record("head"), record("head")]
+    p95 = results.compile_records(single, trees, ["perf/bench_t"], results.Policy(min_runs=2))[0][1]
+    thin = results.classify(p95, POLICY)
+    expect("thin-p95", (thin.status, table.task_cell(thin)), ("thin", "1ms (n=2)"))
+
+
+def noise_aware_classification():
+    import random
+
+    rng = random.Random(7)
+    baseline = [10 + rng.random() for _ in range(400)]
+    same = [10 + rng.random() for _ in range(400)]
+    slower = [12 + rng.random() for _ in range(400)]
+    policy = results.Policy(min_runs=2, min_change=())
+
+    def compiled(head):
+        records = [pooled("baseline", baseline[:200]), pooled("baseline", baseline[200:]), pooled("head", head[:200]), pooled("head", head[200:])]
+        measured, problems = results.compile_records(records, ["baseline", "head"], ["perf/bench_t"], policy)
+        expect("noise-problems", problems, [])
+        return measured, [results.classify(item, policy).status for item in measured]
+
+    first, statuses = compiled(slower)
+    expect("noise-real-change", statuses, ["degraded", "degraded"])
+    expect("bootstrap-deterministic", [item.interval for item in compiled(slower)[0]], [item.interval for item in first])
+    expect("noise-identical-code", compiled(same)[1], ["unchanged", "unchanged"])
+    expect("floor-sub-ms", results.classify(measurement(0.53, 0.90), POLICY).status, "unchanged")
+    expect("floor-other-unit", results.classify(measurement(0.53, 0.90, unit="rows"), POLICY).status, "degraded")
+    expect("interval-straddles", results.classify(measurement(100, 115, interval=(-5.0, 30.0)), POLICY).status, "unchanged")
+    expect("interval-beyond", results.classify(measurement(100, 115, interval=(12.0, 20.0)), POLICY).status, "degraded")
+    expect("interval-improved", results.classify(measurement(100, 85, interval=(-20.0, -12.0)), POLICY).status, "improved")
+    expect("control-noise", results.classify(measurement(100, 118, interval=(15.0, 20.0), control=125), POLICY).status, "unchanged")
+    expect("control-quiet", results.classify(measurement(100, 118, interval=(15.0, 20.0), control=101), POLICY).status, "degraded")
+
+
+def policy_settings():
+    expect("policy-defaults", settings.policy(Config(root=Path("/tmp"), raw={})), results.Policy())
+    raw = {"perf": {"threshold_percent": 5, "min_runs": 3, "values_per_sample": 250, "p95_min_values": 500, "min_change": {"ms": 2, "rows": 10}, "bootstrap": 100, "control": True}}
+    configured = Config(root=Path("/tmp"), raw=raw)
+    expect("policy-configured", settings.policy(configured), results.Policy(3, 250, 500, 5.0, (("ms", 2.0), ("rows", 10.0)), 100))
+    expect("control-on", settings.control(configured), True)
+    expect("control-off", settings.control(Config(root=Path("/tmp"), raw={})), False)
+
+
+def control_tree():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = new_repo(tmp)
+        config = Config(root=root, raw={"git": {"base": "main"}, "perf": {"control": True}})
+        perf_trees.record_start(config, "t")
+        with quiet(), perf_trees.measuring(config, "t") as session:
+            seen = [tree.name for tree in session.trees]
+            shas = {tree.name: tree.sha for tree in session.trees}
+            section = perf_trees.prompt_section(config, session)
+        expect("control-trees", seen, ["baseline", "head", "control"])
+        expect("control-same-commit", shas["control"], shas["baseline"])
+        expect("control-prompt", "- control: a second copy of the baseline commit" in section, True)
+        expect("control-removed", worktree_count(root), 1)
+
+
 if __name__ == "__main__":
+    pooled_values()
+    noise_aware_classification()
+    policy_settings()
+    control_tree()
     fingerprints_follow_the_harness()
     stale_samples_dropped_and_rejected()
     scratch_discarded()

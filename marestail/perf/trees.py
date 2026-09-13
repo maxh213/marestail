@@ -11,6 +11,7 @@ from marestail.perf import settings, table
 from marestail.shell import run, tail
 
 NO_PRE_MARESTAIL = "no commit before marestail.toml; skipping the pre-marestail row"
+CONTROL = "control"
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,8 @@ def populate(config: Config, session: Session) -> None:
         print(f"   {note}")
     add_tree(config, session, "baseline", start)
     session.trees.append(Tree("head", head(config), config.root))
+    if settings.control(config):
+        add_tree(config, session, CONTROL, start)
     if pre:
         add_tree(config, session, "pre-marestail", pre)
     write_trees(config, session)
@@ -170,11 +173,16 @@ def close(config: Config, session: Session) -> None:
 def prompt_section(config: Config, session: Session) -> str:
     lines = [f"- {tree.name}: {tree.sha} at {tree.path}" for tree in session.trees]
     existing = table.load(config.root).columns
+    policy = settings.policy(config)
     lines += [
-        f"- threshold_percent: {settings.threshold_percent(config):g}",
-        f"- min_runs: {settings.min_runs(config)}",
+        f"- threshold_percent: {policy.threshold_percent:g}",
+        f"- min_runs: {policy.min_runs}",
+        f"- values_per_sample: {policy.values_per_sample} (p95 is classified only with {policy.p95_min_values} pooled values per tree)",
+        "- min_change: " + (", ".join(f"{amount:g} {unit}" for unit, amount in policy.min_change) or "none"),
         "- existing columns every run must re-measure: " + (", ".join(f"`{column}`" for column in existing) or "none"),
     ]
+    if any(tree.name == CONTROL for tree in session.trees):
+        lines.append("- control: a second copy of the baseline commit; its difference from baseline is the noise a change must exceed")
     if session.image:
         lines.append(
             f"- performance database: {session.image} (from {session.image_source}), rows {session.rows} ({session.rows_source}); "
