@@ -43,8 +43,14 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [x] Verify (test-perf-db `perf db ok`, test-perf ok, agent backends ok, dryrun exit 0, no marestail-perf-test- containers or volume left, other containers untouched) + commit
 
 ## Phase 5: Scale check at 50M rows
-- [ ] tools/perf-db-scale.py, run, record line
-- [ ] Verify + commit
+- [x] tools/perf-db-scale.py, run, record line
+- [x] Verify + commit
+
+scale: image=postgres:16 rows=50000000 seed_s=141 golden_bytes=6884145427 reset_ms_median=1724 reset_ms_max=2046
+
+- Run 2026-09-13 through the real `perf_db.prepare` and `perf_db.reset` (resets_ms = 1180, 1757, 1872, 1533, 1775, 1692, 1458, 1861, 2046, 1439). `seed_s` covers the whole golden build: migrate (table created with its primary key), the 50M-row seed, the row check, `VACUUM (ANALYZE)`, `CHECKPOINT`, a clean stop, the move and `du`.
+- The golden is 6.9 GB, not the 12.5 GB of the pre-implementation probe: the probe ran Postgres with `max_wal_size=8GB`, which left a much larger `pg_wal`; the real build uses the image defaults.
+- The first attempt of this script exited 1 after the golden was already ready, because it treated the informational session notes (no recorded start commit, no pre-marestail commit) as failures. Fixed to fail only on `golden for the … failed` notes, then re-run.
 
 ## Phase 6: Install and gate exclusions
 - [x] templates/PERFORMANCE.md + install + gitignore lines
@@ -53,8 +59,21 @@ Worktree `/home/max/workspace/marestail-marestail-perf-tsar`, branch `feat/mares
 - [x] Verify (test-perf ok incl. install and exclusion tests, agent backends ok, dryrun exit 0, 0 plan lines) + commit
 
 ## Phase 7: Documentation
-- [ ] README, templates/marestail.toml, tasks-README, hardener.md
-- [ ] Verify + commit
+- [x] README, templates/marestail.toml, tasks-README, hardener.md
+- [x] Verify (doc greps ok, template toml parses, test-perf ok, dryrun exit 0, 0 plan lines) + commit
+
+Order note: Phases 6 and 7 were done while the Phase 5 scale run was in progress, rather than after it. The pre-implementation probe on 2026-09-13 (same machine, same mechanism) measured a median reset of 1.97 s, well under the 5000 ms stop line, and Phases 6 and 7 do not touch the database code. If Phase 5 had crossed the line, Phases 6 and 7 would still stand and only the database follow-up would wait for a human.
+
+## Final verification (2026-09-13, all 18 success criteria)
+- `python3 tools/test-perf.py` → `perf ok`
+- `python3 tools/test-perf-db.py` → `perf db ok`; no `marestail-perf-test-` container or volume left
+- `python3 tools/test-agent-backends.py` → `agent backends ok`
+- `tools/dryrun.sh` → exit 0, `remaining plan lines: 0`; table header `| Task | Commit | Date | Rows | add_one p50 | add_one p95 |`, exactly two rows (`pre-marestail`: `—`, `8ms`, `8ms`; `t`: `—`, `20ms (+100.0%) ⚠`, `20ms (+100.0%) ⚠`); `perf verdict: BOUNCE` (line 13) before `perf verdict: PASS` (line 15); `perf/bench_t.py` mode 100755; one worktree
+- `marestail.pipeline.names()` exact; disabled skip, retry-with-feedback, image detection, `--db` reset counts, editable rows and the disk refusal message are covered by the two test scripts
+- `bin/marestail install` into empty temp dirs creates `PERFORMANCE.md`; `--gitignore-generated` adds `PERFORMANCE.md` and `perf/`, without it neither
+- `grep -rnE '^\s*#' marestail/perf/ --include='*.py'` prints nothing; every import under `marestail/perf/` is stdlib or `marestail.*`
+- the scale line is above and there is no `RESET TOO SLOW`
+- `animus-chat-db-1`, `data_tracker-db-1`, `data_tracker-redis-1` and `marestail-sonarqube` were running before and after every Docker test
 
 ## Baseline
 - 2026-09-13, base 88c3adb: `python3 tools/test-agent-backends.py` passes. `tools/dryrun.sh` exits 0 but printed `remaining plan lines: 1`, and it was not testing this checkout (see below).

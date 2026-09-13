@@ -432,11 +432,14 @@ def check_disk(database: Database, name: str) -> None:
     free = int(output.strip().splitlines()[-1])
     goldens = repo_goldens(database)
     if refuses(free, goldens, database.rows, database.min_free_gb):
-        needed = estimate_bytes(goldens, database.rows, database.min_free_gb)
-        raise DatabaseError(
-            f"not enough disk for {name}: need ~{needed / GIB:.1f} GB, have {free / GIB:.1f} GB free on the Docker data root; "
-            "run marestail perf db prune or lower [perf.db] rows"
-        )
+        raise DatabaseError(disk_message(name, estimate_bytes(goldens, database.rows, database.min_free_gb), free))
+
+
+def disk_message(name: str, needed: int, free: int) -> str:
+    return (
+        f"not enough disk for {name}: need ~{needed / GIB:.1f} GB, have {free / GIB:.1f} GB free on the Docker data root; "
+        "run marestail perf db prune or lower [perf.db] rows"
+    )
 
 
 def repo_goldens(database: Database) -> list[dict]:

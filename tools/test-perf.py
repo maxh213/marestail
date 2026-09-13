@@ -561,6 +561,11 @@ def disk_estimate():
     expect("disk-refuses", perf_db.refuses(2999999999, prior, 10000000, 50), True)
     expect("disk-allows", perf_db.refuses(3000000000, prior, 10000000, 50), False)
     expect("disk-rows-zero", perf_db.refuses(0, prior, 0, 50), False)
+    expect(
+        "disk-message",
+        perf_db.disk_message("golden_0123456789abcdef", 3 * 1024**3, 1024**3),
+        "not enough disk for golden_0123456789abcdef: need ~3.0 GB, have 1.0 GB free on the Docker data root; run marestail perf db prune or lower [perf.db] rows",
+    )
 
 
 def install_template_and_gitignore():
