@@ -20,6 +20,8 @@ INSTALL = 'add gem "mutant" and gem "mutant-rspec" to the Gemfile and run bundle
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.ruby_root()
+    if ctx.ruby("mutation", True) is False:
+        return Result.skipped("rb.mutation", "disabled: [ruby] mutation = false")
     subjects = changed_subjects(ctx)
     if ctx.scope_changed and not subjects:
         return Result.skipped("rb.mutation", "no changed ruby sources")
