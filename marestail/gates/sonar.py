@@ -14,6 +14,7 @@ POLL_LIMIT = 120
 DOTNET_SCANNER = "dotnet-sonarscanner"
 DOTNET_SCANNER_VERSION = "11.3.0"
 DOTNET_REPORT_TASK = Path(".sonarqube") / "out" / ".sonar" / "report-task.txt"
+BENCHMARKS = "perf/**"
 DOTNET_EXCLUSIONS = [
     "**/node_modules/**", "**/.next/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.venv/**",
     "**/mutants/**", "**/StrykerOutput/**", "**/coverage/**", ".sonarqube/**", ".marestail/**", ".scannerwork/**", "perf/**",
@@ -69,7 +70,35 @@ def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
         f"-Dsonar.projectKey={key}",
         f"-Dsonar.projectBaseDir={root}",
         f"-Dsonar.working.directory={root}/.marestail/scannerwork",
+        f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
     ]
+
+
+def scanner_exclusions(ctx: Context) -> str:
+    patterns = project_exclusions(ctx)
+    return ",".join(patterns if BENCHMARKS in patterns else [*patterns, BENCHMARKS])
+
+
+def project_exclusions(ctx: Context) -> list[str]:
+    path = ctx.root / "sonar-project.properties"
+    if not path.exists():
+        return []
+    for key, value in properties(path.read_text()):
+        if key == "sonar.exclusions":
+            return [pattern.strip() for pattern in value.split(",") if pattern.strip()]
+    return []
+
+
+def properties(text: str) -> list[tuple[str, str]]:
+    entries = []
+    for line in text.replace("\\\n", "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "!")):
+            continue
+        separator = min((index for index in (stripped.find("="), stripped.find(":")) if index >= 0), default=-1)
+        if separator > 0:
+            entries.append((stripped[:separator].strip(), stripped[separator + 1 :].strip()))
+    return entries
 
 
 def dotnet_scan(ctx: Context, creds: dict, key: str) -> tuple[int, str]:

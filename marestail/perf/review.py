@@ -26,7 +26,20 @@ def review(config: Config, session: trees.Session, report: Path, verdict: str) -
     classified = [results.classify(measurement, settings.threshold_percent(config)) for measurement in measurements]
     write_results(report, classified)
     problems += results.audit(classified, table.load(config.root).columns, report.read_text(), verdict, benches)
+    problems += csharp_problems(config)
     return Review(problems, classified, any(record["db"] for record in records))
+
+
+def csharp_problems(config: Config) -> list[str]:
+    projects = sorted(path.name for path in config.root.glob("*.csproj"))
+    folder = config.root / "perf"
+    if not projects or not folder.is_dir():
+        return []
+    return [
+        f"`{path.relative_to(config.root).as_posix()}` would compile into {', '.join(projects)}, because an SDK project at the repo root "
+        "includes every .cs file below it; write this bench in another language"
+        for path in sorted(folder.rglob("*.cs"))
+    ]
 
 
 def load_records(config: Config) -> list[dict]:

@@ -622,13 +622,49 @@ def gates_skip_benchmarks():
             changed={"perf/bench_x.py", "src/app.py", "perf/bench.ts", "src/app.ts"},
         )
         expect("py-lint-changed", py_lint.changed_python(changed), ["src/app.py"])
-        expect("py-mutation-changed", py_mutation.mutant_patterns(changed), ["src.app.*"])
-        expect("ts-mutation-changed", ts_mutation.changed_sources(changed), ["src/app.ts"])
+        expect("py-mutation-changed", py_mutation.mutant_patterns(changed, ["perf/bench_x.py", "src/app.py"]), ["src.app.*"])
+        expect("ts-mutation-changed", ts_mutation.changed_sources(changed, ["perf/bench.ts", "src/app.ts"]), ["src/app.ts"])
+
+
+def sonar_scanner_excludes_benchmarks():
+    from marestail.context import Context
+    from marestail.gates import sonar
+
+    creds = {"url": "http://localhost:9000", "token": "t"}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        ctx = Context(config=Config(root=root, raw={}))
+        expect("sonar-no-properties", sonar.scanner_exclusions(ctx), "perf/**")
+        (root / "sonar-project.properties").write_text("sonar.projectKey=x\n# sonar.exclusions=ignored/**\nsonar.exclusions=**/node_modules/**, \\\n  **/dist/**\n")
+        expect("sonar-merged", sonar.scanner_exclusions(ctx), "**/node_modules/**,**/dist/**,perf/**")
+        expect("sonar-flag", "-Dsonar.exclusions=**/node_modules/**,**/dist/**,perf/**" in sonar.scanner_command(ctx, creds, "x"), True)
+        (root / "sonar-project.properties").write_text("sonar.exclusions : perf/**,**/tmp/**\n")
+        expect("sonar-no-duplicate", sonar.scanner_exclusions(ctx), "perf/**,**/tmp/**")
+
+
+def csharp_bench_guard():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        config = Config(root=root, raw={})
+        (root / "perf").mkdir()
+        (root / "perf" / "Bench.cs").write_text("class Bench {}\n")
+        expect("csharp-no-root-project", perf_review.csharp_problems(config), [])
+        (root / "Api").mkdir()
+        (root / "Api" / "Api.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        expect("csharp-nested-project", perf_review.csharp_problems(config), [])
+        (root / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        expect(
+            "csharp-root-project",
+            perf_review.csharp_problems(config),
+            ["`perf/Bench.cs` would compile into App.csproj, because an SDK project at the repo root includes every .cs file below it; write this bench in another language"],
+        )
 
 
 if __name__ == "__main__":
     install_template_and_gitignore()
     gates_skip_benchmarks()
+    sonar_scanner_excludes_benchmarks()
+    csharp_bench_guard()
     image_detection()
     row_count()
     golden_names()

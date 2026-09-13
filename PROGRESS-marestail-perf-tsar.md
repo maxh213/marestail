@@ -64,6 +64,12 @@ scale: image=postgres:16 rows=50000000 seed_s=141 golden_bytes=6884145427 reset_
 
 Order note: Phases 6 and 7 were done while the Phase 5 scale run was in progress, rather than after it. The pre-implementation probe on 2026-09-13 (same machine, same mechanism) measured a median reset of 1.97 s, well under the 5000 ms stop line, and Phases 6 and 7 do not touch the database code. If Phase 5 had crossed the line, Phases 6 and 7 would still stand and only the database follow-up would wait for a human.
 
+## Follow-ups after completion (2026-09-13)
+- Merged `origin/main` at 7c33476 (diff-scoped gates: `Context.scoped`, `in_scope`, `mutation_files`). Conflicts only in `py_lint.py` (kept `ctx.scoped`, still filters `perf/` through `changed_python`) and `py_mutation.py` (kept main's `mutant_patterns(ctx, files)`, still skips benches). The auto-merged `ts_mutation.py` and `rb_mutation.py` kept the bench filter in main's `(ctx, files)` form.
+- Sonar: instead of editing the 13 target repos' `sonar-project.properties` (frozen config, several with live overnight runs), the non-.NET scanner command now passes `-Dsonar.exclusions=<the target's sonar.exclusions>,perf/**` (`sonar.scanner_exclusions`, which reads the properties file including `:` separators and `\` continuations and never duplicates `perf/**`). The .NET path already had `perf/**` in `DOTNET_EXCLUSIONS`.
+- C#: no existing target has a `.csproj` at the repo root (uk-sendgrid-api and write-to-harness keep theirs in `SendGridEmailApi/` and `write-to-api/`), so a root `perf/` is never compiled there. For a repo that does, `review.csharp_problems` rejects a perf verdict while `perf/` holds `.cs` files next to a root `.csproj`, and `roles/perf.md` tells the agent up front. This replaces the earlier "exclude them in the `.csproj`" caveat, since agents cannot edit the frozen `.csproj`.
+- Re-verified after the merge: `tools/test-perf.py`, `tools/test-perf-db.py`, `tools/test-agent-backends.py`, `tools/dryrun.sh`, and main's own fixtures `tools/samples/scope-cs.sh`, `scope-er.sh`, `scope-rb.sh`, `scope-sonar.sh`, `mutation-scope.sh`, `scope-py.sh`, `scope-ts.sh`, `scope-ex.sh` all pass.
+
 ## Final verification (2026-09-13, all 18 success criteria)
 - `python3 tools/test-perf.py` → `perf ok`
 - `python3 tools/test-perf-db.py` → `perf db ok`; no `marestail-perf-test-` container or volume left
