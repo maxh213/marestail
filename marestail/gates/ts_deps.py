@@ -16,7 +16,7 @@ def run_gate(ctx: Context) -> Result:
     command = ["npx", "depcruise", "--config", config, "--output-type", "err", source]
     code, output = run(command, cwd=ctx.ts_root(), timeout=600)
     if ctx.scoped:
-        findings = scoped_findings(output, ctx)
+        findings = scoped_findings(output, ctx, code)
         ok = not findings
     else:
         findings = [line for line in output.splitlines() if line.strip()][:60] if code != 0 else []
@@ -25,11 +25,11 @@ def run_gate(ctx: Context) -> Result:
     return Result("ts.deps", ok, summary, findings, time.time() - started)
 
 
-def scoped_findings(output: str, ctx: Context) -> list[str]:
+def scoped_findings(output: str, ctx: Context, code: int) -> list[str]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     violations = [line for line in lines if VIOLATION.match(line)]
     if not violations:
-        return lines[:60]
+        return [] if code == 0 else lines[:60]
     return [line for line in violations if in_scope_violation(line, ctx)][:60]
 
 
