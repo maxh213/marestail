@@ -12,14 +12,14 @@ from marestail.shell import run
 
 SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "comments.exs"
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "cover", "reports", "__pycache__", "vendor", "tmp", "log"}
+SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "cover", "reports", "__pycache__", "vendor", "tmp", "log", "target"}
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 MARKUP = re.compile(r"<!--|\{#")
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -126,6 +126,20 @@ def dotnet_findings(ctx: Context) -> list[str]:
     if error:
         return [f"C# comment scanner failed: {error}"]
     return [f"{c['file']}:{c['line']} comment: {c['text']}" for c in data]
+
+
+def rust_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("rust") is None:
+        return []
+    paths = files(ctx, (".rs",))
+    if not paths:
+        return []
+    from marestail import rust
+
+    data, error = rust.scan(ctx, "comments", paths)
+    if error:
+        return [f"rust comment scanner failed: {error}"]
+    return [f"{rust.rel(ctx, c['file'])}:{c['line']} comment: {c['text']}" for c in data]
 
 
 

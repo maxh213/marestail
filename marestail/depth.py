@@ -6,7 +6,7 @@ from pathlib import Path
 from marestail.config import Config
 from marestail.shell import run
 
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports", "vendor", "tmp", "spec"}
+SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports", "vendor", "tmp", "spec", "target"}
 TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
@@ -44,6 +44,7 @@ def raw_modules(config: Config) -> list[Module]:
         + erlang_modules(config)
         + ruby_modules(config)
         + dotnet_modules(config)
+        + rust_modules(config)
     )
 
 
@@ -246,6 +247,27 @@ def dotnet_modules(config: Config) -> list[Module]:
         )
         for item in data
     ]
+
+
+def rust_modules(config: Config) -> list[Module]:
+    if config.section("rust") is None:
+        return []
+    from marestail import rust
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = rust.sources(ctx)
+    if not files:
+        return []
+    data, error = rust.scan(ctx, "depth", files)
+    if error:
+        return []
+    modules = []
+    for item in data:
+        label = rust.rel(ctx, item["file"])
+        pass_throughs = [f"{label}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]]
+        modules.append(Module(path=label, public=item["public"], statements=item["statements"], pass_throughs=pass_throughs))
+    return modules
 
 
 def report(modules: list[Module]) -> str:

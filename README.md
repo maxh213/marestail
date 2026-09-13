@@ -8,21 +8,23 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 ## Gates
 
-| Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET | Erlang |
-|---|---|---|---|---|---|---|
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover |
-| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet | erl_parse AST + cover |
-| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | built-in operator-swap escript |
-| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles | beam call-graph cycles |
-| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF | erlc strong warnings as errors |
-| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner | escript scanner |
-| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) | escript scanner (pass-throughs) |
-| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members | escript scanner |
-| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
-| the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — | — |
-| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET | local SonarQube, sonar-erlang plugin |
+| Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET | Erlang | Rust |
+|---|---|---|---|---|---|---| --- |
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover | cargo llvm-cov, lines and code regions |
+| CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet | erl_parse AST + cover | syn AST + llvm-cov lines |
+| mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | built-in operator-swap escript | cargo-mutants |
+| dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles | beam call-graph cycles | `use`/path resolution vs `.rust-layers.json`, module cycles |
+| types and lint | mypy strict, ruff | tsc strict, eslint | mix format, mix compile | rubocop | Roslyn analyzers via SARIF | erlc strong warnings as errors | clippy `-D warnings -D clippy::pedantic`, rustfmt |
+| no comments, no docstrings | tokenizer | typescript scanner | elixir AST scanner | Ripper | Roslyn scanner | escript scanner | proc-macro2 token gaps, doc attributes |
+| no pass-through functions, no imports of private modules | ast | typescript AST | elixir AST | Ripper | Roslyn scanner (pass-throughs) | escript scanner (pass-throughs) | syn scanner (pass-throughs) |
+| no unreachable definitions | vulture | knip | BEAM abstract code scan | unused private methods | unused private members | escript scanner | rustc `dead_code` via clippy, unreferenced `pub` items |
+| docs match the code: routes ledger, env vars, paths | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources | regex over sources |
+| the code parses on the interpreter that ships | Dockerfile base image vs `requires-python`, ruff, mypy and shebangs, then `ast` at that version | — | — | — | — | — | — |
+| Sonar quality gate, zero issues, zero duplication | local SonarQube | local SonarQube | local SonarQube | local SonarQube | local SonarQube, SonarScanner for .NET | local SonarQube, sonar-erlang plugin | local SonarQube, built-in Rust analyzer + LCOV |
 
 The Erlang gates compile and run eunit themselves with erlc and escript (OTP 25+); no rebar3 is required. `er.mutation` is marestail's own mutation tester: an escript rewrites one operator at a time (comparison, arithmetic, andalso/orelse swaps), recompiles, and runs the eunit suite per mutant — survivors fail the gate, `mutation_max` caps the mutants checked when a full pass is too slow. For the sonar tier, `marestail sonar setup` builds the [sonar-erlang](https://github.com/evolution-gaming/sonar-erlang) plugin jar once with docker (pinned to a commit, cached under `~/.config/marestail/`, so the build does not recur), mounts it into the SonarQube container's `extensions/plugins` and restarts the container if the plugin is not loaded yet. The gate imports the coverage `er.tests` already produced: the eunit run exports `.marestail/eunit.coverdata` (via `cover:export`), which the plugin parses into line coverage. It then fails closed when SonarQube shows no Erlang lines or no coverage metric, on top of the usual quality gate, issue, coverage and duplication checks.
+
+The Rust gates need cargo with clippy and rustfmt, plus `cargo install --locked cargo-llvm-cov cargo-mutants`. marestail's own scanner (`marestail/rs/scan`, syn and proc-macro2) is built once per repo into `.marestail/rs-scan`, rebuilt when its source changes, and needs crates.io the first time. `rs.tests` runs `cargo llvm-cov --no-report` then writes `.marestail/rs-lcov.info` (for Sonar and CRAP) and the llvm JSON export; each test binary instruments the library separately, so hits are merged per line and per code region. Stable Rust has no branch coverage, so the gate reports unexecuted code regions, which catch an untaken `else` or match arm even when it shares a line with covered code. Without rustup, the gate points `LLVM_COV`/`LLVM_PROFDATA` at the system LLVM; it must match the LLVM version in `rustc -vV`. Dead code is two checks: rustc's `dead_code` lint fails `rs.lint`, and `deadcode` reports `pub` items whose name appears nowhere else in the sources, `tests/`, `examples/` or `benches/` (a name match, so a same-named item elsewhere hides one). Items defined in `lib.rs` count as the crate's API and are never reported. Pass-through detection skips trait impls, because the trait fixes their signature. There are no default layers; `rs.deps` checks `.rust-layers.json` (`[{"from": "src/domain", "forbid": ["src/web"]}]`) and always fails on module cycles. `rs.mutation` treats a mutant that times out as killed and ignores ones that do not compile. For Sonar, set `sonar.rust.lcov.reportPaths=.marestail/rs-lcov.info` and `sonar.rust.clippy.enabled=false` (the scanner container has no cargo, and `rs.lint` already runs clippy).
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 

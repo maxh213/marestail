@@ -12,6 +12,8 @@ GATE_CONFIG = [
     "**/mutant.yml", "**/mutant.yaml",
     "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*",
     "**/*.csproj", "**/*.sln", "**/*.props", "**/*.targets", "**/NuGet.config", "**/nuget.config", "**/dotnet-tools.json",
+    "**/Cargo.toml", "Cargo.lock", "**/clippy.toml", "**/.clippy.toml", "**/rustfmt.toml", "**/.rustfmt.toml",
+    "rust-toolchain", "rust-toolchain.toml", "**/.cargo/config.toml", "**/.cargo/mutants.toml", ".rust-layers.json",
     "**/.editorconfig", "**/.globalconfig", "**/*.runsettings", "**/stryker-config.*", ".dotnet-layers.json",
 
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
@@ -21,7 +23,7 @@ GATE_CONFIG = [
 SPEC = ["features/**", "qa/**", "tasks/**"]
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
-    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json"],
+    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json"],
 }
 
 

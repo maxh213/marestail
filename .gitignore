@@ -7,6 +7,7 @@ marestail/cs/scan/bin/
 marestail/cs/scan/obj/
 tools/samples/**/bin/
 tools/samples/**/obj/
+tools/samples/**/target/
 tools/samples/**/.sonarqube/
 tools/samples/**/TestResults/
 StrykerOutput/
