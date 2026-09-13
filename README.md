@@ -82,6 +82,7 @@ Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-jso
 | coder | worker | fast | implements; must trace every scenario to a test in its handoff |
 | cleaner | worker | sonar | readability without comments, CRAP, Sonar |
 | architect | worker | sonar | draws module boundaries, moves code, tightens the dependency contracts |
+| practices | judge | none | reviews the diff against the repo's `guidance/*.md` rulebooks; bounces to a fresh coder only for a cited rule violation in code the task touched |
 | perf | judge | none | benchmarks every `perf/` bench on the start commit and HEAD; flags degradations and improvements; bounces to a fresh coder only for a fix inside the spec |
 | hardener | judge | full | judges the diff and the mutation report; bounces to a fresh coder until it passes |
 | qa | worker | qa | turns the QA procedure into an executable end-to-end test |
@@ -89,6 +90,14 @@ Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-jso
 Workers edit and commit. Judges write one verdict file and nothing else (perf may also write `perf/**`); the runner discards any other edit a judge makes. Handoff and verdict files are runtime state under `.marestail/`, never committed: when a worker passes verification the runner folds its handoff into that role's commit message, and a judge's verdict becomes an empty commit carrying the verdict. Every commit a run produces starts with the model and effort that produced it, `[claude-opus-5 high] coder handoff`; the runner rewrites the subject of any commit a worker made without one, so the stamp is deterministic rather than something the agent has to remember. With no `--model` the backend name stands in for it, and with no effort the stamp is the model alone. `git log` on the branch is the record, and a role in a fresh clone reads its predecessors from there. When a pipeline completes, the task's handoff files are archived under `.marestail/runs/`. Every role runs in a fresh session with a short prompt: the role file, the task, the earlier handoffs, and how to finish. Judges also get the gate report.
 
 After every worker the runner checks, deterministically: the handoff exists, the tree is committed, no frozen file changed, the gate for that tier passes, and for the coder that every scenario in the feature file is traced to a test that exists. Anything failing goes back to the same role as feedback until it passes (`--retries N` caps it; default is unlimited). A judge's gate failing is a bounce regardless of what the judge wrote. A judge bounces as many times as it takes, with one stop: if it writes the same numbered findings twice in a row, the worker is not making progress and the pipeline stops for a human.
+
+## Best practices
+
+The `practices` judge reviews each task's diff against the per-language rulebooks in the repo's `guidance/` folder (`guidance/ts.md`, `guidance/ruby.md`, …; the file stem names the language). A repo with no `guidance/*.md` is skipped entirely, so the step only runs where a maintainer has added rulebooks, and `[practices] enabled = false` turns it off per repo. It bounces to the coder only for a clear violation of a numbered rule in a line the task added or changed, citing the rule id and file:line; violations in pre-existing code are listed informationally under `## Pre-existing` on a PASS. React and Next.js rules apply only where that stack is present.
+
+`marestail install` places `guidance/ts.md`, the curated TypeScript/React/Next.js rulebook (rules numbered `TS-1`…). Guidance files are maintainer policy: committed, never gitignored, and frozen (`guidance/**` in `freeze.SPEC`), so no agent can weaken a rulebook during a run. Other languages get no shipped rulebook; write your own `guidance/<lang>.md` with one numbered rule per line.
+
+`[practices]` keys: `enabled` (default `true`).
 
 ## Performance
 

@@ -19,11 +19,14 @@ Worktree `/home/max/workspace/marestail-marestail-practices-tsar`, branch `feat/
 - [ ] Verify + commit
 
 ## Phase 3: Gates and documentation
-- [ ] Gate audit for root `guidance/` (record outcome here)
-- [ ] `README.md` pipeline row + `## Best practices` section
-- [ ] `templates/marestail.toml` commented `[practices]` block
-- [ ] `templates/tasks-README.md` pipeline order sentence
-- [ ] `roles/hardener.md` guidance sentence
+- [x] Gate audit for root `guidance/`: no changes needed — every walker selects source suffixes (`.py`, `.ts`, …) or markup (`.html`, `.css`, …) and never `.md` (`gates/comments.py` `files()` suffixes; `gates/docs.py` `source_files` suffixes and `doc_files` default `README.md` with prefix-gated `path_findings`). A rulebook that would trip a gate would trip `README.md` too.
+- [x] `README.md` pipeline row + `## Best practices` section
+- [x] `templates/marestail.toml` commented `[practices]` block
+- [x] `templates/tasks-README.md` pipeline order sentence
+- [x] `roles/hardener.md` guidance sentence
 - [ ] Verify + commit
 
 ## Decisions and notes
+- `marestail/practices.py` is a single module, not a package: `files(root)` lists sorted `*.md` directly under `<root>/guidance/`, no recursion. The name-based skip in `run_step` follows the `measuring()` precedent.
+- The dry-run stub needs no dedicated action: the generic `judge <verdict>` plan line covers a verdict-only judge, so `tools/stub-claude` is unchanged.
+- `install()` copies `templates/guidance/ts.md` unconditionally (the `PERFORMANCE.md` precedent); existing repos never re-run install, so the no-guidance skip keeps the step off for them until a maintainer adds a rulebook.

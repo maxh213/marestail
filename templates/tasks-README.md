@@ -1,6 +1,6 @@
 # Writing tasks
 
-One task is one pipeline run: specifier, critic, coder, cleaner, architect, perf, hardener, QA. Write it so that run ends with something a user could do that they could not do before.
+One task is one pipeline run: specifier, critic, coder, cleaner, architect, practices, perf, hardener, QA. Write it so that run ends with something a user could do that they could not do before.
 
 - **Slice vertically.** Name the user and the outcome: "a donor gives 50 zł by card through the new widget". Reach every layer that outcome needs and no wider. "Build the amounts component" is a layer, not a task.
 - **Keep it thin.** One payment method, one variant, one route. The next slice adds the next one. If the task needs a list of sub-features, it is several tasks.

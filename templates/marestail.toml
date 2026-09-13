@@ -6,6 +6,9 @@ base = "origin/master"
 # model = "claude-opus-5"
 # effort = "high"  # reasoning effort or variant; stamped on every commit
 
+# [practices]
+# enabled = true  # the practices judge runs between architect and perf unless false; skips repos with no guidance/*.md
+
 # [perf]
 # enabled = true  # the perf judge runs between architect and hardener unless false
 # threshold_percent = 10  # a change smaller than this is unchanged
