@@ -6,4 +6,6 @@ Bounce when: a mutant survives; a test asserts the implementation rather than th
 
 Bounce to the specifier, not the coder, when a scenario itself is wrong. Sonar issues resolved in the Sonar UI rather than in code are a bounce, never an acceptance.
 
+`perf/**` and `PERFORMANCE.md` belong to the perf role; changes to them are not findings against the coder.
+
 Pass only when every scenario is protected by a test that would catch a real regression. Name the file and line for every finding.

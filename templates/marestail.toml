@@ -6,6 +6,23 @@ base = "origin/master"
 # model = "claude-opus-5"
 # effort = "high"  # reasoning effort or variant; stamped on every commit
 
+# [perf]
+# enabled = true  # the perf judge runs between architect and hardener unless false
+# threshold_percent = 10  # a change smaller than this is unchanged
+# min_runs = 10  # samples per tree per target
+# sample_timeout = 600  # seconds per sample, excluding the database reset
+# setup = ""  # command run in each extra worktree, e.g. "uv sync"
+
+# [perf.db]
+# migrate = ""  # brings an empty bench database to a tree's schema; enables marestail perf run --db
+# url_env = "DATABASE_URL"
+# rows = 50000000  # minimum rows per table; 0 for an empty database; MARESTAIL_PERF_DB_ROWS overrides
+# migrations = []  # globs of schema files for the golden cache key; empty uses the commit
+# skip_tables = ["schema_migrations", "alembic_version", "ar_internal_metadata", "__EFMigrationsHistory"]
+# image = ""  # empty uses the repo's postgres image (compose, workflows, .tool-versions), else postgres:18
+# port = 55432  # head; baseline +1, pre-marestail +2
+# min_free_gb = 50  # free space required before a golden build with no earlier golden to estimate from
+
 [python]
 root = "server"
 venv = ".venv"
