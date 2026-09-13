@@ -128,6 +128,20 @@ def percent_change(baseline: float, head: float) -> float:
     return round((head - baseline) * 100 / baseline, 9)
 
 
+def stale_problems(records: list[dict], fingerprints: dict[str, str]) -> list[str]:
+    counts: dict[str, dict[str, int]] = {}
+    for record in records:
+        script = record["script"]
+        if script in fingerprints and record.get("fingerprint") != fingerprints[script]:
+            per_tree = counts.setdefault(script, {})
+            per_tree[record["tree"]] = per_tree.get(record["tree"], 0) + 1
+    return [
+        f"`{script}` has samples taken before it or a shared file under perf/ last changed "
+        f"({', '.join(f'{count} on {tree}' for tree, count in sorted(per_tree.items()))}); take its samples again on every tree"
+        for script, per_tree in sorted(counts.items())
+    ]
+
+
 def audit(classified: list[Classified], existing_columns: list[str], verdict_text: str, verdict: str, benches: list[str]) -> list[str]:
     measured = {item.measurement.column for item in classified}
     problems = [

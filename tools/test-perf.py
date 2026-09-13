@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from marestail import freeze, runner
 from marestail.config import Config
 from marestail.perf import db as perf_db
+from marestail.perf import hygiene
 from marestail.perf import image as perf_image
 from marestail.perf import results, samples, settings, table
 from marestail.perf import review as perf_review
@@ -106,6 +107,9 @@ def sampling_judge(verdict: str) -> str:
             'Path("src.py").write_text("tampered\\n")',
             'Path("stray.txt").write_text("stray\\n")',
             'Path("PERFORMANCE.md").write_text("agent edit\\n")',
+            'Path("perf/_probe_timing.py").write_text("print(1)\\n")',
+            'Path("perf/__pycache__").mkdir(exist_ok=True)',
+            'Path("perf/__pycache__/benchlib.cpython-314.pyc").write_bytes(b"x")',
             'verdict = Path(re.search(r"Write your verdict to (\\S+) and", prompt).group(1))',
             f"verdict.write_text({verdict!r})",
             'print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0, "result": "ok"}))',
@@ -178,7 +182,7 @@ def absent(tree, target="t", script="perf/bench_t"):
 
 
 def pipeline_order():
-    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "perf", "hardener", "qa"])
+    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
     perf = find("perf")
     expect("perf-bounce-to", perf.bounce_to, "coder")
     expect("perf-writes", perf.writes, ("perf/**",))
@@ -201,6 +205,7 @@ def pinned_bounce_keeps_only_writes():
         expect("pinned-subject", git(root, "log", "-1", "--format=%s").endswith("perf verdict: BOUNCE"), True)
         expect("verdict-commit-files", git(root, "show", "--name-only", "--format=", "HEAD"), "perf/bench_x.py")
         expect("bench-executable", git(root, "ls-files", "-s", "perf/bench_x.py").split()[0], "100755")
+        expect("scratch-not-committed", [(root / "perf" / "_probe_timing.py").exists(), (root / "perf" / "__pycache__").exists()], [False, False])
         expect("src-restored", (root / "src.py").read_text(), "original\n")
         expect("stray-removed", (root / "stray.txt").exists(), False)
         expect("table-not-written-on-bounce", (root / "PERFORMANCE.md").exists(), False)
@@ -348,7 +353,8 @@ def perf_run_records():
         with contextlib.chdir(root), quiet():
             expect("records-exit", samples.run_command("perf/bench_mixed.py", "head", 1, False), 0)
         lines = [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
-        base = {"tree": "head", "sha": sha, "script": "perf/bench_mixed.py", "sample": 1, "db": False, "reset_ms": None}
+        stamp = hygiene.fingerprint(root, "perf/bench_mixed.py")
+        base = {"tree": "head", "sha": sha, "script": "perf/bench_mixed.py", "fingerprint": stamp, "sample": 1, "db": False, "reset_ms": None}
         expect("records", lines, [base | {"target": "a", "unit": "ms", "better": "lower", "value": 2.5}, base | {"target": "b", "absent": True}])
 
 
@@ -660,7 +666,79 @@ def csharp_bench_guard():
         )
 
 
+def fingerprints_follow_the_harness():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "perf").mkdir()
+        write_script(root, "bench_a.py", "print(1)")
+        write_script(root, "bench_b.py", "print(2)")
+        (root / "perf" / "benchlib.py").write_text("SETUP = 1\n")
+        first = hygiene.fingerprint(root, "perf/bench_a.py")
+        expect("fingerprint-shape", re.fullmatch(r"[0-9a-f]{16}", first) is not None, True)
+        write_script(root, "bench_b.py", "print(3)")
+        expect("fingerprint-ignores-other-bench", hygiene.fingerprint(root, "perf/bench_a.py"), first)
+        (root / "perf" / "_probe_timing.py").write_text("print(4)\n")
+        (root / "perf" / "__pycache__").mkdir()
+        (root / "perf" / "__pycache__" / "benchlib.cpython-314.pyc").write_bytes(b"\0")
+        expect("fingerprint-ignores-scratch", hygiene.fingerprint(root, "perf/bench_a.py"), first)
+        (root / "perf" / "benchlib.py").write_text("SETUP = 2\n")
+        shared_changed = hygiene.fingerprint(root, "perf/bench_a.py")
+        expect("fingerprint-follows-shared-file", shared_changed != first, True)
+        write_script(root, "bench_a.py", "print(5)")
+        expect("fingerprint-follows-bench", hygiene.fingerprint(root, "perf/bench_a.py") != shared_changed, True)
+        (root / "perf" / "_helper.py").write_text("VALUE = 1\n")
+        write_script(root, "bench_a.py", "import _helper\nprint(_helper.VALUE)")
+        with_helper = hygiene.fingerprint(root, "perf/bench_a.py")
+        (root / "perf" / "_helper.py").write_text("VALUE = 2\n")
+        expect("fingerprint-follows-referenced-underscore-file", hygiene.fingerprint(root, "perf/bench_a.py") != with_helper, True)
+
+
+def stale_samples_dropped_and_rejected():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = new_repo(tmp)
+        (root / "perf").mkdir()
+        (root / "perf" / "benchlib.py").write_text("VALUE = 1\n")
+        write_script(root, "bench_lib.py", 'print(json.dumps({"target": "lib", "unit": "ms", "better": "lower", "value": 1}))')
+        config = head_only_trees(root)
+        with contextlib.chdir(root), quiet():
+            expect("stale-first-run", samples.run_command("perf/bench_lib.py", "head", 3, False), 0)
+        old = [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
+        (root / "perf" / "benchlib.py").write_text("VALUE = 2\n")
+        current = {"perf/bench_lib.py": hygiene.fingerprint(root, "perf/bench_lib.py")}
+        expect(
+            "stale-problem",
+            results.stale_problems(old, current),
+            ["`perf/bench_lib.py` has samples taken before it or a shared file under perf/ last changed (3 on head); take its samples again on every tree"],
+        )
+        errors = io.StringIO()
+        with contextlib.chdir(root), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+            expect("stale-second-run", samples.run_command("perf/bench_lib.py", "head", 2, False), 0)
+        fresh = [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
+        expect("stale-dropped", [record["fingerprint"] for record in fresh], [current["perf/bench_lib.py"]] * 2)
+        expect("stale-message", "dropped 3 earlier measurements of perf/bench_lib.py" in errors.getvalue(), True)
+        expect("stale-fresh-accepted", results.stale_problems(fresh, current), [])
+
+
+def scratch_discarded():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "perf").mkdir()
+        write_script(root, "bench_a.py", "import _helper\nprint(_helper.VALUE)")
+        (root / "perf" / "_helper.py").write_text("VALUE = 1\n")
+        (root / "perf" / "_probe_timing.py").write_text("print(1)\n")
+        (root / "perf" / "__init__.py").write_text("")
+        (root / "perf" / "_scratch").mkdir()
+        (root / "perf" / "_scratch" / "notes.txt").write_text("timings\n")
+        (root / "perf" / "__pycache__").mkdir()
+        (root / "perf" / "__pycache__" / "_helper.cpython-314.pyc").write_bytes(b"\0")
+        expect("scratch-removed", hygiene.discard_scratch(root), ["perf/__pycache__/_helper.cpython-314.pyc", "perf/_probe_timing.py", "perf/_scratch/notes.txt"])
+        expect("scratch-kept", sorted(path.relative_to(root).as_posix() for path in (root / "perf").rglob("*")), ["perf/__init__.py", "perf/_helper.py", "perf/bench_a.py"])
+
+
 if __name__ == "__main__":
+    fingerprints_follow_the_harness()
+    stale_samples_dropped_and_rejected()
+    scratch_discarded()
     install_template_and_gitignore()
     gates_skip_benchmarks()
     sonar_scanner_excludes_benchmarks()

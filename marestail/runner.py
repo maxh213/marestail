@@ -14,6 +14,7 @@ from marestail import config as config_module
 from marestail.cli import run_gates
 from marestail.config import Config
 from marestail.perf import db as perf_db
+from marestail.perf import hygiene as perf_hygiene
 from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
@@ -230,6 +231,8 @@ def judge_attempt(
         if problems:
             print(f"   {judge.name} verdict rejected; retrying")
             return None, problems
+        for path in perf_hygiene.discard_scratch(state.config.root):
+            print(f"   removed perf scratch {path}")
     stage_writes(state.config, judge.writes)
     record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
     print(f"   verdict {verdict}" + (f" to {target}" if target else ""))

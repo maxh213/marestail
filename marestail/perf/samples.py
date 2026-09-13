@@ -7,7 +7,7 @@ from pathlib import Path
 from marestail import config as config_module
 from marestail.config import Config
 from marestail.perf import db as perf_db
-from marestail.perf import settings, trees
+from marestail.perf import hygiene, settings, trees
 
 BETTER = ("lower", "higher")
 
@@ -28,11 +28,37 @@ def run_command(script: str, tree_name: str, samples: int, db: bool) -> int:
         database, problem = perf_db.for_run(config)
         if database is None:
             return fail(problem, 2)
+    stamp = hygiene.fingerprint(config.root, bench)
+    dropped = drop_stale(config, bench, stamp)
+    if dropped:
+        sys.stderr.write(
+            f"dropped {dropped} earlier measurements of {bench} taken before it or a shared file under perf/ changed; "
+            "take its samples again on every tree\n"
+        )
     for sample in range(1, samples + 1):
-        problem = take_sample(config, bench, tree, sample, database)
+        problem = take_sample(config, bench, tree, sample, (database, stamp))
         if problem:
             return fail(problem, 1)
     return 0
+
+
+def drop_stale(config: Config, bench: str, stamp: str) -> int:
+    path = trees.samples_file(config)
+    if not path.exists():
+        return 0
+    lines = path.read_text().splitlines()
+    kept = [line for line in lines if not stale(line, bench, stamp)]
+    if len(kept) != len(lines):
+        path.write_text("".join(line + "\n" for line in kept))
+    return len(lines) - len(kept)
+
+
+def stale(line: str, bench: str, stamp: str) -> bool:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(record, dict) and record.get("script") == bench and record.get("fingerprint") != stamp
 
 
 def fail(message: str, code: int) -> int:
@@ -53,7 +79,8 @@ def bench_path(config: Config, script: str) -> str | None:
     return relative.as_posix()
 
 
-def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, database: perf_db.Database | None) -> str:
+def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, harness: tuple[perf_db.Database | None, str]) -> str:
+    database, stamp = harness
     label = f"{bench} sample {sample} on {tree.name}"
     timeout = settings.sample_timeout(config)
     env = {"MARESTAIL_PERF_TREE": tree.name, "MARESTAIL_PERF_TREE_PATH": str(tree.path), "MARESTAIL_PERF_SAMPLE": str(sample)}
@@ -80,7 +107,7 @@ def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, datab
         return f"{label} exited {completed.returncode}"
     if not records:
         return f"{label} printed no JSON measurement"
-    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "sample": sample, "db": database is not None, "reset_ms": reset_ms}
+    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "fingerprint": stamp, "sample": sample, "db": database is not None, "reset_ms": reset_ms}
     with trees.samples_file(config).open("a") as handle:
         handle.writelines(json.dumps({**base, **record}) + "\n" for record in records)
     return ""

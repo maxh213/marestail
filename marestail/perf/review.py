@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from marestail.config import Config
-from marestail.perf import results, settings, table, trees
+from marestail.perf import hygiene, results, settings, table, trees
 from marestail.shell import run
 
 CHANGED = ("degraded", "improved", "removed")
@@ -27,6 +27,7 @@ def review(config: Config, session: trees.Session, report: Path, verdict: str) -
     write_results(report, classified)
     problems += results.audit(classified, table.load(config.root).columns, report.read_text(), verdict, benches)
     problems += csharp_problems(config)
+    problems += results.stale_problems(records, {bench: hygiene.fingerprint(config.root, bench) for bench in benches})
     return Review(problems, classified, any(record["db"] for record in records))
 
 
