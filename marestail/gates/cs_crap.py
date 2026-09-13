@@ -10,17 +10,26 @@ def run_gate(ctx: Context) -> Result:
     coverage = dotnet.load_coverage(ctx)
     if coverage is None:
         return Result("cs.crap", False, "no coverage data; cs.tests must run first", [], 0.0)
-    files = dotnet.in_scope(ctx, dotnet.sources(ctx))
+    files = [path for path in dotnet.sources(ctx) if ctx.in_scope(dotnet.rel(ctx, path))]
     if not files:
         return Result.skipped("cs.crap", "no C# files in scope")
     members, error = dotnet.scan(ctx, "complexity", files)
     if error:
         return Result("cs.crap", False, error, [], time.time() - started)
+    if ctx.scoped:
+        members = [member for member in members if touches_hunk(member, ctx)]
     limit = float(ctx.dotnet("crap_max", 4))
     scored = [score(ctx, member, coverage) for member in members]
     offenders = sorted((f for f in scored if f["crap"] > limit), key=lambda f: -f["crap"])
     summary = f"{len(scored)} members, {len(offenders)} above CRAP {limit:g}"
     return Result("cs.crap", not offenders, summary, [describe(f) for f in offenders], time.time() - started)
+
+
+def touches_hunk(member: dict, ctx: Context) -> bool:
+    gated = ctx.gated_lines(member["file"])
+    if gated is None:
+        return True
+    return any(member["startLine"] <= line <= member["endLine"] for line in gated)
 
 
 def score(ctx: Context, member: dict, coverage: dict) -> dict:

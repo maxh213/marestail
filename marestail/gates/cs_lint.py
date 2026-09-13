@@ -17,7 +17,7 @@ SUPPRESSION = re.compile(r"#pragma\s+warning\s+disable|\[\s*SuppressMessage")
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.scope_changed and not ctx.changed_under(ctx.dotnet_root(), (".cs",)):
+    if ctx.scoped and not ctx.changed_under(ctx.dotnet_root(), (".cs",)):
         return Result.skipped("cs.lint", "no changed C# files")
     product, tests, error = dotnet.projects(ctx)
     if error:
@@ -30,8 +30,6 @@ def run_gate(ctx: Context) -> Result:
         if not sarif.exists():
             return Result("cs.lint", False, dotnet.hint(code, output) or f"no SARIF written for {dotnet.rel(ctx, project)}; the build did not compile", tail(output), time.time() - started)
         findings += sarif_findings(ctx, sarif, project)
-    if ctx.scope_changed:
-        findings = [f for f in findings if f.split(":")[0] in ctx.changed]
     findings = sorted(set(findings))
     summary = f"analyzers clean (AnalysisLevel {ANALYSIS_LEVEL}, Recommended)" if not findings else f"{len(findings)} problems"
     return Result("cs.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
@@ -49,6 +47,8 @@ def build_args(project: Path, sarif: Path) -> list[str]:
 def suppression_findings(ctx: Context) -> list[str]:
     findings = []
     for path in dotnet.files(ctx):
+        if not ctx.in_scope(dotnet.rel(ctx, path)):
+            continue
         for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
             if SUPPRESSION.search(line):
                 findings.append(f"{dotnet.rel(ctx, path)}:{number} analyzer suppressed in source; fix the code instead")
@@ -64,9 +64,16 @@ def sarif_findings(ctx: Context, sarif: Path, project: Path) -> list[str]:
         where = location(ctx, result, project)
         if where is None or result.get("level", "warning") not in LEVELS:
             continue
+        if not file_in_scope(where, ctx):
+            continue
         message = " ".join(result["message"]["text"].split())
         findings.append(f"{where} {result.get('ruleId', '?')}: {message[:200]}")
     return findings
+
+
+def file_in_scope(where: str, ctx: Context) -> bool:
+    path = where.rsplit(":", 1)[0]
+    return not path.endswith(".cs") or ctx.in_scope(path)
 
 
 def location(ctx: Context, result: dict, project: Path) -> str | None:

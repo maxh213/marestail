@@ -22,7 +22,7 @@ def run_gate(ctx: Context) -> Result:
     if not sources:
         return Result.skipped("er.mutation", "no erlang sources under [erlang] sources (default src/)")
     mutate = sources
-    if ctx.scope_changed:
+    if ctx.scoped:
         changed = set(ctx.changed_under(ctx.erlang_root(), (".erl",)))
         mutate = [path for path in sources if erlang.rel(ctx, path) in changed]
         if not mutate:
@@ -42,7 +42,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("er.mutation", False, "no mutant manifest written", tail(output), time.time() - started)
     mutants = json.loads(manifest.read_text()).get("mutants", [])
     if not mutants:
-        where = " in the changed erlang sources" if ctx.scope_changed else " in the erlang sources"
+        where = " in the changed erlang sources" if ctx.scoped else " in the erlang sources"
         return Result("er.mutation", False, "no mutants were generated", [f"no mutable comparison, arithmetic or boolean operators found{where}"], time.time() - started)
     apply_cap(mutants, ctx)
     ebin_base = scratch / "ebin-base"

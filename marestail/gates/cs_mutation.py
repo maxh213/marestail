@@ -27,8 +27,8 @@ def run_gate(ctx: Context) -> Result:
     csproj = product.read_text(errors="replace")
     if SENTRY.search(csproj) and SENTRY_SWITCH not in csproj:
         return Result("cs.mutation", False, "stryker cannot roll back mutants in Sentry's generated code", [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"], 0.0)
-    targets = [dotnet.rel(ctx, path) for path in dotnet.in_scope(ctx, dotnet.sources(ctx))]
-    if ctx.scope_changed and not targets:
+    targets = [dotnet.rel(ctx, path) for path in dotnet.sources(ctx) if ctx.in_scope(dotnet.rel(ctx, path))] if ctx.scoped else []
+    if ctx.scoped and not targets:
         return Result.skipped("cs.mutation", "no changed C# sources")
     out = ctx.work / OUTPUT_DIR
     shutil.rmtree(out, ignore_errors=True)
@@ -73,9 +73,8 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         if name.startswith(dotnet.rel(ctx, ctx.dotnet_root()) + "/"):
             name = name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")
         args += ["-m", f"!**/{name}"]
-    if ctx.scope_changed:
-        for name in targets:
-            args += ["-m", "**/" + name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")]
+    for name in targets:
+        args += ["-m", "**/" + name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")]
     return args
 
 

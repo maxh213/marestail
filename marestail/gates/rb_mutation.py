@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     if ctx.ruby("mutation", True) is False:
         return Result.skipped("rb.mutation", "disabled: [ruby] mutation = false")
     subjects = changed_subjects(ctx)
-    if ctx.scope_changed and not subjects:
+    if ctx.scoped and not subjects:
         return Result.skipped("rb.mutation", "no changed ruby sources")
     code, output = run([*bundler(ctx), "info", "mutant"], cwd=root, timeout=120)
     if code == 127:
@@ -90,7 +90,7 @@ def sessions(root: Path) -> set[Path]:
 
 
 def changed_subjects(ctx: Context) -> list[str]:
-    if not ctx.scope_changed:
+    if not ctx.scoped:
         return []
     names = set()
     for file in ctx.changed_under(ctx.ruby_root(), (".rb",)):

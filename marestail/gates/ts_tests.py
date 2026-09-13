@@ -20,8 +20,11 @@ def run_gate(ctx: Context) -> Result:
         findings = jest_failures(ctx) if jest else []
         return Result("ts.tests", False, "tests failed", findings or tail(output), time.time() - started)
     skipped = UNINSTRUMENTED.findall(output)
-    if skipped:
-        return Result("ts.tests", False, f"{len(skipped)} files could not be instrumented", [f"{relative_path(name, ctx)}:1 not instrumented" for name in skipped], time.time() - started)
+    uninstrumented = [f"{relative_path(name, ctx)}:1 not instrumented" for name in skipped]
+    if ctx.scoped:
+        uninstrumented = [finding for finding in uninstrumented if ctx.in_scope(finding.split(":", 1)[0])]
+    if uninstrumented:
+        return Result("ts.tests", False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, time.time() - started)
     report = ctx.work / COVERAGE_DIR / "coverage-final.json"
     coverage = json.loads(report.read_text()) if report.exists() else {}
     if not coverage:
@@ -78,10 +81,11 @@ def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     findings: list[str] = []
     for file, data in sorted(coverage.items()):
         relative = relative_path(file, ctx)
-        if ctx.scope_changed and relative not in ctx.changed:
+        if not ctx.in_scope(relative):
             continue
-        findings.extend(uncovered_statements(relative, data))
-        findings.extend(uncovered_branches(relative, data))
+        gated = ctx.gated_lines(relative)
+        findings.extend(uncovered_statements(relative, data, gated))
+        findings.extend(uncovered_branches(relative, data, gated))
     return findings
 
 
@@ -95,19 +99,31 @@ def relative_path(file: str, ctx: Context) -> str:
         return file
 
 
-def uncovered_statements(file: str, data: dict) -> list[str]:
+def uncovered_statements(file: str, data: dict, gated: set[int] | None) -> list[str]:
     lines = sorted({data["statementMap"][key]["start"]["line"] for key, hits in data["s"].items() if hits == 0})
+    if gated is not None:
+        lines = [line for line in lines if line in gated]
     return [f"{file}:{line} not covered" for line in lines]
 
 
-def uncovered_branches(file: str, data: dict) -> list[str]:
+def uncovered_branches(file: str, data: dict, gated: set[int] | None) -> list[str]:
     findings = []
     for key, arms in data["b"].items():
         branch = data["branchMap"][key]
         for index, hits in enumerate(arms):
-            if hits == 0:
+            if hits == 0 and arm_gated(branch, index, gated):
                 findings.append(f"{file}:{branch['loc']['start']['line']} branch arm {index} not taken")
     return findings
+
+
+def arm_gated(branch: dict, index: int, gated: set[int] | None) -> bool:
+    if gated is None:
+        return True
+    lines = {branch["loc"]["start"]["line"]}
+    locations = branch.get("locations") or []
+    if index < len(locations):
+        lines.add((locations[index].get("start") or {}).get("line"))
+    return bool(lines & gated)
 
 
 def count_tests(output: str) -> str:

@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 
 from marestail.context import Context
 from marestail.report import Result
@@ -17,7 +16,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("py.tests", False, "tests failed", tail(output), time.time() - started)
     findings = coverage_findings(load_coverage(ctx), ctx)
     percent = load_coverage(ctx)["totals"]["percent_covered"]
-    scope = " on changed files" if ctx.scope_changed else ""
+    scope = " on changed lines" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
     return Result("py.tests", not findings, summary, findings, time.time() - started)
 
@@ -39,16 +38,27 @@ def load_coverage(ctx: Context) -> dict:
 def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     findings: list[str] = []
     for file, data in sorted(coverage["files"].items()):
-        if ctx.scope_changed and not in_scope(file, ctx):
-            continue
-        findings.extend(f"{file}:{line} not covered" for line in data["missing_lines"])
-        findings.extend(f"{file}:{start} branch to {end} not taken" for start, end in data["missing_branches"])
+        gated = scoped_lines(file, ctx)
+        findings.extend(f"{file}:{line} not covered" for line in gated_intersect(data["missing_lines"], gated))
+        branches = [pair for pair in data["missing_branches"] if gated is None or pair[0] in gated]
+        findings.extend(f"{file}:{start} branch to {end} not taken" for start, end in branches)
     return findings
 
 
-def in_scope(file: str, ctx: Context) -> bool:
+def scoped_lines(file: str, ctx: Context) -> set[int] | None:
+    if not ctx.scoped:
+        return None
     relative = (ctx.python_root() / file).resolve().relative_to(ctx.root)
-    return str(relative) in ctx.changed
+    path = str(relative)
+    if not ctx.in_scope(path):
+        return set()
+    return ctx.gated_lines(path)
+
+
+def gated_intersect(lines: list[int], gated: set[int] | None) -> list[int]:
+    if gated is None:
+        return lines
+    return sorted(set(lines) & gated)
 
 
 def count_tests(output: str) -> str:
