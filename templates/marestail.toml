@@ -49,6 +49,7 @@ preset = ""
 deadcode_ignore_modules = []
 deadcode_ignore = []
 muex_optimize = true
+# muex_mirror = []  # extra top-level dirs muex symlinks into mutation sandboxes, e.g. ["connector"]
 root = "."
 crap_max = 4
 

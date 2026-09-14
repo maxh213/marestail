@@ -22,7 +22,7 @@ def run_gate(ctx: Context) -> Result:
     if code == 127:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
-        return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.9", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
+        return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
     code, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     start = output.find("{")
     if start < 0:
@@ -63,6 +63,10 @@ def command(ctx: Context, files: list[str]) -> list[str]:
     max_mutations = ctx.elixir("muex_max_mutations")
     if max_mutations:
         parts += ["--max-mutations", str(max_mutations)]
+    mirror = ctx.elixir("muex_mirror")
+    if mirror:
+        dirs = mirror if isinstance(mirror, list) else [mirror]
+        parts += ["--mirror", ",".join(str(dir) for dir in dirs)]
     if files:
         parts += ["--files", ",".join(files)]
     return parts
