@@ -131,7 +131,6 @@ def populate(config: Config, session: Session) -> None:
     if pre:
         add_tree(config, session, "pre-marestail", pre)
     write_trees(config, session)
-    samples_file(config).write_text("")
 
 
 def add_tree(config: Config, session: Session, name: str, sha: str) -> None:
