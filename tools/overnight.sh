@@ -28,10 +28,18 @@ START_FLAG=()
 if [ -n "${START_FROM:-}" ]; then
   START_FLAG=("--from" "$START_FROM")
 fi
+SCOPE_FLAG=()
+if [ -n "${SCOPE:-}" ]; then
+  SCOPE_FLAG=("--scope" "$SCOPE")
+fi
+FOCUS_FLAG=()
+for path in ${FOCUS:-}; do
+  FOCUS_FLAG+=("--focus" "$path")
+done
 for task in "$@"; do
   start=$(date +%s)
   echo "### $task ($(date '+%T'))" >> "$SUMMARY"
-  marestail run "$task" "${START_FLAG[@]}" --to "$STOP_AT" --auto "${AGENT_FLAG[@]}" "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" >> "$LOG" 2>&1
+  marestail run "$task" "${START_FLAG[@]}" "${SCOPE_FLAG[@]}" "${FOCUS_FLAG[@]}" --to "$STOP_AT" --auto "${AGENT_FLAG[@]}" "${MODEL_FLAG[@]}" "${EFFORT_FLAG[@]}" >> "$LOG" 2>&1
   code=$?
   minutes=$(( ($(date +%s) - start) / 60 ))
   {

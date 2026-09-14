@@ -85,6 +85,8 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="stop", default=None)
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
+    parser.add_argument("--scope", choices=["all", "changed"], default=None, help="soft scope: gate the diff against [git] base plus [focus] paths from marestail.toml instead of the whole repo; workers may still edit any file, and it joins the diff")
+    parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
     parser.add_argument("--model", default=None)
     parser.add_argument(
         "--retries",
@@ -335,7 +337,7 @@ def sweep_counters(work: Path, keep: Path) -> None:
 def run_command(args: argparse.Namespace) -> int:
     from marestail.runner import run_pipeline
 
-    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort)
+    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort, args.scope, args.focus)
 
 
 def watch_command(args: argparse.Namespace) -> int:

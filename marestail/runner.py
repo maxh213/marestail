@@ -6,12 +6,12 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from marestail import audit, freeze, practices, prompts
 from marestail import config as config_module
-from marestail.cli import run_gates
+from marestail.cli import hook_focus, resolve_focus, run_gates
 from marestail.config import Config
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
@@ -56,10 +56,21 @@ class Run:
     agent: str | None = None
     effort: str | None = None
     perf_changes: str = ""
+    scope_changed: bool = False
+    focus: set[str] = field(default_factory=set)
 
     @property
     def task_name(self) -> str:
         return self.task.stem
+
+    @property
+    def gate_flags(self) -> str:
+        if not self.scope_changed:
+            return ""
+        return " --scope changed" + "".join(f" --focus {path}" for path in sorted(self.focus))
+
+    def gates(self, tier: str):
+        return run_gates(tier, self.scope_changed, None, self.focus)
 
     @property
     def folder(self) -> Path:
@@ -84,13 +95,17 @@ def run_pipeline(
     retries: int,
     agent: str | None = None,
     effort: str | None = None,
+    scope: str | None = None,
+    focus: list[str] | None = None,
 ) -> int:
     config = config_module.load(Path.cwd())
     if model is None:
         model = config.get("agent", "model")
     if effort is None:
         effort = config.get("agent", "effort")
-    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort)
+    scope_changed = scope == "changed" or bool(focus)
+    focused = (resolve_focus(config, set(focus or [])) | hook_focus(config)) if scope_changed else set()
+    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort, scope_changed=scope_changed, focus=focused)
     perf_trees.record_start(config, state.task_name)
     outcome = 0
     for step in window(start, stop):
@@ -163,7 +178,7 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
-        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state))
+        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags)
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
@@ -175,7 +190,7 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
 
 
 def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
-    gate_report, gate_ok = gate_for(judge.tier)
+    gate_report, gate_ok = gate_for(state, judge.tier)
     feedback = ""
     author_left = 3
     for attempt in attempts(state.retries):
@@ -337,10 +352,10 @@ def review_measurements(state: Run, session: perf_trees.Session, report: Path, v
     return ""
 
 
-def gate_for(tier: str | None) -> tuple[str, bool]:
+def gate_for(state: Run, tier: str | None) -> tuple[str, bool]:
     if tier is None:
         return "", True
-    results = run_gates(tier, False, None)
+    results = state.gates(tier)
     return render(results), all(result.ok for result in results)
 
 
@@ -373,7 +388,7 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     if worker.audit and report.exists():
         problems.extend(audit.problems(config, state.task_name, report.read_text()))
     if worker.tier:
-        results = run_gates(worker.tier, False, None)
+        results = state.gates(worker.tier)
         if not all(result.ok for result in results):
             problems.append(render(results))
     return "\n\n".join(problems)

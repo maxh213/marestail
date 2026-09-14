@@ -7,13 +7,13 @@ from marestail.pipeline import Judge, Worker
 ROLES_DIR = Path(__file__).resolve().parent.parent / "roles"
 
 
-def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "") -> str:
+def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "", gate_flags: str = "") -> str:
     parts = [
         role_text(worker.name),
         section("Task", task.read_text()),
         section("Specification files", spec_listing(config, task_name)),
         section("Handoffs so far", handoffs(config, task_name)),
-        section("Finishing", finishing(config, worker, task_name, report, label)),
+        section("Finishing", finishing(config, worker, task_name, report, label, gate_flags)),
     ]
     if feedback:
         parts.append(section("Why the work came back to you", feedback))
@@ -85,12 +85,12 @@ def handoffs_from_history(config: Config) -> str:
     return "\n".join(f"## {entry.strip()}" for entry in entries)
 
 
-def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = "") -> str:
+def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = "", gate_flags: str = "") -> str:
     steps = []
     if worker.audit:
         steps.append(audit.instructions(config, task_name))
     if worker.tier:
-        steps.append(f"Run `marestail gate --tier {worker.tier}` and keep working until it prints GATE PASSED.")
+        steps.append(f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED.")
     opening = f"starting with `[{label}] ` and " if label else ""
     steps.append(f"Commit everything with a message {opening}ending in `By {worker.name}.`")
     steps.append(
