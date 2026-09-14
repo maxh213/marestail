@@ -376,6 +376,10 @@ def gate_label(tokens: list[str], names: list[str]) -> str | None:
         return "sonar"
     if "java" in names and any("sonar" in token for token in tokens):
         return "sonar"
+    if "mvn" in names or "mvnw" in names:
+        return "pitest" if any("pitest" in token for token in tokens) else "mvn"
+    if "java" in names and any(token.endswith("PmdCli") for token in tokens):
+        return "pmd"
     bundle = bundle_inner(tokens)
     if bundle is not None:
         return bundle

@@ -24,6 +24,7 @@ def registry() -> list[Gate]:
     from marestail.gates import comments, deadcode, depth, docs, ex_crap, ex_deps, ex_lint, ex_mutation, ex_tests, py_crap, py_deps, py_lint, py_mutation, py_runtime, py_tests, qa, sonar
     from marestail.gates import cs_crap, cs_deps, cs_lint, cs_mutation, cs_tests
     from marestail.gates import er_crap, er_deps, er_lint, er_mutation, er_tests
+    from marestail.gates import java_crap, java_deps, java_lint, java_mutation, java_tests
     from marestail.gates import rb_crap, rb_deps, rb_lint, rb_mutation, rb_tests
     from marestail.gates import rs_crap, rs_deps, rs_lint, rs_mutation, rs_tests
     from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
@@ -58,6 +59,10 @@ def registry() -> list[Gate]:
         Gate("rs.crap", FAST, "rust", rs_crap.run_gate),
         Gate("rs.lint", FAST, "rust", rs_lint.run_gate),
         Gate("rs.deps", FAST, "rust", rs_deps.run_gate),
+        Gate("java.tests", FAST, "java", java_tests.run_gate),
+        Gate("java.crap", FAST, "java", java_crap.run_gate),
+        Gate("java.lint", FAST, "java", java_lint.run_gate),
+        Gate("java.deps", FAST, "java", java_deps.run_gate),
         Gate("comments", FAST, None, comments.run_gate),
         Gate("depth", FAST, None, depth.run_gate),
         Gate("deadcode", FAST, None, deadcode.run_gate),
@@ -69,6 +74,7 @@ def registry() -> list[Gate]:
         Gate("cs.mutation", FULL, "dotnet", cs_mutation.run_gate),
         Gate("er.mutation", FULL, "erlang", er_mutation.run_gate),
         Gate("rs.mutation", FULL, "rust", rs_mutation.run_gate),
+        Gate("java.mutation", FULL, "java", java_mutation.run_gate),
         Gate("sonar", SONAR, "sonar", sonar.run_gate),
         Gate("qa", QA, "qa", qa.run_gate),
     ]

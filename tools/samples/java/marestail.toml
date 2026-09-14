@@ -1,0 +1,20 @@
+# Shipped red on purpose, like the dotnet and rust samples: a // comment and a javadoc,
+# a pass-through Basket.total forwarding to net, an unused private Pricing.withVat, an
+# if without braces (PMD ControlStatementBraces), domain -> services breaking
+# .java-layers.json, a Basket <-> Pricing cycle, the untested refund arm of Pricing.band,
+# Pricing.classify at complexity 5 with its tiny and empty arms uncovered, and
+# surviving boundary mutants no test kills.
+
+[git]
+base = "HEAD"
+
+[java]
+root = "."
+crap_max = 4
+
+[comments]
+paths = ["src"]
+
+[sonar]
+project_key = "marestail-java-sample"
+project_name = "marestail java sample"

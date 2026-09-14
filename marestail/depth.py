@@ -46,6 +46,7 @@ def raw_modules(config: Config) -> list[Module]:
         + ruby_modules(config)
         + dotnet_modules(config)
         + rust_modules(config)
+        + java_modules(config)
     )
 
 
@@ -274,6 +275,30 @@ def rust_modules(config: Config) -> list[Module]:
         pass_throughs = [f"{label}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]]
         modules.append(Module(path=label, public=item["public"], statements=item["statements"], pass_throughs=pass_throughs))
     return modules
+
+
+def java_modules(config: Config) -> list[Module]:
+    if config.section("java") is None:
+        return []
+    from marestail import java
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = java.sources(ctx)
+    if not files:
+        return []
+    data, error = java.scan(ctx, "depth", files)
+    if error:
+        raise SystemExit(f"java depth analysis failed: {error}")
+    return [
+        Module(
+            path=item["file"],
+            public=item["public"],
+            statements=item["statements"],
+            pass_throughs=[f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]],
+        )
+        for item in data
+    ]
 
 
 def report(modules: list[Module]) -> str:

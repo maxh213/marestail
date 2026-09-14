@@ -15,6 +15,7 @@ GATE_CONFIG = [
     "**/Cargo.toml", "Cargo.lock", "**/clippy.toml", "**/.clippy.toml", "**/rustfmt.toml", "**/.rustfmt.toml",
     "rust-toolchain", "rust-toolchain.toml", "**/.cargo/config.toml", "**/.cargo/mutants.toml", ".rust-layers.json",
     "**/.editorconfig", "**/.globalconfig", "**/*.runsettings", "**/stryker-config.*", ".dotnet-layers.json",
+    "**/pom.xml", "mvnw", "mvnw.cmd", "**/.mvn/**", "**/lombok.config", "**/pmd-ruleset.xml", ".java-layers.json",
 
     ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
     ".grok/hooks/**", ".grok/config.toml",
@@ -23,7 +24,7 @@ GATE_CONFIG = [
 SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
-    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json"],
+    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json", ".java-layers.json"],
 }
 
 

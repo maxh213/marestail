@@ -1,0 +1,5 @@
+{
+  "layers": [
+    {"from": "com.example.domain", "forbid": ["com.example.services"], "forbid_external": ["java.sql.*"]}
+  ]
+}

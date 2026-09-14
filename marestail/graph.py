@@ -16,7 +16,7 @@ for module in sorted(graph.modules):
 
 
 def render(config: Config) -> str:
-    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), erlang_graph(config), ruby_graph(config), dotnet_graph(config), rust_graph(config)] if part)
+    return "\n\n".join(part for part in [python_graph(config), ts_graph(config), elixir_graph(config), erlang_graph(config), ruby_graph(config), dotnet_graph(config), rust_graph(config), java_graph(config)] if part)
 
 
 def python_graph(config: Config) -> str:
@@ -99,6 +99,23 @@ def rust_graph(config: Config) -> str:
         return "## Rust modules\n" + error
     lines = [f"{rust.rel(ctx, e['from'])} -> {rust.rel(ctx, e['to'])} ({e['symbol']})" for e in edges]
     return "## Rust modules\n" + "\n".join(lines)
+
+
+def java_graph(config: Config) -> str:
+    if config.section("java") is None:
+        return ""
+    from marestail import java
+    from marestail.context import Context
+
+    ctx = Context(config=config)
+    files = java.sources(ctx)
+    if not files:
+        return ""
+    data, error = java.scan(ctx, "deps", files)
+    if error:
+        return "## Java modules\n" + error
+    lines = [f"{e['from']} -> {e['to']} ({e['symbol']})" for e in data["edges"]]
+    return "## Java modules\n" + "\n".join(lines)
 
 
 def erlang_graph(config: Config) -> str:

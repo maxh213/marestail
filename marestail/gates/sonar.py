@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 
-from marestail import dotnet, erlang, rust
+from marestail import dotnet, erlang, java, rust
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run, tail
@@ -46,6 +46,8 @@ def run_gate(ctx: Context) -> Result:
         findings += erlang_findings(ctx, client, key)
     if ctx.config.section("rust") is not None:
         findings += rust_findings(ctx, client, key)
+    if ctx.config.section("java") is not None:
+        findings += java_findings(ctx, client, key)
     return Result("sonar", not findings, summarize(ctx, findings, status), findings, time.time() - started)
 
 
@@ -71,7 +73,20 @@ def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
         f"-Dsonar.projectBaseDir={root}",
         f"-Dsonar.working.directory={root}/.marestail/scannerwork",
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
+        *java_properties(ctx),
     ]
+
+
+def java_properties(ctx: Context) -> list[str]:
+    if ctx.config.section("java") is None:
+        return []
+    path = ctx.root / "sonar-project.properties"
+    declared = {key for key, _ in properties(path.read_text())} if path.exists() else set()
+    values = {
+        "sonar.java.binaries": java.build_dir(ctx) / "classes",
+        "sonar.coverage.jacoco.xmlReportPaths": ctx.work / "java-jacoco.xml",
+    }
+    return [f"-D{name}={value}" for name, value in values.items() if name not in declared]
 
 
 def scanner_exclusions(ctx: Context) -> str:
@@ -180,6 +195,17 @@ def rust_findings(ctx: Context, client: Client, key: str) -> list[str]:
         findings.append(f"{rust.rel(ctx, ctx.rust_root())}:1 SonarQube received no Rust lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the crate's src in sonar.sources")
     if "coverage" not in values:
         findings.append("sonar-project.properties:1 SonarQube imported no rust coverage; run rs.tests first and set sonar.rust.lcov.reportPaths=.marestail/rs-lcov.info")
+    return findings
+
+
+def java_findings(ctx: Context, client: Client, key: str) -> list[str]:
+    data = client.get("api/measures/component", component=key, metricKeys="coverage,ncloc_language_distribution")
+    values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
+    findings = []
+    if "java=" not in values.get("ncloc_language_distribution", ""):
+        findings.append(f"{java.rel(ctx, ctx.java_root())}:1 SonarQube received no Java lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the sources in sonar.sources")
+    if "coverage" not in values:
+        findings.append("marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists")
     return findings
 
 

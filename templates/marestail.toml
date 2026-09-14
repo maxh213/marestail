@@ -80,6 +80,18 @@ mutation_jobs = 2
 # clippy_args = ["-D", "warnings", "-D", "clippy::pedantic"]
 # coverage_ignore_regex = "src/main\\.rs$"  # also skipped by rs.crap
 
+[java]
+root = "."  # the Maven module that holds pom.xml
+sources = ["src/main/java"]
+tests = ["src/test/java"]
+coverage_exclude = []  # also skipped by java.mutation unless mutation_exclude is set, e.g. ["src/main/java/com/acme/Application.java"]
+crap_max = 4
+mutation_threads = 2
+# mvn = "./mvnw"  # default: ./mvnw when it exists, else mvn
+# release = "21"  # default: maven.compiler.release from pom.xml
+# pmd_ruleset = "pmd-ruleset.xml"  # default: marestail's quickstart rules plus CyclomaticComplexity
+# jacoco_version = "0.8.15"
+
 
 [sonar]
 project_key = "change-me"

@@ -1,0 +1,7 @@
+{
+  "layers": [
+    {"from": "com.acme.domain", "forbid": ["com.acme.web", "com.acme.persistence"], "forbid_external": ["org.springframework.*", "jakarta.persistence.*"]},
+    {"from": "com.acme.persistence", "forbid": ["com.acme.web"], "forbid_external": ["org.springframework.web.*"]},
+    {"from": "com.acme.web", "forbid": ["com.acme.persistence"]}
+  ]
+}

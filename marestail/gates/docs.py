@@ -36,7 +36,7 @@ def doc_text(ctx: Context) -> str:
 
 def source_files(ctx: Context) -> list[Path]:
     folders = ctx.config.get("docs", "sources", ["."])
-    suffixes = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs")
+    suffixes = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs", ".java")
     files = []
     for folder in folders:
         for path in (ctx.root / folder).rglob("*"):

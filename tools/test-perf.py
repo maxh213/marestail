@@ -600,7 +600,7 @@ def install_template_and_gitignore():
 
 
 def gates_skip_benchmarks():
-    from marestail import depth, dotnet, rust
+    from marestail import depth, dotnet, java, rust
     from marestail.context import Context
     from marestail.gates import comments, deadcode, docs, py_crap, py_lint, py_mutation, py_runtime, sonar, ts_lint, ts_mutation
 
@@ -617,6 +617,7 @@ def gates_skip_benchmarks():
         expect("docs-skip", [path.relative_to(root).as_posix() for path in docs.source_files(ctx)], ["src/app.py", "src/lib.rs"])
         expect("py-runtime-skip", [path.relative_to(root).as_posix() for path in py_runtime.sources(ctx, root)], ["src/app.py"])
         expect("rust-skip", [rust.skipped(ctx, root / "perf" / "bench.rs"), rust.skipped(ctx, root / "src" / "lib.rs")], [True, False])
+        expect("java-skip", [java.skipped(ctx, root / "perf" / "Bench.java"), java.skipped(ctx, root / "src" / "App.java")], [True, False])
         expect("depth-skip", [depth.skipped(bench, root), depth.skipped(app, root)], [True, False])
         expect("dotnet-skip", [dotnet.generated(ctx, root / "perf" / "Bench.cs"), dotnet.generated(ctx, root / "src" / "App.cs")], [True, False])
         expect("vulture-exclude", "perf/*" in deadcode.PYTHON_EXCLUDES, True)

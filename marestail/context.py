@@ -82,6 +82,11 @@ class Context:
     def rust_root(self) -> Path:
         return self.root / self.rust("root", ".")
 
+    def java(self, key: str, default=None):
+        return self.config.get("java", key, default)
+
+    def java_root(self) -> Path:
+        return self.root / self.java("root", ".")
 
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)

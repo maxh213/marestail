@@ -16,7 +16,7 @@ TS_KINDS = ["files", "exports", "types"]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + java_findings(ctx)
     if ctx.scoped:
         findings = [f for f in findings if ctx.in_scope(f.split(":")[0])]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
@@ -126,6 +126,20 @@ def rust_findings(ctx: Context) -> list[str]:
     if error:
         return [f"rust deadcode scanner failed: {error}"]
     return [f"{rust.rel(ctx, e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
+
+
+def java_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("java") is None:
+        return []
+    from marestail import java
+
+    files = java.sources(ctx)
+    if not files:
+        return []
+    data, error = java.scan(ctx, "dead", files)
+    if error:
+        return [f"java deadcode scanner failed: {error}"]
+    return [f"{e['file']}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
 
 
 def elixir_findings(ctx: Context) -> list[str]:

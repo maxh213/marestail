@@ -20,7 +20,7 @@ MARKUP = re.compile(r"<!--|\{#")
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + markup_findings(ctx)
+    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + java_findings(ctx) + markup_findings(ctx)
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -142,6 +142,19 @@ def rust_findings(ctx: Context) -> list[str]:
         return [f"rust comment scanner failed: {error}"]
     return [f"{rust.rel(ctx, c['file'])}:{c['line']} comment: {c['text']}" for c in data]
 
+
+def java_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("java") is None:
+        return []
+    paths = files(ctx, (".java",))
+    if not paths:
+        return []
+    from marestail import java
+
+    data, error = java.scan(ctx, "comments", paths)
+    if error:
+        return [f"java comment scanner failed: {error}"]
+    return [f"{c['file']}:{c['line']} comment: {c['text']}" for c in data]
 
 
 def markup_findings(ctx: Context) -> list[str]:
