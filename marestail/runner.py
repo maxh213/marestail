@@ -278,9 +278,9 @@ def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback
         after = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
         if after == before:
             print(f"   {note.stem}: benches unchanged")
-            return ""
+            return feedback
         print(f"   {note.stem}: benches changed; stale samples dropped, re-authoring")
-        feedback = "Benches changed in the previous authoring round; samples taken before the change were dropped."
+        feedback = (feedback + "\n\n" if feedback else "") + "Benches changed in the previous authoring round; samples taken before the change were dropped."
     return feedback
 
 
