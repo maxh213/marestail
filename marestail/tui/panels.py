@@ -168,12 +168,17 @@ def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoSt
     worker = repo.worker
     if worker is None:
         if repo.alive:
-            label = "in gate" if repo.gate_activity is not None else "between steps"
+            if repo.gate_activity is not None:
+                label = f"in gate: {repo.gate_activity}"
+            elif repo.runner_activity:
+                label = f"runner: {repo.runner_activity}"
+            else:
+                label = "between steps"
             text = f"{GLYPH_RUNNING} {label}"
             if selected:
                 put(win, y, x, text.ljust(width)[:width], state.theme.selected)
                 return
-            put(win, y, x, text, state.theme.worker)
+            put(win, y, x, text[:width], state.theme.worker)
             return
         put(win, y, x, f"{GLYPH_IDLE} idle", state.theme.idle)
         return

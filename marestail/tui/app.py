@@ -11,7 +11,7 @@ MIN_W = 70
 MIN_H = 20
 TICK_MS = 125
 LEGEND = [
-    ("⚘", "running worker / between steps"),
+    ("⚘", "running: worker, gate, or runner work"),
     ("✿", "step done"),
     ("✶", "bounced by a judge"),
     ("✔", "passed the judge"),

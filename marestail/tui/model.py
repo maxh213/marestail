@@ -44,6 +44,7 @@ class RepoState:
     alive: bool = False
     tail_lines: list[str] = field(default_factory=list)
     gate_activity: str | None = None
+    runner_activity: str | None = None
 
 
 @dataclass

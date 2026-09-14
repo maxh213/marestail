@@ -60,7 +60,19 @@ def collect_repo(root: Path) -> RepoState:
         state.tail_lines = transcript_tail(real)
         if state.worker is not None:
             state.worker.tail_lines = state.tail_lines
+        elif state.gate_activity is None:
+            state.runner_activity = latest_runner_line(log_path)
     return state
+
+
+def latest_runner_line(log_path: Path | None) -> str | None:
+    if log_path is None:
+        return None
+    try:
+        lines = [line.strip() for line in log_path.read_text(errors="ignore").splitlines() if line.strip()]
+    except OSError:
+        return None
+    return lines[-1] if lines else None
 
 
 def collect_fleet(roots: list[Path]) -> Fleet:
