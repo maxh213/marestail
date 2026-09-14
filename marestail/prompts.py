@@ -30,10 +30,14 @@ def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, repor
         parts.append(section("Gate report", gate_report))
     if trees:
         parts.append(section("Trees", trees))
-    parts += [
-        section("Handoffs so far", handoffs(config, task_name)),
-        section("Verdict", verdict_instructions(report, judge)),
-    ]
+    parts.append(section("Handoffs so far", handoffs(config, task_name)))
+    if judge.name == "perf":
+        parts.append(section("Benches frozen", (
+            "`perf/` is frozen in this phase and the runner has already taken every missing sample; any edit you make to `perf/` "
+            "is discarded. If a bench is missing or broken, write `VERDICT: AUTHOR` as your first line to return to the authoring "
+            "phase. Otherwise analyse the measurements and write your verdict."
+        )))
+    parts.append(section("Verdict", verdict_instructions(report, judge)))
     if feedback:
         parts.append(section("Why your verdict was rejected", feedback))
     return "\n\n".join(parts)
@@ -124,3 +128,24 @@ def bounce_choices(judge: Judge) -> str:
         "`VERDICT: BOUNCE <role>` to send it to a different one, for example `VERDICT: BOUNCE specifier` when the "
         "defect is in the feature file or the QA procedure rather than the code."
     )
+
+
+def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, note: Path, feedback: str = "") -> str:
+    parts = [
+        role_text("perf"),
+        section("Task", task.read_text()),
+        section("Specification", spec_listing(config, task_name)),
+        section("Handoffs so far", handoffs(config, task_name)),
+    ]
+    if trees:
+        parts.append(section("Trees", trees))
+    parts.append(section("Authoring", (
+        "This is the authoring phase: `perf/` is editable now and frozen afterwards. Look at the diff since the task's start "
+        "commit and make sure every endpoint and function the task added or changed is measured by a `perf/bench_*` script, "
+        "extending or creating benches as needed and keeping every existing target. Do not take samples: the runner measures "
+        "between the phases. If the benches already cover the diff, change nothing. Write one short paragraph on what you "
+        f"changed (or `nothing`) to {note}. Edit nothing outside `perf/`."
+    )))
+    if feedback:
+        parts.append(section("Earlier feedback", feedback))
+    return "\n\n".join(parts)

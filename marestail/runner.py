@@ -16,6 +16,8 @@ from marestail.config import Config
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
 from marestail.perf import review as perf_review
+from marestail.perf import samples as perf_samples
+from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
 from marestail.report import render
@@ -175,12 +177,24 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
 def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
     gate_report, gate_ok = gate_for(judge.tier)
     feedback = ""
+    author_left = 3
     for attempt in attempts(state.retries):
         report = state.next_report(judge.name)
         print(f"== {judge.name} ({report.stem}) attempt {attempt}")
         with measuring(state, judge) as session:
+            if judge.name == "perf" and gate_ok and session is not None:
+                if author_left > 0:
+                    feedback = author_phase(state, judge, session, feedback)
+                fill_samples(state, session)
             outcome, feedback = judge_attempt(state, judge, report, (gate_report, gate_ok), session, feedback)
         if outcome is not None:
+            if judge.name == "perf" and outcome[0] == "AUTHOR":
+                if author_left > 0:
+                    author_left -= 1
+                    feedback = "You asked for an authoring round; benches are editable again in the authoring phase."
+                else:
+                    feedback = "No authoring rounds left; benches stay frozen. Write PASS or BOUNCE with the benches as they are."
+                continue
             return outcome
     shown = "unlimited" if state.retries <= 0 else str(state.retries)
     return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
@@ -206,15 +220,19 @@ def judge_attempt(
     trees = perf_trees.prompt_section(state.config, session) if session else ""
     prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback)
     invoke(state, report.stem, prompt)
-    discard_edits(state.config, keep=report, writes=judge.writes)
+    writes = () if judge.name == "perf" else judge.writes
+    discard_edits(state.config, keep=report, writes=writes)
     blob = ""
     json_path = state.folder / f"{report.stem}.json"
     if json_path.exists():
         blob = json_path.read_text()
+    combined = (report.read_text() if report.exists() else "") + "\n" + blob
+    if judge.name == "perf" and re.search(r"^\s*VERDICT:\s*AUTHOR\b", combined, re.IGNORECASE | re.MULTILINE):
+        return ("AUTHOR", None, ""), feedback
     parsed = parse_verdict(report, blob)
     if parsed is None:
         print(f"{judge.name} wrote no verdict; retrying")
-        return None, feedback
+        return None, no_verdict_feedback(report)
     if not report.exists():
         verdict, target = parsed
         line = f"VERDICT: {verdict}" + (f" {target}" if target else "")
@@ -233,10 +251,80 @@ def judge_attempt(
             return None, problems
         for path in perf_hygiene.discard_scratch(state.config.root):
             print(f"   removed perf scratch {path}")
-    stage_writes(state.config, judge.writes)
+    stage_writes(state.config, writes)
     record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
     print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
     return (verdict, target, text), ""
+
+
+def no_verdict_feedback(report: Path) -> str:
+    return (
+        f"Your session produced no verdict I could find: no file at {report} and no line starting `VERDICT:` in your output. "
+        "Write the verdict file yourself, first line `VERDICT: PASS` or `VERDICT: BOUNCE`, "
+        "or print the `VERDICT:` line in your final output."
+    )
+
+
+def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback: str) -> str:
+    config = state.config
+    for round_no in range(1, 4):
+        before = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
+        note = state.folder / f"perf-author-{round_no}.md"
+        trees = perf_trees.prompt_section(config, session)
+        invoke(state, note.stem, prompts.perf_author_prompt(config, state.task, state.task_name, trees, note, feedback))
+        discard_edits(config, keep=note, writes=judge.writes)
+        stage_writes(config, judge.writes)
+        record_staged(config, f"{note.stem} benches", judge.name, agent_label(state))
+        after = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
+        if after == before:
+            print(f"   {note.stem}: benches unchanged")
+            return ""
+        print(f"   {note.stem}: benches changed; stale samples dropped, re-authoring")
+        feedback = "Benches changed in the previous authoring round; samples taken before the change were dropped."
+    return feedback
+
+
+def record_staged(config: Config, message: str, role: str, label: str) -> None:
+    _, staged = run(["git", "diff", "--cached", "--name-only"], cwd=config.root)
+    if staged.strip():
+        run(["git", "commit", "-q", "-m", stamped(f"{message}\n\nBy {role}.", label)], cwd=config.root)
+
+
+def fill_samples(state: Run, session: perf_trees.Session) -> None:
+    config = state.config
+    benches = perf_review.bench_scripts(config)
+    if not benches:
+        return
+    policy = perf_settings.policy(config)
+    stamps = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in benches}
+    for bench, stamp in stamps.items():
+        dropped = perf_samples.drop_stale(config, bench, stamp)
+        if dropped:
+            print(f"   dropped {dropped} stale {bench} samples")
+    records = perf_review.load_records(config)
+    for tree in session.trees:
+        for bench in benches:
+            have = {
+                record["sample"]
+                for record in records
+                if record["script"] == bench and record["tree"] == tree.name and record.get("fingerprint") == stamps[bench]
+            }
+            missing = policy.min_runs - len(have)
+            if missing <= 0:
+                continue
+            database = None
+            if any(record.get("db") for record in records if record["script"] == bench):
+                database, problem = perf_db.for_run(config)
+                if database is None:
+                    print(f"   fill_samples: {problem}")
+                    continue
+            print(f"   filling {bench} on {tree.name}: {missing} sample(s)")
+            start = max(have, default=0)
+            for number in range(start + 1, start + 1 + missing):
+                problem = perf_samples.take_sample(config, bench, tree, number, (database, stamps[bench]))
+                if problem:
+                    print(f"   fill_samples: {problem}")
+                    break
 
 
 def review_measurements(state: Run, session: perf_trees.Session, report: Path, verdict: str, text: str) -> str:
@@ -458,7 +546,7 @@ def invoke(state: Run, label: str, prompt: str) -> None:
         return
     for _ in range(LIMIT_WAITS):
         started = time.time()
-        code, output = run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600)
+        code, output = run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600, env=agent_env(state))
         (state.folder / f"{label}.json").write_text(output)
         if not rate_limited(code, output):
             print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {summary(output)}")
@@ -540,6 +628,12 @@ def effort_name(state: Run) -> str:
     if backend == "grok":
         return grok_effort(state) or ""
     return state.effort or ""
+
+
+def agent_env(state: Run) -> dict[str, str]:
+    if resolve_agent(state) == "claude":
+        return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
+    return {}
 
 
 def agent_command(state: Run) -> list[str]:
