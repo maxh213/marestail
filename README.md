@@ -30,7 +30,7 @@ The Java gates drive Maven 3.9+ (the repo's `./mvnw` when there is one, else `mv
 
 Acceptance is the same in every language: whatever command `[qa] cmd` names, run from `[qa] cwd`.
 
-Tiers: `fast` (everything quick), `sonar` (adds the Sonar quality gate), `full` (adds mutation testing), `qa`.
+Tiers: `fast` (tests with coverage, CRAP, lint, the dependency rules, comments, dead code, depth, docs and `py.runtime`; a language's gates run only when its section is in `marestail.toml`), `sonar` (fast plus the Sonar quality gate), `full` (sonar plus mutation testing), `qa` (fast plus the acceptance command, with no Sonar and no mutation), `all` (every gate). `marestail gate` with no `--tier` runs `fast` on the whole repo. The Stop hook runs `fast` on the diff against `[git] base` plus the focus paths, and blocks at most five stops per session before letting the agent finish.
 
 `py.runtime` exists because every other gate runs in the repo's virtualenv, which is not what production runs. It reads the version off the last `FROM` in the Dockerfile (override with `[python] deploy_files`, or state it outright with `[python] runtime = "3.12"`), requires every version the tooling asserts to equal it, and parses each source at that version. Keeping mypy's `python_version` honest is half the point: typeshed then rejects stdlib names the shipped interpreter does not have. It skips when nothing declares a deployed interpreter.
 
@@ -94,14 +94,16 @@ Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-jso
 | Step | Kind | Gate | Does |
 |---|---|---|---|
 | specifier | worker | none | Gherkin scenarios and a QA procedure from the task |
-| critic | judge | none | judges the spec against the task; bounces to a fresh specifier until it passes; then a human approval pause |
+| critic | judge | none | judges the spec against the task; bounces to a fresh specifier until it passes; then a human approval pause, skipped by `--auto` or when stdin is not a terminal |
 | coder | worker | fast | implements; must trace every scenario to a test in its handoff |
 | cleaner | worker | sonar | readability without comments, CRAP, Sonar |
 | architect | worker | sonar | draws module boundaries, moves code, tightens the dependency contracts |
-| practices | judge | none | reviews the diff against the repo's `guidance/*.md` rulebooks; bounces to a fresh coder only for a cited rule violation in code the task touched |
+| practices | judge | none | reviews the diff against the repo's `guidance/*.md` rulebooks; bounces to a fresh coder only for a cited rule violation in code the task touched; skipped when the repo has no `guidance/*.md` |
 | perf | judge | none | benchmarks every `perf/` bench on the start commit and HEAD; flags degradations and improvements; bounces to a fresh coder only for a fix inside the spec |
-| hardener | judge | full | judges the diff and the mutation report; bounces to a fresh coder until it passes |
+| hardener | judge | full | judges the diff and the full-tier gate report, mutation included; bounces to a fresh coder, or to the specifier when a scenario itself is wrong, until it passes |
 | qa | worker | qa | turns the QA procedure into an executable end-to-end test |
+
+The Gate column is the tier a worker is told to run and must pass before its handoff is accepted, and the tier whose report a judge reads before ruling; `none` means the step runs no gate. Under `marestail run` every gate follows the run's `--scope`: a default run gates the whole repo, and `--scope changed` or `--scope hard` narrows every tier the same way.
 
 Workers edit and commit. Judges write one verdict file and nothing else (perf may also write `perf/**`); the runner discards any other edit a judge makes. Handoff and verdict files are runtime state under `.marestail/`, never committed: when a worker passes verification the runner folds its handoff into that role's commit message, and a judge's verdict becomes an empty commit carrying the verdict. A worker that force-adds a gitignored path (typical: `features/`, `qa/`, `.marestail/handoffs/`) has that path dropped from the commit before the handoff is folded; the working copy is kept. Every commit a run produces starts with the model and effort that produced it, `[claude-opus-5 high] coder handoff`; the runner rewrites the subject of any commit a worker made without one, so the stamp is deterministic rather than something the agent has to remember. With no `--model` the backend name stands in for it, and with no effort the stamp is the model alone. `git log` on the branch is the record, and a role in a fresh clone reads its predecessors from there. When a pipeline completes, the task's handoff files are archived under `.marestail/runs/`. Every role runs in a fresh session with a short prompt: the role file, the task, the earlier handoffs, and how to finish. Judges also get the gate report.
 
