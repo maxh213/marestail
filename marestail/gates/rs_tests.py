@@ -64,7 +64,7 @@ def merge(ctx: Context) -> dict:
 def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     findings = []
     for file, data in sorted(coverage["files"].items()):
-        if ctx.scope_changed and file not in ctx.changed:
+        if not ctx.in_scope(file):
             continue
         missing = sorted(int(number) for number, hits in data["lines"].items() if hits == 0)
         findings.extend(f"{file}:{number} not covered" for number in missing)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
-BACKENDS = ("claude", "grok", "agy", "cursor-agent", "kilo")
+BACKENDS = ("claude", "grok", "agy", "cursor-agent", "kilo", "kimi")
 STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")
@@ -214,13 +214,23 @@ def transcript_conversation(root: Path, max_lines: int = 200, window: int = CONV
     return entries[-max_lines:]
 
 
+def claude_homes() -> list[Path]:
+    work = os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR") or "~/.claude-work"
+    homes = [Path.home() / ".claude", Path(work).expanduser()]
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        homes.append(Path(configured).expanduser())
+    return homes
+
+
 def live_transcript(root: Path) -> Path | None:
     slug = str(root).replace("/", "-")
-    projects = Path.home() / ".claude" / "projects" / slug
-    try:
-        logs = [p for p in projects.iterdir() if p.is_file() and p.suffix == ".jsonl"]
-    except OSError:
-        return None
+    logs = []
+    for home in claude_homes():
+        try:
+            logs.extend(p for p in (home / "projects" / slug).iterdir() if p.is_file() and p.suffix == ".jsonl")
+        except OSError:
+            continue
     if not logs:
         return None
     newest = max(logs, key=dir_mtime)
@@ -438,7 +448,7 @@ def agent_process(pid: int, elapsed: int, tokens: list[str]) -> Process | None:
 
 def model_of(tokens: list[str]) -> str:
     return next(
-        (tokens[index + 1] for index, token in enumerate(tokens[:-1]) if token == "--model"),
+        (tokens[index + 1] for index, token in enumerate(tokens[:-1]) if token in ("--model", "-m")),
         "",
     )
 

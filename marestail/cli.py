@@ -17,8 +17,13 @@ HOOK_BLOCK_LIMIT = 5
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["route"]:
+        from marestail import route
+
+        return route.command(arguments[1:])
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     return args.handler(args)
 
 
@@ -31,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
+    commands.add_parser("route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False)
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
@@ -72,7 +78,7 @@ def perf_run_command(args: argparse.Namespace) -> int:
 
 def add_gate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tier", choices=["fast", "sonar", "full", "qa", "all"], default="fast")
-    parser.add_argument("--scope", choices=["all", "changed"], default=None)
+    parser.add_argument("--scope", choices=["all", "changed", "hard"], default=None, help="all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths")
     parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
     parser.add_argument("--only", help="comma separated gate names")
     parser.add_argument("--json", action="store_true")
@@ -85,9 +91,9 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="stop", default=None)
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
-    parser.add_argument("--scope", choices=["all", "changed"], default=None, help="soft scope: gate the diff against [git] base plus [focus] paths from marestail.toml instead of the whole repo; workers may still edit any file, and it joins the diff")
+    parser.add_argument("--scope", choices=["all", "changed", "hard"], default=None, help="changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from the smallest supporting edits")
     parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
-    parser.add_argument("--model", default=None)
+    parser.add_argument("--model", default=None, help="the model, or dandelion/route or dandelion/route-best to ask dandelion before every session")
     parser.add_argument(
         "--retries",
         type=int,
@@ -134,7 +140,8 @@ def gate_command(args: argparse.Namespace) -> int:
     if focus and args.scope == "all":
         sys.stderr.write("--focus cannot be combined with --scope all\n")
         return 2
-    results, ctx = run_gates_with_context(args.tier, args.scope == "changed" or bool(focus), parse_only(args.only), focus)
+    hard = args.scope == "hard"
+    results, ctx = run_gates_with_context(args.tier, args.scope == "changed" or hard or bool(focus), parse_only(args.only), focus, hard)
     if not results:
         sys.stderr.write(f"no gate ran: nothing in the {args.tier} tier matches --only and marestail.toml\n")
         return 2
@@ -142,15 +149,18 @@ def gate_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for result in results) else 1
 
 
-def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None) -> list[Result]:
-    results, _ = run_gates_with_context(tier, scope_changed, only, focus)
+def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False) -> list[Result]:
+    results, _ = run_gates_with_context(tier, scope_changed, only, focus, hard)
     return results
 
 
-def run_gates_with_context(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None) -> tuple[list[Result], context_module.Context]:
+def run_gates_with_context(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False) -> tuple[list[Result], context_module.Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
-    ctx = context_module.build(config, scope_changed, resolve_focus(config, focus or set()))
+    focused = resolve_focus(config, focus or set())
+    if hard:
+        focused |= hook_focus(config)
+    ctx = context_module.build(config, scope_changed, focused, hard)
     results = []
     for gate in gates_module.select(tier, only):
         if gate.section and config.section(gate.section) is None:
@@ -189,6 +199,15 @@ def hook_focus(config: config_module.Config) -> set[str]:
     return found
 
 
+def hook_scope(config: config_module.Config) -> tuple[set[str], bool]:
+    found = hook_focus(config)
+    for path in filter(None, os.environ.get("MARESTAIL_FOCUS", "").split(os.pathsep)):
+        entry = locate_focus(config, path)
+        if entry is not None:
+            found.add(entry)
+    return found, os.environ.get("MARESTAIL_SCOPE") == "hard"
+
+
 def scope_line(ctx: context_module.Context) -> str | None:
     return ctx.scope_summary() if ctx.scoped else None
 
@@ -218,8 +237,8 @@ def hook_command(args: argparse.Namespace) -> int:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
-    results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
-    is_agy = "conversationId" in payload
+    results, ctx = run_gates_with_context("fast", True, None, *hook_scope(config))
+    is_agy ="conversationId" in payload
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
         if is_agy:
@@ -255,7 +274,7 @@ def cursor_hook_command(payload: dict) -> int:
     previous = Path.cwd()
     try:
         os.chdir(config.root)
-        results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
+        results, ctx = run_gates_with_context("fast", True, None, *hook_scope(config))
     finally:
         os.chdir(previous)
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT or loop_count >= HOOK_BLOCK_LIMIT:
@@ -287,7 +306,7 @@ def grok_hook_command(payload: dict) -> int:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
-    results, ctx = run_gates_with_context("fast", True, None, hook_focus(config))
+    results, ctx = run_gates_with_context("fast", True, None, *hook_scope(config))
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
         grok_remember_hook(config.work, session_id, turn_id, True, "")

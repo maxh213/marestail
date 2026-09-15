@@ -5,12 +5,23 @@ from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 
 ROLES_DIR = Path(__file__).resolve().parent.parent / "roles"
+WORKER_SCOPE = (
+    "This run has a hard scope: {paths}. Make the task's change inside these paths. Outside them, make only the smallest "
+    "supporting edits the change cannot work without, such as a caller, an import or a test; refactor, rename, reformat and "
+    "clean up nothing outside them, even where your role asks for it. The gates measure only these paths."
+)
+JUDGE_SCOPE = (
+    "This run has a hard scope: {paths}. The gate report covers only these paths, and code outside them is not the task's to "
+    "improve. Outside them, bounce only when the diff goes beyond the smallest supporting edits the change needs, such as a "
+    "refactor, a rename or a cleanup, naming the file and line."
+)
 
 
-def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "", gate_flags: str = "") -> str:
+def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "", gate_flags: str = "", hard_focus: set[str] | None = None) -> str:
     parts = [
         role_text(worker.name),
         section("Task", task.read_text()),
+        *hard_scope(hard_focus, WORKER_SCOPE),
         section("Specification files", spec_listing(config, task_name)),
         section("Handoffs so far", handoffs(config, task_name)),
         section("Finishing", finishing(config, worker, task_name, report, label, gate_flags)),
@@ -20,11 +31,12 @@ def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, re
     return "\n\n".join(parts)
 
 
-def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "", feedback: str = "") -> str:
+def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "", feedback: str = "", hard_focus: set[str] | None = None) -> str:
     parts = [
         role_text(judge.name),
         section("Task", task.read_text()),
-        section("Specification", spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)),
+        *hard_scope(hard_focus, JUDGE_SCOPE),
+        section("Specification",spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)),
     ]
     if gate_report:
         parts.append(section("Gate report", gate_report))
@@ -49,6 +61,12 @@ def role_text(name: str) -> str:
 
 def section(title: str, body: str) -> str:
     return f"# {title}\n{body.strip()}"
+
+
+def hard_scope(focus: set[str] | None, template: str) -> list[str]:
+    if not focus:
+        return []
+    return [section("Scope", template.format(paths=", ".join(f"`{path}`" for path in sorted(focus))))]
 
 
 def spec_listing(config: Config, task_name: str) -> str:

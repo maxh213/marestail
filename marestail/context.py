@@ -19,6 +19,7 @@ class Context:
     changed: set[str] = field(default_factory=set)
     focus: set[str] = field(default_factory=set)
     changed_lines_map: dict[str, set[int]] = field(default_factory=dict)
+    hard: bool = False
 
     @property
     def root(self) -> Path:
@@ -34,6 +35,8 @@ class Context:
 
     @property
     def scope_name(self) -> str:
+        if self.hard:
+            return "hard"
         return "changed" if self.scoped else "all"
 
     def python(self, key: str, default=None):
@@ -135,7 +138,9 @@ class Context:
     def scope_summary(self) -> str:
         if not self.scoped:
             return "all"
-        total = sum(len(lines) for lines in self.changed_lines_map.values())
+        if self.hard:
+            return "hard: " + ", ".join(sorted(self.focus))
+        total =sum(len(lines) for lines in self.changed_lines_map.values())
         summary = f"changed ({len(self.changed)} files, {total} lines)"
         if self.focus:
             summary += " + focus: " + ", ".join(sorted(self.focus))
@@ -167,9 +172,13 @@ class Context:
         return MutationScope("scoped", files) if files else MutationScope("skip", [])
 
 
-def build(config: Config, scope_changed: bool, focus: set[str] | None = None) -> Context:
-    base = config.get("git", "base", "origin/master")
+def build(config: Config, scope_changed: bool, focus: set[str] | None = None, hard: bool = False) -> Context:
     focused = focus or set()
+    if hard:
+        if not focused:
+            raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
+        return Context(config=config, scope_changed=True, focus=focused, hard=True)
+    base = config.get("git", "base", "origin/master")
     scoped = scope_changed or bool(focused)
     changed = changed_files(config.root, base) if scoped else set()
     lines = changed_lines(config.root, base) if scoped else {}

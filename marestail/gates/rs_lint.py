@@ -41,7 +41,7 @@ def clippy_findings(output: str, ctx: Context) -> list[str]:
         if not spans:
             continue
         where = rust.rel(ctx, spans[0]["file_name"])
-        if ctx.scope_changed and where not in ctx.changed:
+        if not ctx.in_scope(where):
             continue
         rule = (message.get("code") or {}).get("code") or message["level"]
         finding = f"{where}:{spans[0]['line_start']} {rule}: {message['message']}"
@@ -59,4 +59,4 @@ def format_findings(ctx: Context) -> list[str]:
     if code != 0 and not paths:
         return [f"cargo fmt --check failed: {output.strip()[-300:]}"]
     relative = [rust.rel(ctx, path) for path in paths]
-    return [f"{path}:1 not rustfmt formatted; run cargo fmt" for path in relative if not ctx.scope_changed or path in ctx.changed]
+    return [f"{path}:1 not rustfmt formatted; run cargo fmt" for path in relative if ctx.in_scope(path)]

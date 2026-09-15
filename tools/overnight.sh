@@ -44,7 +44,7 @@ for task in "$@"; do
   minutes=$(( ($(date +%s) - start) / 60 ))
   {
     echo "- exit $code after ${minutes} min, HEAD $(git rev-parse --short HEAD)"
-    grep -E "^== |finished in|verdict" "$LOG" | tail -n 40 | sed 's/^/    /'
+    grep -E "^== |finished in|verdict|dandelion/route" "$LOG" | tail -n 40 | sed 's/^/    /'
     sed -n '/^## Config changes/,/^## Performance changes/{/^## Performance changes/!p;}' "$LOG" | tail -n 60 | sed 's/^/    /'
     sed -n '/^## Performance changes/,$p' "$LOG" | tail -n 40 | sed 's/^/    /'
     echo

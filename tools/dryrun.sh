@@ -14,5 +14,5 @@ mkdir guidance && printf '# TypeScript practices\n\n- TS-1: prefer union types o
 git add -A && git commit -qm init
 cp "$PLAN" "$WORK/plan.txt"
 export PATH="$HERE/../bin:$PATH" STUB_PLAN="$WORK/plan.txt" MARESTAIL_CLAUDE="$HERE/stub-claude"
-marestail run tasks/t.md --auto
+marestail run tasks/t.md --auto ${MODEL:+--model "$MODEL"} ${SCOPE:+--scope "$SCOPE"} ${FOCUS:+--focus "$FOCUS"}
 echo "remaining plan lines: $(wc -l < "$WORK/plan.txt")"

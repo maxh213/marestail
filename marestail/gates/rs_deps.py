@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
 def layer_findings(ctx: Context, edges: list[dict]) -> list[str]:
     findings = []
     for edge in edges:
-        if ctx.scope_changed and edge["from"] not in ctx.changed:
+        if not ctx.in_scope(edge["from"]):
             continue
         for layer in load_layers(ctx):
             if under(edge["from"], layer["from"]) and any(under(edge["to"], ban) for ban in layer["forbid"]):
@@ -50,7 +50,7 @@ def cycle_findings(ctx: Context, edges: list[dict]) -> list[str]:
         graph.setdefault(edge["from"], []).append(edge)
     findings = []
     for component in components(graph):
-        if ctx.scope_changed and not set(component) & ctx.changed:
+        if not any(ctx.in_scope(path) for path in component):
             continue
         first = min(component)
         edge = next(e for e in graph[first] if e["to"] in component)

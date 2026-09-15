@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from marestail import audit, freeze, practices, prompts
+from marestail import route as dandelion
 from marestail import config as config_module
 from marestail.cli import hook_focus, resolve_focus, run_gates
 from marestail.config import Config
@@ -58,6 +59,10 @@ class Run:
     perf_changes: str = ""
     scope_changed: bool = False
     focus: set[str] = field(default_factory=set)
+    hard: bool = False
+    route: str | None = None
+    account_env: dict[str, str] = field(default_factory=dict)
+    labels: set[str] = field(default_factory=set)
 
     @property
     def task_name(self) -> str:
@@ -67,10 +72,15 @@ class Run:
     def gate_flags(self) -> str:
         if not self.scope_changed:
             return ""
-        return " --scope changed" + "".join(f" --focus {path}" for path in sorted(self.focus))
+        scope = "hard" if self.hard else "changed"
+        return f" --scope {scope}" + "".join(f" --focus {path}" for path in sorted(self.focus))
+
+    @property
+    def hard_focus(self) -> set[str] | None:
+        return self.focus if self.hard else None
 
     def gates(self, tier: str):
-        return run_gates(tier, self.scope_changed, None, self.focus)
+        return run_gates(tier, self.scope_changed, None, self.focus, self.hard)
 
     @property
     def folder(self) -> Path:
@@ -101,11 +111,24 @@ def run_pipeline(
     config = config_module.load(Path.cwd())
     if model is None:
         model = config.get("agent", "model")
-    if effort is None:
+    route = model if dandelion.is_routed(model) else None
+    if route:
+        if agent or effort:
+            raise SystemExit(f"--model {route} picks the backend and effort before every session; drop --agent and --effort")
+        dandelion.require()
+        model = None
+    elif effort is None:
         effort = config.get("agent", "effort")
-    scope_changed = scope == "changed" or bool(focus)
-    focused = (resolve_focus(config, set(focus or [])) | hook_focus(config)) if scope_changed else set()
-    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort, scope_changed=scope_changed, focus=focused)
+    paths = [path for path in focus or [] if path.strip()]
+    if scope == "all" and paths:
+        raise SystemExit("--focus cannot be combined with --scope all")
+    hard = scope == "hard"
+    scope_changed = scope in ("changed", "hard") or bool(paths)
+    focused = (resolve_focus(config, set(paths)) | hook_focus(config)) if scope_changed else set()
+    if hard and not focused:
+        raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
+    share_scope(scope_changed, hard, focused)
+    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort, scope_changed=scope_changed, focus=focused, hard=hard, route=route)
     perf_trees.record_start(config, state.task_name)
     outcome = 0
     for step in window(start, stop):
@@ -123,6 +146,13 @@ def run_pipeline(
     if state.perf_changes:
         print(state.perf_changes)
     return outcome
+
+
+def share_scope(scope_changed: bool, hard: bool, focus: set[str]) -> None:
+    if not scope_changed:
+        return
+    os.environ["MARESTAIL_SCOPE"] = "hard" if hard else "changed"
+    os.environ["MARESTAIL_FOCUS"] = os.pathsep.join(sorted(focus))
 
 
 def run_step(state: Run, step: Step) -> bool:
@@ -178,12 +208,12 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
-        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags)
+        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags, state.hard_focus)
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
             saved = drop_ignored_since(state.config, before)
-            fold_handoff(state.config, worker.name, report, before, agent_label(state))
+            fold_handoff(state.config, worker.name, report, before, agent_label(state), state.labels)
             restore_files(state.config, saved)
             return True
         feedback = problems
@@ -235,7 +265,7 @@ def judge_attempt(
 ) -> tuple[tuple[str, str | None, str] | None, str]:
     gate_report, gate_ok = gate
     trees = perf_trees.prompt_section(state.config, session) if session else ""
-    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback)
+    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus)
     before = head(state.config)
     invoke(state, report.stem, prompt)
     writes = () if judge.name == "perf" else judge.writes
@@ -521,14 +551,14 @@ def restore_files(config: Config, saved: dict[str, bytes]) -> None:
         dest.write_bytes(data)
 
 
-def fold_handoff(config: Config, role: str, report: Path, before: str, label: str) -> None:
+def fold_handoff(config: Config, role: str, report: Path, before: str, label: str, used: set[str] | None = None) -> None:
     body = report.read_text().strip()
     if head(config) == before:
         record_commit(config, f"{role} handoff", body, role, label)
         return
-    stamp_history(config, before, label)
+    stamp_history(config, before, label, used)
     _, original = run(["git", "log", "-1", "--format=%B"], cwd=config.root)
-    message = stamped(strip_byline(original, role), label) + f"\n\n{body}\n\nBy {role}."
+    message = stamped(strip_byline(original, role), label, used) + f"\n\n{body}\n\nBy {role}."
     run(["git", "commit", "--amend", "--allow-empty", "-q", "-m", message], cwd=config.root)
 
 
@@ -544,20 +574,19 @@ def record_commit(config: Config, subject: str, body: str, role: str, label: str
     run(["git", "commit", "--allow-empty", "-q", "-m", message], cwd=config.root)
 
 
-def stamped(message: str, label: str) -> str:
-    prefix = f"[{label}]"
-    if not label or message.startswith(prefix):
+def stamped(message: str, label: str, used: set[str] | None = None) -> str:
+    if not label or any(message.startswith(f"[{known}]") for known in {label, *(used or set())}):
         return message
-    return f"{prefix} {message}"
+    return f"[{label}] {message}"
 
 
-def stamp_history(config: Config, before: str, label: str) -> None:
+def stamp_history(config: Config, before: str, label: str, used: set[str] | None = None) -> None:
     commits = rev_list(config, before, ["--no-merges"])
     if not label or not commits or commits != rev_list(config, before, []):
         return
     parent = before
     for sha in commits:
-        parent = restamp(config, sha, parent, label)
+        parent = restamp(config, sha, parent, label, used)
     run(["git", "reset", "--hard", "-q", parent], cwd=config.root)
 
 
@@ -566,12 +595,12 @@ def rev_list(config: Config, before: str, options: list[str]) -> list[str]:
     return output.split()
 
 
-def restamp(config: Config, sha: str, parent: str, label: str) -> str:
+def restamp(config: Config, sha: str, parent: str, label: str, used: set[str] | None = None) -> str:
     _, details = run(["git", "log", "-1", "--format=%an%n%ae%n%aI%n%B", sha], cwd=config.root)
     name, email, date, message = details.split("\n", 3)
     author = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date}
     tree = f"{sha}^{{tree}}"
-    _, created = run(["git", "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label)], cwd=config.root, env=author)
+    _, created = run(["git", "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label, used)], cwd=config.root, env=author)
     return created.split()[0]
 
 
@@ -592,68 +621,59 @@ def invoke(state: Run, label: str, prompt: str) -> None:
     state.folder.mkdir(parents=True, exist_ok=True)
     prompt_file = state.folder / f"{label}.prompt.md"
     prompt_file.write_text(prompt)
-    backend = resolve_agent(state)
-    if backend == "grok":
-        invoke_grok(state, label, prompt_file)
-        return
-    if backend == "kilo":
-        invoke_kilo(state, label, prompt)
-        return
-    if backend == "kimi":
-        invoke_kimi(state, label, prompt)
-        return
     for _ in range(LIMIT_WAITS):
+        if state.route:
+            prompt, unrouted = routed(state, prompt)
+            if unrouted:
+                print(f"   {state.route}: {unrouted}; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+                time.sleep(LIMIT_WAIT_SECONDS)
+                continue
+            prompt_file.write_text(prompt)
+        backend = resolve_agent(state)
         started = time.time()
-        code, output = run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600, env=agent_env(state))
+        code, output = run_backend(state, backend, prompt, prompt_file)
         (state.folder / f"{label}.json").write_text(output)
-        if not rate_limited(code, output):
-            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {summary(output)}")
-            return
-        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
-        time.sleep(LIMIT_WAIT_SECONDS)
-    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
-
-
-def invoke_grok(state: Run, label: str, prompt_file: Path) -> None:
-    for _ in range(LIMIT_WAITS):
-        started = time.time()
-        code, output = grok_run(state, prompt_file)
-        (state.folder / f"{label}.json").write_text(output)
-        if grok_always_approve_locked(code, output):
+        if backend == "grok" and grok_always_approve_locked(code, output):
             print(f"   {label}: grok always-approve is locked; cannot run unattended")
             return
-        if not grok_rate_limited(code, output):
-            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {grok_summary(output)}")
+        limited, describe = outcome_readers(backend)
+        if not limited(code, output):
+            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {describe(output)}")
             return
         print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
         time.sleep(LIMIT_WAIT_SECONDS)
     print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
 
 
-def invoke_kilo(state: Run, label: str, prompt: str) -> None:
-    for _ in range(LIMIT_WAITS):
-        started = time.time()
-        code, output = kilo_run(state, prompt)
-        (state.folder / f"{label}.json").write_text(output)
-        if not kilo_rate_limited(code, output):
-            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {kilo_summary(output)}")
-            return
-        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
-        time.sleep(LIMIT_WAIT_SECONDS)
-    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
+def routed(state: Run, prompt: str) -> tuple[str, str]:
+    before = agent_label(state)
+    choice, unrouted = dandelion.choose(str(state.route), state.config.root)
+    if choice is None:
+        return prompt, unrouted
+    state.agent, state.model, state.effort, state.account_env = choice.backend, choice.model, choice.effort, choice.env
+    after = agent_label(state)
+    state.labels.add(after)
+    print(f"   {state.route}: {choice.line}")
+    return prompt.replace(f"[{before}] ", f"[{after}] "), ""
 
 
-def invoke_kimi(state: Run, label: str, prompt: str) -> None:
-    for _ in range(LIMIT_WAITS):
-        started = time.time()
-        code, output = kimi_run(state, prompt)
-        (state.folder / f"{label}.json").write_text(output)
-        if not kimi_rate_limited(code, output):
-            print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {kimi_summary(output)}")
-            return
-        print(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
-        time.sleep(LIMIT_WAIT_SECONDS)
-    print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
+def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:
+    if backend == "grok":
+        return grok_run(state, prompt_file)
+    if backend == "kilo":
+        return kilo_run(state, prompt)
+    if backend == "kimi":
+        return kimi_run(state, prompt)
+    return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600, env=agent_env(state))
+
+
+def outcome_readers(backend: str):
+    readers = {
+        "grok": (grok_rate_limited, grok_summary),
+        "kilo": (kilo_rate_limited, kilo_summary),
+        "kimi": (kimi_rate_limited, kimi_summary),
+    }
+    return readers.get(backend, (rate_limited, summary))
 
 
 def resolve_agent(state: Run) -> str:
@@ -675,11 +695,15 @@ def agent_label(state: Run) -> str:
 def model_name(state: Run) -> str:
     if state.model:
         return state.model
+    if state.route:
+        return state.route
     backend = resolve_agent(state)
     return KILO_DEFAULT_MODEL if backend == "kilo" else backend
 
 
 def effort_name(state: Run) -> str:
+    if state.route and not state.agent:
+        return ""
     backend = resolve_agent(state)
     if backend == "kilo":
         return kilo_variant(state) or ""
@@ -690,8 +714,8 @@ def effort_name(state: Run) -> str:
 
 def agent_env(state: Run) -> dict[str, str]:
     if resolve_agent(state) == "claude":
-        return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
-    return {}
+        return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", **state.account_env}
+    return dict(state.account_env)
 
 
 def agent_command(state: Run) -> list[str]:
