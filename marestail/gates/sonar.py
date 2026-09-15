@@ -67,6 +67,7 @@ def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
         "-e", f"SONAR_TOKEN={creds['token']}",
         "-e", f"SONAR_USER_HOME={root}/.marestail/sonar-cache",
         "-v", f"{root}:{root}",
+        *git_mounts(ctx),
         "-w", root,
         SCANNER_IMAGE,
         f"-Dsonar.projectKey={key}",
@@ -75,6 +76,17 @@ def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
         *java_properties(ctx),
     ]
+
+
+def git_mounts(ctx: Context) -> list[str]:
+    code, output = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ctx.root)
+    lines = output.strip().splitlines()
+    if code != 0 or not lines:
+        return []
+    common = Path(lines[-1]).resolve()
+    if common.is_relative_to(ctx.root.resolve()):
+        return []
+    return ["-v", f"{common}:{common}:ro"]
 
 
 def java_properties(ctx: Context) -> list[str]:
