@@ -21,6 +21,8 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
     copy_if_missing(TEMPLATES / "PERFORMANCE.md", target / "PERFORMANCE.md")
     (target / "guidance").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
+    if uses_csharp(target):
+        copy_if_missing(TEMPLATES / "guidance" / "cs.md", target / "guidance" / "cs.md")
     claude = target / "CLAUDE.md"
     agents = target / "AGENTS.md"
     append_instructions(claude)
@@ -40,6 +42,10 @@ def uses_dotnet(target: Path) -> bool:
         return False
     with config.open("rb") as handle:
         return "dotnet" in tomllib.load(handle)
+
+
+def uses_csharp(target: Path) -> bool:
+    return next(target.rglob("*.csproj"), None) is not None
 
 
 def copy_if_missing(source: Path, destination: Path) -> None:

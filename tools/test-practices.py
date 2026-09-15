@@ -188,6 +188,14 @@ def install_template():
         with quiet():
             install.install(target, gitignore_generated=True)
         expect("gitignore-generated-no-guidance", "guidance/" in (target / ".gitignore").read_text(), False)
+        expect("install-no-csharp-guidance", (target / "guidance" / "cs.md").exists(), False)
+        (target / "src").mkdir()
+        (target / "src" / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        with quiet():
+            install.install(target)
+        csharp = target / "guidance" / "cs.md"
+        expect("install-creates-csharp-guidance", csharp.is_file(), True)
+        expect("install-csharp-guidance-matches", csharp.read_text(), (ROOT / "templates" / "guidance" / "cs.md").read_text())
 
 
 def rulebook_content():
@@ -201,6 +209,13 @@ def rulebook_content():
         expect(f"mentions {needle}", needle in text, True)
 
 
+def csharp_rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "cs.md").read_text()
+    expect("cs-rule-ids", re.findall(r"\*\*CS-(\d+)", text), ["1"])
+    for needle in ["Arrange, Act, Assert", "exactly one action", "blank line", "never by comments"]:
+        expect(f"cs mentions {needle}", needle in text, True)
+
+
 if __name__ == "__main__":
     pipeline_order()
     guidance_files()
@@ -211,4 +226,5 @@ if __name__ == "__main__":
     role_file()
     install_template()
     rulebook_content()
+    csharp_rulebook_content()
     print("practices ok")

@@ -111,7 +111,7 @@ After every worker the runner checks, deterministically: the handoff exists, the
 
 The `practices` judge reviews each task's diff against the per-language rulebooks in the repo's `guidance/` folder (`guidance/ts.md`, `guidance/ruby.md`, …; the file stem names the language). A repo with no `guidance/*.md` is skipped entirely, so the step only runs where a maintainer has added rulebooks, and `[practices] enabled = false` turns it off per repo. It bounces to the coder only for a clear violation of a numbered rule in a line the task added or changed, citing the rule id and file:line; violations in pre-existing code are listed informationally under `## Pre-existing` on a PASS. React and Next.js rules apply only where that stack is present.
 
-`marestail install` places `guidance/ts.md`, the curated TypeScript/React/Next.js rulebook (rules numbered `TS-1`…). Guidance files are maintainer policy: committed, never gitignored, and frozen (`guidance/**` in `freeze.SPEC`), so no agent can weaken a rulebook during a run. Other languages get no shipped rulebook; write your own `guidance/<lang>.md` with one numbered rule per line.
+`marestail install` places `guidance/ts.md`, the curated TypeScript/React/Next.js rulebook (rules numbered `TS-1`…), and in a repo with a `.csproj` `guidance/cs.md`, whose one rule so far (`CS-1`) requires every test to follow Arrange, Act, Assert. Guidance files are maintainer policy: committed, never gitignored, and frozen (`guidance/**` in `freeze.SPEC`), so no agent can weaken a rulebook during a run. Other languages get no shipped rulebook; write your own `guidance/<lang>.md` with one numbered rule per line.
 
 `[practices]` keys: `enabled` (default `true`).
 
