@@ -12,3 +12,5 @@ tools/samples/**/.sonarqube/
 tools/samples/**/TestResults/
 StrykerOutput/
 .sonarqube/
+PROMPT-*.md
+PROGRESS-*.md
