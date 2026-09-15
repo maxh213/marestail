@@ -288,7 +288,7 @@ def no_verdict_feedback(report: Path) -> str:
 def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback: str) -> str:
     config = state.config
     for round_no in range(1, 4):
-        before = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
+        benches = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
         note = state.folder / f"perf-author-{round_no}.md"
         trees = perf_trees.prompt_section(config, session)
         before = head(config)
@@ -298,7 +298,7 @@ def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback
         record_staged(config, f"{note.stem} benches", judge.name, agent_label(state))
         restore_files(config, drop_ignored_since(config, before))
         after = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
-        if after == before:
+        if after == benches:
             print(f"   {note.stem}: benches unchanged")
             return feedback
         print(f"   {note.stem}: benches changed; stale samples dropped, re-authoring")
