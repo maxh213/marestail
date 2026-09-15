@@ -1,3 +1,4 @@
+import re
 from fnmatch import fnmatch
 
 from marestail.config import Config
@@ -22,6 +23,8 @@ GATE_CONFIG = [
     ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
+CSPROJ_ADDITION = re.compile(r'^\+\s*<(PackageReference|InternalsVisibleTo) Include="[^"]+"(?: Version="[^"]+")? />\s*$')
+CSPROJ_WRAPPER = re.compile(r"^\+\s*(<ItemGroup>|</ItemGroup>)?\s*$")
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
     "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json", ".java-layers.json"],
@@ -32,6 +35,14 @@ def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
     allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
     return [path for path in paths if matches_any(path, frozen) and not matches_any(path, allowed)]
+
+
+def tolerated(path: str, diff: str) -> bool:
+    if not matches(path, "**/*.csproj"):
+        return False
+    changes = [line for line in diff.splitlines() if line[:1] in ("+", "-") and not line.startswith(("+++", "---"))]
+    additions = [line for line in changes if CSPROJ_ADDITION.match(line)]
+    return bool(additions) and all(CSPROJ_ADDITION.match(line) or CSPROJ_WRAPPER.match(line) for line in changes)
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:

@@ -428,7 +428,7 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     if dirty:
         problems.append("uncommitted changes:\n" + "\n".join(dirty[:20]))
     touched = changed_paths(config, ["git", "diff", "--name-only", f"{before}..HEAD"]) + dirty
-    frozen = freeze.frozen_paths(config, worker.name, touched)
+    frozen = [path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))]
     if frozen and not dirty:
         problems.extend(reject_config_change(state, worker, report, before, frozen))
     elif frozen:
@@ -440,6 +440,11 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
         if not all(result.ok for result in results):
             problems.append(render(results))
     return "\n\n".join(problems)
+
+
+def file_diff(config: Config, before: str, path: str) -> str:
+    _, output = run(["git", "diff", before, "--", path], cwd=config.root)
+    return output
 
 
 def reject_config_change(state: Run, worker: Worker, report: Path, before: str, frozen: list[str]) -> list[str]:

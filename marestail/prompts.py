@@ -123,8 +123,19 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
         "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
         "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
         "sees it after the run. Then find a way within the current configuration."
+        + csproj_note(config)
     )
     return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, start=1))
+
+
+def csproj_note(config: Config) -> str:
+    if config.section("dotnet") is None:
+        return ""
+    return (
+        " The one frozen edit that is kept: adding `<PackageReference Include=\"...\" Version=\"...\" />` or "
+        "`<InternalsVisibleTo Include=\"...\" />` lines to a `.csproj`. Any other csproj change, including removing or "
+        "changing a line, is reverted."
+    )
 
 
 def verdict_instructions(report: Path, judge: Judge) -> str:
