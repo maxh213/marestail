@@ -92,7 +92,11 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
     if worker.tier:
         steps.append(f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED.")
     opening = f"starting with `[{label}] ` and " if label else ""
-    steps.append(f"Commit everything with a message {opening}ending in `By {worker.name}.`")
+    steps.append(
+        f"Commit tracked changes with a message {opening}ending in `By {worker.name}.` "
+        "Do not use `git add -f` or `--force`. Paths ignored by `.gitignore` stay untracked on disk; "
+        "the next role still reads them. The runner drops any gitignored path you force-add."
+    )
     steps.append(
         f"Write {report.relative_to(config.root)}: what you did, what is left, what the next role must know. "
         "Under 40 lines, plus the audit section if one is required."

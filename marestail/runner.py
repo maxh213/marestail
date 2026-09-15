@@ -182,7 +182,9 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
+            saved = drop_ignored_since(state.config, before)
             fold_handoff(state.config, worker.name, report, before, agent_label(state))
+            restore_files(state.config, saved)
             return True
         feedback = problems
         print(problems)
@@ -234,6 +236,7 @@ def judge_attempt(
     gate_report, gate_ok = gate
     trees = perf_trees.prompt_section(state.config, session) if session else ""
     prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback)
+    before = head(state.config)
     invoke(state, report.stem, prompt)
     writes = () if judge.name == "perf" else judge.writes
     discard_edits(state.config, keep=report, writes=writes)
@@ -267,7 +270,9 @@ def judge_attempt(
         for path in perf_hygiene.discard_scratch(state.config.root):
             print(f"   removed perf scratch {path}")
     stage_writes(state.config, writes)
+    saved = drop_ignored_since(state.config, before)
     record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
+    restore_files(state.config, saved)
     print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
     return (verdict, target, text), ""
 
@@ -286,10 +291,12 @@ def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback
         before = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
         note = state.folder / f"perf-author-{round_no}.md"
         trees = perf_trees.prompt_section(config, session)
+        before = head(config)
         invoke(state, note.stem, prompts.perf_author_prompt(config, state.task, state.task_name, trees, note, feedback))
         discard_edits(config, keep=note, writes=judge.writes)
         stage_writes(config, judge.writes)
         record_staged(config, f"{note.stem} benches", judge.name, agent_label(state))
+        restore_files(config, drop_ignored_since(config, before))
         after = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in perf_review.bench_scripts(config)}
         if after == before:
             print(f"   {note.stem}: benches unchanged")
@@ -476,6 +483,42 @@ def stage_writes(config: Config, writes: tuple[str, ...]) -> None:
     kept = [path for path in changed if freeze.matches_any(path, list(writes))]
     if kept:
         run(["git", "add", "-A", "--", *kept], cwd=config.root)
+
+
+def newly_tracked_ignored(config: Config, before: str) -> list[str]:
+    _, then = run(["git", "ls-tree", "-r", "--name-only", before], cwd=config.root)
+    _, now = run(["git", "ls-files"], cwd=config.root)
+    previous = set(then.splitlines())
+    added = [path for path in now.splitlines() if path and path not in previous]
+    return [path for path in added if ignored_path(config, path)]
+
+
+def ignored_path(config: Config, path: str) -> bool:
+    code, _ = run(["git", "check-ignore", "-q", "--no-index", "--", path], cwd=config.root)
+    return code == 0
+
+
+def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
+    paths = newly_tracked_ignored(config, before)
+    saved = {}
+    for path in paths:
+        file = config.root / path
+        if file.is_file():
+            saved[path] = file.read_bytes()
+    if not paths:
+        return saved
+    print(f"   dropping gitignored files: {', '.join(paths[:10])}")
+    run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *paths], cwd=config.root)
+    if head(config) != before:
+        run(["git", "commit", "--amend", "--allow-empty", "-q", "--no-edit"], cwd=config.root)
+    return saved
+
+
+def restore_files(config: Config, saved: dict[str, bytes]) -> None:
+    for path, data in saved.items():
+        dest = config.root / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
 
 
 def fold_handoff(config: Config, role: str, report: Path, before: str, label: str) -> None:
