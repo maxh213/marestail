@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+from marestail import freeze
 from marestail.config import Config
 
 SCENARIO = re.compile(r"^\s*Scenario(?: Outline)?:\s*(.+?)\s*$", re.MULTILINE)
@@ -18,15 +19,21 @@ def scenarios(files: list[Path]) -> list[str]:
     return [title for file in files for title in SCENARIO.findall(file.read_text())]
 
 
-def problems(config: Config, task_name: str, handoff: str) -> list[str]:
+def problems(config: Config, task_name: str, handoff: str, role: str = "coder") -> list[str]:
     titles = scenarios(feature_files(config, task_name))
     traces = TRACE.findall(handoff)
     covered = {normalise(title) for title, _, _ in traces}
     missing = [f"audit: no test traced for scenario '{t}'" for t in titles if normalise(t) not in covered]
-    broken = [f"audit: {file}::{name} not found" for _, file, name in traces if not test_exists(config, file, name)]
+    frozen = [(file, name) for _, file, name in traces if freeze.frozen_paths(config, role, [file])]
+    unwritable = [
+        f"audit: {file}::{name} is under a path the {role} cannot edit, so it cannot prove this scenario; "
+        "end-to-end tests under qa/ are written by the QA role. Trace the scenario to a test you can write."
+        for file, name in frozen
+    ]
+    broken = [f"audit: {file}::{name} not found" for _, file, name in traces if (file, name) not in frozen and not test_exists(config, file, name)]
     if not titles:
         return ["audit: no feature file found for this task"]
-    return missing + broken
+    return missing + unwritable + broken
 
 
 def normalise(title: str) -> str:
@@ -44,5 +51,7 @@ def instructions(config: Config, task_name: str) -> str:
         f"Audit before you hand off. Re-read the task and {files}. For every Scenario, find the test that proves it "
         "and would fail if that behaviour broke. If one has none, write it. Then in the handoff, under `## Audit`, "
         "write one line per scenario: `- <scenario title> -> <test file path>::<test function name>`. "
-        "The runner checks every scenario is traced and every test exists."
+        "The runner checks every scenario is traced and every test exists. Trace only to tests you can write: never "
+        "to files under `qa/` or `features/`, which are frozen for you; the QA role writes the end-to-end test from "
+        "the QA procedure after the hardener."
     )

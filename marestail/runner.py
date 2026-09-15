@@ -44,6 +44,7 @@ GROK_APPROVE_LOCK = re.compile(
     r"always-approve|always approve|bypassPermissions|yolo.{0,40}(disabled|locked|forbidden)|disable_bypass",
     re.I,
 )
+WORKER_REPEAT_LIMIT = 3
 KILO_DEFAULT_MODEL = "kilo/stepfun/step-3.7-flash:free"
 KILO_DEFAULT_VARIANT = "high"
 
@@ -205,6 +206,7 @@ def attempts(retries: int):
 
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     before = head(state.config)
+    previous, repeats = "", 0
     for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
@@ -218,7 +220,16 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
             return True
         feedback = problems
         print(problems)
+        repeats = repeats + 1 if problem_shape(previous) == problem_shape(problems) else 1
+        previous = problems
+        if repeats >= WORKER_REPEAT_LIMIT:
+            print(f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human")
+            return False
     return False
+
+
+def problem_shape(problems: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"\d+(?:\.\d+)?", "#", problems)).strip()
 
 
 def run_judge(state: Run, judge: Judge) -> tuple[str, str | None, str]:
@@ -423,7 +434,7 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     elif frozen:
         problems.extend(f"{path} is frozen for {worker.name}" for path in frozen)
     if worker.audit and report.exists():
-        problems.extend(audit.problems(config, state.task_name, report.read_text()))
+        problems.extend(audit.problems(config, state.task_name, report.read_text(), worker.name))
     if worker.tier:
         results = state.gates(worker.tier)
         if not all(result.ok for result in results):

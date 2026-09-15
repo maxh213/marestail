@@ -4,4 +4,6 @@ Produce two files:
 1. `features/<task>.feature`: Gherkin scenarios from the user's point of view with concrete values. Cover the happy path, every failure the user can see, and every existing endpoint that must keep working.
 2. `qa/<task>.md`: a numbered QA procedure a person could follow at the UI to prove the feature works, with the expected result of each step.
 
+Do not ask the coder for end-to-end tests under `qa/`: the coder cannot edit `qa/`, and the QA role writes the executable end-to-end test from your procedure.
+
 Read the code before writing. State your assumptions at the top of the handoff instead of asking questions. Keep both files short.
