@@ -1,3 +1,4 @@
+import configparser
 import json
 from pathlib import Path
 from typing import Any
@@ -250,3 +251,10 @@ def test_this_repo_omits_tui_from_crap() -> None:
     assert py_crap.omitted_file("marestail/tui/collect.py", patterns)
     assert py_crap.omitted_file("marestail/__init__.py", patterns)
     assert not py_crap.omitted_file("marestail/gates/py_crap.py", patterns)
+
+
+def test_this_repo_radon_cfg_ignores_tui() -> None:
+    parser = configparser.ConfigParser()
+    read = parser.read(Path(__file__).resolve().parent.parent / "radon.cfg")
+    assert read
+    assert parser.get("radon", "ignore") == "tui"
