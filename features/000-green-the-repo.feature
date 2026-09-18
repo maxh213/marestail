@@ -12,7 +12,7 @@ Feature: Bring marestail itself through its own gate
     When I run "marestail gate --tier full"
     Then the exit code is 0
     And the output ends with the line "GATE PASSED"
-    And every result line matches "^\[ok  \] <gate-name> <summary>  \\(<seconds>s\\)$"
+    And every result line matches "^\[ok  \] <gate-name> <summary>  \\(<seconds>s\)$"
     And no result line starts with "[FAIL]"
 
   Scenario: default fast-tier gate still passes
@@ -66,11 +66,11 @@ Feature: Bring marestail itself through its own gate
 
   Scenario: every CLI subcommand remains available
     When I run "marestail --help"
-    Then the output lists the subcommands "gate", "run", "install", "sonar", "route", "watch", "perf", "graph", "depth"
+    Then the output lists the subcommands "gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"
     When I run "marestail gate --help"
     Then the output lists "--tier", "--scope", "--focus", "--only", "--json", "--hook"
     When I run "marestail run --help"
-    Then the output lists "--model", "--agent", "--effort", "--scope", "--focus", "--retries", "--auto", "--from", "--to"
+    Then the output lists "--from", "--to", "--auto", "--scope", "--focus", "--model", "--retries", "--effort", "--agent"
     When I run "marestail install --help"
     Then the output lists "--gitignore-generated"
     When I run "marestail sonar --help"
@@ -86,8 +86,8 @@ Feature: Bring marestail itself through its own gate
     When I run "marestail depth"
     Then the exit code is 0
 
-  Scenario: install command creates the expected files and prints the same line
-    Given a fresh temporary directory "/tmp/marestail-install-check"
+  Scenario: install command creates the expected files in an existing empty directory and prints the same line
+    Given an existing empty temporary directory "/tmp/marestail-install-check"
     When I run "marestail install /tmp/marestail-install-check"
     Then the exit code is 0
     And "/tmp/marestail-install-check/marestail.toml" exists
@@ -100,7 +100,7 @@ Feature: Bring marestail itself through its own gate
     And stdout is exactly "installed into /tmp/marestail-install-check; edit marestail.toml and sonar-project.properties\n"
 
   Scenario: route without dandelion still prints the install hint and exits 127
-    Given the environment variable "MARESTAIL_DANDELION" is unset and no "dandelion" binary is on PATH
+    Given the environment variable "MARESTAIL_DANDELION" is unset and PATH is set to "/usr/bin:/bin"
     When I run "marestail route"
     Then the exit code is 127
     And stderr contains "dandelion is not installed"
@@ -131,6 +131,7 @@ Feature: Bring marestail itself through its own gate
       | MARESTAIL_CURSOR                 |
       | MARESTAIL_DANDELION              |
       | MARESTAIL_FOCUS                  |
+      | MARESTAIL_GATE_ACTIVE            |
       | MARESTAIL_GROK                   |
       | MARESTAIL_GROK_EFFORT            |
       | MARESTAIL_KILO                   |
@@ -152,5 +153,5 @@ Feature: Bring marestail itself through its own gate
     And it notes that common variables such as HOME and PATH are ignored by the docs gate
 
   Scenario: no comments or docstrings remain under marestail/
-    When I run "grep -R -E '#[^!]|\"\"\"|'''" marestail/ --include='*.py'
+    When I run "grep -R -E '#[^!]|"""|'''" marestail/ --include='*.py'
     Then the only matches are shebang lines or string literals, not comments or docstrings
