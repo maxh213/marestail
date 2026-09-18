@@ -11,7 +11,7 @@ GATE_CONFIG = [
     "rebar.config", "rebar.lock", "**/*.app.src",
     "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
     "**/mutant.yml", "**/mutant.yaml",
-    "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*",
+    "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*", "**/playwright.config.*",
     "**/*.csproj", "**/*.sln", "**/*.props", "**/*.targets", "**/NuGet.config", "**/nuget.config", "**/dotnet-tools.json",
     "**/Cargo.toml", "Cargo.lock", "**/clippy.toml", "**/.clippy.toml", "**/rustfmt.toml", "**/.rustfmt.toml",
     "rust-toolchain", "rust-toolchain.toml", "**/.cargo/config.toml", "**/.cargo/mutants.toml", ".rust-layers.json",

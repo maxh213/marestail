@@ -3,6 +3,9 @@ __pycache__/
 marestail/gl/build/
 tools/samples/**/build/
 tools/samples/**/.marestail/
+tools/samples/**/node_modules/
+tools/samples/**/playwright-report/
+tools/samples/**/test-results/
 marestail/cs/scan/bin/
 marestail/cs/scan/obj/
 tools/samples/**/bin/

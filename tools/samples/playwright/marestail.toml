@@ -1,0 +1,8 @@
+[git]
+base = "HEAD"
+
+[ts]
+root = "."
+source = "src"
+crap_max = 4
+runner = "playwright"

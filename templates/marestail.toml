@@ -42,7 +42,7 @@ mutation_workers = 4
 root = "client/app"
 source = "src"
 crap_max = 4
-runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]
+runner = "vitest"  # or "jest" / "playwright"; then list sources = ["app", "components", "lib"]
 
 [elixir]
 preset = ""

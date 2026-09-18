@@ -10,7 +10,7 @@ This whole project is very opinionated on what I consider to be clean code / goo
 
 | Gate | Python | TypeScript | Elixir | Ruby / Rails | C# / .NET | Erlang | Rust | Java |
 |---|---|---|---|---|---|---| --- | --- |
-| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover | cargo llvm-cov, lines and code regions | mvn test + JaCoCo |
+| tests, 100% line and branch coverage | pytest, coverage.py | vitest, v8 (or jest, or playwright + c8) | mix test --cover | rspec + SimpleCov | dotnet test + coverlet | eunit + cover | cargo llvm-cov, lines and code regions | mvn test + JaCoCo |
 | CRAP ≤ 4 per function | radon + coverage | typescript AST + istanbul | elixir AST + cover | Ripper AST + SimpleCov | Roslyn scanner + coverlet | erl_parse AST + cover | syn AST + llvm-cov lines | javac tree API + JaCoCo |
 | mutation testing, changed files | mutmut | Stryker | muex | mutant | Stryker.NET | built-in operator-swap escript | cargo-mutants | PIT |
 | dependency direction | import-linter | dependency-cruiser | mix xref cycles | Zeitwerk constants vs `.ruby-layers.json` | Roslyn type resolution vs `.dotnet-layers.json`, cycles | beam call-graph cycles | `use`/path resolution vs `.rust-layers.json`, module cycles | import and name resolution vs `.java-layers.json`, cycles |
@@ -35,6 +35,8 @@ Tiers: `fast` (tests with coverage, CRAP, lint, the dependency rules, comments, 
 `py.runtime` exists because every other gate runs in the repo's virtualenv, which is not what production runs. It reads the version off the last `FROM` in the Dockerfile (override with `[python] deploy_files`, or state it outright with `[python] runtime = "3.12"`), requires every version the tooling asserts to equal it, and parses each source at that version. Keeping mypy's `python_version` honest is half the point: typeshed then rejects stdlib names the shipped interpreter does not have. It skips when nothing declares a deployed interpreter.
 
 A Next.js repo that will not move to vitest sets `[ts] runner = "jest"`: the gate runs the repo's own `node_modules/.bin/jest` with `--coverageProvider=babel` (v8 cannot express branch arms) and needs `[ts] sources` so untested files still appear in the report.
+
+A repo whose TypeScript suite is Playwright — including Next.js apps that already run `@playwright/test` specs, even Node-side unit tests that never open a browser — sets `[ts] runner = "playwright"`. The gate runs the repo's `node_modules/.bin/playwright test` under `c8`, writes the same istanbul JSON vitest and jest produce, and needs `[ts] sources` so files no spec imported still appear. Without `@playwright/test` or `c8` the gate fails closed. `[qa] cmd` can still be `npx playwright test`: that is the acceptance command and does not collect coverage. Specs that only drive a browser and never import source files fail closed as uncovered sources.
 
 ## Scope
 
