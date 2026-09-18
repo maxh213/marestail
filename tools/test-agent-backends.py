@@ -19,6 +19,7 @@ from marestail.runner import (
     kilo_summary,
     kimi_command,
     kimi_events,
+    kimi_prompt,
     kimi_rate_limited,
     kimi_summary,
     parse_verdict,
@@ -93,13 +94,16 @@ def kilo_defaults():
 def kimi_backend():
     expect(
         "kimi-command",
-        kimi_command(state("kimi"), "do the thing"),
-        ["kimi", "-p", "do the thing", "--output-format", "stream-json", "-m", "mymodel"],
+        kimi_command(state("kimi"), PROMPT),
+        ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json", "-m", "mymodel"],
     )
     expect(
         "kimi-command-no-model",
-        kimi_command(state("kimi", model=None), "do the thing"),
-        ["kimi", "-p", "do the thing", "--output-format", "stream-json"],
+        kimi_command(state("kimi", model=None), PROMPT),
+        ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json"],
+    )
+    expect("kimi-prompt-points-at-file", str(PROMPT.resolve()) in kimi_prompt(PROMPT), True)
+    expect("kimi-prompt-stays-short", len(kimi_prompt(PROMPT)) < 4096, True
     )
     expect("kimi-resolve", resolve_agent(state("kimi", model=None)), "kimi")
     expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
@@ -130,7 +134,7 @@ def env_overrides():
         if kilo[-2:] != ["--variant", "high"]:
             raise SystemExit(f"kilo-variant-env: {kilo!r}")
         os.environ["MARESTAIL_KIMI"] = "/opt/kimi"
-        expect("kimi-binary", kimi_command(state("kimi"), "p")[0], "/opt/kimi")
+        expect("kimi-binary", kimi_command(state("kimi"), PROMPT)[0], "/opt/kimi")
         os.environ["MARESTAIL_AGENT"] = "kimi"
         expect("env-agent-kimi", resolve_agent(state(None, model=None)), "kimi")
     finally:
@@ -158,8 +162,8 @@ def labels():
     expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "mymodel high")
     expect(
         "kimi-effort-unflagged",
-        kimi_command(state("kimi", effort="high"), "p"),
-        ["kimi", "-p", "p", "--output-format", "stream-json", "-m", "mymodel"],
+        kimi_command(state("kimi", effort="high"), PROMPT),
+        ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json", "-m", "mymodel"],
     )
     expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")

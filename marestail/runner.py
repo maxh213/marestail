@@ -679,7 +679,7 @@ def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tup
     if backend == "kilo":
         return kilo_run(state, prompt)
     if backend == "kimi":
-        return kimi_run(state, prompt)
+        return kimi_run(state, prompt_file)
     return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600, env=agent_env(state))
 
 
@@ -932,10 +932,14 @@ def kilo_summary(output: str) -> str:
     return " ".join(bits)
 
 
-def kimi_command(state: Run, prompt: str) -> list[str]:
+def kimi_prompt(prompt_file: Path) -> str:
+    return f"Your instructions are in {prompt_file.resolve()}. Read that whole file first, then follow it exactly."
+
+
+def kimi_command(state: Run, prompt_file: Path) -> list[str]:
     command = [
         os.environ.get("MARESTAIL_KIMI", "kimi"),
-        "-p", prompt,
+        "-p", kimi_prompt(prompt_file),
         "--output-format", "stream-json",
     ]
     if state.model:
@@ -943,10 +947,10 @@ def kimi_command(state: Run, prompt: str) -> list[str]:
     return command
 
 
-def kimi_run(state: Run, prompt: str) -> tuple[int, str]:
+def kimi_run(state: Run, prompt_file: Path) -> tuple[int, str]:
     from marestail.shell import clean
 
-    command = kimi_command(state, prompt)
+    command = kimi_command(state, prompt_file)
     try:
         completed = subprocess.run(
             command,

@@ -81,7 +81,7 @@ marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route 
 
 Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
 
-Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, prompt in argv, JSONL on stdout; `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
+Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, JSONL on stdout; the `-p` text only points at the prompt file under `.marestail/runs/<task>/`, because a full worker prompt is longer than one argv entry allows (128 KB); `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
 
 `install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
 
