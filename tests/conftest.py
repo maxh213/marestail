@@ -69,7 +69,7 @@ class ForbiddenCallError(RuntimeError):
     pass
 
 
-class GuardedPopen(subprocess.Popen):
+class GuardedPopen(subprocess.Popen[Any]):
     def __init__(self, args: Any, *rest: Any, **options: Any) -> None:
         program = args if isinstance(args, str) else args[0]
         if Path(str(program).split()[0]).name in FORBIDDEN_BINARIES:

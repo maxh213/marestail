@@ -41,7 +41,7 @@ def test_missing_coverage_fails(tmp_path: Path) -> None:
     )
 
 
-def test_nothing_in_scope_is_skipped(tmp_path: Path, fake_run) -> None:
+def test_nothing_in_scope_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     setup(tmp_path, {str(tmp_path / "web" / "a.ts"): file_coverage({}, {})})
     fake = fake_run(ts_crap)
 
@@ -51,7 +51,7 @@ def test_nothing_in_scope_is_skipped(tmp_path: Path, fake_run) -> None:
     assert fake.calls == []
 
 
-def test_script_failure_shows_the_last_lines(tmp_path: Path, fake_run) -> None:
+def test_script_failure_shows_the_last_lines(tmp_path: Path, fake_run: Any) -> None:
     setup(tmp_path, {str(tmp_path / "web" / "a.ts"): file_coverage({}, {})})
     fake_run(ts_crap, [(1, "\n".join(str(n) for n in range(15)))])
 
@@ -60,7 +60,7 @@ def test_script_failure_shows_the_last_lines(tmp_path: Path, fake_run) -> None:
     assert (result.ok, result.summary, result.findings) == (False, "complexity script failed", [str(n) for n in range(5, 15)])
 
 
-def test_scores_functions_and_sorts_offenders(tmp_path: Path, fake_run) -> None:
+def test_scores_functions_and_sorts_offenders(tmp_path: Path, fake_run: Any) -> None:
     source = str(tmp_path / "web" / "a.ts")
     setup(tmp_path, {source: file_coverage({1: 1, 2: 0, 10: 0, 20: 1}, {3: [1, 0], 11: [0, 0]})})
     functions = [
@@ -79,7 +79,7 @@ def test_scores_functions_and_sorts_offenders(tmp_path: Path, fake_run) -> None:
     assert fake.options == [{"cwd": tmp_path / "web"}]
 
 
-def test_limit_is_configurable_and_scope_limits_functions(tmp_path: Path, fake_run) -> None:
+def test_limit_is_configurable_and_scope_limits_functions(tmp_path: Path, fake_run: Any) -> None:
     source = str(tmp_path / "web" / "a.ts")
     setup(tmp_path, {source: file_coverage({1: 0, 10: 0}, {})})
     functions = [function(source, "touched", 1, 5, 2), function(source, "untouched", 10, 15, 9)]
@@ -97,7 +97,7 @@ def test_limit_is_configurable_and_scope_limits_functions(tmp_path: Path, fake_r
     )
 
 
-def test_passing_run(tmp_path: Path, fake_run) -> None:
+def test_passing_run(tmp_path: Path, fake_run: Any) -> None:
     source = str(tmp_path / "web" / "a.ts")
     setup(tmp_path, {source: file_coverage({1: 1}, {})})
     fake_run(ts_crap, [(0, json.dumps([function(source, "f", 1, 2, 4)]))])

@@ -99,7 +99,7 @@ def test_clean_run(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 def test_scoped_percent(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, scope_changed=True, changed={"lib/c.ex"})
     assert ex_tests.scoped_percent(COVERAGE, ctx) == 100.0
-    empty = {"files": {"lib/c.ex": {}}}
+    empty: dict[str, Any] = {"files": {"lib/c.ex": {}}}
     assert ex_tests.scoped_percent(empty, ctx) == 100.0
     both = make_context(tmp_path, scope_changed=True, changed={"lib/a.ex", "lib/b.ex"})
     assert ex_tests.scoped_percent(COVERAGE, both) == pytest.approx(700 / 9)

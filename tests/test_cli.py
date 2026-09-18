@@ -165,7 +165,7 @@ def test_run_command_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 def fake_tui(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     fake = Recorder(4)
     app = types.ModuleType(cli.TUI_APP)
-    app.run = fake
+    vars(app)["run"] = fake
     monkeypatch.setitem(sys.modules, cli.TUI_APP, app)
     return fake
 
@@ -481,7 +481,12 @@ def test_cursor_hook_follows_up(
 ) -> None:
     gates(PASS, FAIL)
     seen: list[str] = []
-    monkeypatch.setattr(cli, "hook_scope", lambda config: seen.append(os.getcwd()) or (set(), False))
+
+    def hook_scope(config: Any) -> tuple[set[str], bool]:
+        seen.append(os.getcwd())
+        return set(), False
+
+    monkeypatch.setattr(cli, "hook_scope", hook_scope)
     monkeypatch.chdir(tmp_path)
     output = cursor_hook(monkeypatch, capsys, {"workspace_roots": [str(repo)], "conversation_id": "k", "status": "completed"})
     assert json.loads(output) == {"followup_message": BLOCK}

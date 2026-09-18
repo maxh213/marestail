@@ -199,7 +199,7 @@ def test_per_mutant_timeout(
 
 @pytest.mark.parametrize(("cap", "count", "skipped"), [(0, 3, 0), (None, 3, 0), (3, 3, 0), (5, 3, 0), (-1, 3, 0), (1, 3, 2), (2, 5, 3)])
 def test_apply_cap(tmp_path: Path, cap: Any, count: int, skipped: int) -> None:
-    mutants = [{"id": ident} for ident in range(count)]
+    mutants: list[dict[str, Any]] = [{"id": ident} for ident in range(count)]
     er_mutation.apply_cap(mutants, make_context(tmp_path, {"erlang": {"mutation_max": cap}}))
     assert sum(1 for entry in mutants if entry.get("status") == "skipped") == skipped
 

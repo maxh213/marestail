@@ -242,7 +242,7 @@ def test_suppression_findings(tmp_path: Path) -> None:
 
 def test_javac_findings(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"java": {"root": "svc"}}, scope_changed=True, changed={APP})
-    diagnostics = [
+    diagnostics: list[dict[str, Any]] = [
         {"file": None, "line": 0, "kind": "WARNING", "code": "compiler.warn.source.no.bootclasspath", "message": "boot"},
         {"file": "", "line": 1, "kind": "MANDATORY_WARNING", "code": None, "message": "x" * 250},
         {"file": TEST, "line": 2, "kind": "ERROR", "code": "compiler.err.x", "message": "skip"},

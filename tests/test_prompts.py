@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -75,7 +75,7 @@ def test_hard_scope() -> None:
 
 def test_worker_prompt(repo: Path) -> None:
     text = prompts.worker_prompt(
-        config(repo), find("coder"), repo / "tasks" / "t.md", "t", report(repo, "03-coder"), "fix it", "lbl", " --x"
+        config(repo), cast(Worker, find("coder")), repo / "tasks" / "t.md", "t", report(repo, "03-coder"), "fix it", "lbl", " --x"
     )
     assert text.split("\n\n") == [
         "You are the coder.",
@@ -96,7 +96,9 @@ def test_worker_prompt(repo: Path) -> None:
 
 
 def test_worker_prompt_with_hard_scope_and_no_feedback(repo: Path) -> None:
-    text = prompts.worker_prompt(config(repo), find("specifier"), repo / "tasks" / "t.md", "t", report(repo, "01"), "", hard_focus={"src"})
+    text = prompts.worker_prompt(
+        config(repo), cast(Worker, find("specifier")), repo / "tasks" / "t.md", "t", report(repo, "01"), "", hard_focus={"src"}
+    )
     parts = text.split("\n\n")
     assert parts[2] == "# Scope\n" + prompts.WORKER_SCOPE.format(paths="`src`")
     assert parts[-1] == (
@@ -141,7 +143,9 @@ def test_commit_opening() -> None:
 
 
 def test_judge_prompt_for_critic(repo: Path) -> None:
-    text = prompts.judge_prompt(config(repo), find("critic"), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "", "", "")
+    text = prompts.judge_prompt(
+        config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "", "", ""
+    )
     assert text == "\n\n".join(
         [
             "You are the critic.",
@@ -149,14 +153,16 @@ def test_judge_prompt_for_critic(repo: Path) -> None:
             "# Specification\n## features/t.feature\nScenario: one\n\n## qa/t.md\nprocedure",
             "# Handoffs so far\n## 01-specifier\nwrote spec",
             f"# Verdict\nWrite your verdict to {report(repo, '02-critic')} and nothing else. Do not edit any other file; "
-            "the runner discards other edits.\n" + prompts.bounce_choices(find("critic")) + " Then numbered findings, each naming "
+            "the runner discards other edits.\n"
+            + prompts.bounce_choices(cast(Judge, find("critic")))
+            + " Then numbered findings, each naming "
             "the file, scenario or step concerned and the fix required. Under 40 lines.",
         ]
     )
 
 
 def test_judge_prompt_for_perf_with_everything(repo: Path) -> None:
-    judge = find("perf")
+    judge = cast(Judge, find("perf"))
     text = prompts.judge_prompt(config(repo), judge, repo / "tasks" / "t.md", "t", report(repo, "p"), "gates", "trees", "bad", {"a"})
     assert text.split("\n\n") == [
         "You are the perf.",
@@ -173,11 +179,11 @@ def test_judge_prompt_for_perf_with_everything(repo: Path) -> None:
 
 
 def test_judge_specification(repo: Path) -> None:
-    assert prompts.judge_specification(config(repo), find("hardener"), "t") == "features/t.feature\nqa/t.md"
+    assert prompts.judge_specification(config(repo), cast(Judge, find("hardener")), "t") == "features/t.feature\nqa/t.md"
 
 
 def test_verdict_instructions_for_writing_judge() -> None:
-    text = prompts.verdict_instructions(Path("/r/v.md"), find("perf"))
+    text = prompts.verdict_instructions(Path("/r/v.md"), cast(Judge, find("perf")))
     assert text == (
         "Write your verdict to /r/v.md and edit nothing else except files matching `perf/**`; the runner discards other edits.\n"
         "First line: `VERDICT: PASS`, or `VERDICT: BOUNCE` to send the work back to the coder. Then numbered findings, each naming "

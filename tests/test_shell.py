@@ -40,7 +40,7 @@ def test_run_reports_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         seen.update(options)
         raise subprocess.TimeoutExpired(command, options["timeout"])
 
-    monkeypatch.setattr(shell.subprocess, "run", expire)
+    monkeypatch.setattr(subprocess, "run", expire)
     assert shell.run(["sh", "-c", "x"], cwd=tmp_path, timeout=7) == (124, "sh -c x: timed out after 7s")
     assert (seen["timeout"], seen["cwd"], seen["input"], seen["check"]) == (7, tmp_path, None, False)
 
@@ -52,7 +52,7 @@ def test_run_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         seen.update(options)
         return subprocess.CompletedProcess(command, 0, "out", "err")
 
-    monkeypatch.setattr(shell.subprocess, "run", record)
+    monkeypatch.setattr(subprocess, "run", record)
     monkeypatch.setenv("FROM_OS", "1")
     assert shell.run(["x"], cwd=tmp_path) == (0, "outerr")
     assert (seen["timeout"], seen["capture_output"], seen["text"], seen["env"]["FROM_OS"]) == (3600, True, True, "1")

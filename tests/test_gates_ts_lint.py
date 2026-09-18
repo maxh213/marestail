@@ -27,7 +27,7 @@ def eslint_report(root: Path) -> str:
     )
 
 
-def test_scoped_run_without_typescript_changes_is_skipped(tmp_path: Path, fake_run) -> None:
+def test_scoped_run_without_typescript_changes_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint)
 
     result = ts_lint.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/readme.md"}))
@@ -36,7 +36,7 @@ def test_scoped_run_without_typescript_changes_is_skipped(tmp_path: Path, fake_r
     assert fake.calls == []
 
 
-def test_clean_run(tmp_path: Path, fake_run) -> None:
+def test_clean_run(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint, [(0, "whatever"), (0, "[]")])
 
     result = ts_lint.run_gate(make_context(with_tsconfig(tmp_path), TS))
@@ -46,7 +46,7 @@ def test_clean_run(tmp_path: Path, fake_run) -> None:
     assert fake.options == [{"cwd": tmp_path / "web", "timeout": 900}] * 2
 
 
-def test_missing_tsconfig_is_reported(tmp_path: Path, fake_run) -> None:
+def test_missing_tsconfig_is_reported(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint, [(0, "")])
 
     result = ts_lint.run_gate(make_context(tmp_path, {"ts": {"root": "web", "tsconfig": "tsconfig.json"}}))
@@ -56,7 +56,7 @@ def test_missing_tsconfig_is_reported(tmp_path: Path, fake_run) -> None:
     assert fake.calls == [ESLINT]
 
 
-def test_findings_are_capped(tmp_path: Path, fake_run) -> None:
+def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
     tsc = "\n".join(f"src/a.ts({n},1): error TS1: bad" for n in range(1, 71))
     fake_run(ts_lint, [(2, tsc), (1, "[]")])
 
@@ -66,7 +66,7 @@ def test_findings_are_capped(tmp_path: Path, fake_run) -> None:
     assert result.findings == [f"web/src/a.ts:{n} error TS1: bad" for n in range(1, 61)]
 
 
-def test_tsc_errors_are_parsed(tmp_path: Path, fake_run) -> None:
+def test_tsc_errors_are_parsed(tmp_path: Path, fake_run: Any) -> None:
     output = "npm notice hi\n  src/a.ts(4,2):   error TS2322: " + "x" * 400 + "\n/outside/b.ts(9,1): error TS1\nFound 2 errors.\n"
     fake_run(ts_lint, [(2, output)])
 
@@ -75,14 +75,14 @@ def test_tsc_errors_are_parsed(tmp_path: Path, fake_run) -> None:
     assert findings == ["web/src/a.ts:4 " + ("error TS2322: " + "x" * 400)[:300], "/outside/b.ts:9 error TS1"]
 
 
-def test_tsc_errors_out_of_scope_are_dropped(tmp_path: Path, fake_run) -> None:
+def test_tsc_errors_out_of_scope_are_dropped(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(2, "src/a.ts(4,2): error A\nsrc/b.ts(1,1): error B\n")])
     ctx = make_context(with_tsconfig(tmp_path), TS, scope_changed=True, changed={"web/src/b.ts"})
 
     assert ts_lint.tsc_findings(ctx) == ["web/src/b.ts:1 error B"]
 
 
-def test_unparsed_tsc_output_is_passed_through(tmp_path: Path, fake_run) -> None:
+def test_unparsed_tsc_output_is_passed_through(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(1, "npm warn old\nnpm WARN x\n\nerror TS5058: missing\n")])
 
     assert ts_lint.tsc_findings(
@@ -90,7 +90,7 @@ def test_unparsed_tsc_output_is_passed_through(tmp_path: Path, fake_run) -> None
     ) == ["tsc: error TS5058: missing"]
 
 
-def test_eslint_messages(tmp_path: Path, fake_run) -> None:
+def test_eslint_messages(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(1, "prefix " + eslint_report(tmp_path) + " suffix")])
 
     assert ts_lint.eslint_findings(make_context(tmp_path, TS)) == [
@@ -100,7 +100,7 @@ def test_eslint_messages(tmp_path: Path, fake_run) -> None:
     ]
 
 
-def test_scoped_eslint_messages(tmp_path: Path, fake_run) -> None:
+def test_scoped_eslint_messages(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(1, eslint_report(tmp_path))])
 
     findings = ts_lint.eslint_findings(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"}))
@@ -108,7 +108,7 @@ def test_scoped_eslint_messages(tmp_path: Path, fake_run) -> None:
     assert findings == ["web/src/a.ts:3 no-var: Use let."]
 
 
-def test_scoped_eslint_without_matches_is_empty(tmp_path: Path, fake_run) -> None:
+def test_scoped_eslint_without_matches_is_empty(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(1, "[]\nOops")])
 
     assert ts_lint.eslint_findings(make_context(tmp_path, TS, scope_changed=True)) == []
@@ -124,13 +124,13 @@ def test_scoped_eslint_without_matches_is_empty(tmp_path: Path, fake_run) -> Non
         ("npm warn []", ["marestail.toml:1 eslint exited 2 without a message"]),
     ],
 )
-def test_eslint_failures_without_messages(tmp_path: Path, fake_run, output: str, expected: list[str]) -> None:
+def test_eslint_failures_without_messages(tmp_path: Path, fake_run: Any, output: str, expected: list[str]) -> None:
     fake_run(ts_lint, [(2, output)])
 
     assert ts_lint.eslint_findings(make_context(tmp_path, TS)) == expected
 
 
-def test_eslint_success_has_no_findings(tmp_path: Path, fake_run) -> None:
+def test_eslint_success_has_no_findings(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_lint, [(0, "garbage")])
 
     assert ts_lint.eslint_findings(make_context(tmp_path, TS)) == []

@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -142,7 +143,7 @@ def test_record_table_skips_without_measurements(tmp_path: Path, fake_run: Calla
 def test_record_table_writes_and_stages(
     tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, ignored: int, staged: bool
 ) -> None:
-    monkeypatch.setattr(review.time, "strftime", lambda _: "2026-01-02")
+    monkeypatch.setattr(time, "strftime", lambda _: "2026-01-02")
     fake = fake_run(review, [(0, "abc1234\n"), (0, "pre5678\n"), (ignored, "")])
     outcome = review.Review([], [item("t", "degraded")], False)
     review.record_table(config_at(tmp_path), session_with("head", table.PRE_MARESTAIL), outcome)
@@ -159,7 +160,7 @@ def test_record_table_writes_and_stages(
 
 
 def test_snapshot_without_head_or_pre(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(review.time, "strftime", lambda _: "2026-01-02")
+    monkeypatch.setattr(time, "strftime", lambda _: "2026-01-02")
     fake = fake_run(review, [(0, " HEADSHA \n")])
     outcome = review.Review([], [item("t", "new")], False)
     snapshot = review.snapshot_for(config_at(tmp_path), session_with("baseline"), outcome)

@@ -1,4 +1,6 @@
+import shutil
 import subprocess
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -89,7 +91,7 @@ def test_wait_until_up(monkeypatch: pytest.MonkeyPatch) -> None:
     replies = ["DOWN", "STARTING", "UP"]
     slept: list[float] = []
     monkeypatch.setattr(setup, "status", lambda url: replies.pop(0))
-    monkeypatch.setattr(setup.time, "sleep", slept.append)
+    monkeypatch.setattr(time, "sleep", slept.append)
     setup.wait_until_up("http://x")
     assert slept == [5, 5]
 
@@ -97,8 +99,13 @@ def test_wait_until_up(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_wait_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     slept: list[float] = []
-    monkeypatch.setattr(setup, "status", lambda url: urls.append(url) or "DOWN")
-    monkeypatch.setattr(setup.time, "sleep", slept.append)
+
+    def status(url: str) -> str:
+        urls.append(url)
+        return "DOWN"
+
+    monkeypatch.setattr(setup, "status", status)
+    monkeypatch.setattr(time, "sleep", slept.append)
     with pytest.raises(SystemExit, match=r"^sonarqube did not come up$"):
         setup.wait_until_up("http://x", attempts=2)
     assert (urls, slept) == (["http://x", "http://x"], [5, 5])
@@ -121,7 +128,12 @@ def install_setup(monkeypatch: pytest.MonkeyPatch, installed: list[bool]) -> lis
     calls: list[str] = []
     for name in ("up", "compose", "wait_until_up", "ensure_project", "ensure_credentials"):
         record(monkeypatch, calls, name)
-    monkeypatch.setattr(setup, "admin_client", lambda password: calls.append(f"admin {password}") or password)
+
+    def admin_client(password: str) -> str:
+        calls.append(f"admin {password}")
+        return password
+
+    monkeypatch.setattr(setup, "admin_client", admin_client)
     monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: installed.pop(0))
     return calls
 
@@ -177,7 +189,7 @@ def test_plugin_jar_left_alone_when_current(paths: Path, monkeypatch: pytest.Mon
     paths.write_bytes(b"same")
     setup.PLUGINS_DIR.mkdir()
     (setup.PLUGINS_DIR / "sonar-erlang-plugin.jar").write_bytes(b"same")
-    monkeypatch.setattr(setup.shutil, "copyfile", lambda *args: pytest.fail("copied"))
+    monkeypatch.setattr(shutil, "copyfile", lambda *args: pytest.fail("copied"))
     setup.ensure_erlang_plugin_jar()
 
 
@@ -267,7 +279,12 @@ def test_admin_client_tolerates_changed_password(monkeypatch: pytest.MonkeyPatch
             raise SystemExit("401")
 
     made: list[Any] = []
-    monkeypatch.setattr(setup, "Client", lambda *args: made.append(args) or Rejecting())
+
+    def client(*args: Any) -> Rejecting:
+        made.append(args)
+        return Rejecting()
+
+    monkeypatch.setattr(setup, "Client", client)
     assert isinstance(setup.admin_client("pw"), Rejecting)
     assert made[-1] == ("http://localhost:9000", "admin", "pw")
 
@@ -286,7 +303,7 @@ def test_ensure_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     saved: list[tuple[str, str]] = []
     monkeypatch.setattr(setup, "credentials", lambda: None)
     monkeypatch.setattr(setup, "save_credentials", lambda url, token: saved.append((url, token)))
-    monkeypatch.setattr(setup.time, "time", lambda: 1700.9)
+    monkeypatch.setattr(time, "time", lambda: 1700.9)
     admin: Any = FakeClient({"api/user_tokens/generate": {"token": "T"}})
     setup.ensure_credentials(admin)
     assert admin.posts == [("api/user_tokens/generate", {"name": "marestail-1700", "type": "USER_TOKEN"})]

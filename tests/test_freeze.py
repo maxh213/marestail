@@ -52,7 +52,7 @@ def test_frozen_paths_by_role(role: str, expected: list[str]) -> None:
 
 
 def test_frozen_paths_follow_configuration() -> None:
-    raw = {"freeze": {"paths": ["src/**"], "spec": ["docs/**"], "allow": {"coder": ["src/ok.py"]}}}
+    raw: dict[str, object] = {"freeze": {"paths": ["src/**"], "spec": ["docs/**"], "allow": {"coder": ["src/ok.py"]}}}
     paths = ["src/a.py", "src/ok.py", "docs/x.md", "pyproject.toml"]
     assert freeze.frozen_paths(config(raw), "coder", paths) == ["src/a.py", "docs/x.md"]
 

@@ -275,7 +275,12 @@ def test_source_files(tmp_path: Path) -> None:
 
 def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple[int, str]) -> list[Any]:
     calls: list[Any] = []
-    monkeypatch.setattr(erlang, "source_files", lambda ctx: calls.append(ctx) or files)
+
+    def source_files(ctx: Context) -> list[Path]:
+        calls.append(ctx)
+        return files
+
+    monkeypatch.setattr(erlang, "source_files", source_files)
 
     def escript(ctx: Context, script: str, args: list[str]) -> tuple[int, str]:
         calls.append((script, args))
@@ -339,7 +344,12 @@ TARGETED = Module("src/A.x", ["A.f"], 9, ["src/A.x:4 f only forwards its argumen
 
 def fake_scanner(monkeypatch: pytest.MonkeyPatch, module: Any, files: list[Path], reply: tuple[Any, str | None]) -> list[Any]:
     calls: list[Any] = []
-    monkeypatch.setattr(module, "sources", lambda ctx: calls.append(ctx) or files)
+
+    def sources(ctx: Context) -> list[Path]:
+        calls.append(ctx)
+        return files
+
+    monkeypatch.setattr(module, "sources", sources)
 
     def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
         calls.append((mode, paths))
@@ -367,7 +377,12 @@ def test_dotnet_modules_empty_and_error(tmp_path: Path, monkeypatch: pytest.Monk
 def test_rust_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = Config(root=tmp_path, raw={"rust": {}})
     calls = fake_scanner(monkeypatch, rust, [Path("lib.rs")], ([ITEM], None))
-    monkeypatch.setattr(rust, "rel", lambda ctx, path: calls.append(ctx) or f"crate/{path}")
+
+    def rel(ctx: Context, path: Any) -> str:
+        calls.append(ctx)
+        return f"crate/{path}"
+
+    monkeypatch.setattr(rust, "rel", rel)
     expected = Module("crate/src/A.x", ["A.f"], 9, ["crate/src/A.x:4 f only forwards its arguments to g"])
     assert depth.rust_modules(config) == [expected]
     assert calls == [Context(config=config), ("depth", [Path("lib.rs")]), Context(config=config)]

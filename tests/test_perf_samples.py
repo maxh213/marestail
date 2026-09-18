@@ -115,7 +115,12 @@ def test_run_command_resets_the_database_each_sample(root: Path, monkeypatch: py
     database = object()
     resets: list[Any] = []
     monkeypatch.setattr(perf_db, "for_run", lambda config: (database, ""))
-    monkeypatch.setattr(perf_db, "reset", lambda db, tree: resets.append((db, tree.name)) or (42, {"DB_URL": "pg://x"}))
+
+    def reset(db: Any, tree: Any) -> tuple[int, dict[str, str]]:
+        resets.append((db, tree.name))
+        return 42, {"DB_URL": "pg://x"}
+
+    monkeypatch.setattr(perf_db, "reset", reset)
     assert samples.run_command(BENCH, "baseline", 2, True) == 0
     assert resets == [(database, "baseline")] * 2
     assert [(record["target"], record["db"], record["reset_ms"], record["absent"]) for record in saved(root)] == [
@@ -166,7 +171,7 @@ def test_take_sample_reports_start_failures(root: Path, monkeypatch: pytest.Monk
         seen.append({"command": command, **options})
         raise error
 
-    monkeypatch.setattr(samples.subprocess, "run", explode)
+    monkeypatch.setattr(subprocess, "run", explode)
     tree = trees.Tree("head", "sha1", root / "wt")
     assert samples.take_sample(config, BENCH, tree, 2, (None, "stamp")) == message
     assert seen[0]["command"] == [str(root / BENCH)]

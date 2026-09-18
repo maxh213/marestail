@@ -82,7 +82,7 @@ def test_require_raises_the_hint(missing: str) -> None:
 
 
 def test_require_passes_when_installed(dandelion: str) -> None:
-    assert route.require() is None
+    route.require()
 
 
 def test_command_without_dandelion(missing: str, capsys: pytest.CaptureFixture[str]) -> None:

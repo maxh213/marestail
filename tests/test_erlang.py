@@ -13,8 +13,8 @@ HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or dock
 @pytest.fixture(autouse=True)
 def fresh_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(erlang, "host_checks", {})
-    monkeypatch.setattr(erlang.os, "getuid", lambda: 1000)
-    monkeypatch.setattr(erlang.os, "getgid", lambda: 100)
+    monkeypatch.setattr("marestail.erlang.os.getuid", lambda: 1000)
+    monkeypatch.setattr("marestail.erlang.os.getgid", lambda: 100)
 
 
 @pytest.mark.parametrize(

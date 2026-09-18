@@ -3,7 +3,7 @@ import json
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -236,7 +236,7 @@ def test_failure_line_truncates_message(tmp_path: Path) -> None:
 
 def test_first_problem() -> None:
     case = ET.fromstring("<testcase><system-out/><error type='E'/><failure type='F'/></testcase>")
-    assert java_tests.first_problem(case).get("type") == "E"
+    assert cast(ET.Element, java_tests.first_problem(case)).get("type") == "E"
     assert java_tests.first_problem(ET.fromstring("<testcase><skipped/></testcase>")) is None
 
 
@@ -282,7 +282,7 @@ def test_source_coverage_defaults() -> None:
 
 
 def test_percent_covered() -> None:
-    files = {"a": {"lines": {"1": 0, "2": 2, "3": 1}}, "b": {"lines": {}}}
+    files: dict[str, dict[str, Any]] = {"a": {"lines": {"1": 0, "2": 2, "3": 1}}, "b": {"lines": {}}}
     assert java_tests.covered_lines(files) == 2
     assert java_tests.percent_covered(files) == pytest.approx(200 / 3)
     assert java_tests.percent_covered({"b": {"lines": {}}}) == 0.0

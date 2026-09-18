@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ REPORT = "\n".join(
 )
 
 
-def test_default_command_and_clean_run(tmp_path: Path, fake_run) -> None:
+def test_default_command_and_clean_run(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_deps, [(0, "no violations\n")])
 
     result = ts_deps.run_gate(make_context(tmp_path, TS))
@@ -28,7 +29,7 @@ def test_default_command_and_clean_run(tmp_path: Path, fake_run) -> None:
     assert fake.options == [{"cwd": tmp_path / "web", "timeout": 600}]
 
 
-def test_configured_command(tmp_path: Path, fake_run) -> None:
+def test_configured_command(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_deps, [(0, "")])
 
     ts_deps.run_gate(make_context(tmp_path, {"ts": {"depcruise_config": "deps.cjs", "source": "lib"}}))
@@ -36,7 +37,7 @@ def test_configured_command(tmp_path: Path, fake_run) -> None:
     assert fake.calls == [["npx", "depcruise", "--config", "deps.cjs", "--output-type", "err", "lib"]]
 
 
-def test_unscoped_failure_lists_nonblank_lines(tmp_path: Path, fake_run) -> None:
+def test_unscoped_failure_lists_nonblank_lines(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
     result = ts_deps.run_gate(make_context(tmp_path, TS))
@@ -45,13 +46,13 @@ def test_unscoped_failure_lists_nonblank_lines(tmp_path: Path, fake_run) -> None
     assert result.findings == [line for line in REPORT.splitlines() if line.strip()]
 
 
-def test_unscoped_failure_is_capped(tmp_path: Path, fake_run) -> None:
+def test_unscoped_failure_is_capped(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, "\n".join(f"line {n}" for n in range(70)))])
 
     assert ts_deps.run_gate(make_context(tmp_path, TS)).findings == [f"line {n}" for n in range(60)]
 
 
-def test_scoped_run_keeps_violations_in_scope(tmp_path: Path, fake_run) -> None:
+def test_scoped_run_keeps_violations_in_scope(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
     result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"}))
@@ -63,7 +64,7 @@ def test_scoped_run_keeps_violations_in_scope(tmp_path: Path, fake_run) -> None:
     )
 
 
-def test_scoped_run_passes_when_violations_are_elsewhere(tmp_path: Path, fake_run) -> None:
+def test_scoped_run_passes_when_violations_are_elsewhere(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
     result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/z.ts"}))
@@ -72,7 +73,7 @@ def test_scoped_run_passes_when_violations_are_elsewhere(tmp_path: Path, fake_ru
 
 
 @pytest.mark.parametrize(("code", "expected"), [(0, []), (2, ["config broke", "badly"])])
-def test_scoped_run_without_violations(tmp_path: Path, fake_run, code: int, expected: list[str]) -> None:
+def test_scoped_run_without_violations(tmp_path: Path, fake_run: Any, code: int, expected: list[str]) -> None:
     fake_run(ts_deps, [(code, "  config broke  \n\n badly\n")])
 
     result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True))

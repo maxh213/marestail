@@ -129,7 +129,7 @@ def test_touches_hunk_unscoped(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("lines", "expected"), [({3}, True), ({6}, True), ({2, 7}, False), (set(), False)])
 def test_touches_hunk_bounds(tmp_path: Path, lines: set[int], expected: bool) -> None:
-    fn = {"file": str(tmp_path / "a.erl"), "line": 3}
+    fn: dict[str, Any] = {"file": str(tmp_path / "a.erl"), "line": 3}
     ctx = make_context(tmp_path, scope_changed=True, changed={"a.erl"}, changed_lines_map={"a.erl": lines})
     assert er_crap.touches_hunk(fn, {(fn["file"], 3): 6}, ctx) is expected
 

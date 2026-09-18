@@ -75,7 +75,7 @@ def test_jest_command(tmp_path: Path, ts: dict[str, Any], globs: list[str]) -> N
     ]
 
 
-def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run) -> None:
+def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_tests, [(1, "\n".join(f"line {n}" for n in range(40)))])
 
     result = ts_tests.run_gate(make_context(tmp_path, TS))
@@ -86,7 +86,7 @@ def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run) -> None:
     assert fake.options[0] == {"cwd": tmp_path / "web", "timeout": 1800}
 
 
-def test_jest_failure_reads_the_results(tmp_path: Path, fake_run) -> None:
+def test_jest_failure_reads_the_results(tmp_path: Path, fake_run: Any) -> None:
     write_jest(
         tmp_path,
         [
@@ -105,7 +105,7 @@ def test_jest_failure_reads_the_results(tmp_path: Path, fake_run) -> None:
     assert fake.calls[0][0].endswith("jest")
 
 
-def test_jest_failure_without_results_shows_output(tmp_path: Path, fake_run) -> None:
+def test_jest_failure_without_results_shows_output(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(1, "raw failure")])
 
     result = ts_tests.run_gate(make_context(tmp_path, {"ts": {"runner": "jest"}}))
@@ -140,7 +140,7 @@ def test_first_line(text: str, expected: str) -> None:
     assert ts_tests.first_line(text) == expected
 
 
-def test_uninstrumented_files_fail(tmp_path: Path, fake_run) -> None:
+def test_uninstrumented_files_fail(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(0, "Failed to collect coverage from src/a.ts\nFailed to collect coverage from src/b.ts\n")])
 
     result = ts_tests.run_gate(make_context(tmp_path, TS))
@@ -149,7 +149,7 @@ def test_uninstrumented_files_fail(tmp_path: Path, fake_run) -> None:
     assert result.findings == ["web/src/a.ts:1 not instrumented", "web/src/b.ts:1 not instrumented"]
 
 
-def test_uninstrumented_files_out_of_scope_are_ignored(tmp_path: Path, fake_run) -> None:
+def test_uninstrumented_files_out_of_scope_are_ignored(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(0, "Failed to collect coverage from src/a.ts\n")])
 
     result = ts_tests.run_gate(make_context(tmp_path, TS, scope_changed=True))
@@ -158,7 +158,7 @@ def test_uninstrumented_files_out_of_scope_are_ignored(tmp_path: Path, fake_run)
 
 
 @pytest.mark.parametrize("coverage", [None, {}])
-def test_missing_coverage_fails(tmp_path: Path, fake_run, coverage: dict[str, Any] | None) -> None:
+def test_missing_coverage_fails(tmp_path: Path, fake_run: Any, coverage: dict[str, Any] | None) -> None:
     if coverage is not None:
         write_coverage(tmp_path, coverage)
     fake_run(ts_tests, [(0, "Tests 3 passed")])
@@ -168,7 +168,7 @@ def test_missing_coverage_fails(tmp_path: Path, fake_run, coverage: dict[str, An
     assert (result.ok, result.summary, result.findings) == (False, "no coverage report; check [ts] runner and sources", ["Tests 3 passed"])
 
 
-def test_full_coverage_passes(tmp_path: Path, fake_run) -> None:
+def test_full_coverage_passes(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(tmp_path, {str(tmp_path / "web" / "a.ts"): coverage_entry({"1": 2}, {"1": [1, 1]})})
     fake_run(ts_tests, [(0, "noise\n      Tests  12 passed (12)\n")])
 
@@ -177,7 +177,7 @@ def test_full_coverage_passes(tmp_path: Path, fake_run) -> None:
     assert (result.ok, result.summary, result.findings) == (True, "12 passed, 0 uncovered lines/branches (need 0)", [])
 
 
-def test_uncovered_code_fails(tmp_path: Path, fake_run) -> None:
+def test_uncovered_code_fails(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(
         tmp_path,
         {

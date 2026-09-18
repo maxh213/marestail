@@ -7,7 +7,7 @@ import pytest
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates import er_deps
+from marestail.gates import cs_deps, er_deps
 from marestail.report import Result
 from tests.conftest import FakeRun, make_context
 
@@ -122,4 +122,4 @@ def test_cycle_findings_pick_first_module_line() -> None:
         {"from": "x", "to": "w", "line": 3},
         {"from": "x", "to": "y", "line": 6},
     ]
-    assert er_deps.cycle_findings(edges) == ["x:6 dependency cycle: x <-> y <-> z"]
+    assert cs_deps.cycle_findings(edges) == ["x:6 dependency cycle: x <-> y <-> z"]

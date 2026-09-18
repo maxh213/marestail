@@ -47,7 +47,7 @@ def test_bad_setting_is_an_error(tmp_path: Path) -> None:
     assert result.summary == '[ts] mutation_scope must be "changed" or "all", got \'some\''
 
 
-def test_nothing_changed_is_skipped(tmp_path: Path, fake_run) -> None:
+def test_nothing_changed_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_mutation)
 
     result = ts_mutation.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.test.ts", "perf/b.ts"}))
@@ -56,7 +56,7 @@ def test_nothing_changed_is_skipped(tmp_path: Path, fake_run) -> None:
     assert fake.calls == []
 
 
-def test_full_run_reports_survivors(tmp_path: Path, fake_run) -> None:
+def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
     prepare(tmp_path)
     report = {
         "files": {
@@ -82,7 +82,7 @@ def test_full_run_reports_survivors(tmp_path: Path, fake_run) -> None:
     assert not (tmp_path / "web" / ".stryker-tmp").exists()
 
 
-def test_missing_report_fails_and_cleans_up(tmp_path: Path, fake_run) -> None:
+def test_missing_report_fails_and_cleans_up(tmp_path: Path, fake_run: Any) -> None:
     prepare(tmp_path)
     fake_run(ts_mutation, stryker(tmp_path, None, []))
 
@@ -92,7 +92,7 @@ def test_missing_report_fails_and_cleans_up(tmp_path: Path, fake_run) -> None:
     assert not (tmp_path / "web" / ".stryker-tmp").exists()
 
 
-def test_scoped_run_mutates_changed_sources(tmp_path: Path, fake_run) -> None:
+def test_scoped_run_mutates_changed_sources(tmp_path: Path, fake_run: Any) -> None:
     for name in ["a.ts", "b.ts"]:
         (tmp_path / "web" / "src").mkdir(parents=True, exist_ok=True)
         (tmp_path / "web" / "src" / name).write_text("")
@@ -106,7 +106,7 @@ def test_scoped_run_mutates_changed_sources(tmp_path: Path, fake_run) -> None:
     assert fake.calls == [[*BASE, "--mutate", "src/a.ts,src/b.ts"]]
 
 
-def test_all_killed_with_a_note(tmp_path: Path, fake_run, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_all_killed_with_a_note(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "web").mkdir()
     ctx = make_context(tmp_path, TS)
     monkeypatch.setattr(ctx, "mutation_files", lambda *args: MutationScope("full", note="(no base main; full run)"))

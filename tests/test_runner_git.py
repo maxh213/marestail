@@ -1,12 +1,14 @@
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from marestail import runner
+from marestail import audit, runner
 from marestail.config import Config
+from marestail.perf import trees as perf_trees
 from marestail.pipeline import Worker
-from marestail.report import Result
+from marestail.report import Result, render
 from marestail.runner import Run
 from tests.conftest import commit_all, git
 
@@ -362,7 +364,7 @@ def test_verify_worker_clean(repo: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_verify_worker_collects_problems(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fail_gates(monkeypatch, False)
-    monkeypatch.setattr(runner.audit, "problems", lambda config, task, text, role: [f"audit {task} {text} {role}"])
+    monkeypatch.setattr(audit, "problems", lambda config, task, text, role: [f"audit {task} {text} {role}"])
     write(repo, "marestail.toml", "[a]\n")
     commit_all(repo, "toml")
     state = make_state(repo)
@@ -370,7 +372,7 @@ def test_verify_worker_collects_problems(repo: Path, monkeypatch: pytest.MonkeyP
     write(repo, "marestail.toml", "[b]\n")
     missing = state.handoffs / "01-coder.md"
     problems = runner.verify_worker(state, Worker("coder", "fast", audit=True), missing, before)
-    gate = runner.render([Result(gate="lint", ok=False, summary="summary")])
+    gate = render([Result(gate="lint", ok=False, summary="summary")])
     assert problems == "\n\n".join(
         [
             "missing handoff .marestail/handoffs/task/01-coder.md",
@@ -382,7 +384,7 @@ def test_verify_worker_collects_problems(repo: Path, monkeypatch: pytest.MonkeyP
 
 
 def test_verify_worker_audits_existing_report(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runner.audit, "problems", lambda config, task, text, role: [f"audit {task} {text} {role}"])
+    monkeypatch.setattr(audit, "problems", lambda config, task, text, role: [f"audit {task} {text} {role}"])
     state = make_state(repo)
     report = state.next_report("coder")
     report.write_text("handoff")
@@ -423,15 +425,15 @@ def test_gate_for(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fail_gates(monkeypatch, False)
     state = make_state(tmp_path)
     assert runner.gate_for(state, None) == ("", True)
-    assert runner.gate_for(state, "full") == (runner.render([Result(gate="lint", ok=False, summary="summary")]), False)
+    assert runner.gate_for(state, "full") == (render([Result(gate="lint", ok=False, summary="summary")]), False)
     fail_gates(monkeypatch, True)
     assert runner.gate_for(state, "full")[1] is True
 
 
 def test_archive_handoffs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     archived: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(runner.perf_trees, "archive_start", lambda *args: archived.append(args))
-    monkeypatch.setattr(runner.time, "strftime", lambda fmt: f"stamp{fmt}")
+    monkeypatch.setattr(perf_trees, "archive_start", lambda *args: archived.append(args))
+    monkeypatch.setattr(time, "strftime", lambda fmt: f"stamp{fmt}")
     state = make_state(tmp_path)
     runner.archive_handoffs(state)
     state.next_report("coder").write_text("h")

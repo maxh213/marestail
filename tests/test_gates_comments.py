@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -107,7 +108,7 @@ def test_docstrings(text: str, expected: list[int]) -> None:
     assert comments.docstrings(text) == expected
 
 
-def test_ts_findings_needs_a_ts_root(tmp_path: Path, fake_run) -> None:
+def test_ts_findings_needs_a_ts_root(tmp_path: Path, fake_run: Any) -> None:
     write(tmp_path, "a.ts", "// x\n")
     fake = fake_run(comments)
 
@@ -115,14 +116,14 @@ def test_ts_findings_needs_a_ts_root(tmp_path: Path, fake_run) -> None:
     assert fake.calls == []
 
 
-def test_ts_findings_needs_files(tmp_path: Path, fake_run) -> None:
+def test_ts_findings_needs_files(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(comments)
 
     assert comments.ts_findings(make_context(tmp_path, {**EVERYWHERE, "ts": {"root": "web"}})) == []
     assert fake.calls == []
 
 
-def test_ts_findings_runs_the_scanner(tmp_path: Path, fake_run) -> None:
+def test_ts_findings_runs_the_scanner(tmp_path: Path, fake_run: Any) -> None:
     source = write(tmp_path, "web/a.tsx", "// x\n")
     reply = json.dumps([{"file": str(source), "line": 4, "text": "// x"}])
     fake = fake_run(comments, [(0, reply)])
@@ -134,14 +135,14 @@ def test_ts_findings_runs_the_scanner(tmp_path: Path, fake_run) -> None:
     assert fake.options[0]["cwd"] == tmp_path
 
 
-def test_ts_scanner_failure_keeps_the_output_tail(tmp_path: Path, fake_run) -> None:
+def test_ts_scanner_failure_keeps_the_output_tail(tmp_path: Path, fake_run: Any) -> None:
     write(tmp_path, "a.js", "// x\n")
     fake_run(comments, [(2, "  " + "a" * 50 + "b" * 200 + "  \n")])
 
     assert comments.ts_findings(make_context(tmp_path, {**EVERYWHERE, "ts": {"root": "."}})) == ["comment scanner failed: " + "b" * 200]
 
 
-def test_elixir_findings(tmp_path: Path, fake_run) -> None:
+def test_elixir_findings(tmp_path: Path, fake_run: Any) -> None:
     source = write(tmp_path, "lib/a.ex", "# x\n")
     fake = fake_run(comments, [(0, json.dumps([{"file": str(source), "line": 1, "text": "# x"}])), (1, "boom")])
     ctx = make_context(tmp_path, EVERYWHERE)
@@ -151,7 +152,7 @@ def test_elixir_findings(tmp_path: Path, fake_run) -> None:
     assert fake.calls[0] == ["elixir", str(comments.EX_SCRIPT), str(source)]
 
 
-def test_elixir_findings_without_files(tmp_path: Path, fake_run) -> None:
+def test_elixir_findings_without_files(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(comments)
 
     assert comments.elixir_findings(make_context(tmp_path, EVERYWHERE)) == []
@@ -171,10 +172,13 @@ def test_erlang_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], hint: str | None, expected: list[str]
 ) -> None:
     source = write(tmp_path, "src/a.erl", "% c\n")
-    calls = []
-    monkeypatch.setattr(
-        erlang, "escript", lambda ctx, script, args: calls.append((script, args)) or (reply[0], reply[1].replace("FILE", str(source)))
-    )
+    calls: list[tuple[str, list[str]]] = []
+
+    def escript(ctx: object, script: str, args: list[str]) -> tuple[int, str]:
+        calls.append((script, args))
+        return reply[0], reply[1].replace("FILE", str(source))
+
+    monkeypatch.setattr(erlang, "escript", escript)
     monkeypatch.setattr(erlang, "hint", lambda code, output: hint)
 
     assert comments.erlang_findings(make_context(tmp_path, EVERYWHERE)) == expected
@@ -196,10 +200,13 @@ def test_erlang_findings_without_files(tmp_path: Path) -> None:
 def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], expected: list[str]) -> None:
     source = write(tmp_path, "app/a.rb", "# r\n")
     write(tmp_path, "lib/tasks/b.txt", "# r\n")
-    calls = []
-    monkeypatch.setattr(
-        ruby, "scan", lambda ctx, mode, paths: calls.append((mode, paths)) or (reply[0], reply[1].replace("FILE", str(source)))
-    )
+    calls: list[tuple[str, list[Path]]] = []
+
+    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[int, str]:
+        calls.append((mode, paths))
+        return reply[0], reply[1].replace("FILE", str(source))
+
+    monkeypatch.setattr(ruby, "scan", scan)
 
     assert comments.ruby_findings(make_context(tmp_path, {**EVERYWHERE, "ruby": {}})) == expected
     assert calls == [("comments", [source])]
@@ -238,10 +245,13 @@ def test_language_sections_are_optional(tmp_path: Path) -> None:
 
 def test_rust_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = write(tmp_path, "src/lib.rs", "// c\n")
-    calls = []
-    monkeypatch.setattr(
-        rust, "scan", lambda ctx, mode, paths: calls.append((mode, paths)) or ([{"file": "/abs/lib.rs", "line": 2, "text": "// c"}], None)
-    )
+    calls: list[tuple[str, list[Path]]] = []
+
+    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[list[dict[str, Any]], None]:
+        calls.append((mode, paths))
+        return [{"file": "/abs/lib.rs", "line": 2, "text": "// c"}], None
+
+    monkeypatch.setattr(rust, "scan", scan)
     monkeypatch.setattr(rust, "rel", lambda ctx, file: f"rel:{file}")
 
     assert comments.rust_findings(make_context(tmp_path, {**EVERYWHERE, "rust": {}})) == ["rel:/abs/lib.rs:2 comment: // c"]

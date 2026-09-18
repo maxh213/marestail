@@ -1,5 +1,9 @@
 import json
 import os
+import secrets
+import subprocess
+import sys
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -55,9 +59,9 @@ def tree(tmp_path: Path, name: str = "head") -> trees.Tree:
 
 @pytest.fixture
 def frozen(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db.time, "time", lambda: 1000.0)
-    monkeypatch.setattr(db.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(db.secrets, "token_urlsafe", lambda size: f"pw{size}")
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda size: f"pw{size}")
 
 
 def test_database_names(tmp_path: Path) -> None:
@@ -74,7 +78,7 @@ def test_database_names(tmp_path: Path) -> None:
 def test_build_database_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("PORT", "PREFIX", "VOLUME", "HOME"):
         monkeypatch.delenv(f"MARESTAIL_PERF_DB_{name}", raising=False)
-    monkeypatch.setattr(db.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     database = db.build_database(Config(root=tmp_path, raw={}), {"migrate": "m"}, 5, "rs", "img", "is")
     assert database == db.Database(
         tmp_path,
@@ -153,9 +157,12 @@ def test_for_run_falls_back_to_settings(tmp_path: Path, monkeypatch: pytest.Monk
 def session_calls(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     calls: list[Any] = []
     monkeypatch.setattr(trees, "write_trees", lambda config, session: calls.append(("write", session.image, session.rows)))
-    monkeypatch.setattr(
-        db, "build", lambda database, tree: calls.append(("build", tree.name, database.rows)) or ("bad" if tree.name == "baseline" else "")
-    )
+
+    def build(database: Any, tree: Any) -> str:
+        calls.append(("build", tree.name, database.rows))
+        return "bad" if tree.name == "baseline" else ""
+
+    monkeypatch.setattr(db, "build", build)
     return calls
 
 
@@ -346,8 +353,8 @@ def test_start_postgres_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]
 
 def clock(monkeypatch: pytest.MonkeyPatch, ticks: list[float]) -> None:
     values: Iterator[float] = iter(ticks)
-    monkeypatch.setattr(db.time, "monotonic", lambda: next(values))
-    monkeypatch.setattr(db.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(time, "monotonic", lambda: next(values))
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
 
 
 def test_wait_ready_retries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
@@ -513,7 +520,7 @@ def test_process_alive(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(pid: int, signal: int) -> None:
         raise ProcessLookupError(pid)
 
-    monkeypatch.setattr(db.os, "kill", refuse)
+    monkeypatch.setattr(os, "kill", refuse)
     assert db.process_alive(1) is False
 
 
@@ -612,7 +619,7 @@ def golden_rules(extra: dict[str, Reply] | None = None) -> Callable[[list[str]],
 
 
 def test_build_golden_seeded(tmp_path: Path, fake_run: Callable[..., FakeRun], frozen: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(db.time, "strftime", lambda pattern: "2026-09-18T00:00:00+0000")
+    monkeypatch.setattr(time, "strftime", lambda pattern: "2026-09-18T00:00:00+0000")
     fake = fake_run(db, golden_rules())
     database = make_db(tmp_path)
     (database.root / "perf").mkdir()
@@ -756,15 +763,15 @@ def test_start_build_background(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         launched.append((command, options["cwd"], options["stderr"], options["start_new_session"], options["stdout"].name))
         return FakeChild()
 
-    monkeypatch.setattr(db.subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     database = make_db(tmp_path)
     name = db.golden_name(database, tree(tmp_path))
     log = tmp_path / "home" / "perf-db" / f"{name}.log"
     assert db.start_build(database, tree(tmp_path)) == (
         f"building {name} for the head tree in the background; poll marestail perf db status; log: {log}"
     )
-    command = [db.sys.executable, str(db.CLI), "perf", "db", "golden", "--tree", "head", "--wait"]
-    assert launched == [(command, database.root, db.subprocess.STDOUT, True, str(log))]
+    command = [sys.executable, str(db.CLI), "perf", "db", "golden", "--tree", "head", "--wait"]
+    assert launched == [(command, database.root, subprocess.STDOUT, True, str(log))]
     assert db.read_status(database, name) == {"state": "building", "started": 1000.0, "pid": 4242}
 
 
@@ -934,7 +941,12 @@ def test_prune_action(
 ) -> None:
     activate(monkeypatch, {"head": tree(project)})
     kept: list[set[str]] = []
-    monkeypatch.setattr(db, "prune", lambda database, needed: kept.append(needed) or ["a", "b"])
+
+    def prune(database: Any, needed: set[str]) -> list[str]:
+        kept.append(needed)
+        return ["a", "b"]
+
+    monkeypatch.setattr(db, "prune", prune)
     assert db.command("prune", None, False) == 0
     assert capsys.readouterr().out == "pruned a\npruned b\n"
     assert [len(names) for names in kept] == [1]

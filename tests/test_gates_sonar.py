@@ -53,7 +53,7 @@ def languages(distribution: str | None, coverage: bool) -> Responder:
 @pytest.fixture
 def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     slept: list[float] = []
-    monkeypatch.setattr(sonar.time, "sleep", slept.append)
+    monkeypatch.setattr("marestail.gates.sonar.time.sleep", slept.append)
     return slept
 
 

@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ def test_rel(tmp_path: Path) -> None:
 
 
 def test_env_prefers_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rust.shutil, "which", which_from(INSTALLED))
+    monkeypatch.setattr(shutil, "which", which_from(INSTALLED))
     ctx = make_context(tmp_path, {"rust": {"llvm_cov": "/llvm/cov", "llvm_profdata": "/llvm/profdata"}})
     assert rust.env(ctx) == {"LLVM_COV": "/llvm/cov", "LLVM_PROFDATA": "/llvm/profdata"}
 
@@ -42,7 +43,7 @@ def test_env_prefers_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_env_uses_system_llvm_without_rustup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLVM_COV", raising=False)
     monkeypatch.setenv("LLVM_PROFDATA", "/set")
-    monkeypatch.setattr(rust.shutil, "which", which_from(INSTALLED))
+    monkeypatch.setattr(shutil, "which", which_from(INSTALLED))
     assert rust.env(make_context(tmp_path)) == {"LLVM_COV": "/usr/bin/llvm-cov"}
 
 
@@ -50,12 +51,12 @@ def test_env_uses_system_llvm_without_rustup(tmp_path: Path, monkeypatch: pytest
 def test_env_leaves_rustup_or_missing_tools_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, found: dict[str, str]) -> None:
     monkeypatch.delenv("LLVM_COV", raising=False)
     monkeypatch.delenv("LLVM_PROFDATA", raising=False)
-    monkeypatch.setattr(rust.shutil, "which", which_from(found))
+    monkeypatch.setattr(shutil, "which", which_from(found))
     assert rust.env(make_context(tmp_path)) == {}
 
 
 def test_cargo_runs_in_rust_root(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rust.shutil, "which", which_from({}))
+    monkeypatch.setattr(shutil, "which", which_from({}))
     fake = fake_run(rust, [(0, "ok"), (1, "bad")])
     ctx = make_context(tmp_path, {"rust": {"root": "crate", "cargo": ["cross", "+nightly"], "llvm_cov": "/c"}})
     assert rust.cargo(ctx, ["test"]) == (0, "ok")

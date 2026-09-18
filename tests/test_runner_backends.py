@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -161,7 +162,7 @@ class FakeSubprocess:
 
 def install_subprocess(monkeypatch: pytest.MonkeyPatch, result: Any) -> FakeSubprocess:
     fake = FakeSubprocess(result)
-    monkeypatch.setattr(runner.subprocess, "run", fake)
+    monkeypatch.setattr(subprocess, "run", fake)
     return fake
 
 
@@ -190,7 +191,7 @@ def test_kilo_run_output_choice(monkeypatch: pytest.MonkeyPatch, result: tuple[i
     fake = install_subprocess(monkeypatch, result)
     assert runner.kilo_run(make_state(), "the prompt") == expected
     assert fake.calls[0]["input"] == "the prompt"
-    assert fake.calls[0]["env"] is runner.os.environ
+    assert fake.calls[0]["env"] is os.environ
 
 
 def test_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,7 +316,7 @@ def test_kimi_error(event: dict[str, Any], expected: str | None) -> None:
 
 
 def test_kimi_texts() -> None:
-    events = [
+    events: list[dict[str, Any]] = [
         {"role": "assistant", "content": " a "},
         {"type": "assistant", "message": {"content": [{"text": " b "}, {"text": ""}, "raw", {"other": 1}]}},
         {"role": "assistant", "content": "   ", "message": "not a dict"},

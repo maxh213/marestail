@@ -15,11 +15,11 @@ from tests.conftest import make_context
 WEB = "src/main/java/app/web/Api.java"
 DOMAIN = "src/main/java/app/domain/Order.java"
 REPO = "src/main/java/app/repo/Store.java"
-LAYERS = [
+LAYERS: list[dict[str, Any]] = [
     {"from": "app.domain", "forbid": ["app.web", "src/main/java/app/repo"], "forbid_external": ["javax.servlet.*"]},
     {"from": "src/main/java/app/web"},
 ]
-DATA = {
+DATA: dict[str, Any] = {
     "files": [
         {"path": WEB, "package": "app.web", "imports": [{"name": "javax.servlet.Http", "line": 2}]},
         {

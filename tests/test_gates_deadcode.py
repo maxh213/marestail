@@ -25,7 +25,7 @@ def test_nothing_configured_passes(tmp_path: Path) -> None:
     assert (result.gate, result.ok, result.summary, result.findings) == ("deadcode", True, "nothing unreachable", [])
 
 
-def test_python_findings_through_the_gate(tmp_path: Path, fake_run) -> None:
+def test_python_findings_through_the_gate(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(deadcode, [(3, VULTURE)])
 
     result = deadcode.run_gate(make_context(tmp_path, PYTHON))
@@ -35,7 +35,7 @@ def test_python_findings_through_the_gate(tmp_path: Path, fake_run) -> None:
     assert fake.options == [{"cwd": tmp_path, "timeout": 600}]
 
 
-def test_scoped_gate_keeps_findings_in_scope(tmp_path: Path, fake_run) -> None:
+def test_scoped_gate_keeps_findings_in_scope(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(3, VULTURE)])
 
     result = deadcode.run_gate(make_context(tmp_path, PYTHON, scope_changed=True, changed={"marestail/b.py"}))
@@ -43,7 +43,7 @@ def test_scoped_gate_keeps_findings_in_scope(tmp_path: Path, fake_run) -> None:
     assert result.findings == ["marestail/b.py:12 unreachable code after 'return'"]
 
 
-def test_python_kinds_can_be_configured(tmp_path: Path, fake_run) -> None:
+def test_python_kinds_can_be_configured(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(0, VULTURE)])
 
     findings = deadcode.python_findings(make_context(tmp_path, {**PYTHON, "deadcode": {"python_kinds": ["unused variable"]}}))
@@ -61,13 +61,13 @@ def test_python_kinds_can_be_configured(tmp_path: Path, fake_run) -> None:
         ((3, ""), []),
     ],
 )
-def test_python_findings_outcomes(tmp_path: Path, fake_run, reply: tuple[int, str], expected: list[str]) -> None:
+def test_python_findings_outcomes(tmp_path: Path, fake_run: Any, reply: tuple[int, str], expected: list[str]) -> None:
     fake_run(deadcode, [reply])
 
     assert deadcode.python_findings(make_context(tmp_path, PYTHON)) == expected
 
 
-def test_python_root_resolves_paths(tmp_path: Path, fake_run) -> None:
+def test_python_root_resolves_paths(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(deadcode, [(3, "pkg/a.py:1: unused class 'A' (60% confidence)")])
 
     findings = deadcode.python_findings(make_context(tmp_path, {"python": {"root": "svc"}}))
@@ -115,7 +115,7 @@ KNIP = {
 }
 
 
-def test_ts_findings(tmp_path: Path, fake_run) -> None:
+def test_ts_findings(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(deadcode, [(1, "noise " + json.dumps(KNIP) + " trailing {")])
 
     findings = deadcode.ts_findings(make_context(tmp_path, {"ts": {"root": "web"}}))
@@ -125,7 +125,7 @@ def test_ts_findings(tmp_path: Path, fake_run) -> None:
     assert fake.options == [{"cwd": tmp_path / "web", "timeout": 900}]
 
 
-def test_ts_kinds_can_be_configured(tmp_path: Path, fake_run) -> None:
+def test_ts_kinds_can_be_configured(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(0, json.dumps(KNIP))])
 
     findings = deadcode.ts_findings(make_context(tmp_path, {"ts": {}, "deadcode": {"ts_kinds": ["enumMembers", "exports"]}}))
@@ -133,7 +133,7 @@ def test_ts_kinds_can_be_configured(tmp_path: Path, fake_run) -> None:
     assert findings == ["src/a.ts:4 unused export 'helper'", ".:0 unused enumMember 'X'"]
 
 
-def test_ts_findings_without_a_report(tmp_path: Path, fake_run) -> None:
+def test_ts_findings_without_a_report(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(2, " " + "k" * 300 + "\n")])
 
     assert deadcode.ts_findings(make_context(tmp_path, {"ts": {}})) == ["knip produced no report: " + "k" * 200]
@@ -157,9 +157,14 @@ def test_describe(item: Any, expected: str) -> None:
 )
 def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], expected: list[str]) -> None:
     files = [tmp_path / "app" / "a.rb"]
-    calls = []
+    calls: list[tuple[str, list[Path]]] = []
+
+    def scan(ctx: object, mode: str, found: list[Path]) -> tuple[int, str]:
+        calls.append((mode, found))
+        return reply
+
     monkeypatch.setattr(rb_crap, "ruby_sources", lambda ctx: files)
-    monkeypatch.setattr(ruby, "scan", lambda ctx, mode, found: calls.append((mode, found)) or reply)
+    monkeypatch.setattr(ruby, "scan", scan)
 
     assert deadcode.ruby_findings(make_context(tmp_path, {"ruby": {}})) == expected
     assert calls == [("dead", files)]
@@ -197,9 +202,14 @@ ENTRY = {"file": "A.cs", "line": 5, "kind": "method", "name": "Go"}
 def test_structured_scanners(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: Any, section: str, failure: str) -> None:
     files = [tmp_path / "A"]
     replies = [([ENTRY], None), (None, "exploded")]
-    calls = []
+    calls: list[tuple[str, list[Path]]] = []
+
+    def scan(ctx: object, mode: str, found: list[Path]) -> tuple[Any, Any]:
+        calls.append((mode, found))
+        return replies.pop(0)
+
     monkeypatch.setattr(module, "sources", lambda ctx: files)
-    monkeypatch.setattr(module, "scan", lambda ctx, mode, found: calls.append((mode, found)) or replies.pop(0))
+    monkeypatch.setattr(module, "scan", scan)
     scanner = getattr(deadcode, f"{section}_findings")
     ctx = make_context(tmp_path, {section: {}})
 
@@ -220,11 +230,16 @@ def test_structured_scanners_without_sources(tmp_path: Path, monkeypatch: pytest
 def test_rust_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     files, uses = [tmp_path / "lib.rs"], [tmp_path / "main.rs"]
     replies = [([{**ENTRY, "file": "/abs/lib.rs"}], None), ([], "no cargo")]
-    calls = []
+    calls: list[tuple[str, list[Path], list[Path]]] = []
+
+    def scan(ctx: object, mode: str, found: list[Path], uses: list[Path]) -> tuple[Any, Any]:
+        calls.append((mode, found, uses))
+        return replies.pop(0)
+
     monkeypatch.setattr(rust, "sources", lambda ctx: files)
     monkeypatch.setattr(rust, "use_files", lambda ctx: uses)
     monkeypatch.setattr(rust, "rel", lambda ctx, file: f"rel:{file}")
-    monkeypatch.setattr(rust, "scan", lambda ctx, mode, found, uses: calls.append((mode, found, uses)) or replies.pop(0))
+    monkeypatch.setattr(rust, "scan", scan)
     ctx = make_context(tmp_path, {"rust": {}})
 
     assert deadcode.rust_findings(ctx) == ["rel:/abs/lib.rs:5 unused method 'Go'"]
@@ -241,7 +256,7 @@ def elixir_writer(ctx_work: Path, entries: list[dict[str, Any]], code: int = 0) 
     return reply
 
 
-def test_elixir_findings(tmp_path: Path, fake_run) -> None:
+def test_elixir_findings(tmp_path: Path, fake_run: Any) -> None:
     entries = [
         {"file": "lib/a.ex", "line": 3, "module": "A", "function": "go", "arity": 1},
         {"file": "../../../outside.ex", "line": 4, "module": "B", "function": "stop", "arity": 0},
@@ -255,7 +270,7 @@ def test_elixir_findings(tmp_path: Path, fake_run) -> None:
 
 
 @pytest.mark.parametrize("code", [1, 0])
-def test_elixir_failures(tmp_path: Path, fake_run, code: int) -> None:
+def test_elixir_failures(tmp_path: Path, fake_run: Any, code: int) -> None:
     stale = tmp_path / ".marestail" / "ex-deadcode.json"
     stale.parent.mkdir()
     stale.write_text("[]")
@@ -265,7 +280,7 @@ def test_elixir_failures(tmp_path: Path, fake_run, code: int) -> None:
     assert not stale.exists()
 
 
-def test_elixir_failure_after_writing_the_report(tmp_path: Path, fake_run) -> None:
+def test_elixir_failure_after_writing_the_report(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, elixir_writer(tmp_path / ".marestail", [], code=1))
 
     assert deadcode.elixir_findings(make_context(tmp_path, {"elixir": {}})) == ["elixir dead code analysis failed: mix output"]
