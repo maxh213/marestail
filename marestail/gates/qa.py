@@ -1,4 +1,3 @@
-import shlex
 import time
 
 from marestail.context import Context

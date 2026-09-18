@@ -41,6 +41,10 @@ if __name__ == "__main__":
         expect("worktree-mounts-common-dir-read-only", git_mounts(context(worktree)), ["-v", f"{main / '.git'}:{main / '.git'}:ro"])
         expect("not-a-repo-mounts-nothing", git_mounts(context(plain)), [])
         command = scanner_command(context(worktree), CREDS, "k")
-        expect("mount-before-image", command.index(f"{main / '.git'}:{main / '.git'}:ro") < command.index("sonarsource/sonar-scanner-cli"), True)
+        expect(
+            "mount-before-image",
+            command.index(f"{main / '.git'}:{main / '.git'}:ro") < command.index("sonarsource/sonar-scanner-cli"),
+            True,
+        )
         expect("project-still-mounted", f"{worktree}:{worktree}" in command, True)
     print("sonar worktree ok")

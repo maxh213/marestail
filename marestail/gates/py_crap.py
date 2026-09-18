@@ -59,9 +59,7 @@ def intersects(block: dict, lines: set[int]) -> bool:
 
 def functions_by_line(file_coverage: dict) -> dict[int, float]:
     return {
-        data["start_line"]: data["summary"]["percent_covered"] / 100
-        for name, data in file_coverage.get("functions", {}).items()
-        if name
+        data["start_line"]: data["summary"]["percent_covered"] / 100 for name, data in file_coverage.get("functions", {}).items() if name
     }
 
 
@@ -83,5 +81,3 @@ def score(file: str, block: dict, covered: float) -> dict:
 
 def describe(f: dict) -> str:
     return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['cc']}, coverage={f['cov']:.0%})"
-
-

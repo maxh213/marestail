@@ -54,7 +54,17 @@ def snapshot_existing():
     expect(
         "claude",
         agent_command(state("claude")),
-        ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json", "--model", "mymodel"],
+        [
+            "claude",
+            "-p",
+            "--permission-mode",
+            "bypassPermissions",
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "json",
+            "--model",
+            "mymodel",
+        ],
     )
     expect(
         "agy",
@@ -69,7 +79,18 @@ def snapshot_existing():
     expect(
         "grok",
         grok_command(state("grok"), PROMPT),
-        ["grok", "--prompt-file", str(PROMPT.resolve()), "--output-format", "json", "--always-approve", "--no-plan", "--trust", "--model", "mymodel"],
+        [
+            "grok",
+            "--prompt-file",
+            str(PROMPT.resolve()),
+            "--output-format",
+            "json",
+            "--always-approve",
+            "--no-plan",
+            "--trust",
+            "--model",
+            "mymodel",
+        ],
     )
     expect("default", resolve_agent(state(None, model=None)), "claude")
     expect("default-command", agent_command(state(None)), agent_command(state("claude")))
@@ -79,7 +100,19 @@ def kilo_defaults():
     expect(
         "kilo-default",
         kilo_command(state("kilo", model=None)),
-        ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model", KILO_DEFAULT_MODEL, "--variant", KILO_DEFAULT_VARIANT],
+        [
+            "kilo",
+            "run",
+            "--auto",
+            "--format",
+            "json",
+            "--log-level",
+            "ERROR",
+            "--model",
+            KILO_DEFAULT_MODEL,
+            "--variant",
+            KILO_DEFAULT_VARIANT,
+        ],
     )
     expect("kilo-default-model", KILO_DEFAULT_MODEL, "kilo/stepfun/step-3.7-flash:free")
     expect("kilo-default-variant", KILO_DEFAULT_VARIANT, "high")
@@ -103,14 +136,23 @@ def kimi_backend():
         ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json"],
     )
     expect("kimi-prompt-points-at-file", str(PROMPT.resolve()) in kimi_prompt(PROMPT), True)
-    expect("kimi-prompt-stays-short", len(kimi_prompt(PROMPT)) < 4096, True
-    )
+    expect("kimi-prompt-stays-short", len(kimi_prompt(PROMPT)) < 4096, True)
     expect("kimi-resolve", resolve_agent(state("kimi", model=None)), "kimi")
     expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
 
 
 def env_overrides():
-    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT", "MARESTAIL_KIMI"]
+    keys = [
+        "MARESTAIL_AGENT",
+        "MARESTAIL_KILO",
+        "MARESTAIL_KILO_VARIANT",
+        "MARESTAIL_CLAUDE",
+        "MARESTAIL_AGY",
+        "MARESTAIL_CURSOR",
+        "MARESTAIL_GROK",
+        "MARESTAIL_GROK_EFFORT",
+        "MARESTAIL_KIMI",
+    ]
     previous = {key: os.environ.get(key) for key in keys}
     try:
         os.environ["MARESTAIL_AGENT"] = "kilo"
@@ -224,7 +266,11 @@ def kimi_output():
     stderr_failure = '{"role":"meta","type":"system.version","version":"0.42.0"}\nerror: failed to run prompt: usage limit reached'
     expect("kimi-rate-limited-stderr", kimi_rate_limited(1, stderr_failure), True)
     expect("kimi-not-limited-clean-exit", kimi_rate_limited(0, "usage limit mentioned in passing"), False)
-    expect("kimi-not-limited-nonquota-error", kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'), False)
+    expect(
+        "kimi-not-limited-nonquota-error",
+        kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'),
+        False,
+    )
 
 
 def verdict_parse():

@@ -29,7 +29,13 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("er.mutation", "no changed erlang sources")
     tests = erlang.test_files(ctx)
     if not tests:
-        return Result("er.mutation", False, "no eunit test files", ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"], time.time() - started)
+        return Result(
+            "er.mutation",
+            False,
+            "no eunit test files",
+            ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"],
+            time.time() - started,
+        )
     scratch = erlang.fresh_dir(ctx.work / SCRATCH)
     code, output = erlang.escript(ctx, "mutation.escript", ["mutants", str(scratch), *map(str, mutate)], timeout=900)
     problem = erlang.hint(code, output)
@@ -43,7 +49,13 @@ def run_gate(ctx: Context) -> Result:
     mutants = json.loads(manifest.read_text()).get("mutants", [])
     if not mutants:
         where = " in the changed erlang sources" if scope.mode != "full" else " in the erlang sources"
-        return Result("er.mutation", False, "no mutants were generated", [f"no mutable comparison, arithmetic or boolean operators found{where}"], time.time() - started)
+        return Result(
+            "er.mutation",
+            False,
+            "no mutants were generated",
+            [f"no mutable comparison, arithmetic or boolean operators found{where}"],
+            time.time() - started,
+        )
     apply_cap(mutants, ctx)
     ebin_base = scratch / "ebin-base"
     ebin_base.mkdir()
@@ -65,7 +77,9 @@ def run_gate(ctx: Context) -> Result:
     if problem:
         return Result("er.mutation", False, problem, [problem], time.time() - started)
     if code == 1:
-        return Result("er.mutation", False, "test suite fails on unmutated sources; fix the suite first", tail(output), time.time() - started)
+        return Result(
+            "er.mutation", False, "test suite fails on unmutated sources; fix the suite first", tail(output), time.time() - started
+        )
     if code != 0:
         return Result("er.mutation", False, "eunit run failed on unmutated sources", tail(output), time.time() - started)
     per_mutant_timeout = max(60, min(1800, math.ceil(baseline_seconds * 10)))
@@ -84,7 +98,9 @@ def run_gate(ctx: Context) -> Result:
     capped = [m for m in mutants if m.get("status") == "skipped"]
     counted = [m for m in mutants if m.get("status") not in EXCLUDED]
     if not counted:
-        return Result("er.mutation", False, f"no runnable mutants: all {len(mutants)} failed to compile or were capped", [], time.time() - started)
+        return Result(
+            "er.mutation", False, f"no runnable mutants: all {len(mutants)} failed to compile or were capped", [], time.time() - started
+        )
     findings = [describe(ctx, m, "survived") for m in survived]
     findings += [describe(ctx, m, "not checked (time budget)") for m in unchecked]
     notes = []

@@ -32,11 +32,24 @@ def tolerance_rules():
     expect("package-added", freeze.tolerated("App.Tests/App.Tests.csproj", diff("+" + PACKAGE)), True)
     expect("visible-added", freeze.tolerated("App.csproj", diff("+" + VISIBLE)), True)
     expect("new-itemgroup", freeze.tolerated("App.csproj", diff("+", "+  <ItemGroup>", "+" + VISIBLE, "+  </ItemGroup>")), True)
-    expect("version-bump", freeze.tolerated("App.csproj", diff('-    <PackageReference Include="xunit" Version="2.6.6" />', '+    <PackageReference Include="xunit" Version="2.9.0" />')), False)
+    expect(
+        "version-bump",
+        freeze.tolerated(
+            "App.csproj",
+            diff('-    <PackageReference Include="xunit" Version="2.6.6" />', '+    <PackageReference Include="xunit" Version="2.9.0" />'),
+        ),
+        False,
+    )
     expect("removal", freeze.tolerated("App.csproj", diff('-    <PackageReference Include="coverlet.collector" Version="6.0.0" />')), False)
-    expect("property", freeze.tolerated("App.csproj", diff("+" + PACKAGE, "+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>")), False)
+    expect(
+        "property", freeze.tolerated("App.csproj", diff("+" + PACKAGE, "+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>")), False
+    )
     expect("compile-remove", freeze.tolerated("App.csproj", diff('+    <Compile Remove="Services/Hard.cs" />')), False)
-    expect("extra-attribute", freeze.tolerated("App.csproj", diff('+    <PackageReference Include="x" Version="1" PrivateAssets="all" />')), False)
+    expect(
+        "extra-attribute",
+        freeze.tolerated("App.csproj", diff('+    <PackageReference Include="x" Version="1" PrivateAssets="all" />')),
+        False,
+    )
     expect("wrappers-only", freeze.tolerated("App.csproj", diff("+  <ItemGroup>", "+  </ItemGroup>")), False)
     expect("empty-diff", freeze.tolerated("App.csproj", ""), False)
     expect("other-file", freeze.tolerated("marestail.toml", diff("+" + PACKAGE)), False)
@@ -83,7 +96,9 @@ def worker_keeps_additions():
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(Path(tmp))
         stub_agent(Path(tmp), root, f"sed -i 's|  </ItemGroup>|{PACKAGE}\\n  </ItemGroup>|' App.csproj")
-        state = Run(config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude")
+        state = Run(
+            config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude"
+        )
         with contextlib.redirect_stdout(io.StringIO()):
             passed = run_worker(state, find("specifier"), "")
         expect("addition-passes", passed, True)
@@ -94,8 +109,10 @@ def worker_keeps_additions():
 def worker_reverts_other_edits():
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(Path(tmp))
-        stub_agent(Path(tmp), root, "sed -i 's|Version=\"2.6.6\"|Version=\"2.9.0\"|' App.csproj")
-        state = Run(config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude")
+        stub_agent(Path(tmp), root, 'sed -i \'s|Version="2.6.6"|Version="2.9.0"|\' App.csproj')
+        state = Run(
+            config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude"
+        )
         with contextlib.redirect_stdout(io.StringIO()) as out:
             passed = run_worker(state, find("specifier"), "")
         expect("bump-fails", passed, False)

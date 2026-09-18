@@ -8,7 +8,10 @@ from marestail.report import Result
 from marestail.ruby import scan
 
 DEFAULT_LAYERS = [
-    {"from": "app/models", "forbid": ["app/controllers", "app/helpers", "app/jobs", "app/mailers", "app/channels", "app/graphql", "app/views"]},
+    {
+        "from": "app/models",
+        "forbid": ["app/controllers", "app/helpers", "app/jobs", "app/mailers", "app/channels", "app/graphql", "app/views"],
+    },
     {"from": "app/services", "forbid": ["app/controllers", "app/helpers", "app/views"]},
     {"from": "lib", "forbid": ["app/controllers"]},
 ]

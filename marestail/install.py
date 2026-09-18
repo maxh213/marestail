@@ -6,8 +6,30 @@ import tomllib
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
-GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", "StrykerOutput/", ".sonarqube/", ".idea/", ".vscode/"]
-GITIGNORE_GENERATED_LINES = ["features/", "qa/", "tasks/", "PERFORMANCE.md", "perf/", ".claude/settings.json", ".agents/hooks.json", ".grok/", ".cursor/hooks.json"]
+GITIGNORE_LINES = [
+    ".marestail/",
+    "mutants/",
+    ".scannerwork/",
+    ".venv/",
+    ".coverage",
+    "reports/mutation/",
+    ".stryker-tmp/",
+    "StrykerOutput/",
+    ".sonarqube/",
+    ".idea/",
+    ".vscode/",
+]
+GITIGNORE_GENERATED_LINES = [
+    "features/",
+    "qa/",
+    "tasks/",
+    "PERFORMANCE.md",
+    "perf/",
+    ".claude/settings.json",
+    ".agents/hooks.json",
+    ".grok/",
+    ".cursor/hooks.json",
+]
 GATE_MARKER = "marestail gate"
 
 

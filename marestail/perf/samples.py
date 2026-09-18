@@ -93,7 +93,13 @@ def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, harne
         env |= database_env
     try:
         completed = subprocess.run(
-            [str(config.root / bench)], cwd=tree.path, env={**os.environ, **env}, capture_output=True, text=True, timeout=timeout, check=False
+            [str(config.root / bench)],
+            cwd=tree.path,
+            env={**os.environ, **env},
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return f"{label} timed out after {timeout}s"
@@ -107,7 +113,15 @@ def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, harne
         return f"{label} exited {completed.returncode}"
     if not records:
         return f"{label} printed no JSON measurement"
-    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "fingerprint": stamp, "sample": sample, "db": database is not None, "reset_ms": reset_ms}
+    base = {
+        "tree": tree.name,
+        "sha": tree.sha,
+        "script": bench,
+        "fingerprint": stamp,
+        "sample": sample,
+        "db": database is not None,
+        "reset_ms": reset_ms,
+    }
     with trees.samples_file(config).open("a") as handle:
         handle.writelines(json.dumps({**base, **record}) + "\n" for record in records)
     return ""

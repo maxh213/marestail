@@ -17,7 +17,17 @@ JUDGE_SCOPE = (
 )
 
 
-def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "", gate_flags: str = "", hard_focus: set[str] | None = None) -> str:
+def worker_prompt(
+    config: Config,
+    worker: Worker,
+    task: Path,
+    task_name: str,
+    report: Path,
+    feedback: str,
+    label: str = "",
+    gate_flags: str = "",
+    hard_focus: set[str] | None = None,
+) -> str:
     parts = [
         role_text(worker.name),
         section("Task", task.read_text()),
@@ -31,12 +41,22 @@ def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, re
     return "\n\n".join(parts)
 
 
-def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "", feedback: str = "", hard_focus: set[str] | None = None) -> str:
+def judge_prompt(
+    config: Config,
+    judge: Judge,
+    task: Path,
+    task_name: str,
+    report: Path,
+    gate_report: str,
+    trees: str = "",
+    feedback: str = "",
+    hard_focus: set[str] | None = None,
+) -> str:
     parts = [
         role_text(judge.name),
         section("Task", task.read_text()),
         *hard_scope(hard_focus, JUDGE_SCOPE),
-        section("Specification",spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)),
+        section("Specification", spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)),
     ]
     if gate_report:
         parts.append(section("Gate report", gate_report))
@@ -44,11 +64,16 @@ def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, repor
         parts.append(section("Trees", trees))
     parts.append(section("Handoffs so far", handoffs(config, task_name)))
     if judge.name == "perf":
-        parts.append(section("Benches frozen", (
-            "`perf/` is frozen in this phase and the runner has already taken every missing sample; any edit you make to `perf/` "
-            "is discarded. If a bench is missing or broken, write `VERDICT: AUTHOR` as your first line to return to the authoring "
-            "phase. Otherwise analyse the measurements and write your verdict."
-        )))
+        parts.append(
+            section(
+                "Benches frozen",
+                (
+                    "`perf/` is frozen in this phase and the runner has already taken every missing sample; any edit you make to `perf/` "
+                    "is discarded. If a bench is missing or broken, write `VERDICT: AUTHOR` as your first line to return to the authoring "
+                    "phase. Otherwise analyse the measurements and write your verdict."
+                ),
+            )
+        )
     parts.append(section("Verdict", verdict_instructions(report, judge)))
     if feedback:
         parts.append(section("Why your verdict was rejected", feedback))
@@ -122,8 +147,7 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
     steps.append(
         "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
         "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
-        "sees it after the run. Then find a way within the current configuration."
-        + csproj_note(config)
+        "sees it after the run. Then find a way within the current configuration." + csproj_note(config)
     )
     return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, start=1))
 
@@ -132,8 +156,8 @@ def csproj_note(config: Config) -> str:
     if config.section("dotnet") is None:
         return ""
     return (
-        " The one frozen edit that is kept: adding `<PackageReference Include=\"...\" Version=\"...\" />` or "
-        "`<InternalsVisibleTo Include=\"...\" />` lines to a `.csproj`. Any other csproj change, including removing or "
+        ' The one frozen edit that is kept: adding `<PackageReference Include="..." Version="..." />` or '
+        '`<InternalsVisibleTo Include="..." />` lines to a `.csproj`. Any other csproj change, including removing or '
         "changing a line, is reverted."
     )
 
@@ -172,13 +196,18 @@ def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, n
     ]
     if trees:
         parts.append(section("Trees", trees))
-    parts.append(section("Authoring", (
-        "This is the authoring phase: `perf/` is editable now and frozen afterwards. Look at the diff since the task's start "
-        "commit and make sure every endpoint and function the task added or changed is measured by a `perf/bench_*` script, "
-        "extending or creating benches as needed and keeping every existing target. Do not take samples: the runner measures "
-        "between the phases. If the benches already cover the diff, change nothing. Write one short paragraph on what you "
-        f"changed (or `nothing`) to {note}. Edit nothing outside `perf/`."
-    )))
+    parts.append(
+        section(
+            "Authoring",
+            (
+                "This is the authoring phase: `perf/` is editable now and frozen afterwards. Look at the diff since the task's start "
+                "commit and make sure every endpoint and function the task added or changed is measured by a `perf/bench_*` script, "
+                "extending or creating benches as needed and keeping every existing target. Do not take samples: the runner measures "
+                "between the phases. If the benches already cover the diff, change nothing. Write one short paragraph on what you "
+                f"changed (or `nothing`) to {note}. Edit nothing outside `perf/`."
+            ),
+        )
+    )
     if feedback:
         parts.append(section("Earlier feedback", feedback))
     return "\n\n".join(parts)

@@ -36,10 +36,15 @@ def ruby_bin(ctx: Context) -> list[str]:
     if code == 0:
         return ["ruby"]
     return [
-        "docker", "run", "--rm",
-        "-v", f"{ctx.root}:{ctx.root}",
-        "-v", f"{MARESTAIL_ROOT}:{MARESTAIL_ROOT}",
-        "-w", str(ctx.root),
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{ctx.root}:{ctx.root}",
+        "-v",
+        f"{MARESTAIL_ROOT}:{MARESTAIL_ROOT}",
+        "-w",
+        str(ctx.root),
         ctx.ruby("image", IMAGE),
         "ruby",
     ]

@@ -1,7 +1,6 @@
 import fnmatch
 import json
 import time
-from pathlib import Path
 
 from marestail import dotnet
 from marestail.context import Context
@@ -15,7 +14,9 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     contract = ctx.root / LAYERS_FILE
     if not contract.exists():
-        return Result("cs.deps", False, f"no {LAYERS_FILE}; copy templates/dotnet-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"], 0.0)
+        return Result(
+            "cs.deps", False, f"no {LAYERS_FILE}; copy templates/dotnet-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"], 0.0
+        )
     layers = json.loads(contract.read_text())["layers"]
     files = dotnet.sources(ctx)
     if not files:
@@ -48,7 +49,9 @@ def layer_findings(ctx: Context, layers: list[dict], data: dict) -> list[str]:
             for using in record["usings"]:
                 for pattern in layer.get("forbid_external", []):
                     if fnmatch.fnmatch(using["name"], pattern):
-                        findings.append(f"{record['path']}:{using['line']} {layer['from']} must not depend on {using['name']} (matches {pattern})")
+                        findings.append(
+                            f"{record['path']}:{using['line']} {layer['from']} must not depend on {using['name']} (matches {pattern})"
+                        )
     return findings
 
 
@@ -96,8 +99,8 @@ def strongly_connected(graph: dict[str, set[str]]) -> list[set[str]]:
             if work:
                 low[work[-1][0]] = min(low[work[-1][0]], low[node])
             if low[node] == index[node]:
-                component = set(stack[stack.index(node):])
-                del stack[stack.index(node):]
+                component = set(stack[stack.index(node) :])
+                del stack[stack.index(node) :]
                 if len(component) > 1:
                     components.append(component)
     return components

@@ -15,7 +15,9 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     contract = ctx.root / LAYERS_FILE
     if not contract.exists():
-        return Result("java.deps", False, f"no {LAYERS_FILE}; copy templates/java-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"], 0.0)
+        return Result(
+            "java.deps", False, f"no {LAYERS_FILE}; copy templates/java-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"], 0.0
+        )
     layers = json.loads(contract.read_text())["layers"]
     files = java.sources(ctx)
     if not files:
@@ -49,7 +51,9 @@ def layer_findings(ctx: Context, layers: list[dict], data: dict) -> list[str]:
             for imported in record["imports"]:
                 for pattern in layer.get("forbid_external", []):
                     if fnmatch.fnmatch(imported["name"], pattern):
-                        findings.append(f"{record['path']}:{imported['line']} {layer['from']} must not depend on {imported['name']} (matches {pattern})")
+                        findings.append(
+                            f"{record['path']}:{imported['line']} {layer['from']} must not depend on {imported['name']} (matches {pattern})"
+                        )
     return findings
 
 

@@ -27,18 +27,34 @@ def run_gate(ctx: Context) -> Result:
     shutil.rmtree(site, ignore_errors=True)
     data.unlink(missing_ok=True)
     plugin = f"{JACOCO}:{ctx.java('jacoco_version', JACOCO_VERSION)}"
-    code, output = java.mvn(ctx, [f"{plugin}:prepare-agent", "test", f"{plugin}:report", f"-Djacoco.destFile={data}", f"-Djacoco.dataFile={data}"])
+    code, output = java.mvn(
+        ctx, [f"{plugin}:prepare-agent", "test", f"{plugin}:report", f"-Djacoco.destFile={data}", f"-Djacoco.dataFile={data}"]
+    )
     passed, failures = read_suites(ctx, sorted(reports.glob("TEST-*.xml")))
     if code != 0 or failures:
-        return Result("java.tests", False, java.maven_hint(code, output) or "build or tests failed", failures or tail(output), time.time() - started)
+        return Result(
+            "java.tests", False, java.maven_hint(code, output) or "build or tests failed", failures or tail(output), time.time() - started
+        )
     if passed == 0:
         return Result("java.tests", False, "no test passed; a run that executes nothing is not green", tail(output), time.time() - started)
     report = site / "jacoco.xml"
     if not report.exists():
-        return Result("java.tests", False, "no JaCoCo report; if the pom sets the surefire <argLine>, start it with @{argLine}", tail(output), time.time() - started)
+        return Result(
+            "java.tests",
+            False,
+            "no JaCoCo report; if the pom sets the surefire <argLine>, start it with @{argLine}",
+            tail(output),
+            time.time() - started,
+        )
     coverage = normalise(ctx, ET.parse(report).getroot())
     if not coverage["files"]:
-        return Result("java.tests", False, "coverage report names no source file; check [java] root, sources and coverage_exclude", tail(output), time.time() - started)
+        return Result(
+            "java.tests",
+            False,
+            "coverage report names no source file; check [java] root, sources and coverage_exclude",
+            tail(output),
+            time.time() - started,
+        )
     shutil.copy(report, ctx.work / "java-jacoco.xml")
     (ctx.work / "java-coverage.json").write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)

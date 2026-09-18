@@ -7,7 +7,28 @@ from marestail.config import Config
 from marestail.perf.scope import under_benchmarks
 from marestail.shell import run
 
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", "__pycache__", "tests", "test", "coverage", "cover", "reports", "vendor", "tmp", "spec", "target"}
+SKIP_DIRS = {
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "_build",
+    "deps",
+    "mutants",
+    ".marestail",
+    ".git",
+    "__pycache__",
+    "tests",
+    "test",
+    "coverage",
+    "cover",
+    "reports",
+    "vendor",
+    "tmp",
+    "spec",
+    "target",
+}
 TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
@@ -123,7 +144,7 @@ def private_imports(tree: ast.Module, path: Path, root: Path, label: str) -> lis
         for target in imported_modules(node):
             parts = target.split(".")
             private_index = next((i for i, part in enumerate(parts) if part.startswith("_")), None)
-            if private_index is not None and tuple(parts[:private_index]) != own_package[: private_index]:
+            if private_index is not None and tuple(parts[:private_index]) != own_package[:private_index]:
                 findings.append(f"{label}:{node.lineno} imports private module {target} from outside its package")
     return findings
 
@@ -150,12 +171,14 @@ def ts_modules(config: Config) -> list[Module]:
     modules = []
     for entry in json.loads(output):
         label = str(Path(entry["file"]).resolve().relative_to(config.root))
-        modules.append(Module(
-            path=label,
-            public=entry["exports"],
-            statements=entry["statements"],
-            pass_throughs=[f"{label}:{p['line']} {p['name']} only forwards its arguments" for p in entry["passThroughs"]],
-        ))
+        modules.append(
+            Module(
+                path=label,
+                public=entry["exports"],
+                statements=entry["statements"],
+                pass_throughs=[f"{label}:{p['line']} {p['name']} only forwards its arguments" for p in entry["passThroughs"]],
+            )
+        )
     return modules
 
 
@@ -172,12 +195,14 @@ def elixir_modules(config: Config) -> list[Module]:
     modules = []
     for item in json.loads(output):
         rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
-        modules.append(Module(
-            path=rel,
-            public=item.get("public", []),
-            statements=item.get("statements", 0),
-            pass_throughs=item.get("pass_throughs", []),
-        ))
+        modules.append(
+            Module(
+                path=rel,
+                public=item.get("public", []),
+                statements=item.get("statements", 0),
+                pass_throughs=item.get("pass_throughs", []),
+            )
+        )
     return modules
 
 
@@ -197,12 +222,14 @@ def erlang_modules(config: Config) -> list[Module]:
     modules = []
     for item in json.loads(output):
         rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
-        modules.append(Module(
-            path=rel,
-            public=item.get("public", []),
-            statements=item.get("statements", 0),
-            pass_throughs=[f"{rel}:{p['line']} {p['name']} only forwards its arguments" for p in item.get("pass_throughs", [])],
-        ))
+        modules.append(
+            Module(
+                path=rel,
+                public=item.get("public", []),
+                statements=item.get("statements", 0),
+                pass_throughs=[f"{rel}:{p['line']} {p['name']} only forwards its arguments" for p in item.get("pass_throughs", [])],
+            )
+        )
     return modules
 
 
@@ -223,12 +250,14 @@ def ruby_modules(config: Config) -> list[Module]:
     modules = []
     for item in json.loads(output or "[]"):
         rel = str(Path(item["file"]).resolve().relative_to(config.root.resolve()))
-        modules.append(Module(
-            path=rel,
-            public=item.get("public", []),
-            statements=item.get("statements", 0),
-            pass_throughs=item.get("pass_throughs", []),
-        ))
+        modules.append(
+            Module(
+                path=rel,
+                public=item.get("public", []),
+                statements=item.get("statements", 0),
+                pass_throughs=item.get("pass_throughs", []),
+            )
+        )
     return modules
 
 
@@ -250,7 +279,9 @@ def dotnet_modules(config: Config) -> list[Module]:
             path=item["file"],
             public=item["public"],
             statements=item["statements"],
-            pass_throughs=[f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]],
+            pass_throughs=[
+                f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]
+            ],
         )
         for item in data
     ]
@@ -295,7 +326,9 @@ def java_modules(config: Config) -> list[Module]:
             path=item["file"],
             public=item["public"],
             statements=item["statements"],
-            pass_throughs=[f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]],
+            pass_throughs=[
+                f"{item['file']}:{p['line']} {p['name']} only forwards its arguments to {p['target']}" for p in item["pass_throughs"]
+            ],
         )
         for item in data
     ]

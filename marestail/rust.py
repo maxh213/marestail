@@ -98,7 +98,15 @@ def build_scanner(ctx: Context) -> str | None:
     if binary.exists() and stamp.exists() and stamp.read_text() == digest:
         return None
     code, output = run(
-        [*listify(ctx.rust("cargo", "cargo")), "build", "--release", "--locked", "--quiet", "--manifest-path", str(SCAN_DIR / "Cargo.toml")],
+        [
+            *listify(ctx.rust("cargo", "cargo")),
+            "build",
+            "--release",
+            "--locked",
+            "--quiet",
+            "--manifest-path",
+            str(SCAN_DIR / "Cargo.toml"),
+        ],
         cwd=ctx.root,
         env={"CARGO_TARGET_DIR": str(ctx.work / "rs-scan")},
         timeout=900,
@@ -109,7 +117,9 @@ def build_scanner(ctx: Context) -> str | None:
     return None
 
 
-def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None, uses: list[Path] | None = None) -> tuple[list | None, str | None]:
+def scan(
+    ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None, uses: list[Path] | None = None
+) -> tuple[list | None, str | None]:
     if not paths:
         return [], None
     error = build_scanner(ctx)

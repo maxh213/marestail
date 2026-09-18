@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import freeze, install, practices, runner
+from marestail import freeze, install, practices
 from marestail.config import Config
 from marestail.pipeline import find, names
 from marestail.runner import Run, run_judge, run_step
@@ -47,7 +47,13 @@ def new_repo(tmp: str, guidance: bool = False) -> Path:
 
 
 def state(root: Path, raw=None, retries: int = 1) -> Run:
-    return Run(config=Config(root=root, raw=raw or {"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=retries, agent="claude")
+    return Run(
+        config=Config(root=root, raw=raw or {"git": {"base": "main"}}),
+        task=root / "tasks" / "t.md",
+        model=None,
+        retries=retries,
+        agent="claude",
+    )
 
 
 def passing_judge(verdict: str) -> str:
@@ -153,7 +159,9 @@ def pass_commit():
         expect("pass-verdict", (outcome, target), ("PASS", None))
         expect("pass-subject", "practices verdict: PASS" in git(root, "log", "-1", "--format=%s"), True)
         expect("pass-commit-empty", git(root, "show", "--name-only", "--format=", "HEAD"), "")
-        expect("guidance-kept", (root / "guidance" / "ts.md").read_text(), "# TypeScript practices\n\n- TS-1: prefer union types over enums\n")
+        expect(
+            "guidance-kept", (root / "guidance" / "ts.md").read_text(), "# TypeScript practices\n\n- TS-1: prefer union types over enums\n"
+        )
         expect("tree-clean", git(root, "status", "--porcelain"), "")
 
 
@@ -190,7 +198,7 @@ def install_template():
         expect("gitignore-generated-no-guidance", "guidance/" in (target / ".gitignore").read_text(), False)
         expect("install-no-csharp-guidance", (target / "guidance" / "cs.md").exists(), False)
         (target / "src").mkdir()
-        (target / "src" / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        (target / "src" / "App.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk" />\n')
         with quiet():
             install.install(target)
         csharp = target / "guidance" / "cs.md"

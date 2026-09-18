@@ -73,7 +73,9 @@ def upsert(table: Table, snapshot: Snapshot) -> Table:
         rows = [row for row in rows if row.get("Task") != PRE_MARESTAIL]
         pre_cells = {item.measurement.column: pre_cell(item.measurement) for item in snapshot.classified}
         rows.insert(0, fixed_cells(snapshot, PRE_MARESTAIL, snapshot.pre_commit) | pre_cells)
-    task_row = fixed_cells(snapshot, snapshot.task, snapshot.commit) | {item.measurement.column: task_cell(item) for item in snapshot.classified}
+    task_row = fixed_cells(snapshot, snapshot.task, snapshot.commit) | {
+        item.measurement.column: task_cell(item) for item in snapshot.classified
+    }
     index = next((position for position, row in enumerate(rows) if row.get("Task") == snapshot.task), None)
     if index is None:
         rows.append(task_row)

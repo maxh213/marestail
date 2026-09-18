@@ -30,7 +30,9 @@ def problems(config: Config, task_name: str, handoff: str, role: str = "coder") 
         "end-to-end tests under qa/ are written by the QA role. Trace the scenario to a test you can write."
         for file, name in frozen
     ]
-    broken = [f"audit: {file}::{name} not found" for _, file, name in traces if (file, name) not in frozen and not test_exists(config, file, name)]
+    broken = [
+        f"audit: {file}::{name} not found" for _, file, name in traces if (file, name) not in frozen and not test_exists(config, file, name)
+    ]
     if not titles:
         return ["audit: no feature file found for this task"]
     return missing + unwritable + broken

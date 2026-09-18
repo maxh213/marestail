@@ -41,7 +41,9 @@ def make_repo(tmp: str) -> Path:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "scale@marestail")
     git(root, "config", "user.name", "scale")
-    (root / "marestail.toml").write_text(f"[git]\nbase = \"main\"\n\n[perf.db]\nrows = {ROWS}\nimage = \"{IMAGE}\"\nmigrate = '''{MIGRATE}'''\n")
+    (root / "marestail.toml").write_text(
+        f"[git]\nbase = \"main\"\n\n[perf.db]\nrows = {ROWS}\nimage = \"{IMAGE}\"\nmigrate = '''{MIGRATE}'''\n"
+    )
     (root / ".gitignore").write_text(".marestail/\n")
     (root / "perf").mkdir()
     (root / "perf" / "seed.sql").write_text(SEED)
@@ -83,7 +85,14 @@ def measure(config) -> str:
 
 def main():
     home = tempfile.TemporaryDirectory()
-    os.environ.update({"MARESTAIL_PERF_DB_PREFIX": PREFIX, "MARESTAIL_PERF_DB_VOLUME": VOLUME, "MARESTAIL_PERF_DB_PORT": PORT, "MARESTAIL_PERF_DB_HOME": home.name})
+    os.environ.update(
+        {
+            "MARESTAIL_PERF_DB_PREFIX": PREFIX,
+            "MARESTAIL_PERF_DB_VOLUME": VOLUME,
+            "MARESTAIL_PERF_DB_PORT": PORT,
+            "MARESTAIL_PERF_DB_HOME": home.name,
+        }
+    )
     os.environ.pop(settings.ROWS_ENV, None)
     remove_test_docker()
     try:

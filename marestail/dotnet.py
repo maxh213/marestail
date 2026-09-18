@@ -65,7 +65,15 @@ def dotnet_bin(ctx: Context, cwd: Path, network: bool, extra: dict[str, str], pr
     return [*command, "-w", str(cwd), str(ctx.dotnet("image", IMAGE)), program]
 
 
-def dotnet(ctx: Context, args: list[str], cwd: Path | None = None, timeout: int = 1800, network: bool = False, extra: dict[str, str] | None = None, program: str = "dotnet") -> tuple[int, str]:
+def dotnet(
+    ctx: Context,
+    args: list[str],
+    cwd: Path | None = None,
+    timeout: int = 1800,
+    network: bool = False,
+    extra: dict[str, str] | None = None,
+    program: str = "dotnet",
+) -> tuple[int, str]:
     cwd = cwd or ctx.dotnet_root()
     extra = extra or {}
     return run(dotnet_bin(ctx, cwd, network, extra, program) + args, cwd=cwd, env={**env(ctx), **extra}, timeout=timeout)
@@ -124,7 +132,11 @@ def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
     product, tests = _projects[key]
     if product is None or tests is None or not product.exists() or not tests.exists():
         found = ", ".join(rel(ctx, path) for path in csprojs(ctx)) or "none"
-        return None, None, f"set [dotnet] project and test_project in marestail.toml (.csproj files under {rel(ctx, ctx.dotnet_root())}: {found})"
+        return (
+            None,
+            None,
+            f"set [dotnet] project and test_project in marestail.toml (.csproj files under {rel(ctx, ctx.dotnet_root())}: {found})",
+        )
     return product, tests, None
 
 
@@ -132,7 +144,9 @@ def is_test(ctx: Context, path: Path) -> bool:
     product, tests, _ = projects(ctx)
     if tests is not None and product is not None and tests.parent != product.parent and path.is_relative_to(tests.parent):
         return True
-    return path.name.endswith(TEST_SUFFIXES) or any(part.lower() in ("test", "tests") for part in path.relative_to(ctx.dotnet_root()).parts[:-1])
+    return path.name.endswith(TEST_SUFFIXES) or any(
+        part.lower() in ("test", "tests") for part in path.relative_to(ctx.dotnet_root()).parts[:-1]
+    )
 
 
 def files(ctx: Context) -> list[Path]:
@@ -175,10 +189,24 @@ def build_scanner(ctx: Context) -> str | None:
     digest = hashlib.sha256((SCAN_DIR / "Program.cs").read_bytes() + (SCAN_DIR / "Scan.csproj").read_bytes()).hexdigest()
     if dll.exists() and stamp.exists() and stamp.read_text() == digest:
         return None
-    code, output = dotnet(ctx, [
-        "build", str(SCAN_DIR / "Scan.csproj"), "-c", "Release", "-nologo", "-v", "q",
-        f"-p:BaseIntermediateOutputPath={out}/obj/", f"-p:BaseOutputPath={out}/bin/", "-o", str(out),
-    ], cwd=ctx.root, timeout=900)
+    code, output = dotnet(
+        ctx,
+        [
+            "build",
+            str(SCAN_DIR / "Scan.csproj"),
+            "-c",
+            "Release",
+            "-nologo",
+            "-v",
+            "q",
+            f"-p:BaseIntermediateOutputPath={out}/obj/",
+            f"-p:BaseOutputPath={out}/bin/",
+            "-o",
+            str(out),
+        ],
+        cwd=ctx.root,
+        timeout=900,
+    )
     if code != 0 or not dll.exists():
         return hint(code, output) or f"C# scanner build failed: {output.strip()[-300:]}"
     stamp.write_text(digest)
@@ -193,7 +221,12 @@ def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[list | dict | None
     out.unlink(missing_ok=True)
     listing = ctx.work / f"cs-{mode}.txt"
     listing.write_text("".join(f"{path}\n" for path in paths))
-    code, output = dotnet(ctx, [str(ctx.work / "cs-scan" / SCAN_DLL), mode, "--root", str(ctx.root), "--out", str(out), f"@{listing}"], cwd=ctx.root, timeout=600)
+    code, output = dotnet(
+        ctx,
+        [str(ctx.work / "cs-scan" / SCAN_DLL), mode, "--root", str(ctx.root), "--out", str(out), f"@{listing}"],
+        cwd=ctx.root,
+        timeout=600,
+    )
     if code != 0 or not out.exists():
         return None, hint(code, output) or f"C# scanner failed ({mode}): {output.strip()[-300:]}"
     return json.loads(out.read_text()), None

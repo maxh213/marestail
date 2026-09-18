@@ -54,5 +54,3 @@ def mypy_targets(ctx: Context) -> list[str]:
 def relevant(output: str) -> list[str]:
     lines = [line for line in output.splitlines() if line.strip() and not line.startswith(("Found ", "warning:"))]
     return lines[:MAX_LINES]
-
-

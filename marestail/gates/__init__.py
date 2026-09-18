@@ -21,13 +21,55 @@ class Gate:
 
 
 def registry() -> list[Gate]:
-    from marestail.gates import comments, deadcode, depth, docs, ex_crap, ex_deps, ex_lint, ex_mutation, ex_tests, py_crap, py_deps, py_lint, py_mutation, py_runtime, py_tests, qa, sonar
-    from marestail.gates import cs_crap, cs_deps, cs_lint, cs_mutation, cs_tests
-    from marestail.gates import er_crap, er_deps, er_lint, er_mutation, er_tests
-    from marestail.gates import java_crap, java_deps, java_lint, java_mutation, java_tests
-    from marestail.gates import rb_crap, rb_deps, rb_lint, rb_mutation, rb_tests
-    from marestail.gates import rs_crap, rs_deps, rs_lint, rs_mutation, rs_tests
-    from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
+    from marestail.gates import (
+        comments,
+        cs_crap,
+        cs_deps,
+        cs_lint,
+        cs_mutation,
+        cs_tests,
+        deadcode,
+        depth,
+        docs,
+        er_crap,
+        er_deps,
+        er_lint,
+        er_mutation,
+        er_tests,
+        ex_crap,
+        ex_deps,
+        ex_lint,
+        ex_mutation,
+        ex_tests,
+        java_crap,
+        java_deps,
+        java_lint,
+        java_mutation,
+        java_tests,
+        py_crap,
+        py_deps,
+        py_lint,
+        py_mutation,
+        py_runtime,
+        py_tests,
+        qa,
+        rb_crap,
+        rb_deps,
+        rb_lint,
+        rb_mutation,
+        rb_tests,
+        rs_crap,
+        rs_deps,
+        rs_lint,
+        rs_mutation,
+        rs_tests,
+        sonar,
+        ts_crap,
+        ts_deps,
+        ts_lint,
+        ts_mutation,
+        ts_tests,
+    )
 
     return [
         Gate("py.tests", FAST, "python", py_tests.run_gate),

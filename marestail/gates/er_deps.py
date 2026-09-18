@@ -78,8 +78,8 @@ def strongly_connected(graph: dict[str, set[str]]) -> list[set[str]]:
             if work:
                 low[work[-1][0]] = min(low[work[-1][0]], low[node])
             if low[node] == index[node]:
-                component = set(stack[stack.index(node):])
-                del stack[stack.index(node):]
+                component = set(stack[stack.index(node) :])
+                del stack[stack.index(node) :]
                 if len(component) > 1:
                     components.append(component)
     return components

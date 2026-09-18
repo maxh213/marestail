@@ -225,7 +225,7 @@ def claude_homes() -> list[Path]:
 
 def live_transcript(root: Path) -> Path | None:
     slug = str(root).replace("/", "-")
-    logs = []
+    logs: list[Path] = []
     for home in claude_homes():
         try:
             logs.extend(p for p in (home / "projects" / slug).iterdir() if p.is_file() and p.suffix == ".jsonl")

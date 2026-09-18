@@ -58,7 +58,9 @@ def command(args: list[str]) -> int:
 def choose(model: str, cwd: Path) -> tuple[Choice | None, str]:
     require()
     try:
-        completed = subprocess.run([binary(), "route", *MODES[model]], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False)
+        completed = subprocess.run(
+            [binary(), "route", *MODES[model]], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
+        )
     except subprocess.TimeoutExpired:
         return None, f"dandelion route timed out after {TIMEOUT_SECONDS}s"
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]

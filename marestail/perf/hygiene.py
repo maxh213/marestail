@@ -54,7 +54,11 @@ def discard_scratch(root: Path) -> list[str]:
     for path in removed:
         path.unlink(missing_ok=True)
     folder = root / FOLDER
-    directories = sorted((path for path in folder.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True) if folder.is_dir() else []
+    directories = (
+        sorted((path for path in folder.rglob("*") if path.is_dir()), key=lambda path: len(path.parts), reverse=True)
+        if folder.is_dir()
+        else []
+    )
     for directory in directories:
         if is_scratch(directory.relative_to(root)) and not any(directory.iterdir()):
             directory.rmdir()

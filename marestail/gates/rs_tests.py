@@ -24,7 +24,9 @@ def run_gate(ctx: Context) -> Result:
         return Result("rs.tests", False, "tests failed", tail(output), time.time() - started)
     for flag, name in (("--json", RAW_JSON), ("--lcov", LCOV)):
         (ctx.work / name).unlink(missing_ok=True)
-        report_code, report_output = rust.cargo(ctx, ["llvm-cov", "report", flag, *ignore, "--output-path", str(ctx.work / name)], timeout=600)
+        report_code, report_output = rust.cargo(
+            ctx, ["llvm-cov", "report", flag, *ignore, "--output-path", str(ctx.work / name)], timeout=600
+        )
         if report_code != 0 or not (ctx.work / name).exists():
             return Result("rs.tests", False, f"cargo llvm-cov report {flag} produced no report", tail(report_output), time.time() - started)
     coverage = merge(ctx)

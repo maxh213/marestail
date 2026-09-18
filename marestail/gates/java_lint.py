@@ -75,7 +75,11 @@ def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path
     report.unlink(missing_ok=True)
     listing = ctx.work / "java-pmd-files.txt"
     listing.write_text("\n".join(map(str, files)) + "\n")
-    code, output = run(pmd_command(ctx, tools, listing, report, os.pathsep.join([str(classes), classpath.read_text().strip()]), release), cwd=ctx.root, timeout=1800)
+    code, output = run(
+        pmd_command(ctx, tools, listing, report, os.pathsep.join([str(classes), classpath.read_text().strip()]), release),
+        cwd=ctx.root,
+        timeout=1800,
+    )
     if code not in PMD_OK or not report.exists():
         return [], f"PMD failed (exit {code}): {output.strip()[-300:]}"
     data = json.loads(report.read_text())
@@ -85,7 +89,9 @@ def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path
         if not ctx.in_scope(relative):
             continue
         for violation in entry.get("violations", []):
-            findings.append(f"{relative}:{violation['beginline']} PMD {violation['rule']}: {' '.join(violation['description'].split())[:200]}")
+            findings.append(
+                f"{relative}:{violation['beginline']} PMD {violation['rule']}: {' '.join(violation['description'].split())[:200]}"
+            )
     for problem in data.get("processingErrors", []) + data.get("configurationErrors", []):
         where = java.rel(ctx, problem["filename"]) if problem.get("filename") else java.rel(ctx, java.pom(ctx))
         findings.append(f"{where}:1 PMD could not analyse: {' '.join(str(problem.get('message', '')).split())[:200]}")
@@ -96,7 +102,23 @@ def pmd_command(ctx: Context, tools: str, listing: Path, report: Path, aux: str,
     configured = ctx.java("pmd_ruleset")
     ruleset = ctx.java_root() / str(configured) if configured else java.PMD_RULESET
     command = [
-        java.tool(ctx, "java"), "-cp", tools, PMD_MAIN, "check", "--no-cache", "--no-progress", "--no-fail-on-violation",
-        "-R", str(ruleset), "-f", "json", "-r", str(report), "--aux-classpath", aux, "--file-list", str(listing),
+        java.tool(ctx, "java"),
+        "-cp",
+        tools,
+        PMD_MAIN,
+        "check",
+        "--no-cache",
+        "--no-progress",
+        "--no-fail-on-violation",
+        "-R",
+        str(ruleset),
+        "-f",
+        "json",
+        "-r",
+        str(report),
+        "--aux-classpath",
+        aux,
+        "--file-list",
+        str(listing),
     ]
     return command + (["--use-version", f"java-{release}"] if release else [])

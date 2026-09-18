@@ -51,8 +51,22 @@ def audit_rules(root: Path) -> None:
     expect("frozen-trace-count", len(found), 1)
     expect("frozen-trace-names-qa-role", "cannot edit" in found[0] and "QA role" in found[0] and "qa/t.e2e.mjs::probing" in found[0], True)
     expect("frozen-trace-not-reported-missing", any("not found" in problem for problem in found), False)
-    expect("writable-trace-passes", audit.problems(config, "t", "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Probes the live session -> tests/test_src.py::test_adds_one\n"), [])
-    expect("missing-test-still-reported", audit.problems(config, "t", "- Adds one -> tests/test_src.py::test_gone\n- Probes the live session -> tests/test_src.py::test_adds_one\n"), ["audit: tests/test_src.py::test_gone not found"])
+    expect(
+        "writable-trace-passes",
+        audit.problems(
+            config,
+            "t",
+            "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Probes the live session -> tests/test_src.py::test_adds_one\n",
+        ),
+        [],
+    )
+    expect(
+        "missing-test-still-reported",
+        audit.problems(
+            config, "t", "- Adds one -> tests/test_src.py::test_gone\n- Probes the live session -> tests/test_src.py::test_adds_one\n"
+        ),
+        ["audit: tests/test_src.py::test_gone not found"],
+    )
     expect("specifier-may-trace-qa", audit.problems(config, "t", HANDOFF, "specifier"), [])
     instructions = audit.instructions(config, "t")
     expect("instructions-warn-about-qa", "`qa/`" in instructions and "QA role" in instructions, True)
@@ -60,7 +74,9 @@ def audit_rules(root: Path) -> None:
 
 def stub_agent(folder: Path, body: str) -> None:
     stub = folder / "agent"
-    stub.write_text("#!/bin/sh\ncat > /dev/null\n" + body + 'echo "x" >> "$CALLS"\nprintf \'{"result": "done", "num_turns": 1, "total_cost_usd": 0}\'\n')
+    stub.write_text(
+        "#!/bin/sh\ncat > /dev/null\n" + body + 'echo "x" >> "$CALLS"\nprintf \'{"result": "done", "num_turns": 1, "total_cost_usd": 0}\'\n'
+    )
     stub.chmod(0o755)
     os.environ["MARESTAIL_CLAUDE"] = str(stub)
     os.environ["CALLS"] = str(folder / "calls")
@@ -87,7 +103,9 @@ def loop_guard(folder: Path, root: Path) -> None:
         passed = run_worker(state, find("specifier"), "")
     expect("changing-problems-keep-retrying", (passed, calls(folder)), (False, 5))
     (root / "alpha.txt").unlink(missing_ok=True)
-    expect("shape-ignores-numbers", problem_shape("missing handoff 01-coder.md (12.3s)"), problem_shape("missing handoff 02-coder.md  (9.8s)"))
+    expect(
+        "shape-ignores-numbers", problem_shape("missing handoff 01-coder.md (12.3s)"), problem_shape("missing handoff 02-coder.md  (9.8s)")
+    )
     expect("shape-keeps-words", problem_shape("missing handoff") == problem_shape("uncommitted changes"), False)
 
 

@@ -25,7 +25,11 @@ def run_gate(ctx: Context) -> Result:
     if scope.mode == "error":
         return Result("java.mutation", False, scope.note, [], time.time() - started)
     wanted = None if scope.files is None else set(scope.files)
-    targets = [path for path in java.sources(ctx) if (wanted is None or java.rel(ctx, path) in wanted) and not java.mutation_excluded(ctx, java.rel(ctx, path))]
+    targets = [
+        path
+        for path in java.sources(ctx)
+        if (wanted is None or java.rel(ctx, path) in wanted) and not java.mutation_excluded(ctx, java.rel(ctx, path))
+    ]
     if not targets:
         return Result.skipped("java.mutation", "no changed Java sources" if wanted is not None else "no Java sources")
     out = ctx.work / "pit"
@@ -47,9 +51,13 @@ def command(ctx: Context, targets: list[Path], out: Path) -> list[str]:
     classes = [name for path in targets for name in class_globs(java.class_name(ctx, path))]
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [
-        "test-compile", f"{PITEST}:mutationCoverage",
-        f"-DtargetClasses={','.join(classes)}", "-DoutputFormats=XML", "-DtimestampedReports=false",
-        f"-DreportsDirectory={out}", f"-Dthreads={ctx.java('mutation_threads', 2)}",
+        "test-compile",
+        f"{PITEST}:mutationCoverage",
+        f"-DtargetClasses={','.join(classes)}",
+        "-DoutputFormats=XML",
+        "-DtimestampedReports=false",
+        f"-DreportsDirectory={out}",
+        f"-Dthreads={ctx.java('mutation_threads', 2)}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
 

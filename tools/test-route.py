@@ -14,7 +14,16 @@ from marestail.runner import Run, agent_env, agent_label, invoke, stamped
 
 CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
 DANDELION_ROUTES = Path(os.environ.get("MARESTAIL_DANDELION_SRC", Path.home() / "workspace" / "dandelion" / "src" / "domain" / "route.ts"))
-ENV_KEYS = ["MARESTAIL_DANDELION", "DANDELION_CLAUDE_WORK_CONFIG_DIR", "MARESTAIL_CLAUDE", "MARESTAIL_GROK", "MARESTAIL_CURSOR", "PLAN", "CALLS", "SEEN"]
+ENV_KEYS = [
+    "MARESTAIL_DANDELION",
+    "DANDELION_CLAUDE_WORK_CONFIG_DIR",
+    "MARESTAIL_CLAUDE",
+    "MARESTAIL_GROK",
+    "MARESTAIL_CURSOR",
+    "PLAN",
+    "CALLS",
+    "SEEN",
+]
 
 
 def expect(name, got, wanted):
@@ -27,7 +36,7 @@ def expect_exit(name, action, fragment):
         action()
     except SystemExit as error:
         if fragment not in str(error):
-            raise SystemExit(f"{name}: {error!r} lacks {fragment!r}")
+            raise SystemExit(f"{name}: {error!r} lacks {fragment!r}") from error
         return
     raise SystemExit(f"{name}: no SystemExit")
 
@@ -64,7 +73,16 @@ def parses_every_line():
     expect_exit("one-word", lambda: route.parse("claude"), "expected")
     expect_exit("four-words", lambda: route.parse("a b c claude"), "expected")
     expect_exit("unknown-account", lambda: route.parse("gpt-6 high codex"), "no backend for")
-    expect("routed-models", (route.is_routed("dandelion/route"), route.is_routed("dandelion/route-best"), route.is_routed("claude-opus-5"), route.is_routed(None)), (True, True, False, False))
+    expect(
+        "routed-models",
+        (
+            route.is_routed("dandelion/route"),
+            route.is_routed("dandelion/route-best"),
+            route.is_routed("claude-opus-5"),
+            route.is_routed(None),
+        ),
+        (True, True, False, False),
+    )
 
 
 def dandelion_source_lines() -> list[str]:
@@ -96,11 +114,12 @@ def matches_dandelion_source():
 def stub_dandelion(folder: Path) -> None:
     os.environ["PLAN"] = str(folder / "plan")
     os.environ["CALLS"] = str(folder / "calls")
-    os.environ["MARESTAIL_DANDELION"] = str(script(folder / "dandelion", (
-        'echo "$*" >> "$CALLS"\n'
-        'line=$(head -n 1 "$PLAN"); sed -i 1d "$PLAN"\n'
-        'printf "%s\\n" "${line#* }"; exit "${line%% *}"\n'
-    )))
+    os.environ["MARESTAIL_DANDELION"] = str(
+        script(
+            folder / "dandelion",
+            ('echo "$*" >> "$CALLS"\nline=$(head -n 1 "$PLAN"); sed -i 1d "$PLAN"\nprintf "%s\\n" "${line#* }"; exit "${line%% *}"\n'),
+        )
+    )
 
 
 def chooses(folder: Path):
@@ -138,20 +157,34 @@ def reroutes(folder: Path):
     os.environ["SEEN"] = str(folder / "seen")
     (folder / "plan").write_text("0 grok-4.6 xhigh grok\n1 none\n0 claude-opus-5 high claude-work\n0 kimi-k3-max cursor\n")
     os.environ["MARESTAIL_GROK"] = str(script(folder / "grok", 'echo \'{"type":"error","message":"rate limit exceeded"}\'; exit 1\n'))
-    os.environ["MARESTAIL_CURSOR"] = str(script(folder / "cursor-agent", 'cat > /dev/null; echo \'{"type":"result","result":"cursor stub"}\'\n'))
-    os.environ["MARESTAIL_CLAUDE"] = str(script(folder / "claude", (
-        'cat > "$SEEN"\n'
-        'printf \'{"total_cost_usd": 0, "num_turns": 1, "result": "config=%s args=%s"}\' "$CLAUDE_CONFIG_DIR" "$*"\n'
-    )))
+    os.environ["MARESTAIL_CURSOR"] = str(
+        script(folder / "cursor-agent", 'cat > /dev/null; echo \'{"type":"result","result":"cursor stub"}\'\n')
+    )
+    os.environ["MARESTAIL_CLAUDE"] = str(
+        script(
+            folder / "claude",
+            ('cat > "$SEEN"\nprintf \'{"total_cost_usd": 0, "num_turns": 1, "result": "config=%s args=%s"}\' "$CLAUDE_CONFIG_DIR" "$*"\n'),
+        )
+    )
     previous_wait = runner.LIMIT_WAIT_SECONDS
     runner.LIMIT_WAIT_SECONDS = 0
     try:
-        state = Run(config=Config(root=folder, raw={"agent": {"backend": "kilo", "effort": "low"}}), task=folder / "t.md", model=None, retries=0, route="dandelion/route")
+        state = Run(
+            config=Config(root=folder, raw={"agent": {"backend": "kilo", "effort": "low"}}),
+            task=folder / "t.md",
+            model=None,
+            retries=0,
+            route="dandelion/route",
+        )
         expect("label-before-routing", agent_label(state), "dandelion/route")
         invoke(state, "01-coder", f"Commit everything with a message starting with `[{agent_label(state)}] ` and ending in `By coder.`")
         expect("routed-state", (state.agent, state.model, state.effort), ("claude", "claude-opus-5", "high"))
         expect("labels", state.labels, {"grok-4.6 xhigh", "claude-opus-5 high"})
-        expect("prompt-relabelled", (folder / "seen").read_text(), "Commit everything with a message starting with `[claude-opus-5 high] ` and ending in `By coder.`")
+        expect(
+            "prompt-relabelled",
+            (folder / "seen").read_text(),
+            "Commit everything with a message starting with `[claude-opus-5 high] ` and ending in `By coder.`",
+        )
         expect("prompt-file", (state.folder / "01-coder.prompt.md").read_text(), (folder / "seen").read_text())
         output = (state.folder / "01-coder.json").read_text()
         expect("claude-work-config", "config=/srv/work-claude " in output, True)
@@ -162,8 +195,16 @@ def reroutes(folder: Path):
         expect("route-calls", (folder / "calls").read_text(), "route\nroute\nroute\nroute\n")
     finally:
         runner.LIMIT_WAIT_SECONDS = previous_wait
-    expect("stamp-keeps-earlier-route", stamped("[grok-4.6 xhigh] coder work", "claude-opus-5 high", {"grok-4.6 xhigh"}), "[grok-4.6 xhigh] coder work")
-    expect("stamp-unknown-bracket", stamped("[WIP] coder work", "claude-opus-5 high", {"grok-4.6 xhigh"}), "[claude-opus-5 high] [WIP] coder work")
+    expect(
+        "stamp-keeps-earlier-route",
+        stamped("[grok-4.6 xhigh] coder work", "claude-opus-5 high", {"grok-4.6 xhigh"}),
+        "[grok-4.6 xhigh] coder work",
+    )
+    expect(
+        "stamp-unknown-bracket",
+        stamped("[WIP] coder work", "claude-opus-5 high", {"grok-4.6 xhigh"}),
+        "[claude-opus-5 high] [WIP] coder work",
+    )
 
 
 def rejects_flags(folder: Path):

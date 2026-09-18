@@ -36,7 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
-    commands.add_parser("route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False)
+    commands.add_parser(
+        "route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False
+    )
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
@@ -60,8 +62,12 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     url = db_actions.add_parser("url", help="print the database URL for one tree")
     url.add_argument("--tree", required=True)
     url.set_defaults(handler=perf_db_command)
-    db_actions.add_parser("prune", help="delete this repo's goldens the current perf run does not need").set_defaults(handler=perf_db_command)
-    db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(handler=perf_db_command)
+    db_actions.add_parser("prune", help="delete this repo's goldens the current perf run does not need").set_defaults(
+        handler=perf_db_command
+    )
+    db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(
+        handler=perf_db_command
+    )
 
 
 def perf_db_command(args: argparse.Namespace) -> int:
@@ -78,8 +84,19 @@ def perf_run_command(args: argparse.Namespace) -> int:
 
 def add_gate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tier", choices=["fast", "sonar", "full", "qa", "all"], default="fast")
-    parser.add_argument("--scope", choices=["all", "changed", "hard"], default=None, help="all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths")
-    parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
+    parser.add_argument(
+        "--scope",
+        choices=["all", "changed", "hard"],
+        default=None,
+        help="all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths",
+    )
+    parser.add_argument(
+        "--focus",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="add a file or directory to the gate scope (repeatable); implies --scope changed",
+    )
     parser.add_argument("--only", help="comma separated gate names")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--hook", action="store_true", help="behave as a Claude Code Stop hook")
@@ -91,9 +108,22 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="stop", default=None)
     parser.add_argument("--auto", action="store_true", help="skip the approval pause after the critic")
-    parser.add_argument("--scope", choices=["all", "changed", "hard"], default=None, help="changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from the smallest supporting edits")
-    parser.add_argument("--focus", action="append", default=[], metavar="PATH", help="add a file or directory to the gate scope (repeatable); implies --scope changed")
-    parser.add_argument("--model", default=None, help="the model, or dandelion/route or dandelion/route-best to ask dandelion before every session")
+    parser.add_argument(
+        "--scope",
+        choices=["all", "changed", "hard"],
+        default=None,
+        help="changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from the smallest supporting edits",
+    )
+    parser.add_argument(
+        "--focus",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="add a file or directory to the gate scope (repeatable); implies --scope changed",
+    )
+    parser.add_argument(
+        "--model", default=None, help="the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
+    )
     parser.add_argument(
         "--retries",
         type=int,
@@ -129,7 +159,9 @@ def add_sonar(parser: argparse.ArgumentParser) -> None:
 def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("paths", nargs="*", help="directories to scan for repos with a .marestail directory")
     parser.add_argument("--refresh", type=float, default=2.0, help="seconds between redraws")
-    parser.add_argument("--all", action="store_true", help="show every repo with a .marestail directory, not just those with a running pipeline")
+    parser.add_argument(
+        "--all", action="store_true", help="show every repo with a .marestail directory, not just those with a running pipeline"
+    )
     parser.set_defaults(handler=watch_command)
 
 
@@ -154,7 +186,9 @@ def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[
     return results
 
 
-def run_gates_with_context(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False) -> tuple[list[Result], context_module.Context]:
+def run_gates_with_context(
+    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False
+) -> tuple[list[Result], context_module.Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
     focused = resolve_focus(config, focus or set())
@@ -218,7 +252,13 @@ def run_one(gate: gates_module.Gate, ctx: context_module.Context) -> Result:
         return gate.run(ctx)
     except (Exception, SystemExit) as error:
         detail = " ".join(str(error).split())[:200]
-        return Result(gate.name, False, f"{gate.name} crashed: {type(error).__name__} {detail}", traceback.format_exc().strip().splitlines()[-6:], time.time() - started)
+        return Result(
+            gate.name,
+            False,
+            f"{gate.name} crashed: {type(error).__name__} {detail}",
+            traceback.format_exc().strip().splitlines()[-6:],
+            time.time() - started,
+        )
 
 
 def parse_only(value: str | None) -> set[str] | None:
@@ -238,7 +278,7 @@ def hook_command(args: argparse.Namespace) -> int:
     sweep_counters(config.work, keep=counter)
     blocked = int(counter.read_text()) if counter.exists() else 0
     results, ctx = run_gates_with_context("fast", True, None, *hook_scope(config))
-    is_agy ="conversationId" in payload
+    is_agy = "conversationId" in payload
     if all(result.ok for result in results) or blocked >= HOOK_BLOCK_LIMIT:
         counter.unlink(missing_ok=True)
         if is_agy:
@@ -356,7 +396,9 @@ def sweep_counters(work: Path, keep: Path) -> None:
 def run_command(args: argparse.Namespace) -> int:
     from marestail.runner import run_pipeline
 
-    return run_pipeline(Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort, args.scope, args.focus)
+    return run_pipeline(
+        Path(args.task), args.start, args.stop, args.auto, args.model, args.retries, args.agent, args.effort, args.scope, args.focus
+    )
 
 
 def watch_command(args: argparse.Namespace) -> int:

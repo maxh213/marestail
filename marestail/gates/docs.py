@@ -6,8 +6,21 @@ from marestail.context import Context
 from marestail.perf.scope import under_benchmarks
 from marestail.report import Result
 
-ROUTE_PATTERNS = [r'\.route\(\s*"(/[^"]*)"', r'#\[(?:get|post|put|delete|patch)\(\s*"(/[^"]*)"', r"""@\w+\.route\(\s*["']([^"']+)["']""", r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']""", r"""(?:get|post|put|patch|delete)\s+["'](/[^"']+)["']"""]
-ENV_PATTERNS = [r'env::var(?:_os)?\(\s*"([A-Z][A-Z0-9_]+)"', r'env!\(\s*"([A-Z][A-Z0-9_]+)"', r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']""", r"""os\.environ(?:\.get\(|\[)\s*["']([A-Z][A-Z0-9_]+)["']""", r"""process\.env\.([A-Z][A-Z0-9_]+)""", r"""ENV(?:\[|\.fetch\(\s*)["']([A-Z][A-Z0-9_]+)["']"""]
+ROUTE_PATTERNS = [
+    r'\.route\(\s*"(/[^"]*)"',
+    r'#\[(?:get|post|put|delete|patch)\(\s*"(/[^"]*)"',
+    r"""@\w+\.route\(\s*["']([^"']+)["']""",
+    r"""\.(?:get|post|put|delete|patch)\(\s*["'](/[^"']*)["']""",
+    r"""(?:get|post|put|patch|delete)\s+["'](/[^"']+)["']""",
+]
+ENV_PATTERNS = [
+    r'env::var(?:_os)?\(\s*"([A-Z][A-Z0-9_]+)"',
+    r'env!\(\s*"([A-Z][A-Z0-9_]+)"',
+    r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']""",
+    r"""os\.environ(?:\.get\(|\[)\s*["']([A-Z][A-Z0-9_]+)["']""",
+    r"""process\.env\.([A-Z][A-Z0-9_]+)""",
+    r"""ENV(?:\[|\.fetch\(\s*)["']([A-Z][A-Z0-9_]+)["']""",
+]
 IGNORED_ENV = ["K_REVISION", "K_SERVICE", "PORT", "HOME", "PATH"]
 LEDGER_ROW = re.compile(r"^\|\s*`(/[^`]*)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
@@ -40,7 +53,11 @@ def source_files(ctx: Context) -> list[Path]:
     files = []
     for folder in folders:
         for path in (ctx.root / folder).rglob("*"):
-            if path.suffix in suffixes and not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) and not under_benchmarks(ctx.root, path):
+            if (
+                path.suffix in suffixes
+                and not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
+                and not under_benchmarks(ctx.root, path)
+            ):
                 files.append(path)
     return sorted(files)
 
@@ -65,15 +82,27 @@ def route_findings(ctx: Context) -> list[str]:
     ledger = {route: status.lower() for route, status in LEDGER_ROW.findall(ledger_path.read_text())}
     in_code = found(ctx, ctx.config.get("docs", "route_patterns", ROUTE_PATTERNS))
     findings = [f"{where} route {route} is not in {ledger_name}" for route, where in in_code.items() if route not in ledger]
-    findings += [f"{where} route {route} is marked {ledger[route]} in {ledger_name} but still exists" for route, where in in_code.items() if ledger.get(route) in GONE]
-    findings += [f"{ledger_name} lists {route} as {status} but no code serves it" for route, status in ledger.items() if status not in GONE and route not in in_code]
+    findings += [
+        f"{where} route {route} is marked {ledger[route]} in {ledger_name} but still exists"
+        for route, where in in_code.items()
+        if ledger.get(route) in GONE
+    ]
+    findings += [
+        f"{ledger_name} lists {route} as {status} but no code serves it"
+        for route, status in ledger.items()
+        if status not in GONE and route not in in_code
+    ]
     return findings
 
 
 def env_findings(ctx: Context, docs: str) -> list[str]:
     ignored = set(IGNORED_ENV) | set(ctx.config.get("docs", "ignore_env", []))
     in_code = found(ctx, ctx.config.get("docs", "env_patterns", ENV_PATTERNS))
-    return [f"{where} environment variable {name} is not documented" for name, where in in_code.items() if name not in ignored and name not in docs]
+    return [
+        f"{where} environment variable {name} is not documented"
+        for name, where in in_code.items()
+        if name not in ignored and name not in docs
+    ]
 
 
 def path_findings(ctx: Context) -> list[str]:

@@ -23,10 +23,22 @@ def run_gate(ctx: Context) -> Result:
     if error:
         return Result("cs.mutation", False, error, [], 0.0)
     if tests.resolve() == product.resolve():
-        return Result("cs.mutation", False, "stryker needs the tests in their own .csproj", [f"{dotnet.rel(ctx, product)}:1 holds both product and test code"], 0.0)
+        return Result(
+            "cs.mutation",
+            False,
+            "stryker needs the tests in their own .csproj",
+            [f"{dotnet.rel(ctx, product)}:1 holds both product and test code"],
+            0.0,
+        )
     csproj = product.read_text(errors="replace")
     if SENTRY.search(csproj) and SENTRY_SWITCH not in csproj:
-        return Result("cs.mutation", False, "stryker cannot roll back mutants in Sentry's generated code", [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"], 0.0)
+        return Result(
+            "cs.mutation",
+            False,
+            "stryker cannot roll back mutants in Sentry's generated code",
+            [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"],
+            0.0,
+        )
     scope = ctx.mutation_files("dotnet", ctx.dotnet_root(), (".cs",))
     if scope.mode == "error":
         return Result("cs.mutation", False, scope.note, [], time.time() - started)
@@ -74,9 +86,19 @@ def missing(output: str, code: int) -> str:
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
     args = [
-        "stryker", "--skip-version-check", "--break-on-initial-test-failure",
-        "--test-project", str(tests), "--project", product.name,
-        "-O", str(out), "-r", "json", "-r", "progress",
+        "stryker",
+        "--skip-version-check",
+        "--break-on-initial-test-failure",
+        "--test-project",
+        str(tests),
+        "--project",
+        product.name,
+        "-O",
+        str(out),
+        "-r",
+        "json",
+        "-r",
+        "progress",
     ]
     excludes = dotnet.listify(ctx.dotnet("mutation_exclude", [])) or dotnet.listify(ctx.dotnet("coverage_exclude", []))
     for pattern in excludes:

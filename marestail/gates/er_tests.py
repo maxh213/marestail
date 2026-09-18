@@ -19,7 +19,13 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("er.tests", "no erlang sources under [erlang] sources (default src/)")
     tests = erlang.test_files(ctx)
     if not tests:
-        return Result("er.tests", False, "no eunit test files", ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"], 0.0)
+        return Result(
+            "er.tests",
+            False,
+            "no eunit test files",
+            ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"],
+            0.0,
+        )
     ebin = erlang.fresh_dir(ctx.work / "er-ebin")
     code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=900)
     problem = erlang.hint(code, output)

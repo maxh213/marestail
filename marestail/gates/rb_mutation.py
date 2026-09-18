@@ -31,7 +31,9 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("rb.mutation", "no changed ruby sources")
     code, output = run([*bundler(ctx), "info", "mutant"], cwd=root, timeout=120)
     if code == 127:
-        return Result("rb.mutation", False, "bundle not available", ["bundle is not installed: install ruby and bundler"], time.time() - started)
+        return Result(
+            "rb.mutation", False, "bundle not available", ["bundle is not installed: install ruby and bundler"], time.time() - started
+        )
     if code != 0:
         return Result("rb.mutation", False, "mutant is not in the bundle", [f"mutant is not installed: {INSTALL}"], time.time() - started)
     before = sessions(root)

@@ -17,7 +17,9 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("rb.lint", "no changed ruby files")
     code, output = run(bundle(ctx, "rubocop", "--format", "json", "--force-exclusion"), cwd=root, timeout=900)
     if code == 127:
-        return Result("rb.lint", False, "rubocop missing", ["rubocop is not installed: add gem 'rubocop' and bundle install"], time.time() - started)
+        return Result(
+            "rb.lint", False, "rubocop missing", ["rubocop is not installed: add gem 'rubocop' and bundle install"], time.time() - started
+        )
     findings = parse(output, ctx) if output.strip() else ([f"rubocop failed: {output.strip()[-200:]}"] if code != 0 else [])
     summary = "rubocop clean" if not findings else f"{len(findings)} problems"
     return Result("rb.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)

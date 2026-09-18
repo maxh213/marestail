@@ -49,5 +49,3 @@ def broken_lines(output: str) -> list[str]:
     interesting = [line for line in lines if line and not set(line) <= set("─╔╗╚╝║━╺ ")]
     start = next((i for i, line in enumerate(interesting) if "BROKEN" in line or "Error" in line), 0)
     return interesting[start:][:60]
-
-

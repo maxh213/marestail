@@ -9,14 +9,31 @@ from marestail.shell import run
 
 VULTURE_LINE = re.compile(r"^(.+?):(\d+): (unused \w+|unreachable code) (.+?) \((\d+)% confidence\)$")
 PYTHON_KINDS = ["unused function", "unused method", "unused class", "unused import", "unused property", "unreachable code"]
-PYTHON_DECORATORS = ["@*.route", "@*.before_request", "@*.after_request", "@*.errorhandler", "@*.teardown_appcontext", "@*.cli.command", "@*.command"]
+PYTHON_DECORATORS = [
+    "@*.route",
+    "@*.before_request",
+    "@*.after_request",
+    "@*.errorhandler",
+    "@*.teardown_appcontext",
+    "@*.cli.command",
+    "@*.command",
+]
 PYTHON_EXCLUDES = ["*/tests/*", "*/test/*", "*/mutants/*", "*/.venv/*", "*/__pycache__/*", "perf/*"]
 TS_KINDS = ["files", "exports", "types"]
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + java_findings(ctx)
+    findings = (
+        python_findings(ctx)
+        + ts_findings(ctx)
+        + elixir_findings(ctx)
+        + erlang_findings(ctx)
+        + ruby_findings(ctx)
+        + dotnet_findings(ctx)
+        + rust_findings(ctx)
+        + java_findings(ctx)
+    )
     if ctx.scoped:
         findings = [f for f in findings if ctx.in_scope(f.split(":")[0])]
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
@@ -45,10 +62,14 @@ def python_findings(ctx: Context) -> list[str]:
 def vulture_command(ctx: Context) -> list[str]:
     get = ctx.config.get
     return [
-        ctx.python_bin("vulture"), *ctx.python("sources", ["."]),
-        "--min-confidence", str(get("deadcode", "min_confidence", 60)),
-        "--exclude", ",".join(get("deadcode", "python_exclude", PYTHON_EXCLUDES)),
-        "--ignore-decorators", ",".join(get("deadcode", "python_decorators", PYTHON_DECORATORS)),
+        ctx.python_bin("vulture"),
+        *ctx.python("sources", ["."]),
+        "--min-confidence",
+        str(get("deadcode", "min_confidence", 60)),
+        "--exclude",
+        ",".join(get("deadcode", "python_exclude", PYTHON_EXCLUDES)),
+        "--ignore-decorators",
+        ",".join(get("deadcode", "python_decorators", PYTHON_DECORATORS)),
         *ignore_names(get("deadcode", "python_ignore_names", [])),
     ]
 
@@ -201,6 +222,3 @@ def elixir_command(ctx: Context, out: Path) -> list[str]:
     if names:
         command += ["--ignore", ",".join(names)]
     return command
-
-
-

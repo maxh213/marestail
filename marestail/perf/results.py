@@ -80,14 +80,18 @@ def bench_problems(records: list[dict], tree_names: list[str], benches: list[str
     problems = []
     for bench in benches:
         own = [record for record in records if record["script"] == bench]
-        problems += [f"`{bench}` has no samples on the {tree} tree" for tree in tree_names if not any(record["tree"] == tree for record in own)]
+        problems += [
+            f"`{bench}` has no samples on the {tree} tree" for tree in tree_names if not any(record["tree"] == tree for record in own)
+        ]
         if len({record["db"] for record in own}) > 1:
             problems.append(f"`{bench}` was run with --db on some trees and without it on others")
     return problems
 
 
 def target_measurements(target: str, rows: list[dict], tree_names: list[str], policy: Policy) -> tuple[list[Measurement], list[str]]:
-    problems = [f"`{target}` reports more than one {key}: {', '.join(sorted(seen))}" for key, seen in variants(rows).items() if len(seen) > 1]
+    problems = [
+        f"`{target}` reports more than one {key}: {', '.join(sorted(seen))}" for key, seen in variants(rows).items() if len(seen) > 1
+    ]
     values: dict[str, list[float] | None] = {}
     for tree in tree_names:
         values[tree], problem = tree_values(target, [row for row in rows if row["tree"] == tree], tree, policy)
@@ -137,10 +141,18 @@ def measurements_for(target: str, rows: list[dict], values: dict[str, list[float
     intervals = bootstrap(values.get("baseline"), values.get("head"), policy.bootstrap, zlib.crc32(target.encode()))
     return [
         Measurement(
-            target, metric, first["unit"], first["better"],
-            stat(stats, "pre-marestail", index), stat(stats, "baseline", index), stat(stats, "head", index),
-            runs, first["script"], min(compared) if compared else 0,
-            intervals[index] if intervals else None, stat(stats, CONTROL, index),
+            target,
+            metric,
+            first["unit"],
+            first["better"],
+            stat(stats, "pre-marestail", index),
+            stat(stats, "baseline", index),
+            stat(stats, "head", index),
+            runs,
+            first["script"],
+            min(compared) if compared else 0,
+            intervals[index] if intervals else None,
+            stat(stats, CONTROL, index),
         )
         for index, metric in enumerate(METRICS)
     ]
@@ -151,7 +163,9 @@ def stat(stats: dict[str, tuple[float, float]], tree: str, index: int) -> float 
     return None if found is None else found[index]
 
 
-def bootstrap(baseline: list[float] | None, head: list[float] | None, rounds: int, seed: int) -> tuple[tuple[float, float], tuple[float, float]] | None:
+def bootstrap(
+    baseline: list[float] | None, head: list[float] | None, rounds: int, seed: int
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
     if not baseline or not head or rounds <= 0:
         return None
     rng = random.Random(seed)
@@ -225,7 +239,10 @@ def audit(classified: list[Classified], existing_columns: list[str], verdict_tex
     for item in classified:
         if item.status in FLAGGED and item.measurement.target not in verdict_text:
             unflagged.setdefault(item.measurement.target, item)
-    problems += [f"`{target}` is {item.status} ({item.change:+.1f}% {item.measurement.metric}) but the verdict does not name it" for target, item in unflagged.items()]
+    problems += [
+        f"`{target}` is {item.status} ({item.change:+.1f}% {item.measurement.metric}) but the verdict does not name it"
+        for target, item in unflagged.items()
+    ]
     if not classified and (benches or existing_columns or verdict != "PASS"):
         problems.append("no measurements were taken; run every perf/bench_* script on every tree through `marestail perf run`")
     return problems

@@ -24,8 +24,14 @@ def run_gate(ctx: Context) -> Result:
 def pytest_command(ctx: Context) -> list[str]:
     work = ctx.work
     return [
-        ctx.python_bin("python"), "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "--cov", "--cov-branch",
+        ctx.python_bin("python"),
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--cov",
+        "--cov-branch",
         f"--cov-report=json:{work / COVERAGE_JSON}",
         f"--cov-report=xml:{work / COVERAGE_XML}",
     ]
@@ -66,5 +72,3 @@ def count_tests(output: str) -> str:
         if "passed" in line:
             return line.strip().split(" passed")[0].split()[-1]
     return "?"
-
-

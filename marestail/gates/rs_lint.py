@@ -13,7 +13,9 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     if ctx.scope_changed and not ctx.changed_under(ctx.rust_root(), (".rs", "Cargo.toml")):
         return Result.skipped("rs.lint", "no changed rust files")
-    code, output = rust.cargo(ctx, ["clippy", "--all-targets", "--message-format=json", "--", *rust.listify(ctx.rust("clippy_args", CLIPPY_ARGS))], timeout=1800)
+    code, output = rust.cargo(
+        ctx, ["clippy", "--all-targets", "--message-format=json", "--", *rust.listify(ctx.rust("clippy_args", CLIPPY_ARGS))], timeout=1800
+    )
     problem = rust.missing(code, output, "clippy")
     if problem:
         return Result("rs.lint", False, "clippy missing", [problem], time.time() - started)

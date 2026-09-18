@@ -20,7 +20,13 @@ def run_gate(ctx: Context) -> Result:
     code, output = rust.cargo(ctx, ["mutants", "--version"], timeout=60)
     problem = rust.missing(code, output, "mutants")
     if problem or code != 0:
-        return Result("rs.mutation", False, "cargo-mutants missing", [problem or f"cargo mutants --version failed: {output.strip()[-200:]}"], time.time() - started)
+        return Result(
+            "rs.mutation",
+            False,
+            "cargo-mutants missing",
+            [problem or f"cargo mutants --version failed: {output.strip()[-200:]}"],
+            time.time() - started,
+        )
     shutil.rmtree(ctx.work / OUTPUT, ignore_errors=True)
     code, output = rust.cargo(ctx, command(ctx, files), timeout=int(ctx.rust("mutation_timeout", 7200)))
     report = ctx.work / OUTPUT / "outcomes.json"
@@ -32,7 +38,18 @@ def run_gate(ctx: Context) -> Result:
 def command(ctx: Context, files: list) -> list[str]:
     scoped = [arg for path in files for arg in ("--file", str(path.relative_to(ctx.rust_root())))] if ctx.scope_changed else []
     jobs = str(ctx.rust("mutation_jobs", 2))
-    return ["mutants", "--output", str(ctx.work), "--no-shuffle", "--colors", "never", "--jobs", jobs, *scoped, *rust.listify(ctx.rust("mutation_args", []))]
+    return [
+        "mutants",
+        "--output",
+        str(ctx.work),
+        "--no-shuffle",
+        "--colors",
+        "never",
+        "--jobs",
+        jobs,
+        *scoped,
+        *rust.listify(ctx.rust("mutation_args", [])),
+    ]
 
 
 def verdict(ctx: Context, report: dict, output: str, started: float) -> Result:

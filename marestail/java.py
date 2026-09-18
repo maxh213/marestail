@@ -194,7 +194,19 @@ def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = N
     listing.write_text("".join(f"{path}\n" for path in paths))
     out = ctx.work / f"java-{mode}.json"
     out.unlink(missing_ok=True)
-    command = [tool(ctx, "java"), "-cp", str(ctx.work / "java-scan"), "Scan", mode, "--root", str(ctx.root), "--out", str(out), *(extra or []), f"@{listing}"]
+    command = [
+        tool(ctx, "java"),
+        "-cp",
+        str(ctx.work / "java-scan"),
+        "Scan",
+        mode,
+        "--root",
+        str(ctx.root),
+        "--out",
+        str(out),
+        *(extra or []),
+        f"@{listing}",
+    ]
     code, output = run(command, cwd=ctx.root, timeout=1800)
     if code == 127:
         return None, f"java not found: {INSTALL['jdk']}"

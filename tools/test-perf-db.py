@@ -24,7 +24,9 @@ MIGRATE = (
     '-c "create table a (id bigint primary key, note text); create table b (id bigint primary key)"'
 )
 SEED = "insert into a select g, md5(g::text) from generate_series(1, :rows) g;\ninsert into b select g from generate_series(1, :rows) g;\n"
-SHORT_SEED = "insert into a select g, md5(g::text) from generate_series(1, :rows) g;\ninsert into b select g from generate_series(1, 10) g;\n"
+SHORT_SEED = (
+    "insert into a select g, md5(g::text) from generate_series(1, :rows) g;\ninsert into b select g from generate_series(1, 10) g;\n"
+)
 COUNT_BENCH = """#!/usr/bin/env python3
 import json, os, subprocess
 container = os.environ["MARESTAIL_PERF_DB_CONTAINER"]
@@ -115,7 +117,11 @@ def short_seed_fails(root, database, head, seeded_name):
         problem = perf_db.build(database, head)
     expect("short-seed-names-b", "b (10)" in problem, True)
     expect("short-seed-no-tmp", [entry for entry in goldens_listing(database) if entry.endswith(".tmp")], [])
-    expect("short-seed-no-build-container", [name for name in docker("ps", "-a", "--format", "{{.Names}}").split() if name.startswith(PREFIX + "golden-")], [])
+    expect(
+        "short-seed-no-build-container",
+        [name for name in docker("ps", "-a", "--format", "{{.Names}}").split() if name.startswith(PREFIX + "golden-")],
+        [],
+    )
     return short_name
 
 
@@ -170,7 +176,14 @@ def remove_test_docker():
 
 def main():
     home = tempfile.TemporaryDirectory()
-    os.environ.update({"MARESTAIL_PERF_DB_PREFIX": PREFIX, "MARESTAIL_PERF_DB_VOLUME": VOLUME, "MARESTAIL_PERF_DB_PORT": PORT, "MARESTAIL_PERF_DB_HOME": home.name})
+    os.environ.update(
+        {
+            "MARESTAIL_PERF_DB_PREFIX": PREFIX,
+            "MARESTAIL_PERF_DB_VOLUME": VOLUME,
+            "MARESTAIL_PERF_DB_PORT": PORT,
+            "MARESTAIL_PERF_DB_HOME": home.name,
+        }
+    )
     os.environ.pop(settings.ROWS_ENV, None)
     remove_test_docker()
     try:

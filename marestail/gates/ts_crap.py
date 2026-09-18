@@ -62,5 +62,3 @@ def function_coverage(fn: dict, data: dict) -> float:
 
 def describe(f: dict) -> str:
     return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['complexity']}, coverage={f['cov']:.0%})"
-
-

@@ -93,11 +93,7 @@ class Context:
 
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)
-        paths = {
-            path
-            for path in self.changed
-            if path.endswith(suffixes) and Path(path).is_relative_to(relative)
-        }
+        paths = {path for path in self.changed if path.endswith(suffixes) and Path(path).is_relative_to(relative)}
         paths.update(self.focus_under(relative, suffixes))
         return sorted(paths)
 
@@ -111,9 +107,7 @@ class Context:
                 found.update(
                     path.relative_to(self.root).as_posix()
                     for path in target.rglob("*")
-                    if path.is_file()
-                    and path.name.endswith(suffixes)
-                    and path.relative_to(self.root).is_relative_to(relative)
+                    if path.is_file() and path.name.endswith(suffixes) and path.relative_to(self.root).is_relative_to(relative)
                 )
         return found
 
@@ -140,7 +134,7 @@ class Context:
             return "all"
         if self.hard:
             return "hard: " + ", ".join(sorted(self.focus))
-        total =sum(len(lines) for lines in self.changed_lines_map.values())
+        total = sum(len(lines) for lines in self.changed_lines_map.values())
         summary = f"changed ({len(self.changed)} files, {total} lines)"
         if self.focus:
             summary += " + focus: " + ", ".join(sorted(self.focus))
@@ -154,7 +148,7 @@ class Context:
     def mutation_files(self, lang_key: str, root: Path, suffixes: tuple[str, ...]) -> MutationScope:
         setting = self.config.get(lang_key, "mutation_scope", "changed")
         if setting not in ("changed", "all"):
-            return MutationScope("error", note=f"[{lang_key}] mutation_scope must be \"changed\" or \"all\", got {setting!r}")
+            return MutationScope("error", note=f'[{lang_key}] mutation_scope must be "changed" or "all", got {setting!r}')
         if self.scoped:
             files = self.changed_under(root, suffixes)
             return MutationScope("scoped", files) if files else MutationScope("skip", [])
@@ -164,11 +158,7 @@ class Context:
         if not base_exists(self.root, base):
             return MutationScope("full", note=f"(no base {base}; full run)")
         relative = root.relative_to(self.root)
-        files = sorted(
-            path
-            for path in changed_files(self.root, base)
-            if path.endswith(suffixes) and Path(path).is_relative_to(relative)
-        )
+        files = sorted(path for path in changed_files(self.root, base) if path.endswith(suffixes) and Path(path).is_relative_to(relative))
         return MutationScope("scoped", files) if files else MutationScope("skip", [])
 
 

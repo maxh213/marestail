@@ -175,7 +175,12 @@ def ensure_helper(database: Database) -> None:
     docker(database, "rm", "-f", "-v", database.helper)
     image = perf_image.helper_image(database.image)
     ensure_image(database, image)
-    step(docker(database, "run", "-d", "--name", database.helper, "-v", f"{database.volume}:/perf", "--entrypoint", "sleep", image, "infinity"), "starting the file helper")
+    step(
+        docker(
+            database, "run", "-d", "--name", database.helper, "-v", f"{database.volume}:/perf", "--entrypoint", "sleep", image, "infinity"
+        ),
+        "starting the file helper",
+    )
 
 
 def files(database: Database, script: str, stdin: str | None = None) -> tuple[int, str]:
@@ -222,8 +227,21 @@ def start_postgres(database: Database, name: str, pgdata: str, port: int | None,
     publish = f"127.0.0.1:{port}:5432" if port else "127.0.0.1::5432"
     step(
         docker(
-            database, "run", "-d", "--name", name, "-v", f"{database.volume}:/perf", "-p", publish,
-            "-e", f"POSTGRES_PASSWORD={password(database)}", "-e", f"POSTGRES_DB={DATABASE}", "-e", f"PGDATA={pgdata}",
+            database,
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-v",
+            f"{database.volume}:/perf",
+            "-p",
+            publish,
+            "-e",
+            f"POSTGRES_PASSWORD={password(database)}",
+            "-e",
+            f"POSTGRES_DB={DATABASE}",
+            "-e",
+            f"PGDATA={pgdata}",
             database.image,
         ),
         f"starting {name}",
@@ -250,7 +268,24 @@ def host_port(database: Database, name: str) -> str:
 
 
 def psql(database: Database, container: str, sql: str) -> tuple[int, str]:
-    return docker(database, "exec", container, "psql", "-v", "ON_ERROR_STOP=1", "-qAt", "-F", "\t", "-U", "postgres", "-d", DATABASE, "-c", sql, timeout=BUILD_TIMEOUT)
+    return docker(
+        database,
+        "exec",
+        container,
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-qAt",
+        "-F",
+        "\t",
+        "-U",
+        "postgres",
+        "-d",
+        DATABASE,
+        "-c",
+        sql,
+        timeout=BUILD_TIMEOUT,
+    )
 
 
 def seed_script(root: Path) -> Path | None:
@@ -259,7 +294,11 @@ def seed_script(root: Path) -> Path | None:
         return folder / "seed.sql"
     if not folder.is_dir():
         return None
-    candidates = sorted(path for path in folder.glob("seed*") if path.is_file() and (path.name == "seed" or path.name.startswith("seed.")) and os.access(path, os.X_OK))
+    candidates = sorted(
+        path
+        for path in folder.glob("seed*")
+        if path.is_file() and (path.name == "seed" or path.name.startswith("seed.")) and os.access(path, os.X_OK)
+    )
     return candidates[0] if candidates else None
 
 
@@ -405,7 +444,21 @@ def build_golden(database: Database, tree: trees.Tree, name: str) -> None:
 def run_seed(database: Database, tree: trees.Tree, container: str, seed: Path, env: dict[str, str]) -> None:
     label = seed.relative_to(database.root).as_posix()
     if seed.name == "seed.sql":
-        command = ["exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-q", "-v", f"rows={database.rows}", "-U", "postgres", "-d", DATABASE]
+        command = [
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-q",
+            "-v",
+            f"rows={database.rows}",
+            "-U",
+            "postgres",
+            "-d",
+            DATABASE,
+        ]
         step(docker(database, *command, stdin=seed.read_text(), timeout=BUILD_TIMEOUT), label)
         return
     step(run([str(seed)], cwd=tree.path, env=env, timeout=BUILD_TIMEOUT), label)
@@ -413,7 +466,11 @@ def run_seed(database: Database, tree: trees.Tree, container: str, seed: Path, e
 
 def short_tables(database: Database, container: str) -> list[str]:
     listing = step(
-        psql(database, container, "select tablename, format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog', 'information_schema') order by 2"),
+        psql(
+            database,
+            container,
+            "select tablename, format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog', 'information_schema') order by 2",
+        ),
         "listing tables",
     )
     short = []
@@ -485,7 +542,10 @@ def start_build(database: Database, tree: trees.Tree) -> str:
     with log.open("a") as handle:
         child = subprocess.Popen(
             [sys.executable, str(CLI), "perf", "db", "golden", "--tree", tree.name, "--wait"],
-            cwd=database.root, stdout=handle, stderr=subprocess.STDOUT, start_new_session=True,
+            cwd=database.root,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
     write_status(database, name, {"state": "building", "started": time.time(), "pid": child.pid})
     return f"building {name} for the {tree.name} tree in the background; poll marestail perf db status; log: {log}"
@@ -499,10 +559,17 @@ def reset(database: Database, tree: trees.Tree) -> tuple[int, dict[str, str]]:
     container = database.tree_container(tree.name)
     docker(database, "rm", "-f", "-v", container)
     work = database.work_dir(tree.name)
-    code, output = files(database, f"rm -rf {work} && mkdir -p /perf/work && cp -a --reflink=always /perf/goldens/{name} {work} && rm -f {work}/READY {work}/META.json")
+    code, output = files(
+        database,
+        f"rm -rf {work} && mkdir -p /perf/work && cp -a --reflink=always /perf/goldens/{name} {work} && rm -f {work}/READY {work}/META.json",
+    )
     if code != 0:
         lowered = output.lower()
-        raise DatabaseError(REFLINK_FAILED if "reflink" in lowered or "not supported" in lowered else f"copying the golden failed: {' | '.join(tail(output, 3))}")
+        raise DatabaseError(
+            REFLINK_FAILED
+            if "reflink" in lowered or "not supported" in lowered
+            else f"copying the golden failed: {' | '.join(tail(output, 3))}"
+        )
     port = database.tree_port(tree.name)
     start_postgres(database, container, work, port, READY_TIMEOUT)
     reset_ms = round((time.monotonic() - started) * 1000)

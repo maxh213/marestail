@@ -37,8 +37,13 @@ def run_gate(ctx: Context) -> Result:
 def vitest_command(ctx: Context) -> list[str]:
     report_dir = ctx.work / COVERAGE_DIR
     return [
-        "npx", "vitest", "run", "--coverage.enabled=true", "--coverage.all=true",
-        "--coverage.reporter=json", "--coverage.reporter=lcov",
+        "npx",
+        "vitest",
+        "run",
+        "--coverage.enabled=true",
+        "--coverage.all=true",
+        "--coverage.reporter=json",
+        "--coverage.reporter=lcov",
         f"--coverage.reportsDirectory={report_dir}",
     ]
 
@@ -46,9 +51,16 @@ def vitest_command(ctx: Context) -> list[str]:
 def jest_command(ctx: Context) -> list[str]:
     sources = ctx.ts("sources") or [ctx.ts("source", "src")]
     return [
-        str(ctx.ts_root() / "node_modules" / ".bin" / "jest"), "--ci", "--coverage", "--coverageProvider=babel",
-        "--coverageReporters=json", "--coverageReporters=lcov", f"--coverageDirectory={ctx.work / COVERAGE_DIR}",
-        "--json", f"--outputFile={ctx.work / JEST_RESULTS}", "--testLocationInResults",
+        str(ctx.ts_root() / "node_modules" / ".bin" / "jest"),
+        "--ci",
+        "--coverage",
+        "--coverageProvider=babel",
+        "--coverageReporters=json",
+        "--coverageReporters=lcov",
+        f"--coverageDirectory={ctx.work / COVERAGE_DIR}",
+        "--json",
+        f"--outputFile={ctx.work / JEST_RESULTS}",
+        "--testLocationInResults",
         *[f"--collectCoverageFrom={folder}/**/*.{{ts,tsx,js,jsx}}" for folder in sources],
     ]
 

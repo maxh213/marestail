@@ -9,9 +9,21 @@ from marestail.report import Result
 from marestail.shell import run, tail
 
 STATUS_BY_EXIT_CODE = {
-    1: "killed", 3: "killed", 0: "survived", 5: "no tests", 33: "no tests", 34: "skipped", 35: "suspicious",
-    36: "timeout", 37: "caught by type check", -24: "timeout", 24: "timeout", 152: "timeout", 255: "timeout",
-    2: "interrupted", None: "not checked",
+    1: "killed",
+    3: "killed",
+    0: "survived",
+    5: "no tests",
+    33: "no tests",
+    34: "skipped",
+    35: "suspicious",
+    36: "timeout",
+    37: "caught by type check",
+    -24: "timeout",
+    24: "timeout",
+    152: "timeout",
+    255: "timeout",
+    2: "interrupted",
+    None: "not checked",
 }
 PASSING = {"killed", "skipped", "caught by type check"}
 
@@ -28,7 +40,8 @@ def run_gate(ctx: Context) -> Result:
     workers = str(ctx.python("mutation_workers", 4))
     code, output = run(
         [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", workers],
-        cwd=ctx.python_root(), timeout=7200,
+        cwd=ctx.python_root(),
+        timeout=7200,
     )
     if code != 0 and "mutants" not in output.lower():
         return Result("py.mutation", False, "mutmut failed", tail(output), time.time() - started)

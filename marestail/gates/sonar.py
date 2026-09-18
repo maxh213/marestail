@@ -16,8 +16,19 @@ DOTNET_SCANNER_VERSION = "11.3.0"
 DOTNET_REPORT_TASK = Path(".sonarqube") / "out" / ".sonar" / "report-task.txt"
 BENCHMARKS = "perf/**"
 DOTNET_EXCLUSIONS = [
-    "**/node_modules/**", "**/.next/**", "**/bin/**", "**/obj/**", "**/dist/**", "**/.venv/**",
-    "**/mutants/**", "**/StrykerOutput/**", "**/coverage/**", ".sonarqube/**", ".marestail/**", ".scannerwork/**", "perf/**",
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/bin/**",
+    "**/obj/**",
+    "**/dist/**",
+    "**/.venv/**",
+    "**/mutants/**",
+    "**/StrykerOutput/**",
+    "**/coverage/**",
+    ".sonarqube/**",
+    ".marestail/**",
+    ".scannerwork/**",
+    "perf/**",
 ]
 
 
@@ -61,14 +72,24 @@ def summarize(ctx: Context, findings: list[str], status: str) -> str:
 def scanner_command(ctx: Context, creds: dict, key: str) -> list[str]:
     root = str(ctx.root)
     return [
-        "docker", "run", "--rm", "--network", "host",
-        "-u", f"{os.getuid()}:{os.getgid()}",
-        "-e", f"SONAR_HOST_URL={creds['url']}",
-        "-e", f"SONAR_TOKEN={creds['token']}",
-        "-e", f"SONAR_USER_HOME={root}/.marestail/sonar-cache",
-        "-v", f"{root}:{root}",
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-u",
+        f"{os.getuid()}:{os.getgid()}",
+        "-e",
+        f"SONAR_HOST_URL={creds['url']}",
+        "-e",
+        f"SONAR_TOKEN={creds['token']}",
+        "-e",
+        f"SONAR_USER_HOME={root}/.marestail/sonar-cache",
+        "-v",
+        f"{root}:{root}",
         *git_mounts(ctx),
-        "-w", root,
+        "-w",
+        root,
         SCANNER_IMAGE,
         f"-Dsonar.projectKey={key}",
         f"-Dsonar.projectBaseDir={root}",
@@ -130,28 +151,40 @@ def properties(text: str) -> list[tuple[str, str]]:
 
 def dotnet_scan(ctx: Context, creds: dict, key: str) -> tuple[int, str]:
     if (ctx.root / "sonar-project.properties").exists():
-        return 1, "delete sonar-project.properties: the SonarScanner for .NET refuses to run beside it, and [sonar] in marestail.toml configures this gate"
+        return (
+            1,
+            "delete sonar-project.properties: the SonarScanner for .NET refuses to run beside it, and [sonar] in marestail.toml configures this gate",
+        )
     product, tests, error = dotnet.projects(ctx)
     if error:
         return 1, error
     tools = ctx.work / "dotnet-tools"
     if not (tools / DOTNET_SCANNER).exists():
-        code, output = dotnet.dotnet(ctx, ["tool", "install", DOTNET_SCANNER, "--version", DOTNET_SCANNER_VERSION, "--tool-path", str(tools)], cwd=ctx.root, network=True)
+        code, output = dotnet.dotnet(
+            ctx,
+            ["tool", "install", DOTNET_SCANNER, "--version", DOTNET_SCANNER_VERSION, "--tool-path", str(tools)],
+            cwd=ctx.root,
+            network=True,
+        )
         if code != 0:
             return code, dotnet.hint(code, output) or output
     solutions = sorted(ctx.dotnet_root().glob("*.sln"))
     build = solutions[0] if len(solutions) == 1 else product
     name = ctx.config.get("sonar", "project_name", key)
     script = ctx.work / "sonar-dotnet.sh"
-    script.write_text("\n".join([
-        "set -e",
-        f'export PATH="$PATH:{tools}"',
-        f'cd "{ctx.root}" && rm -rf .sonarqube',
-        f'{DOTNET_SCANNER} begin /k:"{key}" /n:"{name}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
-        f'dotnet build "{build}" -t:Rebuild --nologo',
-        f'{DOTNET_SCANNER} end /d:sonar.token="$SONAR_TOKEN"',
-        "",
-    ]))
+    script.write_text(
+        "\n".join(
+            [
+                "set -e",
+                f'export PATH="$PATH:{tools}"',
+                f'cd "{ctx.root}" && rm -rf .sonarqube',
+                f'{DOTNET_SCANNER} begin /k:"{key}" /n:"{name}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
+                f'dotnet build "{build}" -t:Rebuild --nologo',
+                f'{DOTNET_SCANNER} end /d:sonar.token="$SONAR_TOKEN"',
+                "",
+            ]
+        )
+    )
     return dotnet.dotnet(ctx, [str(script)], cwd=ctx.root, timeout=1800, network=True, extra={"SONAR_TOKEN": creds["token"]}, program="sh")
 
 
@@ -160,7 +193,9 @@ def write_settings(ctx: Context) -> Path:
     prefix = "" if prefix == "." else prefix + "/"
     values = {
         "sonar.exclusions": ",".join(DOTNET_EXCLUSIONS + dotnet.listify(ctx.config.get("sonar", "exclusions", []))),
-        "sonar.coverage.exclusions": ",".join(prefix + pattern.strip("/") for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", []))),
+        "sonar.coverage.exclusions": ",".join(
+            prefix + pattern.strip("/") for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", []))
+        ),
         "sonar.cs.opencover.reportsPaths": f"{ctx.work}/cs-tests/**/coverage.opencover.xml",
         "sonar.scm.disabled": "true",
         "sonar.sourceEncoding": "UTF-8",
@@ -169,7 +204,10 @@ def write_settings(ctx: Context) -> Path:
         values["sonar.javascript.lcov.reportPaths"] = str(ctx.work / "ts-coverage" / "lcov.info")
     if ctx.config.section("python") is not None:
         values["sonar.python.coverage.reportPaths"] = str(ctx.work / "py-coverage.xml")
-    lines = ['<?xml version="1.0" encoding="utf-8" ?>', '<SonarQubeAnalysisProperties xmlns="http://www.sonarsource.com/msbuild/integration/2015/1">']
+    lines = [
+        '<?xml version="1.0" encoding="utf-8" ?>',
+        '<SonarQubeAnalysisProperties xmlns="http://www.sonarsource.com/msbuild/integration/2015/1">',
+    ]
     lines += [f'  <Property Name="{name}">{value}</Property>' for name, value in values.items() if value]
     lines.append("</SonarQubeAnalysisProperties>")
     path = ctx.work / "sonar-dotnet.xml"
@@ -182,7 +220,9 @@ def dotnet_findings(ctx: Context, client: Client, key: str) -> list[str]:
     values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
     findings = []
     if "cs=" not in values.get("ncloc_language_distribution", ""):
-        findings.append(f"{dotnet.rel(ctx, ctx.dotnet_root())}:1 SonarQube received no C# lines (languages: {values.get('ncloc_language_distribution') or 'none'})")
+        findings.append(
+            f"{dotnet.rel(ctx, ctx.dotnet_root())}:1 SonarQube received no C# lines (languages: {values.get('ncloc_language_distribution') or 'none'})"
+        )
     if "coverage" not in values:
         findings.append("marestail.toml:1 SonarQube imported no coverage; run cs.tests first so its OpenCover report exists")
     return findings
@@ -193,7 +233,9 @@ def erlang_findings(ctx: Context, client: Client, key: str) -> list[str]:
     values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
     findings = []
     if "erlang=" not in values.get("ncloc_language_distribution", ""):
-        findings.append(f"{erlang.rel(ctx, ctx.erlang_root())}:1 SonarQube received no Erlang lines (languages: {values.get('ncloc_language_distribution') or 'none'}); run: marestail sonar setup")
+        findings.append(
+            f"{erlang.rel(ctx, ctx.erlang_root())}:1 SonarQube received no Erlang lines (languages: {values.get('ncloc_language_distribution') or 'none'}); run: marestail sonar setup"
+        )
     if "coverage" not in values:
         findings.append("marestail.toml:1 SonarQube imported no erlang coverage; run er.tests first so .marestail/eunit.coverdata exists")
     return findings
@@ -204,9 +246,13 @@ def rust_findings(ctx: Context, client: Client, key: str) -> list[str]:
     values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
     findings = []
     if "rust=" not in values.get("ncloc_language_distribution", ""):
-        findings.append(f"{rust.rel(ctx, ctx.rust_root())}:1 SonarQube received no Rust lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the crate's src in sonar.sources")
+        findings.append(
+            f"{rust.rel(ctx, ctx.rust_root())}:1 SonarQube received no Rust lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the crate's src in sonar.sources"
+        )
     if "coverage" not in values:
-        findings.append("sonar-project.properties:1 SonarQube imported no rust coverage; run rs.tests first and set sonar.rust.lcov.reportPaths=.marestail/rs-lcov.info")
+        findings.append(
+            "sonar-project.properties:1 SonarQube imported no rust coverage; run rs.tests first and set sonar.rust.lcov.reportPaths=.marestail/rs-lcov.info"
+        )
     return findings
 
 
@@ -215,7 +261,9 @@ def java_findings(ctx: Context, client: Client, key: str) -> list[str]:
     values = {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
     findings = []
     if "java=" not in values.get("ncloc_language_distribution", ""):
-        findings.append(f"{java.rel(ctx, ctx.java_root())}:1 SonarQube received no Java lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the sources in sonar.sources")
+        findings.append(
+            f"{java.rel(ctx, ctx.java_root())}:1 SonarQube received no Java lines (languages: {values.get('ncloc_language_distribution') or 'none'}); put the sources in sonar.sources"
+        )
     if "coverage" not in values:
         findings.append("marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists")
     return findings
@@ -269,7 +317,9 @@ def reopened(ctx: Context, client: Client, key: str) -> list[str]:
             continue
         client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
         where = f"{issue_path(issue)}:{issue.get('line', 0)}"
-        findings.append(f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties")
+        findings.append(
+            f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties"
+        )
     return findings
 
 

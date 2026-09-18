@@ -34,7 +34,11 @@ def touches_hunk(member: dict, ctx: Context) -> bool:
 
 def score(ctx: Context, member: dict, coverage: dict) -> dict:
     complexity = member["complexity"]
-    covered = 1.0 if java.coverage_excluded(ctx, member["file"]) else window(coverage["files"].get(member["file"], {}), member["startLine"], member["endLine"])
+    covered = (
+        1.0
+        if java.coverage_excluded(ctx, member["file"])
+        else window(coverage["files"].get(member["file"], {}), member["startLine"], member["endLine"])
+    )
     return {
         "file": member["file"],
         "line": member["line"],

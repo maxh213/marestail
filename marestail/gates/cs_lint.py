@@ -28,7 +28,13 @@ def run_gate(ctx: Context) -> Result:
         sarif.unlink(missing_ok=True)
         code, output = dotnet.dotnet(ctx, build_args(project, sarif), timeout=900)
         if not sarif.exists():
-            return Result("cs.lint", False, dotnet.hint(code, output) or f"no SARIF written for {dotnet.rel(ctx, project)}; the build did not compile", tail(output), time.time() - started)
+            return Result(
+                "cs.lint",
+                False,
+                dotnet.hint(code, output) or f"no SARIF written for {dotnet.rel(ctx, project)}; the build did not compile",
+                tail(output),
+                time.time() - started,
+            )
         findings += sarif_findings(ctx, sarif, project)
     findings = sorted(set(findings))
     summary = f"analyzers clean (AnalysisLevel {ANALYSIS_LEVEL}, Recommended)" if not findings else f"{len(findings)} problems"
@@ -37,10 +43,19 @@ def run_gate(ctx: Context) -> Result:
 
 def build_args(project: Path, sarif: Path) -> list[str]:
     return [
-        "build", str(project), "-t:Rebuild", "-nologo", "-v:q",
-        "-p:EnableNETAnalyzers=true", f"-p:AnalysisLevel={ANALYSIS_LEVEL}", "-p:AnalysisMode=Recommended",
-        "-p:EnforceCodeStyleInBuild=true", "-p:TreatWarningsAsErrors=false", f"-p:ErrorLog={sarif}%2cversion=2.1",
-        "-p:GenerateDocumentationFile=true", "-p:NoWarn=CS1591%3bCS1573%3bCS1587%3bCS1712",
+        "build",
+        str(project),
+        "-t:Rebuild",
+        "-nologo",
+        "-v:q",
+        "-p:EnableNETAnalyzers=true",
+        f"-p:AnalysisLevel={ANALYSIS_LEVEL}",
+        "-p:AnalysisMode=Recommended",
+        "-p:EnforceCodeStyleInBuild=true",
+        "-p:TreatWarningsAsErrors=false",
+        f"-p:ErrorLog={sarif}%2cversion=2.1",
+        "-p:GenerateDocumentationFile=true",
+        "-p:NoWarn=CS1591%3bCS1573%3bCS1587%3bCS1712",
     ]
 
 

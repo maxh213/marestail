@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from marestail import audit, freeze, practices, prompts
-from marestail import route as dandelion
 from marestail import config as config_module
+from marestail import route as dandelion
 from marestail.cli import hook_focus, resolve_focus, run_gates
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -27,7 +27,9 @@ from marestail.shell import run
 PASS = "PASS"
 BOUNCE = "BOUNCE"
 CONFIG_CHANGE = "## Config change"
-LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|session limit|resets \d|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE)
+LIMIT_PATTERN = re.compile(
+    r"rate.?limit|usage limit|session limit|resets \d|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE
+)
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
 GROK_ENV = {
@@ -129,7 +131,18 @@ def run_pipeline(
     if hard and not focused:
         raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
     share_scope(scope_changed, hard, focused)
-    state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort, scope_changed=scope_changed, focus=focused, hard=hard, route=route)
+    state = Run(
+        config=config,
+        task=task.resolve(),
+        model=model,
+        retries=retries,
+        agent=agent,
+        effort=effort,
+        scope_changed=scope_changed,
+        focus=focused,
+        hard=hard,
+        route=route,
+    )
     perf_trees.record_start(config, state.task_name)
     outcome = 0
     for step in window(start, stop):
@@ -210,7 +223,9 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     for attempt in attempts(state.retries):
         report = state.next_report(worker.name)
         print(f"== {worker.name} ({report.stem}) attempt {attempt}")
-        prompt = prompts.worker_prompt(state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags, state.hard_focus)
+        prompt = prompts.worker_prompt(
+            state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags, state.hard_focus
+        )
         invoke(state, report.stem, prompt)
         problems = verify_worker(state, worker, report, before)
         if not problems:
@@ -223,7 +238,9 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
         repeats = repeats + 1 if problem_shape(previous) == problem_shape(problems) else 1
         previous = problems
         if repeats >= WORKER_REPEAT_LIMIT:
-            print(f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human")
+            print(
+                f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human"
+            )
             return False
     return False
 
@@ -312,7 +329,9 @@ def judge_attempt(
             print(f"   removed perf scratch {path}")
     stage_writes(state.config, writes)
     saved = drop_ignored_since(state.config, before)
-    record_commit(state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state))
+    record_commit(
+        state.config, f"{judge.name} verdict: {verdict}" + (f" to {target}" if target else ""), text, judge.name, agent_label(state)
+    )
     restore_files(state.config, saved)
     print(f"   verdict {verdict}" + (f" to {target}" if target else ""))
     return (verdict, target, text), ""
@@ -343,7 +362,9 @@ def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback
             print(f"   {note.stem}: benches unchanged")
             return feedback
         print(f"   {note.stem}: benches changed; stale samples dropped, re-authoring")
-        feedback = (feedback + "\n\n" if feedback else "") + "Benches changed in the previous authoring round; samples taken before the change were dropped."
+        feedback = (
+            feedback + "\n\n" if feedback else ""
+        ) + "Benches changed in the previous authoring round; samples taken before the change were dropped."
     return feedback
 
 
@@ -428,7 +449,9 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     if dirty:
         problems.append("uncommitted changes:\n" + "\n".join(dirty[:20]))
     touched = changed_paths(config, ["git", "diff", "--name-only", f"{before}..HEAD"]) + dirty
-    frozen = [path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))]
+    frozen = [
+        path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))
+    ]
     if frozen and not dirty:
         problems.extend(reject_config_change(state, worker, report, before, frozen))
     elif frozen:
@@ -456,7 +479,12 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
         revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}\n\nBy runner.", label))
         return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
     body = f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n"
-    revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}, recorded as a proposal\n\n{body}\nBy runner.", label))
+    revert(
+        config,
+        before,
+        frozen,
+        stamped(f"Revert change to frozen files by {report.stem}, recorded as a proposal\n\n{body}\nBy runner.", label),
+    )
     proposal = state.next_report("proposal")
     proposal.write_text(body)
     return [
@@ -749,17 +777,27 @@ def agent_command(state: Run) -> list[str]:
         command = [
             binary,
             "-p",
-            "--output-format", "json",
+            "--output-format",
+            "json",
             "--force",
             "--trust",
-            "--sandbox", "disabled",
+            "--sandbox",
+            "disabled",
         ]
         if state.model:
             command += ["--model", state.model]
         return command
     if backend == "kilo":
         return kilo_command(state)
-    command = [os.environ.get("MARESTAIL_CLAUDE", "claude"), "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
+    command = [
+        os.environ.get("MARESTAIL_CLAUDE", "claude"),
+        "-p",
+        "--permission-mode",
+        "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "json",
+    ]
     if state.model:
         command += ["--model", state.model]
     if state.effort:
@@ -796,8 +834,10 @@ def grok_run(state: Run, prompt_file: Path) -> tuple[int, str]:
 def grok_command(state: Run, prompt_file: Path) -> list[str]:
     command = [
         os.environ.get("MARESTAIL_GROK", "grok"),
-        "--prompt-file", str(prompt_file.resolve()),
-        "--output-format", "json",
+        "--prompt-file",
+        str(prompt_file.resolve()),
+        "--output-format",
+        "json",
         "--always-approve",
         "--no-plan",
         "--trust",
@@ -820,9 +860,12 @@ def kilo_command(state: Run) -> list[str]:
         os.environ.get("MARESTAIL_KILO", "kilo"),
         "run",
         "--auto",
-        "--format", "json",
-        "--log-level", "ERROR",
-        "--model", model,
+        "--format",
+        "json",
+        "--log-level",
+        "ERROR",
+        "--model",
+        model,
     ]
     variant = kilo_variant(state)
     if variant:
@@ -939,8 +982,10 @@ def kimi_prompt(prompt_file: Path) -> str:
 def kimi_command(state: Run, prompt_file: Path) -> list[str]:
     command = [
         os.environ.get("MARESTAIL_KIMI", "kimi"),
-        "-p", kimi_prompt(prompt_file),
-        "--output-format", "stream-json",
+        "-p",
+        kimi_prompt(prompt_file),
+        "--output-format",
+        "stream-json",
     ]
     if state.model:
         command += ["-m", state.model]

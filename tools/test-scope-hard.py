@@ -50,7 +50,9 @@ def make_repo(folder: Path) -> Path:
 
 def cli(repo: Path, *args: str, stdin: str = "", env: dict[str, str] | None = None) -> tuple[int, str]:
     merged = {key: value for key, value in os.environ.items() if key not in ("MARESTAIL_SCOPE", "MARESTAIL_FOCUS")}
-    completed = subprocess.run([sys.executable, str(CLI), *args], cwd=repo, input=stdin, capture_output=True, text=True, env={**merged, **(env or {})}, check=False)
+    completed = subprocess.run(
+        [sys.executable, str(CLI), *args], cwd=repo, input=stdin, capture_output=True, text=True, env={**merged, **(env or {})}, check=False
+    )
     return completed.returncode, completed.stdout + completed.stderr
 
 

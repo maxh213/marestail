@@ -24,27 +24,54 @@ def run_gate(ctx: Context) -> Result:
         return Result("cs.tests", False, error, [], time.time() - started)
     findings = attribute_findings(ctx)
     if findings:
-        return Result("cs.tests", False, f"{len(findings)} [{ATTRIBUTE}] in sources; exclusions belong in [dotnet] coverage_exclude", findings, time.time() - started)
+        return Result(
+            "cs.tests",
+            False,
+            f"{len(findings)} [{ATTRIBUTE}] in sources; exclusions belong in [dotnet] coverage_exclude",
+            findings,
+            time.time() - started,
+        )
     results = ctx.work / RESULTS_DIR
     shutil.rmtree(results, ignore_errors=True)
     settings = write_runsettings(ctx, product, tests)
-    code, output = dotnet.dotnet(ctx, [
-        "test", str(tests), "--nologo", "--collect:XPlat Code Coverage",
-        "--settings", str(settings), "--results-directory", str(results), "--logger", "trx;LogFileName=tests.trx",
-    ])
+    code, output = dotnet.dotnet(
+        ctx,
+        [
+            "test",
+            str(tests),
+            "--nologo",
+            "--collect:XPlat Code Coverage",
+            "--settings",
+            str(settings),
+            "--results-directory",
+            str(results),
+            "--logger",
+            "trx;LogFileName=tests.trx",
+        ],
+    )
     trx = results / "tests.trx"
     if code != 0 or not trx.exists():
-        return Result("cs.tests", False, dotnet.hint(code, output) or "tests failed", failed_tests(ctx, trx) or tail(output), time.time() - started)
+        return Result(
+            "cs.tests", False, dotnet.hint(code, output) or "tests failed", failed_tests(ctx, trx) or tail(output), time.time() - started
+        )
     counters = ET.parse(trx).getroot().find("t:ResultSummary/t:Counters", TRX)
     passed = int(counters.get("passed", 0)) if counters is not None else 0
     if passed == 0:
         return Result("cs.tests", False, "no test passed; a run that executes nothing is not green", tail(output), time.time() - started)
     reports = sorted(results.glob("*/coverage.json"))
     if not reports:
-        return Result("cs.tests", False, "no coverage report; reference coverlet.collector from the test project", tail(output), time.time() - started)
+        return Result(
+            "cs.tests", False, "no coverage report; reference coverlet.collector from the test project", tail(output), time.time() - started
+        )
     coverage = normalise(ctx, json.loads(reports[0].read_text()))
     if not coverage["files"]:
-        return Result("cs.tests", False, "coverage report names no source file; check [dotnet] root and coverage_exclude", tail(output), time.time() - started)
+        return Result(
+            "cs.tests",
+            False,
+            "coverage report names no source file; check [dotnet] root and coverage_exclude",
+            tail(output),
+            time.time() - started,
+        )
     (ctx.work / dotnet.COVERAGE_JSON).write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)
     scope = " on changed files" if ctx.scoped else ""
@@ -116,7 +143,12 @@ def normalise(ctx: Context, raw: dict) -> dict:
         for document, classes in documents.items():
             relative = dotnet.rel(ctx, document)
             path = ctx.root / relative
-            if not path.is_relative_to(ctx.dotnet_root()) or dotnet.generated(ctx, path) or dotnet.is_test(ctx, path) or dotnet.coverage_excluded(ctx, relative):
+            if (
+                not path.is_relative_to(ctx.dotnet_root())
+                or dotnet.generated(ctx, path)
+                or dotnet.is_test(ctx, path)
+                or dotnet.coverage_excluded(ctx, relative)
+            ):
                 continue
             for methods in classes.values():
                 for data in methods.values():
@@ -144,7 +176,9 @@ def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
             continue
         gated = ctx.gated_lines(file)
         missing_lines = data["missing_lines"] if gated is None else [line for line in data["missing_lines"] if line in gated]
-        missing_branches = data["missing_branches"] if gated is None else [[line, arm] for line, arm in data["missing_branches"] if line in gated]
+        missing_branches = (
+            data["missing_branches"] if gated is None else [[line, arm] for line, arm in data["missing_branches"] if line in gated]
+        )
         findings.extend(f"{file}:{line} not covered" for line in missing_lines)
         findings.extend(f"{file}:{line} branch arm {arm} not taken" for line, arm in missing_branches)
     return findings

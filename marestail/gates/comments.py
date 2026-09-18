@@ -11,16 +11,46 @@ from marestail.perf.scope import under_benchmarks
 from marestail.report import Result
 from marestail.shell import run
 
-SCRIPT =Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
+SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
 EX_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "comments.exs"
-SKIP_DIRS = {"node_modules", ".venv", "venv", "dist", "build", "_build", "deps", "mutants", ".marestail", ".git", ".scannerwork", "coverage", "cover", "reports", "__pycache__", "vendor", "tmp", "log", "target"}
+SKIP_DIRS = {
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "_build",
+    "deps",
+    "mutants",
+    ".marestail",
+    ".git",
+    ".scannerwork",
+    "coverage",
+    "cover",
+    "reports",
+    "__pycache__",
+    "vendor",
+    "tmp",
+    "log",
+    "target",
+}
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 MARKUP = re.compile(r"<!--|\{#")
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = python_findings(ctx) + ts_findings(ctx) + elixir_findings(ctx) + erlang_findings(ctx) + ruby_findings(ctx) + dotnet_findings(ctx) + rust_findings(ctx) + java_findings(ctx) + markup_findings(ctx)
+    findings = (
+        python_findings(ctx)
+        + ts_findings(ctx)
+        + elixir_findings(ctx)
+        + erlang_findings(ctx)
+        + ruby_findings(ctx)
+        + dotnet_findings(ctx)
+        + rust_findings(ctx)
+        + java_findings(ctx)
+        + markup_findings(ctx)
+    )
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
     return Result("comments", not findings, summary, findings, time.time() - started)
 
@@ -164,5 +194,3 @@ def markup_findings(ctx: Context) -> list[str]:
             if MARKUP.search(line) or (path.suffix == ".css" and "/*" in line):
                 findings.append(f"{path.relative_to(ctx.root)}:{number} comment: {line.strip()[:80]}")
     return findings
-
-
