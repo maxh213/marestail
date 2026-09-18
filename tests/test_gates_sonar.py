@@ -292,6 +292,20 @@ def test_this_repo_excludes_omitted_python_and_embedded_scanners() -> None:
     assert "marestail/**/*.rb" in parts
     assert "marestail/**/*.rs" in parts
     assert "marestail/**/*.cs" in parts
+    assert "marestail/jvm/**" in parts
+    assert "marestail/rs/**" in parts
+
+
+def test_embedded_trees_are_excluded_when_present(tmp_path: Path) -> None:
+    (tmp_path / "pkg" / "jvm").mkdir(parents=True)
+    ctx = make_context(tmp_path, {"python": {"sources": ["pkg"]}})
+    assert "pkg/jvm/**" in sonar.scanner_exclusions(ctx).split(",")
+    assert sonar.tree_glob("pkg", "jvm") == "pkg/jvm/**"
+    assert sonar.tree_glob(".", "tui") == "tui/**"
+    assert sonar.tree_present(ctx, "pkg", "jvm")
+    assert not sonar.tree_present(ctx, "pkg", "tui")
+    assert sonar.tree_present(make_context(tmp_path, {"python": {"sources": "."}}), ".", "pkg")
+    assert not sonar.tree_present(make_context(tmp_path), "", "missing")
 
 
 def test_properties_parsing() -> None:

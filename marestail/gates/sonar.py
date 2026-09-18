@@ -54,6 +54,7 @@ EMBEDDED_LANGUAGE_FILES = (
     ("elixir", "exs"),
     ("erlang", "escript"),
 )
+EMBEDDED_TREES = ("tui", "jvm", "js", "rb", "rs", "cs", "erl", "ex")
 
 Credentials = dict[str, str]
 
@@ -177,7 +178,21 @@ def scanner_exclusions(ctx: Context) -> str:
 
 
 def analysis_exclusions(ctx: Context) -> list[str]:
-    return [*omit_exclusions(ctx), *embedded_language_exclusions(ctx)]
+    return [*omit_exclusions(ctx), *embedded_language_exclusions(ctx), *embedded_tree_exclusions(ctx)]
+
+
+def embedded_tree_exclusions(ctx: Context) -> list[str]:
+    return [tree_glob(source, name) for source in python_source_dirs(ctx) for name in EMBEDDED_TREES if tree_present(ctx, source, name)]
+
+
+def tree_present(ctx: Context, source: str, name: str) -> bool:
+    prefix = source.strip("/")
+    return (ctx.root / name).is_dir() if prefix in ("", ".") else (ctx.root / prefix / name).is_dir()
+
+
+def tree_glob(source: str, name: str) -> str:
+    prefix = source.strip("/") or "."
+    return f"{name}/**" if prefix == "." else f"{prefix}/{name}/**"
 
 
 def omit_exclusions(ctx: Context) -> list[str]:
