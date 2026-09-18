@@ -6,8 +6,10 @@ from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run
 
+GATE = "py.deps"
 VIOLATION = re.compile(r"^-\s+([\w.]+)\s*->")
 BROKEN_MARKER = "Broken contracts"
+BOX_DRAWING = set("─╔╗╚╝║━╺ ")
 
 
 def run_gate(ctx: Context) -> Result:
@@ -15,12 +17,16 @@ def run_gate(ctx: Context) -> Result:
     env = {"PYTHONPATH": str(ctx.python_root())}
     code, output = run([ctx.python_bin("lint-imports"), "--no-cache"], cwd=ctx.root, env=env, timeout=600)
     if code == 0:
-        return Result("py.deps", True, "import contracts kept", [], time.time() - started)
+        return Result(GATE, True, "import contracts kept", [], time.time() - started)
     if ctx.scoped and BROKEN_MARKER in output:
-        findings = scoped_violations(output, ctx)
-        summary = "import contracts kept in scope" if not findings else "import contracts broken in scope"
-        return Result("py.deps", not findings, summary, findings, time.time() - started)
-    return Result("py.deps", False, "import contracts broken", broken_lines(output), time.time() - started)
+        return scoped_result(output, ctx, started)
+    return Result(GATE, False, "import contracts broken", broken_lines(output), time.time() - started)
+
+
+def scoped_result(output: str, ctx: Context, started: float) -> Result:
+    findings = scoped_violations(output, ctx)
+    summary = "import contracts kept in scope" if not findings else "import contracts broken in scope"
+    return Result(GATE, not findings, summary, findings, time.time() - started)
 
 
 def scoped_violations(output: str, ctx: Context) -> list[str]:
@@ -33,10 +39,12 @@ def scoped_violations(output: str, ctx: Context) -> list[str]:
 
 
 def module_in_scope(module: str, ctx: Context) -> bool:
-    existing = [path for path in module_paths(module, ctx) if path.is_file()]
-    if not existing:
-        return True
-    return any(ctx.in_scope(str(path.relative_to(ctx.root))) for path in existing)
+    existing = existing_paths(module, ctx)
+    return not existing or any(ctx.in_scope(str(path.relative_to(ctx.root))) for path in existing)
+
+
+def existing_paths(module: str, ctx: Context) -> list[Path]:
+    return [path for path in module_paths(module, ctx) if path.is_file()]
 
 
 def module_paths(module: str, ctx: Context) -> list[Path]:
@@ -45,7 +53,17 @@ def module_paths(module: str, ctx: Context) -> list[Path]:
 
 
 def broken_lines(output: str) -> list[str]:
-    lines = [line.strip() for line in output.splitlines()]
-    interesting = [line for line in lines if line and not set(line) <= set("─╔╗╚╝║━╺ ")]
-    start = next((i for i, line in enumerate(interesting) if "BROKEN" in line or "Error" in line), 0)
-    return interesting[start:][:60]
+    interesting = [line for line in (raw.strip() for raw in output.splitlines()) if is_text(line)]
+    return interesting[first_broken(interesting) :][:60]
+
+
+def is_text(line: str) -> bool:
+    return bool(line) and not set(line) <= BOX_DRAWING
+
+
+def first_broken(lines: list[str]) -> int:
+    return next((i for i, line in enumerate(lines) if is_break(line)), 0)
+
+
+def is_break(line: str) -> bool:
+    return "BROKEN" in line or "Error" in line

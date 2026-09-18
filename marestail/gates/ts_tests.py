@@ -2,6 +2,7 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
 from marestail.report import Result
@@ -10,6 +11,7 @@ from marestail.shell import run, tail
 COVERAGE_DIR = "ts-coverage"
 JEST_RESULTS = "ts-tests.json"
 UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)
+GATE = "ts.tests"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -17,21 +19,34 @@ def run_gate(ctx: Context) -> Result:
     jest = ctx.ts("runner", "vitest") == "jest"
     code, output = run(jest_command(ctx) if jest else vitest_command(ctx), cwd=ctx.ts_root(), timeout=1800)
     if code != 0:
-        findings = jest_failures(ctx) if jest else []
-        return Result("ts.tests", False, "tests failed", findings or tail(output), time.time() - started)
-    skipped = UNINSTRUMENTED.findall(output)
-    uninstrumented = [f"{relative_path(name, ctx)}:1 not instrumented" for name in skipped]
-    if ctx.scoped:
-        uninstrumented = [finding for finding in uninstrumented if ctx.in_scope(finding.split(":", 1)[0])]
+        return Result(GATE, False, "tests failed", failures(ctx, jest) or tail(output), time.time() - started)
+    return passed(ctx, output, started)
+
+
+def failures(ctx: Context, jest: bool) -> list[str]:
+    return jest_failures(ctx) if jest else []
+
+
+def passed(ctx: Context, output: str, started: float) -> Result:
+    uninstrumented = in_scope_findings([f"{relative_path(name, ctx)}:1 not instrumented" for name in UNINSTRUMENTED.findall(output)], ctx)
     if uninstrumented:
-        return Result("ts.tests", False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, time.time() - started)
-    report = ctx.work / COVERAGE_DIR / "coverage-final.json"
-    coverage = json.loads(report.read_text()) if report.exists() else {}
+        return Result(GATE, False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, time.time() - started)
+    coverage = read_coverage(ctx)
     if not coverage:
-        return Result("ts.tests", False, "no coverage report; check [ts] runner and sources", tail(output), time.time() - started)
+        return Result(GATE, False, "no coverage report; check [ts] runner and sources", tail(output), time.time() - started)
     findings = coverage_findings(coverage, ctx)
     summary = f"{count_tests(output)} passed, {len(findings)} uncovered lines/branches (need 0)"
-    return Result("ts.tests", not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, time.time() - started)
+
+
+def in_scope_findings(findings: list[str], ctx: Context) -> list[str]:
+    return [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
+
+
+def read_coverage(ctx: Context) -> dict[str, Any]:
+    report = ctx.work / COVERAGE_DIR / "coverage-final.json"
+    coverage: dict[str, Any] = json.loads(report.read_text()) if report.exists() else {}
+    return coverage
 
 
 def vitest_command(ctx: Context) -> list[str]:
@@ -69,27 +84,35 @@ def jest_failures(ctx: Context) -> list[str]:
     path = ctx.work / JEST_RESULTS
     if not path.exists():
         return []
-    findings = []
-    for suite in json.loads(path.read_text()).get("testResults", []):
-        file = relative_path(suite["name"], ctx)
-        failed = [case for case in suite.get("assertionResults", []) if case["status"] == "failed"]
-        if not failed and suite.get("status") == "failed":
-            findings.append(f"{file}:1 suite failed to run: {first_line(suite.get('message', ''))}")
-        for case in failed:
-            line = (case.get("location") or {}).get("line", 1)
-            findings.append(f"{file}:{line} {case['fullName']} failed: {first_line(' '.join(case.get('failureMessages', [])))}")
-    return findings
+    return [finding for suite in json.loads(path.read_text()).get("testResults", []) for finding in suite_failures(suite, ctx)]
+
+
+def suite_failures(suite: dict[str, Any], ctx: Context) -> list[str]:
+    file = relative_path(suite["name"], ctx)
+    failed = failed_cases(suite)
+    return suite_broken(file, suite, failed) + [case_failure(file, case) for case in failed]
+
+
+def failed_cases(suite: dict[str, Any]) -> list[dict[str, Any]]:
+    return [case for case in suite.get("assertionResults", []) if case["status"] == "failed"]
+
+
+def suite_broken(file: str, suite: dict[str, Any], failed: list[dict[str, Any]]) -> list[str]:
+    if not failed and suite.get("status") == "failed":
+        return [f"{file}:1 suite failed to run: {first_line(suite.get('message', ''))}"]
+    return []
+
+
+def case_failure(file: str, case: dict[str, Any]) -> str:
+    line = (case.get("location") or {}).get("line", 1)
+    return f"{file}:{line} {case['fullName']} failed: {first_line(' '.join(case.get('failureMessages', [])))}"
 
 
 def first_line(text: str) -> str:
     return next((line.strip()[:200] for line in text.splitlines() if line.strip()), "no message")
 
 
-def load_coverage(ctx: Context) -> dict:
-    return json.loads((ctx.work / COVERAGE_DIR / "coverage-final.json").read_text())
-
-
-def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
+def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
     findings: list[str] = []
     for file, data in sorted(coverage.items()):
         relative = relative_path(file, ctx)
@@ -101,41 +124,55 @@ def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
     return findings
 
 
-def relative_path(file: str, ctx: Context) -> str:
-    path = Path(file.strip())
-    if not path.is_absolute():
-        path = ctx.ts_root() / path
+def located(path: str, ctx: Context) -> str | None:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = ctx.ts_root() / path
     try:
-        return path.resolve().relative_to(ctx.root.resolve()).as_posix()
+        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
     except ValueError:
-        return file
+        return None
 
 
-def uncovered_statements(file: str, data: dict, gated: set[int] | None) -> list[str]:
+def relative(path: str, ctx: Context) -> str:
+    return located(path, ctx) or path
+
+
+def relative_path(file: str, ctx: Context) -> str:
+    return located(file.strip(), ctx) or file
+
+
+def uncovered_statements(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
     lines = sorted({data["statementMap"][key]["start"]["line"] for key, hits in data["s"].items() if hits == 0})
-    if gated is not None:
-        lines = [line for line in lines if line in gated]
-    return [f"{file}:{line} not covered" for line in lines]
+    return [f"{file}:{line} not covered" for line in gated_only(lines, gated)]
 
 
-def uncovered_branches(file: str, data: dict, gated: set[int] | None) -> list[str]:
-    findings = []
-    for key, arms in data["b"].items():
-        branch = data["branchMap"][key]
-        for index, hits in enumerate(arms):
-            if hits == 0 and arm_gated(branch, index, gated):
-                findings.append(f"{file}:{branch['loc']['start']['line']} branch arm {index} not taken")
-    return findings
+def gated_only(lines: list[int], gated: set[int] | None) -> list[int]:
+    return lines if gated is None else [line for line in lines if line in gated]
 
 
-def arm_gated(branch: dict, index: int, gated: set[int] | None) -> bool:
-    if gated is None:
-        return True
+def uncovered_branches(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
+    return [finding for key, arms in data["b"].items() for finding in branch_findings(file, data["branchMap"][key], arms, gated)]
+
+
+def branch_findings(file: str, branch: dict[str, Any], arms: list[int], gated: set[int] | None) -> list[str]:
+    return [
+        f"{file}:{branch['loc']['start']['line']} branch arm {index} not taken"
+        for index, hits in enumerate(arms)
+        if hits == 0 and arm_gated(branch, index, gated)
+    ]
+
+
+def arm_gated(branch: dict[str, Any], index: int, gated: set[int] | None) -> bool:
+    return gated is None or bool(arm_lines(branch, index) & gated)
+
+
+def arm_lines(branch: dict[str, Any], index: int) -> set[Any]:
     lines = {branch["loc"]["start"]["line"]}
     locations = branch.get("locations") or []
     if index < len(locations):
         lines.add((locations[index].get("start") or {}).get("line"))
-    return bool(lines & gated)
+    return lines
 
 
 def count_tests(output: str) -> str:

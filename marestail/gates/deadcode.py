@@ -1,13 +1,18 @@
 import json
 import re
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run
 
-VULTURE_LINE = re.compile(r"^(.+?):(\d+): (unused \w+|unreachable code) (.+?) \((\d+)% confidence\)$")
+VULTURE_HEAD = re.compile(r":(\d+): (unused \w+|unreachable code) (.+)")
+VULTURE_CONFIDENCE = re.compile(r"\d+% confidence\)")
 PYTHON_KINDS = ["unused function", "unused method", "unused class", "unused import", "unused property", "unreachable code"]
 PYTHON_DECORATORS = [
     "@*.route",
@@ -20,24 +25,23 @@ PYTHON_DECORATORS = [
 ]
 PYTHON_EXCLUDES = ["*/tests/*", "*/test/*", "*/mutants/*", "*/.venv/*", "*/__pycache__/*", "perf/*"]
 TS_KINDS = ["files", "exports", "types"]
+ELIXIR_FAILED = "elixir dead code analysis failed"
+ERLANG_FAILED = "erlang dead code analysis failed"
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    findings = (
-        python_findings(ctx)
-        + ts_findings(ctx)
-        + elixir_findings(ctx)
-        + erlang_findings(ctx)
-        + ruby_findings(ctx)
-        + dotnet_findings(ctx)
-        + rust_findings(ctx)
-        + java_findings(ctx)
-    )
-    if ctx.scoped:
-        findings = [f for f in findings if ctx.in_scope(f.split(":")[0])]
+    findings = collected(ctx)
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
     return Result("deadcode", not findings, summary, findings, time.time() - started)
+
+
+def collected(ctx: Context) -> list[str]:
+    return [finding for scanner in SCANNERS for finding in scanner(ctx) if ctx.in_scope(finding.split(":")[0])]
+
+
+def failed(label: str, output: str) -> str:
+    return f"{label}: {output.strip()[-200:]}"
 
 
 def python_findings(ctx: Context) -> list[str]:
@@ -48,15 +52,42 @@ def python_findings(ctx: Context) -> list[str]:
     code, output = run(vulture_command(ctx), cwd=root, timeout=600)
     if code == 127:
         return ["vulture is not installed: uv pip install --python .venv/bin/python vulture"]
-    findings = []
-    for line in output.splitlines():
-        match = VULTURE_LINE.match(line.strip())
-        if match and match.group(3) in kinds:
-            path = (root / match.group(1)).resolve().relative_to(ctx.root)
-            findings.append(f"{path}:{match.group(2)} {match.group(3)} {match.group(4)}")
+    return vetted(code, output, vulture_findings(output, kinds, root, ctx))
+
+
+def vetted(code: int, output: str, findings: list[str]) -> list[str]:
     if code not in (0, 3) and not findings:
-        return [f"vulture failed: {output.strip()[-200:]}"]
+        return [failed("vulture failed", output)]
     return findings
+
+
+def vulture_findings(output: str, kinds: set[str], root: Path, ctx: Context) -> list[str]:
+    return [vulture_finding(entry, root, ctx) for entry in vulture_entries(output) if entry[2] in kinds]
+
+
+def vulture_entries(output: str) -> list[tuple[str, str, str, str]]:
+    return [entry for entry in (vulture_entry(line.strip()) for line in output.splitlines()) if entry]
+
+
+def vulture_entry(line: str) -> tuple[str, str, str, str] | None:
+    body = without_confidence(line)
+    match = next(filter(None, (VULTURE_HEAD.fullmatch(body, at) for at in colons_from_left(body))), None)
+    return None if match is None else (body[: match.start()], match.group(1), match.group(2), match.group(3))
+
+
+def without_confidence(line: str) -> str:
+    body, _, tail = line.rpartition(" (")
+    return body if VULTURE_CONFIDENCE.fullmatch(tail) else ""
+
+
+def colons_from_left(text: str) -> list[int]:
+    return [at for at in range(1, len(text)) if text[at] == ":"]
+
+
+def vulture_finding(entry: tuple[str, str, str, str], root: Path, ctx: Context) -> str:
+    path_text, line, kind, name = entry
+    path = (root / path_text).resolve().relative_to(ctx.root)
+    return f"{path}:{line} {kind} {name}"
 
 
 def vulture_command(ctx: Context) -> list[str]:
@@ -83,24 +114,30 @@ def ts_findings(ctx: Context) -> list[str]:
         return []
     ts_root = ctx.ts_root()
     kinds = ctx.config.get("deadcode", "ts_kinds", TS_KINDS)
-    code, output = run(["npx", "--yes", "knip", "--reporter", "json", "--no-progress"], cwd=ts_root, timeout=900)
+    _, output = run(["npx", "--yes", "knip", "--reporter", "json", "--no-progress"], cwd=ts_root, timeout=900)
     start = output.find("{")
     if start < 0:
-        return [f"knip produced no report: {output.strip()[-200:]}"]
+        return [failed("knip produced no report", output)]
     report, _ = json.JSONDecoder().raw_decode(output[start:])
-    prefix = ts_root.relative_to(ctx.root)
-    findings = [f"{prefix / file} unused file" for file in report.get("files", []) if "files" in kinds]
-    for issue in report.get("issues", []):
-        file = prefix / issue.get("file", "")
-        for kind in kinds:
-            if kind == "files":
-                continue
-            for item in issue.get(kind, []):
-                findings.append(describe(file, kind, item))
-    return findings
+    return knip_findings(report, kinds, ts_root.relative_to(ctx.root))
 
 
-def describe(file: Path, kind: str, item) -> str:
+def knip_findings(report: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
+    return unused_files(report, kinds, prefix) + [
+        finding for issue in report.get("issues", []) for finding in issue_findings(issue, kinds, prefix)
+    ]
+
+
+def unused_files(report: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
+    return [f"{prefix / file} unused file" for file in report.get("files", []) if "files" in kinds]
+
+
+def issue_findings(issue: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
+    file = prefix / issue.get("file", "")
+    return [describe(file, kind, item) for kind in kinds if kind != "files" for item in issue.get(kind, [])]
+
+
+def describe(file: Path, kind: str, item: Any) -> str:
     name = item.get("name", "") if isinstance(item, dict) else str(item)
     line = item.get("line", 0) if isinstance(item, dict) else 0
     return f"{file}:{line} unused {kind.rstrip('s')} '{name}'"
@@ -116,9 +153,23 @@ def ruby_findings(ctx: Context) -> list[str]:
     if not files:
         return []
     code, output = scan(ctx, "dead", files)
+    return ruby_report(code, output)
+
+
+def ruby_report(code: int, output: str) -> list[str]:
     if code != 0:
-        return [f"ruby deadcode scanner failed: {output.strip()[-200:]}"]
-    return json.loads(output or "[]")
+        return [failed("ruby deadcode scanner failed", output)]
+    return list(json.loads(output or "[]"))
+
+
+def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, **options: Any) -> list[str]:
+    files = module.sources(ctx)
+    if not files:
+        return []
+    data, error = module.scan(ctx, "dead", files, **options)
+    if error:
+        return [f"{failure}: {error}"]
+    return [f"{relabel(e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
 
 
 def dotnet_findings(ctx: Context) -> list[str]:
@@ -126,13 +177,7 @@ def dotnet_findings(ctx: Context) -> list[str]:
         return []
     from marestail import dotnet
 
-    files = dotnet.sources(ctx)
-    if not files:
-        return []
-    data, error = dotnet.scan(ctx, "dead", files)
-    if error:
-        return [f"C# deadcode scanner failed: {error}"]
-    return [f"{e['file']}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
+    return structured(ctx, dotnet, "C# deadcode scanner failed")
 
 
 def rust_findings(ctx: Context) -> list[str]:
@@ -140,13 +185,7 @@ def rust_findings(ctx: Context) -> list[str]:
         return []
     from marestail import rust
 
-    files = rust.sources(ctx)
-    if not files:
-        return []
-    data, error = rust.scan(ctx, "dead", files, uses=rust.use_files(ctx))
-    if error:
-        return [f"rust deadcode scanner failed: {error}"]
-    return [f"{rust.rel(ctx, e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
+    return structured(ctx, rust, "rust deadcode scanner failed", partial(rust.rel, ctx), uses=rust.use_files(ctx))
 
 
 def java_findings(ctx: Context) -> list[str]:
@@ -154,13 +193,11 @@ def java_findings(ctx: Context) -> list[str]:
         return []
     from marestail import java
 
-    files = java.sources(ctx)
-    if not files:
-        return []
-    data, error = java.scan(ctx, "dead", files)
-    if error:
-        return [f"java deadcode scanner failed: {error}"]
-    return [f"{e['file']}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
+    return structured(ctx, java, "java deadcode scanner failed")
+
+
+def unused_function(label: str, entry: dict[str, Any]) -> str:
+    return f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}"
 
 
 def elixir_findings(ctx: Context) -> list[str]:
@@ -171,13 +208,17 @@ def elixir_findings(ctx: Context) -> list[str]:
     out.unlink(missing_ok=True)
     code, output = run(elixir_command(ctx, out), cwd=root, timeout=900)
     if code != 0 or not out.exists():
-        return [f"elixir dead code analysis failed: {output.strip()[-200:]}"]
-    findings = []
-    for entry in json.loads(out.read_text()):
-        file = (root / entry["file"]).resolve()
-        label = str(file.relative_to(ctx.root)) if file.is_relative_to(ctx.root) else entry["file"]
-        findings.append(f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}")
-    return findings
+        return [failed(ELIXIR_FAILED, output)]
+    return elixir_entries(json.loads(out.read_text()), root, ctx)
+
+
+def elixir_entries(entries: list[dict[str, Any]], root: Path, ctx: Context) -> list[str]:
+    return [unused_function(elixir_label(entry["file"], root, ctx), entry) for entry in entries]
+
+
+def elixir_label(name: str, root: Path, ctx: Context) -> str:
+    file = (root / name).resolve()
+    return str(file.relative_to(ctx.root)) if file.is_relative_to(ctx.root) else name
 
 
 def erlang_findings(ctx: Context) -> list[str]:
@@ -190,23 +231,38 @@ def erlang_findings(ctx: Context) -> list[str]:
         return []
     ebin = erlang.fresh_dir(ctx.work / "er-deadcode-ebin")
     code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=900)
-    problem = erlang.hint(code, output)
-    if problem:
-        return [problem]
+    problem = compile_problem(code, output)
+    return [problem] if problem else xref_findings(ctx, sources, ebin)
+
+
+def compile_problem(code: int, output: str) -> str | None:
+    from marestail import erlang
+
+    return erlang.hint(code, output) or (failed(ERLANG_FAILED, output) if code != 0 else None)
+
+
+def xref_findings(ctx: Context, sources: list[Path], ebin: Path) -> list[str]:
+    from marestail import erlang
+
+    code, output = erlang.escript(ctx, "deadcode.escript", xref_args(ctx, ebin), timeout=600)
     if code != 0:
-        return [f"erlang dead code analysis failed: {output.strip()[-200:]}"]
+        return [erlang.hint(code, output) or failed(ERLANG_FAILED, output)]
+    return xref_entries(ctx, sources, json.loads(output))
+
+
+def xref_entries(ctx: Context, sources: list[Path], entries: list[dict[str, Any]]) -> list[str]:
+    from marestail import erlang
+
+    labels = {path.stem: erlang.rel(ctx, path) for path in sources}
+    return [unused_function(labels.get(entry["module"], entry["module"]), entry) for entry in entries]
+
+
+def xref_args(ctx: Context, ebin: Path) -> list[str]:
+    from marestail import erlang
+
     beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
     ignore = erlang.listify(ctx.erlang("deadcode_ignore", []))
-    args = (["--ignore", ",".join(ignore)] if ignore else []) + beams
-    code, output = erlang.escript(ctx, "deadcode.escript", args, timeout=600)
-    if code != 0:
-        return [erlang.hint(code, output) or f"erlang dead code analysis failed: {output.strip()[-200:]}"]
-    labels = {path.stem: erlang.rel(ctx, path) for path in sources}
-    findings = []
-    for entry in json.loads(output):
-        label = labels.get(entry["module"], entry["module"])
-        findings.append(f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}")
-    return findings
+    return (["--ignore", ",".join(ignore)] if ignore else []) + beams
 
 
 def elixir_command(ctx: Context, out: Path) -> list[str]:
@@ -222,3 +278,15 @@ def elixir_command(ctx: Context, out: Path) -> list[str]:
     if names:
         command += ["--ignore", ",".join(names)]
     return command
+
+
+SCANNERS = [
+    python_findings,
+    ts_findings,
+    elixir_findings,
+    erlang_findings,
+    ruby_findings,
+    dotnet_findings,
+    rust_findings,
+    java_findings,
+]

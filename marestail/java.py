@@ -5,6 +5,7 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
 from marestail.perf.scope import under_benchmarks
@@ -16,21 +17,24 @@ TOOLS_POM = JVM_DIR / "tools" / "pom.xml"
 PMD_RULESET = JVM_DIR / "pmd-ruleset.xml"
 SCAN_RELEASE = "21"
 DEPENDENCY_PLUGIN = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1"
+BUILD_CLASSPATH = f"{DEPENDENCY_PLUGIN}:build-classpath"
 SKIP_DIRS = {"target", "build", ".marestail", ".git", ".mvn", ".gradle", ".idea", "node_modules"}
 POM = {"m": "http://maven.apache.org/POM/4.0.0"}
 INSTALL = {
     "jdk": "install a JDK 21 or newer (java and javac on PATH, JAVA_HOME, or [java] java_home)",
     "maven": "install Maven 3.9+ (mvn on PATH), commit the Maven wrapper (./mvnw), or set [java] mvn",
 }
+MISSING_TOOL = 127
+STAMP = "stamp"
 
 
-def listify(value) -> list[str]:
+def listify(value: Any) -> list[str]:
     if value is None:
         return []
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
-def rel(ctx: Context, path) -> str:
+def rel(ctx: Context, path: str | Path) -> str:
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = ctx.root / candidate
@@ -38,6 +42,19 @@ def rel(ctx: Context, path) -> str:
         return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
     except ValueError:
         return str(path)
+
+
+def root_prefix(ctx: Context) -> str:
+    prefix = rel(ctx, ctx.java_root())
+    return "" if prefix == "." else prefix + "/"
+
+
+def package_dir(owner: str) -> str:
+    return "/".join(owner.split(".")[:-1])
+
+
+def output_tail(output: str) -> str:
+    return output.strip()[-300:]
 
 
 def tool(ctx: Context, name: str) -> str:
@@ -59,10 +76,24 @@ def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = N
 
 
 def maven_hint(code: int, output: str) -> str | None:
-    if code == 127:
+    if code == MISSING_TOOL:
         return f"maven unavailable: {INSTALL['maven']}"
     if "JAVA_HOME" in output and "not defined correctly" in output:
         return f"maven cannot find a JDK: {INSTALL['jdk']}"
+    return None
+
+
+def maven_failure(code: int, output: str, product: Path, failed: str) -> str | None:
+    if code != 0 or not product.exists():
+        return maven_hint(code, output) or f"{failed}: {output_tail(output)}"
+    return None
+
+
+def jdk_failure(code: int, output: str, product: Path, program: str, failed: str) -> str | None:
+    if code == MISSING_TOOL:
+        return f"{program} not found: {INSTALL['jdk']}"
+    if code != 0 or not product.exists():
+        return f"{failed}: {output_tail(output)}"
     return None
 
 
@@ -84,16 +115,26 @@ def release(ctx: Context) -> str | None:
     configured = ctx.java("release")
     if configured:
         return str(configured)
-    if not pom(ctx).exists():
-        return None
-    properties = ET.parse(pom(ctx)).getroot().find("m:properties", POM)
+    return pom_release(pom(ctx)) if pom(ctx).exists() else None
+
+
+def pom_release(path: Path) -> str | None:
+    properties = ET.parse(path).getroot().find("m:properties", POM)
     if properties is None:
         return None
-    values = {element.tag.split("}", 1)[-1]: (element.text or "").strip() for element in properties}
-    value = values.get("maven.compiler.release", "")
-    if value.startswith("${") and value.endswith("}"):
-        value = values.get(value[2:-1], "")
+    value = resolve_property(pom_properties(properties), "maven.compiler.release")
     return value if value.isdigit() else None
+
+
+def pom_properties(properties: ET.Element) -> dict[str, str]:
+    return {element.tag.split("}", 1)[-1]: (element.text or "").strip() for element in properties}
+
+
+def resolve_property(values: dict[str, str], key: str) -> str:
+    value = values.get(key, "")
+    if value.startswith("${") and value.endswith("}"):
+        return values.get(value[2:-1], "")
+    return value
 
 
 def skipped(ctx: Context, path: Path) -> bool:
@@ -109,8 +150,13 @@ def test_roots(ctx: Context) -> list[Path]:
 
 
 def collect(ctx: Context, folders: list[Path]) -> list[Path]:
-    found = {path for folder in folders if folder.is_dir() for path in folder.rglob("*.java") if not skipped(ctx, path)}
-    return sorted(found)
+    return sorted({path for folder in folders for path in java_files_in(ctx, folder)})
+
+
+def java_files_in(ctx: Context, folder: Path) -> list[Path]:
+    if not folder.is_dir():
+        return []
+    return [path for path in folder.rglob("*.java") if not skipped(ctx, path)]
 
 
 def sources(ctx: Context) -> list[Path]:
@@ -138,19 +184,21 @@ def class_name(ctx: Context, path: Path) -> str | None:
     return None
 
 
-def locate(ctx: Context, package_dir: str, file_name: str, folders: list[Path] | None = None) -> Path | None:
+def locate(ctx: Context, package: str, file_name: str, folders: list[Path] | None = None) -> Path | None:
     for folder in folders if folders is not None else source_roots(ctx) + test_roots(ctx):
-        candidate = folder / package_dir / file_name
+        candidate = folder / package / file_name
         if candidate.is_file():
             return candidate
     return None
 
 
 def excluded(ctx: Context, relative: str, key: str) -> bool:
-    prefix = rel(ctx, ctx.java_root())
-    prefix = "" if prefix == "." else prefix + "/"
-    patterns = [prefix + pattern.strip("/") for pattern in listify(ctx.java(key, []))]
-    return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
+    prefix = root_prefix(ctx)
+    return any(matches(relative, prefix + pattern.strip("/")) for pattern in listify(ctx.java(key, [])))
+
+
+def matches(relative: str, pattern: str) -> bool:
+    return relative == pattern or relative.startswith(pattern + "/") or fnmatch.fnmatch(relative, pattern)
 
 
 def coverage_excluded(ctx: Context, relative: str) -> bool:
@@ -162,78 +210,78 @@ def mutation_excluded(ctx: Context, relative: str) -> bool:
     return excluded(ctx, relative, key)
 
 
-def load_coverage(ctx: Context) -> dict | None:
+def load_coverage(ctx: Context) -> dict[str, Any] | None:
     path = ctx.work / "java-coverage.json"
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def digest_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def stamp_matches(stamp: Path, digest: str) -> bool:
+    return stamp.exists() and stamp.read_text() == digest
+
+
 def build_scanner(ctx: Context) -> str | None:
     out = ctx.work / "java-scan"
-    stamp = out / "stamp"
-    digest = hashlib.sha256(SCAN_SOURCE.read_bytes()).hexdigest()
-    if (out / "Scan.class").exists() and stamp.exists() and stamp.read_text() == digest:
+    digest = digest_of(SCAN_SOURCE)
+    if (out / "Scan.class").exists() and stamp_matches(out / STAMP, digest):
         return None
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     code, output = run([tool(ctx, "javac"), "--release", SCAN_RELEASE, "-d", str(out), str(SCAN_SOURCE)], cwd=ctx.root, timeout=300)
-    if code == 127:
-        return f"javac not found: {INSTALL['jdk']}"
-    if code != 0 or not (out / "Scan.class").exists():
-        return f"java scanner build failed (needs JDK {SCAN_RELEASE}+): {output.strip()[-300:]}"
-    stamp.write_text(digest)
-    return None
+    error = jdk_failure(code, output, out / "Scan.class", "javac", f"java scanner build failed (needs JDK {SCAN_RELEASE}+)")
+    if error is None:
+        (out / STAMP).write_text(digest)
+    return error
 
 
-def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[list | dict | None, str | None]:
+def empty_scan(mode: str) -> list[Any] | dict[str, Any]:
+    return {"files": [], "edges": []} if mode == "deps" else []
+
+
+def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
     if not paths:
-        return ({"files": [], "edges": []} if mode == "deps" else []), None
+        return empty_scan(mode), None
     error = build_scanner(ctx)
     if error:
         return None, error
+    return run_scanner(ctx, mode, paths, extra or [])
+
+
+def run_scanner(ctx: Context, mode: str, paths: list[Path], extra: list[str]) -> tuple[Any, str | None]:
     listing = ctx.work / f"java-{mode}.txt"
     listing.write_text("".join(f"{path}\n" for path in paths))
     out = ctx.work / f"java-{mode}.json"
     out.unlink(missing_ok=True)
-    command = [
-        tool(ctx, "java"),
-        "-cp",
-        str(ctx.work / "java-scan"),
-        "Scan",
-        mode,
-        "--root",
-        str(ctx.root),
-        "--out",
-        str(out),
-        *(extra or []),
-        f"@{listing}",
-    ]
-    code, output = run(command, cwd=ctx.root, timeout=1800)
-    if code == 127:
-        return None, f"java not found: {INSTALL['jdk']}"
-    if code != 0 or not out.exists():
-        return None, f"java scanner failed ({mode}): {output.strip()[-300:]}"
+    command = [tool(ctx, "java"), "-cp", str(ctx.work / "java-scan"), "Scan", mode, "--root", str(ctx.root), "--out", str(out)]
+    code, output = run([*command, *extra, f"@{listing}"], cwd=ctx.root, timeout=1800)
+    error = jdk_failure(code, output, out, "java", f"java scanner failed ({mode})")
+    if error:
+        return None, error
     return json.loads(out.read_text()), None
 
 
 def classpath(ctx: Context) -> tuple[Path | None, str | None]:
     out = ctx.work / "java-classpath.txt"
     out.unlink(missing_ok=True)
-    code, output = mvn(ctx, [f"{DEPENDENCY_PLUGIN}:build-classpath", f"-Dmdep.outputFile={out}", "-Dmdep.includeScope=test"])
-    if code != 0 or not out.exists():
-        return None, maven_hint(code, output) or f"maven could not resolve the test classpath: {output.strip()[-300:]}"
-    return out, None
+    code, output = mvn(ctx, [BUILD_CLASSPATH, f"-Dmdep.outputFile={out}", "-Dmdep.includeScope=test"])
+    error = maven_failure(code, output, out, "maven could not resolve the test classpath")
+    return (None, error) if error else (out, None)
 
 
 def pmd_classpath(ctx: Context) -> tuple[str | None, str | None]:
     folder = ctx.work / "java-tools"
-    out, stamp = folder / "pmd.classpath", folder / "stamp"
-    digest = hashlib.sha256(TOOLS_POM.read_bytes()).hexdigest()
-    if out.exists() and stamp.exists() and stamp.read_text() == digest:
+    out, stamp = folder / "pmd.classpath", folder / STAMP
+    digest = digest_of(TOOLS_POM)
+    if out.exists() and stamp_matches(stamp, digest):
         return out.read_text().strip(), None
     folder.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
-    code, output = mvn(ctx, [f"{DEPENDENCY_PLUGIN}:build-classpath", f"-Dmdep.outputFile={out}"], pom=TOOLS_POM)
-    if code != 0 or not out.exists():
-        return None, maven_hint(code, output) or f"maven could not fetch PMD: {output.strip()[-300:]}"
+    code, output = mvn(ctx, [BUILD_CLASSPATH, f"-Dmdep.outputFile={out}"], pom=TOOLS_POM)
+    error = maven_failure(code, output, out, "maven could not fetch PMD")
+    if error:
+        return None, error
     stamp.write_text(digest)
     return out.read_text().strip(), None

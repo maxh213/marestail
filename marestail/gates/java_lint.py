@@ -4,47 +4,73 @@ import re
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from marestail import java
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import run
 
+GATE = "java.lint"
 MAX_LINES = 60
 SUPPRESSION = re.compile(r"@SuppressWarnings\b|@SuppressFBWarnings\b|//\s*NOPMD")
 PMD_MAIN = "net.sourceforge.pmd.cli.PmdCli"
 PMD_OK = {0, 4, 5}
+FILENAME = "filename"
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.scoped and not ctx.changed_under(ctx.java_root(), (".java",)):
-        return Result.skipped("java.lint", "no changed Java files")
+    if untouched(ctx):
+        return Result.skipped(GATE, "no changed Java files")
     error = java.require_pom(ctx)
     if error:
-        return Result("java.lint", False, error, [], 0.0)
+        return Result(GATE, False, error, [], 0.0)
     files = java.files(ctx)
     if not files:
-        return Result.skipped("java.lint", "no Java sources")
+        return Result.skipped(GATE, "no Java sources")
+    return lint(ctx, files, started)
+
+
+def untouched(ctx: Context) -> bool:
+    return ctx.scoped and not ctx.changed_under(ctx.java_root(), (".java",))
+
+
+def failure(summary: str, findings: list[str], started: float) -> Result:
+    return Result(GATE, False, summary, findings[:MAX_LINES], time.time() - started)
+
+
+def lint(ctx: Context, files: list[Path], started: float) -> Result:
     classpath, error = java.classpath(ctx)
-    if error:
-        return Result("java.lint", False, error, [], time.time() - started)
+    if classpath is None:
+        return failure(str(error), [], started)
     classes = ctx.work / "java-lint-classes"
     shutil.rmtree(classes, ignore_errors=True)
     release = java.release(ctx)
-    extra = ["--classpath", str(classpath), "--classes", str(classes), *(["--release", release] if release else [])]
-    diagnostics, error = java.scan(ctx, "lint", files, extra)
+    diagnostics, error = java.scan(ctx, "lint", files, scan_args(classpath, classes, release))
     if error:
-        return Result("java.lint", False, error, [], time.time() - started)
+        return failure(error, [], started)
     findings = suppression_findings(ctx, files) + javac_findings(ctx, diagnostics)
-    if any(d["kind"] == "ERROR" for d in diagnostics):
-        return Result("java.lint", False, "does not compile", sorted(set(findings))[:MAX_LINES], time.time() - started)
+    if compile_failed(diagnostics):
+        return failure("does not compile", sorted(set(findings)), started)
     pmd, error = pmd_findings(ctx, files, classpath, classes, release)
+    return finish(findings, pmd, error, started)
+
+
+def scan_args(classpath: Path, classes: Path, release: str | None) -> list[str]:
+    return ["--classpath", str(classpath), "--classes", str(classes), *(["--release", release] if release else [])]
+
+
+def compile_failed(diagnostics: list[dict[str, Any]]) -> bool:
+    return any(d["kind"] == "ERROR" for d in diagnostics)
+
+
+def finish(findings: list[str], pmd: list[str], error: str | None, started: float) -> Result:
     if error:
-        return Result("java.lint", False, error, findings[:MAX_LINES], time.time() - started)
-    findings = sorted(set(findings + pmd))
-    summary = "javac -Xlint:all and PMD clean" if not findings else f"{len(findings)} problems"
-    return Result("java.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
+        return failure(error, findings, started)
+    combined = sorted(set(findings + pmd))
+    summary = "javac -Xlint:all and PMD clean" if not combined else f"{len(combined)} problems"
+    return Result(GATE, not combined, summary, combined[:MAX_LINES], time.time() - started)
 
 
 def suppression_findings(ctx: Context, files: list[Path]) -> list[str]:
@@ -56,46 +82,61 @@ def suppression_findings(ctx: Context, files: list[Path]) -> list[str]:
     return findings
 
 
-def javac_findings(ctx: Context, diagnostics: list[dict]) -> list[str]:
-    findings = []
-    for diagnostic in diagnostics:
-        file = diagnostic["file"] or java.rel(ctx, java.pom(ctx))
-        if diagnostic["file"] and not ctx.in_scope(file):
-            continue
-        code = str(diagnostic["code"] or diagnostic["kind"]).removeprefix("compiler.")
-        findings.append(f"{file}:{diagnostic['line']} javac {code}: {diagnostic['message'][:200]}")
-    return findings
+def javac_findings(ctx: Context, diagnostics: list[dict[str, Any]]) -> list[str]:
+    return [finding for finding in (javac_finding(ctx, diagnostic) for diagnostic in diagnostics) if finding is not None]
+
+
+def outside_scope(ctx: Context, diagnostic: dict[str, Any]) -> bool:
+    return bool(diagnostic["file"]) and not ctx.in_scope(diagnostic["file"])
+
+
+def javac_finding(ctx: Context, diagnostic: dict[str, Any]) -> str | None:
+    if outside_scope(ctx, diagnostic):
+        return None
+    file = diagnostic["file"] or pom_rel(ctx)
+    code = str(diagnostic["code"] or diagnostic["kind"]).removeprefix("compiler.")
+    return f"{file}:{diagnostic['line']} javac {code}: {diagnostic['message'][:200]}"
+
+
+def pom_rel(ctx: Context) -> str:
+    return java.rel(ctx, java.pom(ctx))
+
+
+def squash(text: str) -> str:
+    return " ".join(text.split())[:200]
 
 
 def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path, release: str | None) -> tuple[list[str], str | None]:
     tools, error = java.pmd_classpath(ctx)
-    if error:
-        return [], error
+    if tools is None:
+        return [], str(error)
     report = ctx.work / "java-pmd.json"
     report.unlink(missing_ok=True)
     listing = ctx.work / "java-pmd-files.txt"
     listing.write_text("\n".join(map(str, files)) + "\n")
-    code, output = run(
-        pmd_command(ctx, tools, listing, report, os.pathsep.join([str(classes), classpath.read_text().strip()]), release),
-        cwd=ctx.root,
-        timeout=1800,
-    )
+    aux = os.pathsep.join([str(classes), classpath.read_text().strip()])
+    code, output = run(pmd_command(ctx, tools, listing, report, aux, release), cwd=ctx.root, timeout=1800)
     if code not in PMD_OK or not report.exists():
-        return [], f"PMD failed (exit {code}): {output.strip()[-300:]}"
-    data = json.loads(report.read_text())
-    findings = []
-    for entry in data.get("files", []):
-        relative = java.rel(ctx, entry["filename"])
-        if not ctx.in_scope(relative):
-            continue
-        for violation in entry.get("violations", []):
-            findings.append(
-                f"{relative}:{violation['beginline']} PMD {violation['rule']}: {' '.join(violation['description'].split())[:200]}"
-            )
-    for problem in data.get("processingErrors", []) + data.get("configurationErrors", []):
-        where = java.rel(ctx, problem["filename"]) if problem.get("filename") else java.rel(ctx, java.pom(ctx))
-        findings.append(f"{where}:1 PMD could not analyse: {' '.join(str(problem.get('message', '')).split())[:200]}")
-    return findings, None
+        return [], f"PMD failed (exit {code}): {java.output_tail(output)}"
+    return read_pmd(ctx, json.loads(report.read_text())), None
+
+
+def read_pmd(ctx: Context, data: dict[str, Any]) -> list[str]:
+    violations = [finding for entry in data.get("files", []) for finding in entry_findings(ctx, entry)]
+    problems = data.get("processingErrors", []) + data.get("configurationErrors", [])
+    return violations + [problem_finding(ctx, problem) for problem in problems]
+
+
+def entry_findings(ctx: Context, entry: dict[str, Any]) -> list[str]:
+    relative = java.rel(ctx, entry[FILENAME])
+    if not ctx.in_scope(relative):
+        return []
+    return [f"{relative}:{v['beginline']} PMD {v['rule']}: {squash(v['description'])}" for v in entry.get("violations", [])]
+
+
+def problem_finding(ctx: Context, problem: dict[str, Any]) -> str:
+    where = java.rel(ctx, problem[FILENAME]) if problem.get(FILENAME) else pom_rel(ctx)
+    return f"{where}:1 PMD could not analyse: {squash(str(problem.get('message', '')))}"
 
 
 def pmd_command(ctx: Context, tools: str, listing: Path, report: Path, aux: str, release: str | None) -> list[str]:

@@ -1,0 +1,108 @@
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from marestail.context import MutationScope
+from marestail.gates import py_mutation
+from tests.conftest import make_context
+
+FULL = {"python": {"mutation_scope": "all"}}
+
+
+def write_meta(root: Path, name: str, codes: dict[str, Any]) -> None:
+    path = root / "mutants" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"exit_code_by_key": codes}))
+
+
+def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(py_mutation)
+    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
+    assert (result.gate, result.ok, result.summary) == (
+        "py.mutation",
+        False,
+        '[python] mutation_scope must be "changed" or "all", got \'some\'',
+    )
+    assert fake.calls == []
+
+
+def test_nothing_changed_skips(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(py_mutation)
+    result = py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"tests/test_a.py", "perf/b.py"}))
+    assert (result.ok, result.summary) == (True, "skipped: no changed python sources")
+    assert fake.calls == []
+
+
+def test_mutmut_failure(tmp_path: Path, fake_run: Any) -> None:
+    (tmp_path / "mutants" / "stale").mkdir(parents=True)
+    fake = fake_run(py_mutation, [(1, "boom\ncrashed")])
+    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 8}}))
+    assert (result.ok, result.summary, result.findings) == (False, "mutmut failed", ["boom", "crashed"])
+    assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "8"]]
+    assert fake.options == [{"cwd": tmp_path, "timeout": 7200}]
+    assert not (tmp_path / "mutants").exists()
+
+
+def test_no_mutants_generated(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_mutation, [(1, "0 Mutants done")])
+    result = py_mutation.run_gate(make_context(tmp_path, FULL))
+    assert (result.ok, result.summary, result.findings) == (False, "no mutants were generated", ["0 Mutants done"])
+
+
+def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
+    def mutmut(command: list[str]) -> tuple[int, str]:
+        write_meta(tmp_path, "b.py.meta", {"b.x__mutmut_1": 0, "b.x__mutmut_2": 1, "b.x__mutmut_3": None})
+        write_meta(tmp_path, "a.py.meta", {"a.y__mutmut_1": 99, "a.y__mutmut_2": 37, "a.y__mutmut_3": 34})
+        return 0, ""
+
+    fake = fake_run(py_mutation, mutmut)
+    result = py_mutation.run_gate(make_context(tmp_path, FULL))
+    assert result.findings == ["a.y__mutmut_1: suspicious", "b.x__mutmut_1: survived", "b.x__mutmut_3: not checked"]
+    assert (result.ok, result.summary) == (False, "3 of 6 mutants not killed")
+    assert fake.calls[0] == [f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "4"]
+
+
+def test_scoped_run_filters_by_pattern(tmp_path: Path, fake_run: Any) -> None:
+    (tmp_path / "pkg").mkdir()
+
+    def mutmut(command: list[str]) -> tuple[int, str]:
+        write_meta(tmp_path, "m.meta", {"pkg.a.f__mutmut_1": 3, "pkg.b.g__mutmut_1": 0})
+        return 0, ""
+
+    fake = fake_run(py_mutation, mutmut)
+    result = py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"pkg/a.py"}))
+    assert (result.ok, result.summary, result.findings) == (True, "all 1 mutants killed", [])
+    assert fake.calls[0][:3] == [f"{tmp_path}/.venv/bin/mutmut", "run", "pkg.a.*"]
+
+
+@pytest.mark.parametrize(
+    ("total", "survivors", "note", "expected"),
+    [
+        (4, [], "", "all 4 mutants killed"),
+        (4, [], "(no base x; full run)", "all 4 mutants killed (no base x; full run)"),
+        (5, ["a", "b"], "", "2 of 5 mutants not killed"),
+        (5, ["a"], "(n)", "1 of 5 mutants not killed (n)"),
+    ],
+)
+def test_mutation_summary(total: int, survivors: list[str], note: str, expected: str) -> None:
+    assert py_mutation.mutation_summary(total, survivors, note) == expected
+
+
+def test_mutant_patterns(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"python": {"root": "src"}})
+    files = ["src/pkg/mod.py", "src/tests/test_x.py", "perf/bench.py", "src/top.py"]
+    assert py_mutation.mutant_patterns(ctx, files) == ["pkg.mod.*", "top.*"]
+
+
+@pytest.mark.parametrize(
+    ("scope", "patterns", "expected"),
+    [
+        (MutationScope("full"), [], False),
+        (MutationScope("scoped", ["a.py"]), ["a.*"], False),
+        (MutationScope("skip", []), [], True),
+    ],
+)
+def test_nothing_to_mutate(scope: MutationScope, patterns: list[str], expected: bool) -> None:
+    assert py_mutation.nothing_to_mutate(scope, patterns) is expected

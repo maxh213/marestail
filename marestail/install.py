@@ -4,7 +4,13 @@ import shutil
 import time
 import tomllib
 from pathlib import Path
+from typing import Any
 
+PERFORMANCE = "PERFORMANCE.md"
+CONFIG = "marestail.toml"
+HOOKS = "hooks"
+STOP = "Stop"
+AGY_GATE = "marestail-gate"
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 GITIGNORE_LINES = [
     ".marestail/",
@@ -23,7 +29,7 @@ GITIGNORE_GENERATED_LINES = [
     "features/",
     "qa/",
     "tasks/",
-    "PERFORMANCE.md",
+    PERFORMANCE,
     "perf/",
     ".claude/settings.json",
     ".agents/hooks.json",
@@ -35,23 +41,21 @@ GATE_MARKER = "marestail gate"
 
 def install(target: Path, gitignore_generated: bool = False) -> None:
     dotnet = uses_dotnet(target)
-    copy_if_missing(TEMPLATES / "marestail.toml", target / "marestail.toml")
+    copy_if_missing(TEMPLATES / CONFIG, target / CONFIG)
     if not dotnet:
         copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
-    copy_if_missing(TEMPLATES / "PERFORMANCE.md", target / "PERFORMANCE.md")
+    copy_if_missing(TEMPLATES / PERFORMANCE, target / PERFORMANCE)
     (target / "guidance").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
     if uses_csharp(target):
         copy_if_missing(TEMPLATES / "guidance" / "cs.md", target / "guidance" / "cs.md")
-    claude = target / "CLAUDE.md"
-    agents = target / "AGENTS.md"
-    append_instructions(claude)
-    append_instructions(agents)
+    append_instructions(target / "CLAUDE.md")
+    append_instructions(target / "AGENTS.md")
     merge_hook(target / ".claude" / "settings.json")
     merge_agy_hook(target / ".agents" / "hooks.json")
-    merge_grok_hook(target / ".grok" / "hooks" / "marestail-gate.json")
+    merge_grok_hook(target / ".grok" / HOOKS / "marestail-gate.json")
     merge_cursor_hook(target / ".cursor" / "hooks.json")
     extend_gitignore(target / ".gitignore", GITIGNORE_GENERATED_LINES if gitignore_generated else [])
     trust_grok_folder(target)
@@ -59,7 +63,7 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
 
 
 def uses_dotnet(target: Path) -> bool:
-    config = target / "marestail.toml"
+    config = target / CONFIG
     if not config.exists():
         return False
     with config.open("rb") as handle:
@@ -82,65 +86,87 @@ def append_instructions(path: Path) -> None:
         path.write_text(existing.rstrip() + ("\n\n" if existing else "") + snippet)
 
 
-def merge_hook(path: Path) -> None:
-    settings = json.loads(path.read_text()) if path.exists() else {}
-    hook = json.loads((TEMPLATES / "stop-hook.json").read_text())
-    stops = settings.setdefault("hooks", {}).setdefault("Stop", [])
+def read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(path.read_text()) if path.exists() else default
+    return data
+
+
+def read_template(name: str) -> dict[str, Any]:
+    template: dict[str, Any] = json.loads((TEMPLATES / name).read_text())
+    return template
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def add_template_stops(settings: dict[str, Any], template: dict[str, Any], key: str, stop: str) -> None:
+    stops = settings.setdefault(key, {}).setdefault(stop, [])
     if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
-        stops.append(hook)
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n")
+        stops.extend(template.get(key, {}).get(stop, []))
+
+
+def merge_template_hook(path: Path, template: dict[str, Any], key: str) -> None:
+    settings = read_json(path, {})
+    add_template_stops(settings, template, key, STOP)
+    write_json(path, settings)
+
+
+def merge_hook(path: Path) -> None:
+    merge_template_hook(path, {HOOKS: {STOP: [read_template("stop-hook.json")]}}, HOOKS)
 
 
 def merge_agy_hook(path: Path) -> None:
-    settings = json.loads(path.read_text()) if path.exists() else {}
-    template = json.loads((TEMPLATES / "agy-hooks.json").read_text())
-    gate_hook = settings.setdefault("marestail-gate", {})
-    stops = gate_hook.setdefault("Stop", [])
-    if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
-        stops.extend(template.get("marestail-gate", {}).get("Stop", []))
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n")
+    merge_template_hook(path, read_template("agy-hooks.json"), AGY_GATE)
 
 
 def merge_grok_hook(path: Path) -> None:
-    settings = json.loads(path.read_text()) if path.exists() else {}
-    template = json.loads((TEMPLATES / "grok-hooks.json").read_text())
-    stops = settings.setdefault("hooks", {}).setdefault("Stop", [])
-    if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
-        stops.extend(template.get("hooks", {}).get("Stop", []))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n")
+    merge_template_hook(path, read_template("grok-hooks.json"), HOOKS)
 
 
 def merge_cursor_hook(path: Path) -> None:
-    settings = json.loads(path.read_text()) if path.exists() else {"version": 1, "hooks": {}}
-    template = json.loads((TEMPLATES / "cursor-hooks.json").read_text())
+    settings = read_json(path, {"version": 1, HOOKS: {}})
+    template = read_template("cursor-hooks.json")
     settings.setdefault("version", template.get("version", 1))
-    hooks = settings.setdefault("hooks", {})
-    stops = hooks.setdefault("stop", [])
-    if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
-        stops.extend(template.get("hooks", {}).get("stop", []))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n")
+    add_template_stops(settings, template, HOOKS, "stop")
+    write_json(path, settings)
 
 
 def trust_grok_folder(root: Path) -> None:
-    home = Path(os.environ.get("GROK_HOME", Path.home() / ".grok"))
-    store = home / "trusted_folders.toml"
+    store = grok_home() / "trusted_folders.toml"
     key = str(root.resolve())
-    folders: dict = {}
-    if store.exists():
-        folders = tomllib.loads(store.read_text()).get("folders") or {}
-    entry = folders.get(key)
-    if isinstance(entry, dict) and entry.get("trusted"):
+    folders = trusted_folders(store)
+    if is_trusted(folders.get(key)):
         return
     folders[key] = {"trusted": True, "decided_at": int(time.time())}
-    lines = []
-    for path, meta in folders.items():
-        trusted = meta.get("trusted", True) if isinstance(meta, dict) else True
-        decided = meta.get("decided_at", int(time.time())) if isinstance(meta, dict) else int(time.time())
-        lines += [f"[folders.{json.dumps(path)}]", f"trusted = {str(bool(trusted)).lower()}", f"decided_at = {int(decided)}", ""]
+    save_trusted_folders(store, key, folders)
+
+
+def grok_home() -> Path:
+    return Path(os.environ.get("GROK_HOME", Path.home() / ".grok"))
+
+
+def trusted_folders(store: Path) -> dict[str, Any]:
+    if not store.exists():
+        return {}
+    folders: dict[str, Any] = tomllib.loads(store.read_text()).get("folders") or {}
+    return folders
+
+
+def is_trusted(entry: Any) -> bool:
+    return isinstance(entry, dict) and bool(entry.get("trusted"))
+
+
+def folder_lines(path: str, meta: Any) -> list[str]:
+    fields = meta if isinstance(meta, dict) else {}
+    trusted = fields.get("trusted", True)
+    decided = fields.get("decided_at", int(time.time()))
+    return [f"[folders.{json.dumps(path)}]", f"trusted = {str(bool(trusted)).lower()}", f"decided_at = {int(decided)}", ""]
+
+
+def save_trusted_folders(store: Path, key: str, folders: dict[str, Any]) -> None:
+    lines = [line for path, meta in folders.items() for line in folder_lines(path, meta)]
     try:
         store.parent.mkdir(parents=True, exist_ok=True)
         store.write_text("\n".join(lines))
@@ -153,7 +179,14 @@ def trust_grok_folder(root: Path) -> None:
 
 def extend_gitignore(path: Path, extra: list[str] | None = None) -> None:
     existing = path.read_text().splitlines() if path.exists() else []
-    missing = [line for line in [*GITIGNORE_LINES, *(extra or [])] if line not in existing]
+    missing = missing_lines(existing, extra or [])
     if missing:
-        header = [] if "# marestail" in existing else ["", "# marestail"]
-        path.write_text("\n".join([*existing, *header, *missing]) + "\n")
+        path.write_text("\n".join([*existing, *gitignore_header(existing), *missing]) + "\n")
+
+
+def missing_lines(existing: list[str], extra: list[str]) -> list[str]:
+    return [line for line in [*GITIGNORE_LINES, *extra] if line not in existing]
+
+
+def gitignore_header(existing: list[str]) -> list[str]:
+    return [] if "# marestail" in existing else ["", "# marestail"]

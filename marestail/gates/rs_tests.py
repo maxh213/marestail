@@ -1,77 +1,138 @@
 import json
 import re
 import time
+from typing import Any
 
 from marestail import rust
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import tail
 
+GATE = "rs.tests"
 RAW_JSON = "rs-llvm-cov.json"
 LCOV = "rs-lcov.info"
+REPORTS = (("--json", RAW_JSON), ("--lcov", LCOV))
 CODE_REGION = 0
 PASSED = re.compile(r"^test result: \w+\. (\d+) passed", re.MULTILINE)
+
+Entry = dict[str, dict[str, int]]
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    ignore = ["--ignore-filename-regex", ctx.rust("coverage_ignore_regex")] if ctx.rust("coverage_ignore_regex") else []
+    ignore = ignore_args(ctx)
     code, output = rust.cargo(ctx, ["llvm-cov", "--no-report", *rust.listify(ctx.rust("test_args", []))], timeout=3600)
+    return test_failure(code, output, started) or report_failure(ctx, ignore, started) or coverage_result(ctx, output, started)
+
+
+def ignore_args(ctx: Context) -> list[str]:
+    pattern = ctx.rust("coverage_ignore_regex")
+    return ["--ignore-filename-regex", pattern] if pattern else []
+
+
+def test_failure(code: int, output: str, started: float) -> Result | None:
     problem = rust.missing(code, output, "llvm-cov")
     if problem:
-        return Result("rs.tests", False, "cargo llvm-cov missing", [problem], time.time() - started)
+        return Result(GATE, False, "cargo llvm-cov missing", [problem], time.time() - started)
     if code != 0:
-        return Result("rs.tests", False, "tests failed", tail(output), time.time() - started)
-    for flag, name in (("--json", RAW_JSON), ("--lcov", LCOV)):
-        (ctx.work / name).unlink(missing_ok=True)
-        report_code, report_output = rust.cargo(
-            ctx, ["llvm-cov", "report", flag, *ignore, "--output-path", str(ctx.work / name)], timeout=600
-        )
-        if report_code != 0 or not (ctx.work / name).exists():
-            return Result("rs.tests", False, f"cargo llvm-cov report {flag} produced no report", tail(report_output), time.time() - started)
+        return Result(GATE, False, "tests failed", tail(output), time.time() - started)
+    return None
+
+
+def report_failure(ctx: Context, ignore: list[str], started: float) -> Result | None:
+    return next((failure for flag, name in REPORTS if (failure := write_report(ctx, flag, name, ignore, started))), None)
+
+
+def write_report(ctx: Context, flag: str, name: str, ignore: list[str], started: float) -> Result | None:
+    path = ctx.work / name
+    path.unlink(missing_ok=True)
+    code, output = rust.cargo(ctx, ["llvm-cov", "report", flag, *ignore, "--output-path", str(path)], timeout=600)
+    if code != 0 or not path.exists():
+        return Result(GATE, False, f"cargo llvm-cov report {flag} produced no report", tail(output), time.time() - started)
+    return None
+
+
+def coverage_result(ctx: Context, output: str, started: float) -> Result:
     coverage = merge(ctx)
     if not coverage["files"]:
-        return Result("rs.tests", False, "coverage report lists no source files", tail(output), time.time() - started)
+        return Result(GATE, False, "coverage report lists no source files", tail(output), time.time() - started)
     (ctx.work / "rs-coverage.json").write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)
     passed = sum(int(count) for count in PASSED.findall(output))
     scope = " on changed files" if ctx.scope_changed else ""
     summary = f"{passed} passed, line coverage {coverage['totals']['percent_covered']:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result("rs.tests", not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, time.time() - started)
 
 
-def merge(ctx: Context) -> dict:
-    files: dict[str, dict] = {}
-    current = None
+def merge(ctx: Context) -> dict[str, Any]:
+    files: dict[str, Entry] = {}
+    merge_lcov(ctx, files)
+    merge_regions(ctx, files)
+    return {"files": files, "totals": {"percent_covered": line_percent(files)}}
+
+
+def entry_for(files: dict[str, Entry], file: str) -> Entry:
+    return files.setdefault(file, {"lines": {}, "regions": {}})
+
+
+def keep_max(table: dict[str, int], key: str, value: int) -> None:
+    table[key] = max(table.get(key, 0), value)
+
+
+def merge_lcov(ctx: Context, files: dict[str, Entry]) -> None:
+    current: Entry | None = None
     for line in (ctx.work / LCOV).read_text().splitlines():
-        if line.startswith("SF:"):
-            current = files.setdefault(rust.rel(ctx, line[3:]), {"lines": {}, "regions": {}})
-        elif line.startswith("DA:") and current is not None:
-            number, hits = line[3:].split(",")[:2]
-            current["lines"][number] = max(current["lines"].get(number, 0), int(hits))
+        current = lcov_line(ctx, files, current, line)
+
+
+def lcov_line(ctx: Context, files: dict[str, Entry], current: Entry | None, line: str) -> Entry | None:
+    if line.startswith("SF:"):
+        return entry_for(files, rust.rel(ctx, line[3:]))
+    if line.startswith("DA:") and current is not None:
+        number, hits = line[3:].split(",")[:2]
+        keep_max(current["lines"], number, int(hits))
+    return current
+
+
+def merge_regions(ctx: Context, files: dict[str, Entry]) -> None:
     for export in json.loads((ctx.work / RAW_JSON).read_text()).get("data", []):
         for function in export.get("functions", []):
-            names = function.get("filenames", [])
-            for start, column, end, _end_column, count, file_id, _expanded, kind in function.get("regions", []):
-                if kind != CODE_REGION or file_id >= len(names):
-                    continue
-                entry = files.setdefault(rust.rel(ctx, names[file_id]), {"lines": {}, "regions": {}})
-                key = f"{start}:{column}"
-                entry["regions"][key] = max(entry["regions"].get(key, 0), count)
+            merge_function(ctx, files, function)
+
+
+def merge_function(ctx: Context, files: dict[str, Entry], function: dict[str, Any]) -> None:
+    names = function.get("filenames", [])
+    for start, column, _end, _end_column, count, file_id, _expanded, kind in function.get("regions", []):
+        if kind == CODE_REGION and file_id < len(names):
+            keep_max(entry_for(files, rust.rel(ctx, names[file_id]))["regions"], f"{start}:{column}", count)
+
+
+def covered_lines(files: dict[str, Entry]) -> int:
+    return sum(1 for data in files.values() for hits in data["lines"].values() if hits > 0)
+
+
+def line_percent(files: dict[str, Entry]) -> float:
     total = sum(len(data["lines"]) for data in files.values())
-    covered = sum(1 for data in files.values() for hits in data["lines"].values() if hits > 0)
-    return {"files": files, "totals": {"percent_covered": covered / total * 100.0 if total else 100.0}}
+    return covered_lines(files) / total * 100.0 if total else 100.0
 
 
-def coverage_findings(coverage: dict, ctx: Context) -> list[str]:
-    findings = []
-    for file, data in sorted(coverage["files"].items()):
-        if not ctx.in_scope(file):
-            continue
-        missing = sorted(int(number) for number, hits in data["lines"].items() if hits == 0)
-        findings.extend(f"{file}:{number} not covered" for number in missing)
-        for key in sorted((k for k, hits in data["regions"].items() if hits == 0), key=lambda k: tuple(map(int, k.split(":")))):
-            number, column = map(int, key.split(":"))
-            if number not in missing:
-                findings.append(f"{file}:{number} code at column {column} never runs")
-    return findings
+def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
+    return [finding for file, data in sorted(coverage["files"].items()) if ctx.in_scope(file) for finding in file_gaps(file, data)]
+
+
+def file_gaps(file: str, data: Entry) -> list[str]:
+    missing = sorted(int(number) for number, hits in data["lines"].items() if hits == 0)
+    return [f"{file}:{number} not covered" for number in missing] + region_gaps(file, data, missing)
+
+
+def region_gaps(file: str, data: Entry, missing: list[int]) -> list[str]:
+    return [f"{file}:{number} code at column {column} never runs" for number, column in dead_regions(data) if number not in missing]
+
+
+def region_position(key: str) -> tuple[int, int]:
+    number, column = key.split(":")
+    return int(number), int(column)
+
+
+def dead_regions(data: Entry) -> list[tuple[int, int]]:
+    return sorted(region_position(key) for key, hits in data["regions"].items() if hits == 0)

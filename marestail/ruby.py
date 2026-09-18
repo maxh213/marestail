@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
 from marestail.shell import run
@@ -6,9 +8,10 @@ from marestail.shell import run
 SCRIPT = Path(__file__).resolve().parent / "rb" / "scan.rb"
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "ruby:3.2-slim"
+SKIP_DIRS = {"vendor", "spec", "test", "tmp", "log", "node_modules", ".git", "coverage"}
 
 
-def listify(value) -> list[str]:
+def listify(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -24,8 +27,13 @@ def bundle(ctx: Context, *args: str) -> list[str]:
 def scan(ctx: Context, mode: str, files: list[Path], extra: list[str] | None = None) -> tuple[int, str]:
     if not files:
         return 0, "[]"
-    command = ruby_bin(ctx) + [str(SCRIPT), mode, *(extra or []), *map(str, files)]
+    command = [*ruby_bin(ctx), str(SCRIPT), mode, *(extra or []), *map(str, files)]
     return run(command, cwd=ctx.root, timeout=600)
+
+
+def scanned(output: str) -> list[dict[str, Any]]:
+    decoded: list[dict[str, Any]] = json.loads(output or "[]")
+    return decoded
 
 
 def ruby_bin(ctx: Context) -> list[str]:
@@ -48,3 +56,13 @@ def ruby_bin(ctx: Context) -> list[str]:
         ctx.ruby("image", IMAGE),
         "ruby",
     ]
+
+
+def relative(path: str, ctx: Context) -> str:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = ctx.ruby_root() / path
+    try:
+        return str(candidate.resolve().relative_to(ctx.root.resolve()))
+    except ValueError:
+        return path

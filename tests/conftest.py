@@ -1,3 +1,4 @@
+import socket
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -57,3 +58,31 @@ def commit_all(root: Path, message: str = "commit") -> None:
 
 def make_context(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -> Context:
     return Context(config=Config(root=root, raw=raw or {}), **fields)
+
+
+FORBIDDEN_BINARIES = frozenset(
+    {"docker", "claude", "grok", "kilo", "kimi", "cursor-agent", "agy", "dandelion", "sonar-scanner", "curl", "wget"}
+)
+
+
+class ForbiddenCallError(RuntimeError):
+    pass
+
+
+class GuardedPopen(subprocess.Popen):
+    def __init__(self, args: Any, *rest: Any, **options: Any) -> None:
+        program = args if isinstance(args, str) else args[0]
+        if Path(str(program).split()[0]).name in FORBIDDEN_BINARIES:
+            raise ForbiddenCallError(f"tests must fake {program}")
+        super().__init__(args, *rest, **options)
+
+
+def refuse_network(*args: Any, **options: Any) -> Any:
+    raise ForbiddenCallError("tests must not use the network")
+
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+    monkeypatch.setattr(socket.socket, "connect", refuse_network)
+    monkeypatch.setattr(socket, "create_connection", refuse_network)

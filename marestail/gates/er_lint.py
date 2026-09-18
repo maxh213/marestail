@@ -1,12 +1,14 @@
 import re
 import time
+from pathlib import Path
 
 from marestail import erlang
 from marestail.context import Context
 from marestail.report import Result
 
+GATE = "er.lint"
 MAX_LINES = 60
-ERLC_LINE = re.compile(r"^(.+?\.(?:erl|hrl)):(\d+):(?:\d+:)?\s*(.*)$")
+ERLC_LOCATION = re.compile(r"\.[eh]rl:(\d+):(?:\d+:)?")
 STRONG_WARNINGS = [
     "+warn_export_all",
     "+warn_export_vars",
@@ -19,39 +21,58 @@ STRONG_WARNINGS = [
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    root = ctx.erlang_root()
-    if ctx.scoped and not ctx.changed_under(root, (".erl", ".hrl")):
-        return Result.skipped("er.lint", "no changed erlang files")
+    if unchanged(ctx):
+        return Result.skipped(GATE, "no changed erlang files")
     sources = erlang.source_files(ctx)
     tests = erlang.test_files(ctx)
     if not sources and not tests:
-        return Result.skipped("er.lint", "no erlang sources under [erlang] sources (default src/)")
+        return Result.skipped(GATE, erlang.NO_SOURCES)
     ebin = erlang.fresh_dir(ctx.work / "er-lint-ebin")
-    findings = []
+    return lint(ctx, compile_batches(sources, tests, ebin), started)
+
+
+def unchanged(ctx: Context) -> bool:
+    return ctx.scoped and not ctx.changed_under(ctx.erlang_root(), (".erl", ".hrl"))
+
+
+def compile_batches(sources: list[Path], tests: list[Path], ebin: Path) -> list[list[str]]:
     batches = []
     if sources:
         batches.append(["+debug_info", *STRONG_WARNINGS, "-o", str(ebin), *map(str, sources)])
     if tests:
         batches.append(["-DTEST", "+debug_info", *STRONG_WARNINGS, "-pa", str(ebin), "-o", str(ebin), *map(str, tests)])
+    return batches
+
+
+def lint(ctx: Context, batches: list[list[str]], started: float) -> Result:
+    findings: list[str] = []
     for args in batches:
         code, output = erlang.erlc(ctx, args, timeout=900)
         problem = erlang.hint(code, output)
         if problem:
-            return Result("er.lint", False, problem, [problem], time.time() - started)
-        if code != 0:
-            findings.extend(lint_findings(output, ctx))
-    summary = "erlc strong warnings clean" if not findings else f"{len(findings)} problems"
-    return Result("er.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
+            return Result(GATE, False, problem, [problem], time.time() - started)
+        findings.extend(batch_findings(code, output, ctx))
+    summary = f"{len(findings)} problems" if findings else "erlc strong warnings clean"
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+
+
+def batch_findings(code: int, output: str, ctx: Context) -> list[str]:
+    return lint_findings(output, ctx) if code != 0 else []
 
 
 def lint_findings(output: str, ctx: Context) -> list[str]:
-    findings = []
-    for line in output.splitlines():
-        match = ERLC_LINE.match(line)
-        if match:
-            findings.append(f"{erlang.rel(ctx, match.group(1))}:{match.group(2)} {match.group(3)}")
+    findings = erlc_findings(output, ctx)
     if not findings:
         return [line for line in output.splitlines() if line.strip()]
-    if ctx.scoped:
-        findings = [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
-    return findings
+    return erlang.in_scope_findings(ctx, findings)
+
+
+def erlc_findings(output: str, ctx: Context) -> list[str]:
+    return [finding for finding in (erlc_finding(line, ctx) for line in output.splitlines()) if finding]
+
+
+def erlc_finding(line: str, ctx: Context) -> str:
+    match = ERLC_LOCATION.search(line, 1)
+    if match is None:
+        return ""
+    return f"{erlang.rel(ctx, line[: match.start() + 4])}:{match.group(1)} {line[match.end() :].lstrip()}"

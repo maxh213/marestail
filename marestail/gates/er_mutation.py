@@ -2,118 +2,176 @@ import json
 import math
 import shutil
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from marestail import erlang
-from marestail.context import Context
+from marestail.context import Context, MutationScope
 from marestail.report import Result
 from marestail.shell import tail
 
+GATE = "er.mutation"
+SCRIPT = "mutation.escript"
 SCRATCH = "er-mutation"
 MANIFEST = "mutants.json"
 RESULTS = "er-mutation.json"
 BUDGET_SECONDS = 7200
 EXCLUDED = {"invalid", "skipped"}
+NOT_CHECKED = "not checked"
+SURVIVED = "survived"
+SKIPPED = "skipped"
+BASELINE_FAILURES = {1: "test suite fails on unmutated sources; fix the suite first"}
+RUN_STATUS = {0: SURVIVED, 1: "killed", 124: "timeout"}
+NOTES = ((NOT_CHECKED, "unchecked (time budget)"), ("invalid", "failed to compile"), (SKIPPED, "skipped by mutation_max"))
+
+
+@dataclass
+class Job:
+    ctx: Context
+    started: float
+    scope: MutationScope
+    sources: list[Path]
+    mutate: list[Path]
+    tests: list[Path] = field(default_factory=list)
+    scratch: Path = field(default_factory=Path)
+    baseline_seconds: float = 0.0
+
+    @property
+    def ebin_base(self) -> Path:
+        return self.scratch / "ebin-base"
+
+    @property
+    def ebin_test(self) -> Path:
+        return self.scratch / "ebin-test"
+
+    def elapsed(self) -> float:
+        return time.time() - self.started
+
+    def fail(self, summary: str, findings: list[str]) -> Result:
+        return Result(GATE, False, summary, findings, self.elapsed())
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     sources = erlang.source_files(ctx)
     if not sources:
-        return Result.skipped("er.mutation", "no erlang sources under [erlang] sources (default src/)")
+        return Result.skipped(GATE, erlang.NO_SOURCES)
     scope = ctx.mutation_files("erlang", ctx.erlang_root(), (".erl",))
     if scope.mode == "error":
-        return Result("er.mutation", False, scope.note, [], time.time() - started)
-    mutate = mutate_files(ctx, sources, scope.files)
-    if scope.mode != "full" and not mutate:
-        return Result.skipped("er.mutation", "no changed erlang sources")
-    tests = erlang.test_files(ctx)
-    if not tests:
-        return Result(
-            "er.mutation",
-            False,
-            "no eunit test files",
-            ["marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"],
-            time.time() - started,
-        )
-    scratch = erlang.fresh_dir(ctx.work / SCRATCH)
-    code, output = erlang.escript(ctx, "mutation.escript", ["mutants", str(scratch), *map(str, mutate)], timeout=900)
-    problem = erlang.hint(code, output)
-    if problem:
-        return Result("er.mutation", False, problem, [problem], time.time() - started)
-    if code != 0:
-        return Result("er.mutation", False, "mutant generation failed", tail(output), time.time() - started)
-    manifest = scratch / MANIFEST
+        return Result(GATE, False, scope.note, [], time.time() - started)
+    return plan(Job(ctx, started, scope, sources, mutate_files(ctx, sources, scope.files)))
+
+
+def plan(job: Job) -> Result:
+    if job.scope.mode != "full" and not job.mutate:
+        return Result.skipped(GATE, "no changed erlang sources")
+    job.tests = erlang.test_files(job.ctx)
+    if not job.tests:
+        return job.fail("no eunit test files", [erlang.NO_TESTS])
+    return generate(job)
+
+
+def generate(job: Job) -> Result:
+    job.scratch = erlang.fresh_dir(job.ctx.work / SCRATCH)
+    code, output = erlang.escript(job.ctx, SCRIPT, ["mutants", str(job.scratch), *map(str, job.mutate)], timeout=900)
+    failed = erlang.trouble(code, output, "mutant generation failed")
+    if failed:
+        return job.fail(*failed)
+    manifest = job.scratch / MANIFEST
     if not manifest.exists():
-        return Result("er.mutation", False, "no mutant manifest written", tail(output), time.time() - started)
+        return job.fail("no mutant manifest written", tail(output))
     mutants = json.loads(manifest.read_text()).get("mutants", [])
     if not mutants:
-        where = " in the changed erlang sources" if scope.mode != "full" else " in the erlang sources"
-        return Result(
-            "er.mutation",
-            False,
-            "no mutants were generated",
-            [f"no mutable comparison, arithmetic or boolean operators found{where}"],
-            time.time() - started,
-        )
-    apply_cap(mutants, ctx)
-    ebin_base = scratch / "ebin-base"
-    ebin_base.mkdir()
-    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin_base), *map(str, sources)], timeout=900)
-    problem = erlang.hint(code, output)
-    if problem:
-        return Result("er.mutation", False, problem, [problem], time.time() - started)
-    if code != 0:
-        return Result("er.mutation", False, "sources failed to compile", tail(output), time.time() - started)
-    ebin_test = scratch / "ebin-test"
-    ebin_test.mkdir()
-    code, output = erlang.erlc(ctx, ["-DTEST", "+debug_info", "-pa", str(ebin_base), "-o", str(ebin_test), *map(str, tests)], timeout=900)
-    if code != 0:
-        return Result("er.mutation", False, "tests failed to compile", tail(output), time.time() - started)
-    baseline_started = time.time()
-    code, output = erlang.escript(ctx, "mutation.escript", ["run", str(ebin_base), str(ebin_base), str(ebin_test)], timeout=1800)
-    baseline_seconds = time.time() - baseline_started
-    problem = erlang.hint(code, output)
-    if problem:
-        return Result("er.mutation", False, problem, [problem], time.time() - started)
-    if code == 1:
-        return Result(
-            "er.mutation", False, "test suite fails on unmutated sources; fix the suite first", tail(output), time.time() - started
-        )
-    if code != 0:
-        return Result("er.mutation", False, "eunit run failed on unmutated sources", tail(output), time.time() - started)
-    per_mutant_timeout = max(60, min(1800, math.ceil(baseline_seconds * 10)))
+        return nothing_to_mutate(job)
+    apply_cap(mutants, job.ctx)
+    return execute(job, mutants)
+
+
+def nothing_to_mutate(job: Job) -> Result:
+    where = " in the changed erlang sources" if job.scope.mode != "full" else " in the erlang sources"
+    return job.fail("no mutants were generated", [f"no mutable comparison, arithmetic or boolean operators found{where}"])
+
+
+def execute(job: Job, mutants: list[dict[str, Any]]) -> Result:
+    failed = erlang.compile_with_tests(job.ctx, job.sources, job.tests, job.ebin_base, job.ebin_test)
+    if failed:
+        return job.fail(*failed)
+    failed = baseline(job)
+    if failed:
+        return job.fail(*failed)
+    run_mutants(job, mutants)
+    write_report(job.ctx, mutants)
+    return verdict(job, mutants)
+
+
+def baseline(job: Job) -> tuple[str, list[str]] | None:
+    began = time.time()
+    base, test = str(job.ebin_base), str(job.ebin_test)
+    code, output = erlang.escript(job.ctx, SCRIPT, ["run", base, base, test], timeout=1800)
+    job.baseline_seconds = time.time() - began
+    return erlang.trouble(code, output, BASELINE_FAILURES.get(code, "eunit run failed on unmutated sources"))
+
+
+def run_mutants(job: Job, mutants: list[dict[str, Any]]) -> None:
+    per_mutant_timeout = max(60, min(1800, math.ceil(job.baseline_seconds * 10)))
     for mutant in mutants:
-        if mutant.get("status") == "skipped":
-            continue
-        remaining = BUDGET_SECONDS - (time.time() - started)
-        if remaining < 120:
-            mutant["status"] = "not checked"
-            continue
-        run_mutant(ctx, scratch, ebin_base, ebin_test, mutant, min(per_mutant_timeout, math.ceil(remaining)))
-    write_report(ctx, mutants)
-    survived = [m for m in mutants if m.get("status") == "survived"]
-    unchecked = [m for m in mutants if m.get("status") == "not checked"]
-    invalid = [m for m in mutants if m.get("status") == "invalid"]
-    capped = [m for m in mutants if m.get("status") == "skipped"]
-    counted = [m for m in mutants if m.get("status") not in EXCLUDED]
+        if mutant.get("status") != SKIPPED:
+            check_mutant(job, mutant, per_mutant_timeout)
+
+
+def check_mutant(job: Job, mutant: dict[str, Any], per_mutant_timeout: int) -> None:
+    remaining = BUDGET_SECONDS - job.elapsed()
+    if remaining < 120:
+        mutant["status"] = NOT_CHECKED
+        return
+    run_mutant(job, mutant, min(per_mutant_timeout, math.ceil(remaining)))
+
+
+def run_mutant(job: Job, mutant: dict[str, Any], timeout: int) -> None:
+    ebin = erlang.fresh_dir(job.scratch / f"ebin-{mutant['id']}")
+    include = str(Path(mutant["file"]).parent)
+    code, _ = erlang.erlc(job.ctx, ["+debug_info", "-I", include, "-o", str(ebin), mutant["mutant"]], timeout=300)
+    if code != 0:
+        mutant["status"] = "invalid"
+    else:
+        code, _ = erlang.escript(job.ctx, SCRIPT, ["run", str(ebin), str(job.ebin_base), str(job.ebin_test)], timeout=timeout)
+        mutant["status"] = RUN_STATUS.get(code, "error")
+    shutil.rmtree(ebin, ignore_errors=True)
+
+
+def verdict(job: Job, mutants: list[dict[str, Any]]) -> Result:
+    counted = len(runnable(mutants))
     if not counted:
-        return Result(
-            "er.mutation", False, f"no runnable mutants: all {len(mutants)} failed to compile or were capped", [], time.time() - started
-        )
-    findings = [describe(ctx, m, "survived") for m in survived]
-    findings += [describe(ctx, m, "not checked (time budget)") for m in unchecked]
-    notes = []
-    if unchecked:
-        notes.append(f"{len(unchecked)} unchecked (time budget)")
-    if invalid:
-        notes.append(f"{len(invalid)} failed to compile")
-    if capped:
-        notes.append(f"{len(capped)} skipped by mutation_max")
-    base = f"{len(survived)} of {len(counted)} mutants not killed" if findings else f"all {len(counted)} mutants killed"
-    summary = base + (f" ({'; '.join(notes)})" if notes else "")
-    summary += f" {scope.note}" if scope.note else ""
-    return Result("er.mutation", not findings, summary, findings, time.time() - started)
+        return job.fail(f"no runnable mutants: all {len(mutants)} failed to compile or were capped", [])
+    findings = mutant_findings(job.ctx, mutants)
+    survived = len(with_status(mutants, SURVIVED))
+    base = f"{survived} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
+    summary = base + notes_suffix(mutants) + (f" {job.scope.note}" if job.scope.note else "")
+    return Result(GATE, not findings, summary, findings, job.elapsed())
+
+
+def runnable(mutants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [mutant for mutant in mutants if mutant.get("status") not in EXCLUDED]
+
+
+def with_status(mutants: list[dict[str, Any]], status: str) -> list[dict[str, Any]]:
+    return [mutant for mutant in mutants if mutant.get("status") == status]
+
+
+def mutant_findings(ctx: Context, mutants: list[dict[str, Any]]) -> list[str]:
+    survived = [describe(ctx, mutant, SURVIVED) for mutant in with_status(mutants, SURVIVED)]
+    return survived + [describe(ctx, mutant, "not checked (time budget)") for mutant in with_status(mutants, NOT_CHECKED)]
+
+
+def notes(mutants: list[dict[str, Any]]) -> list[str]:
+    counts = [(len(with_status(mutants, status)), label) for status, label in NOTES]
+    return [f"{count} {label}" for count, label in counts if count]
+
+
+def notes_suffix(mutants: list[dict[str, Any]]) -> str:
+    found = notes(mutants)
+    return f" ({'; '.join(found)})" if found else ""
 
 
 def mutate_files(ctx: Context, sources: list[Path], files: list[str] | None) -> list[Path]:
@@ -123,52 +181,38 @@ def mutate_files(ctx: Context, sources: list[Path], files: list[str] | None) -> 
     return [path for path in sources if erlang.rel(ctx, path) in wanted]
 
 
-def apply_cap(mutants: list[dict], ctx: Context) -> None:
+def apply_cap(mutants: list[dict[str, Any]], ctx: Context) -> None:
     cap = int(ctx.erlang("mutation_max", 0) or 0)
-    if cap <= 0 or len(mutants) <= cap:
-        return
+    if 0 < cap < len(mutants):
+        mark_skipped(mutants, kept_ids(mutants, cap))
+
+
+def kept_ids(mutants: list[dict[str, Any]], cap: int) -> set[Any]:
     step = len(mutants) / cap
-    keep = {mutants[int(index * step)]["id"] for index in range(cap)}
+    return {mutants[int(index * step)]["id"] for index in range(cap)}
+
+
+def mark_skipped(mutants: list[dict[str, Any]], keep: set[Any]) -> None:
     for mutant in mutants:
         if mutant["id"] not in keep:
-            mutant["status"] = "skipped"
+            mutant["status"] = SKIPPED
 
 
-def run_mutant(ctx: Context, scratch: Path, ebin_base: Path, ebin_test: Path, mutant: dict, timeout: int) -> None:
-    ebin = erlang.fresh_dir(scratch / f"ebin-{mutant['id']}")
-    include = str(Path(mutant["file"]).parent)
-    code, _ = erlang.erlc(ctx, ["+debug_info", "-I", include, "-o", str(ebin), mutant["mutant"]], timeout=300)
-    if code != 0:
-        mutant["status"] = "invalid"
-        shutil.rmtree(ebin, ignore_errors=True)
-        return
-    code, _ = erlang.escript(ctx, "mutation.escript", ["run", str(ebin), str(ebin_base), str(ebin_test)], timeout=timeout)
-    if code == 0:
-        mutant["status"] = "survived"
-    elif code == 1:
-        mutant["status"] = "killed"
-    elif code == 124:
-        mutant["status"] = "timeout"
-    else:
-        mutant["status"] = "error"
-    shutil.rmtree(ebin, ignore_errors=True)
-
-
-def describe(ctx: Context, mutant: dict, status: str) -> str:
+def describe(ctx: Context, mutant: dict[str, Any], status: str) -> str:
     path = erlang.rel(ctx, mutant["file"])
     return f"{path}:{mutant['line']} {mutant['operator']} mutant {status}: {mutant['original']} -> {mutant['replacement']}"
 
 
-def write_report(ctx: Context, mutants: list[dict]) -> None:
+def write_report(ctx: Context, mutants: list[dict[str, Any]]) -> None:
     entries = [
         {
-            "file": erlang.rel(ctx, m["file"]),
-            "line": m["line"],
-            "operator": m["operator"],
-            "original": m["original"],
-            "replacement": m["replacement"],
-            "status": m.get("status", "not checked"),
+            "file": erlang.rel(ctx, mutant["file"]),
+            "line": mutant["line"],
+            "operator": mutant["operator"],
+            "original": mutant["original"],
+            "replacement": mutant["replacement"],
+            "status": mutant.get("status", NOT_CHECKED),
         }
-        for m in mutants
+        for mutant in mutants
     ]
     (ctx.work / RESULTS).write_text(json.dumps({"mutants": entries}, indent=2) + "\n")

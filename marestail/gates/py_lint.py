@@ -5,20 +5,31 @@ from marestail.perf.scope import is_benchmark
 from marestail.report import Result
 from marestail.shell import run
 
+GATE = "py.lint"
 MAX_LINES = 60
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     if ctx.scoped and not changed_python(ctx):
-        return Result.skipped("py.lint", "no changed python files")
+        return Result.skipped(GATE, "no changed python files")
+    findings = lint_findings(ctx)
+    summary = "ruff, ruff format, mypy clean" if not findings else f"{len(findings)} problems"
+    return Result(GATE, not findings, summary, findings, time.time() - started)
+
+
+def lint_findings(ctx: Context) -> list[str]:
     findings: list[str] = []
     for label, command in commands(ctx):
-        code, output = run(command, cwd=ctx.root, timeout=900)
-        if code != 0:
-            findings.extend(f"{label}: {line}" for line in relevant(output))
-    summary = "ruff, ruff format, mypy clean" if not findings else f"{len(findings)} problems"
-    return Result("py.lint", not findings, summary, findings, time.time() - started)
+        findings.extend(command_findings(label, command, ctx))
+    return findings
+
+
+def command_findings(label: str, command: list[str], ctx: Context) -> list[str]:
+    code, output = run(command, cwd=ctx.root, timeout=900)
+    if code == 0:
+        return []
+    return [f"{label}: {line}" for line in relevant(output)]
 
 
 def commands(ctx: Context) -> list[tuple[str, list[str]]]:

@@ -6,7 +6,8 @@ from marestail.perf.results import Classified, Measurement
 
 FILENAME = "PERFORMANCE.md"
 TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / FILENAME
-FIXED = ["Task", "Commit", "Date", "Rows"]
+TASK = "Task"
+FIXED = [TASK, "Commit", "Date", "Rows"]
 PRE_MARESTAIL = "pre-marestail"
 EMPTY = "—"
 HEADER_START = "| Task |"
@@ -43,16 +44,27 @@ def load(root: Path) -> Table:
 
 def parse(text: str) -> Table:
     lines = text.splitlines(keepends=True)
-    start = next((index for index, line in enumerate(lines) if line.startswith(HEADER_START)), None)
+    start = header_index(lines)
     if start is None:
         return Table(text, [], [], "")
     header = split_row(lines[start])
-    end = start + 2
+    end = table_end(lines, start + 2)
+    rows = [dict(zip(header, split_row(line), strict=False)) for line in lines[start + 2 : end]]
+    return Table("".join(lines[:start]), extra_columns(header), rows, "".join(lines[end:]))
+
+
+def header_index(lines: list[str]) -> int | None:
+    return next((index for index, line in enumerate(lines) if line.startswith(HEADER_START)), None)
+
+
+def table_end(lines: list[str], end: int) -> int:
     while end < len(lines) and lines[end].startswith("|"):
         end += 1
-    rows = [dict(zip(header, split_row(line))) for line in lines[start + 2 : end]]
-    columns = [cell for cell in header if cell not in FIXED]
-    return Table("".join(lines[:start]), columns, rows, "".join(lines[end:]))
+    return end
+
+
+def extra_columns(header: list[str]) -> list[str]:
+    return [cell for cell in header if cell not in FIXED]
 
 
 def split_row(line: str) -> list[str]:
@@ -68,31 +80,45 @@ def write(root: Path, snapshot: Snapshot) -> None:
 
 def upsert(table: Table, snapshot: Snapshot) -> Table:
     columns = table.columns + [column for column in snapshot.columns if column not in table.columns]
-    rows = list(table.rows)
-    if snapshot.pre_commit is not None:
-        rows = [row for row in rows if row.get("Task") != PRE_MARESTAIL]
-        pre_cells = {item.measurement.column: pre_cell(item.measurement) for item in snapshot.classified}
-        rows.insert(0, fixed_cells(snapshot, PRE_MARESTAIL, snapshot.pre_commit) | pre_cells)
-    task_row = fixed_cells(snapshot, snapshot.task, snapshot.commit) | {
-        item.measurement.column: task_cell(item) for item in snapshot.classified
-    }
-    index = next((position for position, row in enumerate(rows) if row.get("Task") == snapshot.task), None)
+    rows = with_pre_row(list(table.rows), snapshot, snapshot.pre_commit)
+    return Table(table.prefix, columns, placed(rows, task_row(snapshot), snapshot.task), table.suffix)
+
+
+def with_pre_row(rows: list[dict[str, str]], snapshot: Snapshot, pre_commit: str | None) -> list[dict[str, str]]:
+    if pre_commit is None:
+        return rows
+    return [pre_row(snapshot, pre_commit), *(row for row in rows if row.get(TASK) != PRE_MARESTAIL)]
+
+
+def pre_row(snapshot: Snapshot, pre_commit: str) -> dict[str, str]:
+    cells = {item.measurement.column: pre_cell(item.measurement) for item in snapshot.classified}
+    return fixed_cells(snapshot, PRE_MARESTAIL, pre_commit) | cells
+
+
+def task_row(snapshot: Snapshot) -> dict[str, str]:
+    cells = {item.measurement.column: task_cell(item) for item in snapshot.classified}
+    return fixed_cells(snapshot, snapshot.task, snapshot.commit) | cells
+
+
+def placed(rows: list[dict[str, str]], row: dict[str, str], task: str) -> list[dict[str, str]]:
+    index = next((position for position, existing in enumerate(rows) if existing.get(TASK) == task), None)
     if index is None:
-        rows.append(task_row)
-    else:
-        rows[index] = task_row
-    return Table(table.prefix, columns, rows, table.suffix)
+        return [*rows, row]
+    return [*rows[:index], row, *rows[index + 1 :]]
 
 
 def fixed_cells(snapshot: Snapshot, task: str, commit: str) -> dict[str, str]:
-    return {"Task": task, "Commit": commit, "Date": snapshot.date, "Rows": snapshot.rows}
+    return {TASK: task, "Commit": commit, "Date": snapshot.date, "Rows": snapshot.rows}
 
 
 def task_cell(item: Classified) -> str:
     head = item.measurement.head
     if item.status == "removed" or head is None:
         return "removed"
-    value = number(head) + item.measurement.unit
+    return measured_cell(item, number(head) + item.measurement.unit)
+
+
+def measured_cell(item: Classified, value: str) -> str:
     if item.status == "new" or item.change is None:
         return f"{value} (new)"
     if item.status == "thin":

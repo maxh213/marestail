@@ -63,14 +63,25 @@ def choose(model: str, cwd: Path) -> tuple[Choice | None, str]:
         )
     except subprocess.TimeoutExpired:
         return None, f"dandelion route timed out after {TIMEOUT_SECONDS}s"
-    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    line = lines[-1] if lines else ""
+    return interpret(completed)
+
+
+def interpret(completed: subprocess.CompletedProcess[str]) -> tuple[Choice | None, str]:
+    line = last_line(completed.stdout)
     if line == NO_ROUTE:
         return None, "no subscription has quota left"
     if completed.returncode != 0 or not line:
-        detail = (completed.stderr.strip() or line or "no output")[-200:]
-        return None, f"dandelion route failed with exit {completed.returncode}: {detail}"
+        return None, f"dandelion route failed with exit {completed.returncode}: {failure_detail(completed.stderr, line)}"
     return parse(line), ""
+
+
+def last_line(output: str) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def failure_detail(stderr: str, line: str) -> str:
+    return (stderr.strip() or line or "no output")[-200:]
 
 
 def parse(line: str) -> Choice:

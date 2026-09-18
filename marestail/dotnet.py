@@ -2,7 +2,9 @@ import fnmatch
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TypeGuard
 
 from marestail.context import Context
 from marestail.perf.scope import under_benchmarks
@@ -11,18 +13,21 @@ from marestail.shell import run
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
 SCAN_DIR = Path(__file__).resolve().parent / "cs" / "scan"
 SCAN_DLL = "marestail-cs-scan.dll"
+SCAN_OUT = "cs-scan"
 IMAGE = "mcr.microsoft.com/dotnet/sdk:8.0"
+DOTNET = "dotnet"
 COVERAGE_JSON = "cs-coverage.json"
+COVERAGE_EXCLUDE = "coverage_exclude"
 GENERATED_DIRS = {"obj", "bin", ".marestail", "node_modules", "Migrations"}
 GENERATED_SUFFIXES = (".g.cs", ".Designer.cs", ".AssemblyInfo.cs")
 TEST_SUFFIXES = ("Tests.cs", "Test.cs")
 INSTALL_HINT = f"install the .NET 8 SDK, or docker with `docker pull {IMAGE}`"
 
-_host: dict[str, bool] = {}
-_projects: dict[str, tuple[Path | None, Path | None]] = {}
+HOST: dict[str, bool] = {}
+PROJECTS: dict[str, tuple[Path | None, Path | None]] = {}
 
 
-def listify(value) -> list[str]:
+def listify(value: Any) -> list[str]:
     if value is None:
         return []
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
@@ -43,18 +48,22 @@ def env(ctx: Context) -> dict[str, str]:
 
 
 def host_dotnet(ctx: Context) -> bool:
-    if "dotnet" not in _host:
-        code, _ = run(["dotnet", "--version"], cwd=ctx.root, env=env(ctx), timeout=60)
-        _host["dotnet"] = code == 0
-    return _host["dotnet"]
+    if DOTNET not in HOST:
+        code, _ = run([DOTNET, "--version"], cwd=ctx.root, env=env(ctx), timeout=60)
+        HOST[DOTNET] = code == 0
+    return HOST[DOTNET]
 
 
 def dotnet_bin(ctx: Context, cwd: Path, network: bool, extra: dict[str, str], program: str) -> list[str]:
-    configured = listify(ctx.dotnet("dotnet"))
-    if configured and program == "dotnet":
+    configured = listify(ctx.dotnet(DOTNET))
+    if configured and program == DOTNET:
         return configured
     if host_dotnet(ctx):
         return [program]
+    return docker_command(ctx, cwd, network, extra, program)
+
+
+def docker_command(ctx: Context, cwd: Path, network: bool, extra: dict[str, str], program: str) -> list[str]:
     command = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "-v", f"{ctx.root}:{ctx.root}"]
     if not MARESTAIL_ROOT.is_relative_to(ctx.root):
         command += ["-v", f"{MARESTAIL_ROOT}:{MARESTAIL_ROOT}"]
@@ -72,11 +81,11 @@ def dotnet(
     timeout: int = 1800,
     network: bool = False,
     extra: dict[str, str] | None = None,
-    program: str = "dotnet",
+    program: str = DOTNET,
 ) -> tuple[int, str]:
-    cwd = cwd or ctx.dotnet_root()
-    extra = extra or {}
-    return run(dotnet_bin(ctx, cwd, network, extra, program) + args, cwd=cwd, env={**env(ctx), **extra}, timeout=timeout)
+    folder = cwd or ctx.dotnet_root()
+    variables = extra or {}
+    return run(dotnet_bin(ctx, folder, network, variables, program) + args, cwd=folder, env={**env(ctx), **variables}, timeout=timeout)
 
 
 def hint(code: int, output: str) -> str | None:
@@ -87,7 +96,11 @@ def hint(code: int, output: str) -> str | None:
     return None
 
 
-def rel(ctx: Context, path) -> str:
+def failure(code: int, output: str, what: str) -> str:
+    return hint(code, output) or f"{what}: {output.strip()[-300:]}"
+
+
+def rel(ctx: Context, path: Path | str) -> str:
     try:
         return Path(path).resolve().relative_to(ctx.root.resolve()).as_posix()
     except ValueError:
@@ -107,11 +120,15 @@ def test_named(path: Path) -> bool:
     return path.stem.endswith(("Tests", "Test"))
 
 
+def named_csprojs(ctx: Context, tests: bool) -> list[Path]:
+    return [path for path in csprojs(ctx) if test_named(path) == tests]
+
+
 def project(ctx: Context) -> Path | None:
     configured = ctx.dotnet("project")
     if configured:
         return ctx.dotnet_root() / str(configured)
-    candidates = [path for path in csprojs(ctx) if not test_named(path)]
+    candidates = named_csprojs(ctx, False)
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -119,34 +136,57 @@ def test_project(ctx: Context) -> Path | None:
     configured = ctx.dotnet("test_project")
     if configured:
         return ctx.dotnet_root() / str(configured)
-    candidates = [path for path in csprojs(ctx) if test_named(path)]
+    candidates = named_csprojs(ctx, True)
     if len(candidates) == 1:
         return candidates[0]
     return project(ctx) if not candidates else None
 
 
-def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
+def cached_projects(ctx: Context) -> tuple[Path | None, Path | None]:
     key = str(ctx.root)
-    if key not in _projects:
-        _projects[key] = (project(ctx), test_project(ctx))
-    product, tests = _projects[key]
-    if product is None or tests is None or not product.exists() or not tests.exists():
-        found = ", ".join(rel(ctx, path) for path in csprojs(ctx)) or "none"
-        return (
-            None,
-            None,
-            f"set [dotnet] project and test_project in marestail.toml (.csproj files under {rel(ctx, ctx.dotnet_root())}: {found})",
-        )
-    return product, tests, None
+    if key not in PROJECTS:
+        PROJECTS[key] = (project(ctx), test_project(ctx))
+    return PROJECTS[key]
+
+
+def present(path: Path | None) -> TypeGuard[Path]:
+    return path is not None and path.exists()
+
+
+def missing_projects(ctx: Context) -> str:
+    found = ", ".join(rel(ctx, path) for path in csprojs(ctx)) or "none"
+    return f"set [dotnet] project and test_project in marestail.toml (.csproj files under {rel(ctx, ctx.dotnet_root())}: {found})"
+
+
+def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
+    product, tests = cached_projects(ctx)
+    if present(product) and present(tests):
+        return product, tests, None
+    return None, None, missing_projects(ctx)
+
+
+def project_pair(ctx: Context) -> tuple[Path, Path] | str:
+    product, tests, error = projects(ctx)
+    if product is None or tests is None:
+        return str(error)
+    return product, tests
+
+
+def in_separate_test_project(ctx: Context, path: Path) -> bool:
+    found = project_pair(ctx)
+    if isinstance(found, str):
+        return False
+    product, tests = found
+    return tests.parent != product.parent and path.is_relative_to(tests.parent)
+
+
+def test_file(ctx: Context, path: Path) -> bool:
+    folders = path.relative_to(ctx.dotnet_root()).parts[:-1]
+    return path.name.endswith(TEST_SUFFIXES) or any(part.lower() in ("test", "tests") for part in folders)
 
 
 def is_test(ctx: Context, path: Path) -> bool:
-    product, tests, _ = projects(ctx)
-    if tests is not None and product is not None and tests.parent != product.parent and path.is_relative_to(tests.parent):
-        return True
-    return path.name.endswith(TEST_SUFFIXES) or any(
-        part.lower() in ("test", "tests") for part in path.relative_to(ctx.dotnet_root()).parts[:-1]
-    )
+    return in_separate_test_project(ctx, path) or test_file(ctx, path)
 
 
 def files(ctx: Context) -> list[Path]:
@@ -163,57 +203,84 @@ def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
     return [path for path in paths if ctx.in_scope(rel(ctx, path))]
 
 
-def coverage_excluded(ctx: Context, relative: str) -> bool:
+def matching_lines(path: Path, predicate: Callable[[str], object]) -> list[int]:
+    return [number for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1) if predicate(line)]
+
+
+def root_prefix(ctx: Context) -> str:
     prefix = rel(ctx, ctx.dotnet_root())
-    prefix = "" if prefix == "." else prefix + "/"
-    patterns = [prefix + pattern.strip("/") for pattern in listify(ctx.dotnet("coverage_exclude", []))]
-    return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
+    return "" if prefix == "." else prefix + "/"
+
+
+def matches(relative: str, pattern: str) -> bool:
+    return relative == pattern or relative.startswith(pattern + "/") or fnmatch.fnmatch(relative, pattern)
+
+
+def matches_any(relative: str, patterns: list[str]) -> bool:
+    return any(matches(relative, pattern) for pattern in patterns)
+
+
+def coverage_excluded(ctx: Context, relative: str) -> bool:
+    prefix = root_prefix(ctx)
+    return matches_any(relative, [prefix + pattern.strip("/") for pattern in listify(ctx.dotnet(COVERAGE_EXCLUDE, []))])
+
+
+def mutation_patterns(ctx: Context) -> list[str]:
+    return listify(ctx.dotnet("mutation_exclude", [])) or listify(ctx.dotnet(COVERAGE_EXCLUDE, []))
 
 
 def mutation_excluded(ctx: Context, relative: str) -> bool:
-    prefix = rel(ctx, ctx.dotnet_root())
-    prefix = "" if prefix == "." else prefix + "/"
-    configured = listify(ctx.dotnet("mutation_exclude", [])) or listify(ctx.dotnet("coverage_exclude", []))
-    patterns = [p if p.startswith(prefix) else prefix + p.strip("/") for p in configured]
-    return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
+    prefix = root_prefix(ctx)
+    return matches_any(relative, [p if p.startswith(prefix) else prefix + p.strip("/") for p in mutation_patterns(ctx)])
 
 
-def load_coverage(ctx: Context) -> dict | None:
+def load_coverage(ctx: Context) -> dict[str, Any] | None:
     path = ctx.work / COVERAGE_JSON
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def scanner_digest() -> str:
+    return hashlib.sha256((SCAN_DIR / "Program.cs").read_bytes() + (SCAN_DIR / "Scan.csproj").read_bytes()).hexdigest()
+
+
+def scanner_current(out: Path, digest: str) -> bool:
+    stamp = out / "stamp"
+    return (out / SCAN_DLL).exists() and stamp.exists() and stamp.read_text() == digest
+
+
+def scanner_build_args(out: Path) -> list[str]:
+    return [
+        "build",
+        str(SCAN_DIR / "Scan.csproj"),
+        "-c",
+        "Release",
+        "-nologo",
+        "-v",
+        "q",
+        f"-p:BaseIntermediateOutputPath={out}/obj/",
+        f"-p:BaseOutputPath={out}/bin/",
+        "-o",
+        str(out),
+    ]
+
+
+def produced(code: int, path: Path) -> bool:
+    return code == 0 and path.exists()
+
+
 def build_scanner(ctx: Context) -> str | None:
-    out = ctx.work / "cs-scan"
-    dll, stamp = out / SCAN_DLL, out / "stamp"
-    digest = hashlib.sha256((SCAN_DIR / "Program.cs").read_bytes() + (SCAN_DIR / "Scan.csproj").read_bytes()).hexdigest()
-    if dll.exists() and stamp.exists() and stamp.read_text() == digest:
+    out = ctx.work / SCAN_OUT
+    digest = scanner_digest()
+    if scanner_current(out, digest):
         return None
-    code, output = dotnet(
-        ctx,
-        [
-            "build",
-            str(SCAN_DIR / "Scan.csproj"),
-            "-c",
-            "Release",
-            "-nologo",
-            "-v",
-            "q",
-            f"-p:BaseIntermediateOutputPath={out}/obj/",
-            f"-p:BaseOutputPath={out}/bin/",
-            "-o",
-            str(out),
-        ],
-        cwd=ctx.root,
-        timeout=900,
-    )
-    if code != 0 or not dll.exists():
-        return hint(code, output) or f"C# scanner build failed: {output.strip()[-300:]}"
-    stamp.write_text(digest)
+    code, output = dotnet(ctx, scanner_build_args(out), cwd=ctx.root, timeout=900)
+    if not produced(code, out / SCAN_DLL):
+        return failure(code, output, "C# scanner build failed")
+    (out / "stamp").write_text(digest)
     return None
 
 
-def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[list | dict | None, str | None]:
+def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
     error = build_scanner(ctx)
     if error:
         return None, error
@@ -223,10 +290,10 @@ def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[list | dict | None
     listing.write_text("".join(f"{path}\n" for path in paths))
     code, output = dotnet(
         ctx,
-        [str(ctx.work / "cs-scan" / SCAN_DLL), mode, "--root", str(ctx.root), "--out", str(out), f"@{listing}"],
+        [str(ctx.work / SCAN_OUT / SCAN_DLL), mode, "--root", str(ctx.root), "--out", str(out), f"@{listing}"],
         cwd=ctx.root,
         timeout=600,
     )
-    if code != 0 or not out.exists():
-        return None, hint(code, output) or f"C# scanner failed ({mode}): {output.strip()[-300:]}"
+    if not produced(code, out):
+        return None, failure(code, output, f"C# scanner failed ({mode})")
     return json.loads(out.read_text()), None

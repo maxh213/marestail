@@ -2,6 +2,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from marestail.config import Config
 from marestail.perf import hygiene, results, settings, table, trees
@@ -28,12 +29,20 @@ def review(config: Config, session: trees.Session, report: Path, verdict: str) -
     write_results(report, classified)
     problems += results.audit(classified, table.load(config.root).columns, report.read_text(), verdict, benches)
     problems += csharp_problems(config)
-    problems += results.stale_problems(records, {bench: hygiene.fingerprint(config.root, bench) for bench in benches})
-    return Review(problems, classified, any(record["db"] for record in records))
+    problems += results.stale_problems(records, fingerprints(config, benches))
+    return Review(problems, classified, used_db(records))
+
+
+def fingerprints(config: Config, benches: list[str]) -> dict[str, str]:
+    return {bench: hygiene.fingerprint(config.root, bench) for bench in benches}
+
+
+def used_db(records: list[dict[str, Any]]) -> bool:
+    return any(record["db"] for record in records)
 
 
 def csharp_problems(config: Config) -> list[str]:
-    projects = sorted(path.name for path in config.root.glob("*.csproj"))
+    projects = csharp_projects(config)
     folder = config.root / "perf"
     if not projects or not folder.is_dir():
         return []
@@ -44,7 +53,11 @@ def csharp_problems(config: Config) -> list[str]:
     ]
 
 
-def load_records(config: Config) -> list[dict]:
+def csharp_projects(config: Config) -> list[str]:
+    return sorted(path.name for path in config.root.glob("*.csproj"))
+
+
+def load_records(config: Config) -> list[dict[str, Any]]:
     path = trees.samples_file(config)
     if not path.exists():
         return []
@@ -66,9 +79,14 @@ def write_results(report: Path, classified: list[results.Classified]) -> None:
 def record_table(config: Config, session: trees.Session, outcome: Review) -> None:
     if not outcome.classified:
         return
+    table.write(config.root, snapshot_for(config, session, outcome))
+    stage_table(config)
+
+
+def snapshot_for(config: Config, session: trees.Session, outcome: Review) -> table.Snapshot:
     head = tree_named(session, "head")
     pre = tree_named(session, table.PRE_MARESTAIL)
-    snapshot = table.Snapshot(
+    return table.Snapshot(
         task=session.task,
         commit=short(config, head.sha if head else "HEAD"),
         date=time.strftime("%Y-%m-%d"),
@@ -76,7 +94,9 @@ def record_table(config: Config, session: trees.Session, outcome: Review) -> Non
         pre_commit=short(config, pre.sha) if pre else None,
         classified=outcome.classified,
     )
-    table.write(config.root, snapshot)
+
+
+def stage_table(config: Config) -> None:
     ignored, _ = run(["git", "check-ignore", "-q", table.FILENAME], cwd=config.root)
     if ignored != 0:
         run(["git", "add", "--", table.FILENAME], cwd=config.root)
@@ -96,15 +116,27 @@ def rows_cell(config: Config, used_db: bool) -> str:
 
 
 def changes_summary(outcome: Review, verdict_text: str, session: trees.Session) -> str:
-    changed = [item for item in outcome.classified if item.status in CHANGED]
-    lines = ["## Performance changes"]
-    if session.image:
-        lines += [f"- Postgres image: {session.image} ({session.image_source})", f"- rows: {session.rows} ({session.rows_source})"]
-    lines += [f"- {item.status} {change_text(item)}`{item.measurement.column}`" for item in changed] or ["- none"]
-    setup = setup_needed(verdict_text)
-    if setup:
-        lines += ["", "### Setup needed", setup]
+    lines = ["## Performance changes", *database_lines(session), *change_lines(outcome), *setup_lines(verdict_text)]
     return "\n".join(lines)
+
+
+def database_lines(session: trees.Session) -> list[str]:
+    if not session.image:
+        return []
+    return [f"- Postgres image: {session.image} ({session.image_source})", f"- rows: {session.rows} ({session.rows_source})"]
+
+
+def change_lines(outcome: Review) -> list[str]:
+    return [f"- {item.status} {change_text(item)}`{item.measurement.column}`" for item in changed_items(outcome)] or ["- none"]
+
+
+def changed_items(outcome: Review) -> list[results.Classified]:
+    return [item for item in outcome.classified if item.status in CHANGED]
+
+
+def setup_lines(verdict_text: str) -> list[str]:
+    setup = setup_needed(verdict_text)
+    return ["", "### Setup needed", setup] if setup else []
 
 
 def change_text(item: results.Classified) -> str:

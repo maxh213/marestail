@@ -2,11 +2,17 @@ import math
 import random
 import zlib
 from dataclasses import dataclass
+from typing import Any
 
 METRICS = ("p50", "p95")
 FLAGGED = ("degraded", "improved")
-COMPARED = ("baseline", "head")
+BASELINE = "baseline"
+HEAD = "head"
+COMPARED = (BASELINE, HEAD)
 CONTROL = "control"
+
+Record = dict[str, Any]
+TreeValues = dict[str, list[float] | None]
 
 
 @dataclass(frozen=True)
@@ -59,7 +65,9 @@ def sorted_percentiles(ordered: list[float]) -> tuple[float, float]:
     return median, ordered[math.ceil(0.95 * len(ordered)) - 1]
 
 
-def compile_records(records: list[dict], tree_names: list[str], benches: list[str], policy: Policy) -> tuple[list[Measurement], list[str]]:
+def compile_records(
+    records: list[Record], tree_names: list[str], benches: list[str], policy: Policy
+) -> tuple[list[Measurement], list[str]]:
     problems = bench_problems(records, tree_names, benches)
     measurements: list[Measurement] = []
     for target, rows in grouped(records).items():
@@ -69,76 +77,128 @@ def compile_records(records: list[dict], tree_names: list[str], benches: list[st
     return measurements, problems
 
 
-def grouped(records: list[dict]) -> dict[str, list[dict]]:
-    groups: dict[str, list[dict]] = {}
+def grouped(records: list[Record]) -> dict[str, list[Record]]:
+    groups: dict[str, list[Record]] = {}
     for record in records:
         groups.setdefault(record["target"], []).append(record)
     return groups
 
 
-def bench_problems(records: list[dict], tree_names: list[str], benches: list[str]) -> list[str]:
-    problems = []
+def bench_problems(records: list[Record], tree_names: list[str], benches: list[str]) -> list[str]:
+    problems: list[str] = []
     for bench in benches:
-        own = [record for record in records if record["script"] == bench]
-        problems += [
-            f"`{bench}` has no samples on the {tree} tree" for tree in tree_names if not any(record["tree"] == tree for record in own)
-        ]
-        if len({record["db"] for record in own}) > 1:
-            problems.append(f"`{bench}` was run with --db on some trees and without it on others")
+        problems += single_bench_problems(bench, [record for record in records if record["script"] == bench], tree_names)
     return problems
 
 
-def target_measurements(target: str, rows: list[dict], tree_names: list[str], policy: Policy) -> tuple[list[Measurement], list[str]]:
-    problems = [
-        f"`{target}` reports more than one {key}: {', '.join(sorted(seen))}" for key, seen in variants(rows).items() if len(seen) > 1
-    ]
-    values: dict[str, list[float] | None] = {}
-    for tree in tree_names:
-        values[tree], problem = tree_values(target, [row for row in rows if row["tree"] == tree], tree, policy)
-        problems += [problem] if problem else []
-    if not problems and values.get("baseline") is None and values.get("head") is None:
-        problems.append(f"`{target}` is absent on both the baseline and head trees")
+def single_bench_problems(bench: str, own: list[Record], tree_names: list[str]) -> list[str]:
+    problems = [f"`{bench}` has no samples on the {tree} tree" for tree in missing_trees(own, tree_names)]
+    if len({record["db"] for record in own}) > 1:
+        problems.append(f"`{bench}` was run with --db on some trees and without it on others")
+    return problems
+
+
+def missing_trees(own: list[Record], tree_names: list[str]) -> list[str]:
+    seen = {record["tree"] for record in own}
+    return [tree for tree in tree_names if tree not in seen]
+
+
+def target_measurements(target: str, rows: list[Record], tree_names: list[str], policy: Policy) -> tuple[list[Measurement], list[str]]:
+    problems = variant_problems(target, rows)
+    values, tree_problems = values_by_tree(target, rows, tree_names, policy)
+    problems += tree_problems
+    problems += absence_problems(target, problems, values)
     if problems:
         return [], problems
     return measurements_for(target, rows, values, policy), []
 
 
-def variants(rows: list[dict]) -> dict[str, set[str]]:
+def variant_problems(target: str, rows: list[Record]) -> list[str]:
+    return [f"`{target}` reports more than one {key}: {', '.join(sorted(seen))}" for key, seen in variants(rows).items() if len(seen) > 1]
+
+
+def values_by_tree(target: str, rows: list[Record], tree_names: list[str], policy: Policy) -> tuple[TreeValues, list[str]]:
+    values: TreeValues = {}
+    problems: list[str] = []
+    for tree in tree_names:
+        values[tree], problem = tree_values(target, rows_on(rows, tree), tree, policy)
+        problems += [problem] if problem else []
+    return values, problems
+
+
+def rows_on(rows: list[Record], tree: str) -> list[Record]:
+    return [row for row in rows if row["tree"] == tree]
+
+
+def absence_problems(target: str, problems: list[str], values: TreeValues) -> list[str]:
+    if problems or values.get(BASELINE) is not None or values.get(HEAD) is not None:
+        return []
+    return [f"`{target}` is absent on both the baseline and head trees"]
+
+
+def variants(rows: list[Record]) -> dict[str, set[str]]:
     return {key: {str(row[key]) for row in rows if key in row} for key in ("unit", "better")}
 
 
-def measured(row: dict) -> bool:
+def measured(row: Record) -> bool:
     return "value" in row or "values" in row
 
 
-def row_values(row: dict) -> list[float]:
+def row_values(row: Record) -> list[float]:
     return list(row["values"]) if "values" in row else [row["value"]]
 
 
-def tree_values(target: str, rows: list[dict], tree: str, policy: Policy) -> tuple[list[float] | None, str]:
-    samples = [row for row in rows if measured(row)]
-    absent = any(row.get("absent") for row in rows)
-    if samples and absent:
-        return None, f"`{target}` has both values and absent on the {tree} tree"
-    if not samples and not absent:
-        return None, f"`{target}` was not measured on the {tree} tree"
+def tree_values(target: str, rows: list[Record], tree: str, policy: Policy) -> tuple[list[float] | None, str]:
+    samples = measured_rows(rows)
+    problem = presence_problem(target, bool(samples), any(row.get("absent") for row in rows), tree) or count_problem(
+        target, samples, tree, policy
+    )
+    if problem:
+        return None, problem
+    return pooled(samples), ""
+
+
+def measured_rows(rows: list[Record]) -> list[Record]:
+    return [row for row in rows if measured(row)]
+
+
+def pooled(samples: list[Record]) -> list[float] | None:
+    return [value for row in samples for value in row_values(row)] or None
+
+
+def presence_problem(target: str, has_samples: bool, absent: bool, tree: str) -> str:
+    if has_samples != absent:
+        return ""
+    if absent:
+        return f"`{target}` has both values and absent on the {tree} tree"
+    return f"`{target}` was not measured on the {tree} tree"
+
+
+def count_problem(target: str, samples: list[Record], tree: str, policy: Policy) -> str:
     if samples and len(samples) < policy.min_runs:
-        return None, f"`{target}` has {len(samples)} samples on the {tree} tree; min_runs is {policy.min_runs}"
-    short = [row for row in samples if "values" in row and len(row["values"]) < policy.values_per_sample]
-    if short:
-        return None, (
-            f"`{target}` has {len(short)} samples on the {tree} tree with fewer than {policy.values_per_sample} values each; "
-            f"time at least {policy.values_per_sample} requests per sample"
-        )
-    return [value for row in samples for value in row_values(row)] or None, ""
+        return f"`{target}` has {len(samples)} samples on the {tree} tree; min_runs is {policy.min_runs}"
+    return short_problem(target, short_rows(samples, policy), tree, policy)
 
 
-def measurements_for(target: str, rows: list[dict], values: dict[str, list[float] | None], policy: Policy) -> list[Measurement]:
-    first = next(row for row in rows if measured(row))
-    runs = min(sum(1 for row in rows if row["tree"] == tree and measured(row)) for tree, found in values.items() if found)
-    stats = {tree: percentiles(found) for tree, found in values.items() if found}
-    compared = [len(found) for tree, found in values.items() if tree in COMPARED and found]
-    intervals = bootstrap(values.get("baseline"), values.get("head"), policy.bootstrap, zlib.crc32(target.encode()))
+def short_rows(samples: list[Record], policy: Policy) -> list[Record]:
+    return [row for row in samples if "values" in row and len(row["values"]) < policy.values_per_sample]
+
+
+def short_problem(target: str, short: list[Record], tree: str, policy: Policy) -> str:
+    if not short:
+        return ""
+    return (
+        f"`{target}` has {len(short)} samples on the {tree} tree with fewer than {policy.values_per_sample} values each; "
+        f"time at least {policy.values_per_sample} requests per sample"
+    )
+
+
+def measurements_for(target: str, rows: list[Record], values: TreeValues, policy: Policy) -> list[Measurement]:
+    first = first_measured(rows)
+    stats = tree_stats(values)
+    runs = run_count(rows, values)
+    compared = min(compared_sizes(values), default=0)
+    intervals = bootstrap(values.get(BASELINE), values.get(HEAD), policy.bootstrap, zlib.crc32(target.encode()))
     return [
         Measurement(
             target,
@@ -146,16 +206,36 @@ def measurements_for(target: str, rows: list[dict], values: dict[str, list[float
             first["unit"],
             first["better"],
             stat(stats, "pre-marestail", index),
-            stat(stats, "baseline", index),
-            stat(stats, "head", index),
+            stat(stats, BASELINE, index),
+            stat(stats, HEAD, index),
             runs,
             first["script"],
-            min(compared) if compared else 0,
+            compared,
             intervals[index] if intervals else None,
             stat(stats, CONTROL, index),
         )
         for index, metric in enumerate(METRICS)
     ]
+
+
+def first_measured(rows: list[Record]) -> Record:
+    return next(row for row in rows if measured(row))
+
+
+def tree_stats(values: TreeValues) -> dict[str, tuple[float, float]]:
+    return {tree: percentiles(found) for tree, found in values.items() if found}
+
+
+def run_count(rows: list[Record], values: TreeValues) -> int:
+    return min(tree_runs(rows, tree) for tree, found in values.items() if found)
+
+
+def tree_runs(rows: list[Record], tree: str) -> int:
+    return sum(1 for row in rows if row["tree"] == tree and measured(row))
+
+
+def compared_sizes(values: TreeValues) -> list[int]:
+    return [len(found) for tree, found in values.items() if tree in COMPARED and found]
 
 
 def stat(stats: dict[str, tuple[float, float]], tree: str, index: int) -> float | None:
@@ -168,14 +248,23 @@ def bootstrap(
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
     if not baseline or not head or rounds <= 0:
         return None
-    rng = random.Random(seed)
+    return resampled_intervals(baseline, head, rounds, random.Random(seed))
+
+
+def resampled_intervals(
+    baseline: list[float], head: list[float], rounds: int, rng: random.Random
+) -> tuple[tuple[float, float], tuple[float, float]]:
     changes: tuple[list[float], list[float]] = ([], [])
     for _ in range(rounds):
-        before = sorted_percentiles(sorted(rng.choices(baseline, k=len(baseline))))
-        after = sorted_percentiles(sorted(rng.choices(head, k=len(head))))
+        before = resample(rng, baseline)
+        after = resample(rng, head)
         for index, collected in enumerate(changes):
             collected.append(percent_change(before[index], after[index]))
     return interval(changes[0]), interval(changes[1])
+
+
+def resample(rng: random.Random, values: list[float]) -> tuple[float, float]:
+    return percentiles(rng.choices(values, k=len(values)))
 
 
 def interval(changes: list[float]) -> tuple[float, float]:
@@ -189,17 +278,30 @@ def classify(measurement: Measurement, policy: Policy) -> Classified:
     if measurement.head is None:
         return Classified(measurement, "removed", None)
     change = percent_change(measurement.baseline, measurement.head)
+    return Classified(measurement, compared_status(measurement, abs(measurement.head - measurement.baseline), change, policy), change)
+
+
+def compared_status(measurement: Measurement, difference: float, change: float, policy: Policy) -> str:
     if measurement.metric == "p95" and measurement.values < policy.p95_min_values:
-        return Classified(measurement, "thin", change)
-    if abs(measurement.head - measurement.baseline) < policy.floor(measurement.unit):
-        return Classified(measurement, "unchanged", change)
-    bar = max(policy.threshold_percent, noise(measurement))
+        return "thin"
+    if difference < policy.floor(measurement.unit):
+        return "unchanged"
+    return shift_status(measurement, change, max(policy.threshold_percent, noise(measurement)))
+
+
+def shift_status(measurement: Measurement, change: float, bar: float) -> str:
     low, high = measurement.interval or (change, change)
-    rose, fell = low >= bar, high <= -bar
-    if rose or fell:
-        worse = rose if measurement.better == "lower" else fell
-        return Classified(measurement, "degraded" if worse else "improved", change)
-    return Classified(measurement, "unchanged", change)
+    return direction_status(low >= bar, high <= -bar, measurement.better)
+
+
+def direction_status(rose: bool, fell: bool, better: str) -> str:
+    if not (rose or fell):
+        return "unchanged"
+    return "degraded" if worse(rose, fell, better) else "improved"
+
+
+def worse(rose: bool, fell: bool, better: str) -> bool:
+    return rose if better == "lower" else fell
 
 
 def noise(measurement: Measurement) -> float:
@@ -214,35 +316,67 @@ def percent_change(baseline: float, head: float) -> float:
     return round((head - baseline) * 100 / baseline, 9)
 
 
-def stale_problems(records: list[dict], fingerprints: dict[str, str]) -> list[str]:
+def stale_problems(records: list[Record], fingerprints: dict[str, str]) -> list[str]:
+    return [stale_message(script, per_tree) for script, per_tree in sorted(stale_counts(records, fingerprints).items())]
+
+
+def stale_counts(records: list[Record], fingerprints: dict[str, str]) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = {}
     for record in records:
-        script = record["script"]
-        if script in fingerprints and record.get("fingerprint") != fingerprints[script]:
-            per_tree = counts.setdefault(script, {})
+        if is_stale(record, fingerprints):
+            per_tree = counts.setdefault(record["script"], {})
             per_tree[record["tree"]] = per_tree.get(record["tree"], 0) + 1
-    return [
+    return counts
+
+
+def is_stale(record: Record, fingerprints: dict[str, str]) -> bool:
+    script = record["script"]
+    return script in fingerprints and record.get("fingerprint") != fingerprints[script]
+
+
+def stale_message(script: str, per_tree: dict[str, int]) -> str:
+    return (
         f"`{script}` has samples taken before it or a shared file under perf/ last changed "
         f"({', '.join(f'{count} on {tree}' for tree, count in sorted(per_tree.items()))}); take its samples again on every tree"
-        for script, per_tree in sorted(counts.items())
-    ]
+    )
 
 
 def audit(classified: list[Classified], existing_columns: list[str], verdict_text: str, verdict: str, benches: list[str]) -> list[str]:
+    problems = unmeasured_problems(classified, existing_columns)
+    problems += unflagged_problems(classified, verdict_text)
+    problems += empty_problems(classified, existing_columns, verdict, benches)
+    return problems
+
+
+def unmeasured_problems(classified: list[Classified], existing_columns: list[str]) -> list[str]:
     measured_columns = {item.measurement.column for item in classified}
-    problems = [
+    return [
         f"column `{column}` in PERFORMANCE.md was not re-measured; every existing bench runs on every tree every time"
         for column in existing_columns
         if column not in measured_columns
     ]
+
+
+def unflagged_problems(classified: list[Classified], verdict_text: str) -> list[str]:
+    return [
+        f"`{target}` is {item.status} ({item.change:+.1f}% {item.measurement.metric}) but the verdict does not name it"
+        for target, item in first_unflagged(classified, verdict_text).items()
+    ]
+
+
+def first_unflagged(classified: list[Classified], verdict_text: str) -> dict[str, Classified]:
     unflagged: dict[str, Classified] = {}
     for item in classified:
         if item.status in FLAGGED and item.measurement.target not in verdict_text:
             unflagged.setdefault(item.measurement.target, item)
-    problems += [
-        f"`{target}` is {item.status} ({item.change:+.1f}% {item.measurement.metric}) but the verdict does not name it"
-        for target, item in unflagged.items()
-    ]
-    if not classified and (benches or existing_columns or verdict != "PASS"):
-        problems.append("no measurements were taken; run every perf/bench_* script on every tree through `marestail perf run`")
-    return problems
+    return unflagged
+
+
+def empty_problems(classified: list[Classified], existing_columns: list[str], verdict: str, benches: list[str]) -> list[str]:
+    if classified or not expects_measurements(existing_columns, verdict, benches):
+        return []
+    return ["no measurements were taken; run every perf/bench_* script on every tree through `marestail perf run`"]
+
+
+def expects_measurements(existing_columns: list[str], verdict: str, benches: list[str]) -> bool:
+    return bool(benches or existing_columns or verdict != "PASS")

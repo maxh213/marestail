@@ -1,15 +1,17 @@
 import json
 import re
 import time
-from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
+from marestail.gates.ts_tests import in_scope_findings, relative
 from marestail.report import Result
 from marestail.shell import run
 
 MAX_LINES = 60
 NOISE = ("npm notice", "npm warn", "npm WARN")
-TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>.+)$")
+TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>\S.*)$")
+FILE_PATH = "filePath"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -26,34 +28,51 @@ def tsc_findings(ctx: Context) -> list[str]:
     if not (ctx.ts_root() / name).exists():
         return [f"marestail.toml:1 [ts] tsconfig = {name!r} does not exist under {relative(str(ctx.ts_root()), ctx)}"]
     code, output = run(["npx", "tsc", "--noEmit", "-p", name], cwd=ctx.ts_root(), timeout=900)
-    if code == 0:
-        return []
+    return [] if code == 0 else tsc_report(output, ctx)
+
+
+def tsc_report(output: str, ctx: Context) -> list[str]:
     lines = meaningful(output)
-    matches = [match for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
+    matches = tsc_matches(lines)
     if not matches:
         return [f"tsc: {line}" for line in lines]
-    findings = [tsc_finding(match, ctx) for match in matches]
-    if ctx.scoped:
-        findings = [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
-    return findings
+    return in_scope_findings([tsc_finding(match, ctx) for match in matches], ctx)
 
 
-def tsc_finding(match: re.Match, ctx: Context) -> str:
+def tsc_matches(lines: list[str]) -> list[re.Match[str]]:
+    return [match for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
+
+
+def tsc_finding(match: re.Match[str], ctx: Context) -> str:
     return f"{relative(match.group('path'), ctx)}:{match.group('line')} {match.group('rest').strip()[:300]}"
 
 
 def eslint_findings(ctx: Context) -> list[str]:
     code, output = run(eslint_command(ctx), cwd=ctx.ts_root(), timeout=900)
-    if code == 0:
-        return []
+    return [] if code == 0 else eslint_report(ctx, code, output)
+
+
+def eslint_report(ctx: Context, code: int, output: str) -> list[str]:
     report = parse(output)
     if report is None:
-        return [f"eslint: {line}" for line in meaningful(output)]
-    if ctx.scoped:
-        report = [file for file in report if ctx.in_scope(relative(file.get("filePath", ""), ctx))]
-        return [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
-    findings = [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
-    return findings or [f"eslint: {line}" for line in meaningful(output)] or [f"marestail.toml:1 eslint exited {code} without a message"]
+        return eslint_lines(output)
+    return scoped_messages(report, ctx) if ctx.scoped else unscoped_messages(report, ctx, code, output)
+
+
+def scoped_messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
+    return messages([file for file in report if ctx.in_scope(relative(file.get(FILE_PATH, ""), ctx))], ctx)
+
+
+def unscoped_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
+    return messages(report, ctx) or eslint_lines(output) or [f"marestail.toml:1 eslint exited {code} without a message"]
+
+
+def messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
+    return [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
+
+
+def eslint_lines(output: str) -> list[str]:
+    return [f"eslint: {line}" for line in meaningful(output)]
 
 
 def eslint_command(ctx: Context) -> list[str]:
@@ -61,7 +80,7 @@ def eslint_command(ctx: Context) -> list[str]:
     return ["npx", "eslint", ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
 
 
-def parse(output: str) -> list | None:
+def parse(output: str) -> list[Any] | None:
     start = output.find("[")
     if start < 0:
         return None
@@ -72,19 +91,9 @@ def parse(output: str) -> list | None:
     return report if isinstance(report, list) else None
 
 
-def describe(file: dict, message: dict, ctx: Context) -> str:
+def describe(file: dict[str, Any], message: dict[str, Any], ctx: Context) -> str:
     text = str(message.get("message", "")).splitlines()[0] if message.get("message") else ""
-    return f"{relative(file.get('filePath', ''), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
-
-
-def relative(path: str, ctx: Context) -> str:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = ctx.ts_root() / path
-    try:
-        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
-    except ValueError:
-        return path
+    return f"{relative(file.get(FILE_PATH, ''), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
 
 
 def meaningful(output: str) -> list[str]:

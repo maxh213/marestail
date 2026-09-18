@@ -2,9 +2,10 @@ import contextlib
 import json
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from marestail.config import Config
 from marestail.perf import settings, table
@@ -46,7 +47,7 @@ def samples_file(config: Config) -> Path:
     return work(config) / "samples.jsonl"
 
 
-def recorded(config: Config) -> dict:
+def recorded(config: Config) -> dict[str, Any]:
     path = trees_file(config)
     return json.loads(path.read_text()) if path.exists() else {}
 
@@ -121,16 +122,24 @@ def measuring(config: Config, task: str) -> Iterator[Session]:
 def populate(config: Config, session: Session) -> None:
     start, start_note = start_commit(config, session.task)
     pre, pre_note = pre_marestail_commit(config)
-    session.notes += [note for note in (start_note, pre_note) if note]
-    for note in session.notes:
-        print(f"   {note}")
+    add_notes(session, (start_note, pre_note))
     add_tree(config, session, "baseline", start)
     session.trees.append(Tree("head", head(config), config.root))
+    add_optional_trees(config, session, start, pre)
+    write_trees(config, session)
+
+
+def add_notes(session: Session, notes: tuple[str, str]) -> None:
+    session.notes += [note for note in notes if note]
+    for note in session.notes:
+        print(f"   {note}")
+
+
+def add_optional_trees(config: Config, session: Session, start: str, pre: str | None) -> None:
     if settings.control(config):
         add_tree(config, session, CONTROL, start)
     if pre:
         add_tree(config, session, "pre-marestail", pre)
-    write_trees(config, session)
 
 
 def add_tree(config: Config, session: Session, name: str, sha: str) -> None:
@@ -171,21 +180,39 @@ def close(config: Config, session: Session) -> None:
 
 def prompt_section(config: Config, session: Session) -> str:
     lines = [f"- {tree.name}: {tree.sha} at {tree.path}" for tree in session.trees]
+    lines += policy_lines(config)
+    lines += control_lines(session)
+    lines += database_lines(session)
+    lines += [f"- note: {note}" for note in session.notes]
+    return "\n".join(lines)
+
+
+def policy_lines(config: Config) -> list[str]:
     existing = table.load(config.root).columns
     policy = settings.policy(config)
-    lines += [
+    return [
         f"- threshold_percent: {policy.threshold_percent:g}",
         f"- min_runs: {policy.min_runs}",
         f"- values_per_sample: {policy.values_per_sample} (p95 is classified only with {policy.p95_min_values} pooled values per tree)",
-        "- min_change: " + (", ".join(f"{amount:g} {unit}" for unit, amount in policy.min_change) or "none"),
-        "- existing columns every run must re-measure: " + (", ".join(f"`{column}`" for column in existing) or "none"),
+        "- min_change: " + listed(f"{amount:g} {unit}" for unit, amount in policy.min_change),
+        "- existing columns every run must re-measure: " + listed(f"`{column}`" for column in existing),
     ]
-    if any(tree.name == CONTROL for tree in session.trees):
-        lines.append("- control: a second copy of the baseline commit; its difference from baseline is the noise a change must exceed")
-    if session.image:
-        lines.append(
-            f"- performance database: {session.image} (from {session.image_source}), rows {session.rows} ({session.rows_source}); "
-            "connect each tree's app with `marestail perf db url --tree <tree>`"
-        )
-    lines += [f"- note: {note}" for note in session.notes]
-    return "\n".join(lines)
+
+
+def listed(items: Iterable[str]) -> str:
+    return ", ".join(items) or "none"
+
+
+def control_lines(session: Session) -> list[str]:
+    if not any(tree.name == CONTROL for tree in session.trees):
+        return []
+    return ["- control: a second copy of the baseline commit; its difference from baseline is the noise a change must exceed"]
+
+
+def database_lines(session: Session) -> list[str]:
+    if not session.image:
+        return []
+    return [
+        f"- performance database: {session.image} (from {session.image_source}), rows {session.rows} ({session.rows_source}); "
+        "connect each tree's app with `marestail perf db url --tree <tree>`"
+    ]

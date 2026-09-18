@@ -25,6 +25,7 @@ IGNORED_ENV = ["K_REVISION", "K_SERVICE", "PORT", "HOME", "PATH"]
 LEDGER_ROW = re.compile(r"^\|\s*`(/[^`]*)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
 GONE = {"retired", "removed", "gone"}
+SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs", ".java")
 SKIP_DIRS = {"node_modules", ".venv", "mutants", "dist", ".git", "tests", "test", "__pycache__", ".marestail", "target"}
 
 
@@ -49,17 +50,15 @@ def doc_text(ctx: Context) -> str:
 
 def source_files(ctx: Context) -> list[Path]:
     folders = ctx.config.get("docs", "sources", ["."])
-    suffixes = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs", ".java")
-    files = []
-    for folder in folders:
-        for path in (ctx.root / folder).rglob("*"):
-            if (
-                path.suffix in suffixes
-                and not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
-                and not under_benchmarks(ctx.root, path)
-            ):
-                files.append(path)
-    return sorted(files)
+    return sorted(path for folder in folders for path in (ctx.root / folder).rglob("*") if documented_source(path, ctx))
+
+
+def documented_source(path: Path, ctx: Context) -> bool:
+    return path.suffix in SOURCE_SUFFIXES and not in_skipped_dir(path, ctx) and not under_benchmarks(ctx.root, path)
+
+
+def in_skipped_dir(path: Path, ctx: Context) -> bool:
+    return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
 
 
 def found(ctx: Context, patterns: list[str]) -> dict[str, str]:
@@ -79,20 +78,37 @@ def route_findings(ctx: Context) -> list[str]:
     ledger_path = ctx.root / ledger_name
     if not ledger_path.exists():
         return [f"{ledger_name} is missing; it must list every route with a status"]
-    ledger = {route: status.lower() for route, status in LEDGER_ROW.findall(ledger_path.read_text())}
+    ledger = read_ledger(ledger_path)
     in_code = found(ctx, ctx.config.get("docs", "route_patterns", ROUTE_PATTERNS))
-    findings = [f"{where} route {route} is not in {ledger_name}" for route, where in in_code.items() if route not in ledger]
-    findings += [
+    return (
+        unlisted_routes(ledger_name, ledger, in_code)
+        + gone_routes(ledger_name, ledger, in_code)
+        + unserved_routes(ledger_name, ledger, in_code)
+    )
+
+
+def read_ledger(path: Path) -> dict[str, str]:
+    return {route: status.lower() for route, status in LEDGER_ROW.findall(path.read_text())}
+
+
+def unlisted_routes(ledger_name: str, ledger: dict[str, str], in_code: dict[str, str]) -> list[str]:
+    return [f"{where} route {route} is not in {ledger_name}" for route, where in in_code.items() if route not in ledger]
+
+
+def gone_routes(ledger_name: str, ledger: dict[str, str], in_code: dict[str, str]) -> list[str]:
+    return [
         f"{where} route {route} is marked {ledger[route]} in {ledger_name} but still exists"
         for route, where in in_code.items()
         if ledger.get(route) in GONE
     ]
-    findings += [
+
+
+def unserved_routes(ledger_name: str, ledger: dict[str, str], in_code: dict[str, str]) -> list[str]:
+    return [
         f"{ledger_name} lists {route} as {status} but no code serves it"
         for route, status in ledger.items()
         if status not in GONE and route not in in_code
     ]
-    return findings
 
 
 def env_findings(ctx: Context, docs: str) -> list[str]:
@@ -107,10 +123,18 @@ def env_findings(ctx: Context, docs: str) -> list[str]:
 
 def path_findings(ctx: Context) -> list[str]:
     prefixes = tuple(ctx.config.get("docs", "path_prefixes", []))
-    findings = []
-    for doc in doc_files(ctx):
-        for number, line in enumerate(doc.read_text().splitlines(), start=1):
-            for token in DOC_PATH.findall(line):
-                if prefixes and token.startswith(prefixes) and "*" not in token and not (ctx.root / token).exists():
-                    findings.append(f"{doc.relative_to(ctx.root)}:{number} mentions {token}, which does not exist")
-    return findings
+    return [finding for doc in doc_files(ctx) for finding in doc_path_findings(ctx, doc, prefixes)]
+
+
+def doc_path_findings(ctx: Context, doc: Path, prefixes: tuple[str, ...]) -> list[str]:
+    label = doc.relative_to(ctx.root)
+    return [
+        f"{label}:{number} mentions {token}, which does not exist"
+        for number, line in enumerate(doc.read_text().splitlines(), start=1)
+        for token in DOC_PATH.findall(line)
+        if missing_path(ctx, token, prefixes)
+    ]
+
+
+def missing_path(ctx: Context, token: str, prefixes: tuple[str, ...]) -> bool:
+    return bool(prefixes) and token.startswith(prefixes) and "*" not in token and not (ctx.root / token).exists()

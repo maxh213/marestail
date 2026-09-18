@@ -4,15 +4,19 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
 from marestail.perf.scope import under_benchmarks
 from marestail.shell import run
 
+CARGO_TOML = "Cargo.toml"
 SCAN_DIR = Path(__file__).resolve().parent / "rs" / "scan"
 SCAN_BIN = Path("rs-scan") / "release" / "marestail-rs-scan"
+SCAN_INPUTS = ("main.rs", CARGO_TOML, "Cargo.lock")
 SKIP_DIRS = {"target", ".marestail", ".git", "node_modules", "mutants.out", "mutants.out.old"}
 USE_DIRS = ("tests", "examples", "benches")
+LLVM_TOOLS = (("LLVM_COV", "llvm-cov"), ("LLVM_PROFDATA", "llvm-profdata"))
 INSTALL = {
     "cargo": "install Rust with cargo: https://rustup.rs or your package manager",
     "llvm-cov": "cargo install --locked cargo-llvm-cov (and rustup component add llvm-tools, or set LLVM_COV and LLVM_PROFDATA to an LLVM matching rustc -vV)",
@@ -21,13 +25,13 @@ INSTALL = {
 }
 
 
-def listify(value) -> list[str]:
+def listify(value: Any) -> list[str]:
     if value is None:
         return []
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
-def rel(ctx: Context, path) -> str:
+def rel(ctx: Context, path: str | Path) -> str:
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = ctx.rust_root() / candidate
@@ -38,18 +42,24 @@ def rel(ctx: Context, path) -> str:
 
 
 def env(ctx: Context) -> dict[str, str]:
-    found = {}
-    for name, tool in (("LLVM_COV", "llvm-cov"), ("LLVM_PROFDATA", "llvm-profdata")):
-        configured = ctx.rust(name.lower())
-        if configured:
-            found[name] = str(configured)
-        elif name not in os.environ and shutil.which(tool) and not shutil.which("rustup"):
-            found[name] = str(shutil.which(tool))
-    return found
+    return {name: found for name, tool in LLVM_TOOLS if (found := llvm_tool(ctx, name, tool))}
+
+
+def llvm_tool(ctx: Context, name: str, tool: str) -> str | None:
+    configured = ctx.rust(name.lower())
+    if configured:
+        return str(configured)
+    if name in os.environ or shutil.which("rustup"):
+        return None
+    return shutil.which(tool)
+
+
+def cargo_bin(ctx: Context) -> list[str]:
+    return listify(ctx.rust("cargo", "cargo"))
 
 
 def cargo(ctx: Context, args: list[str], timeout: int = 1800, cwd: Path | None = None) -> tuple[int, str]:
-    return run([*listify(ctx.rust("cargo", "cargo")), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=timeout)
+    return run([*cargo_bin(ctx), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=timeout)
 
 
 def missing(code: int, output: str, tool: str) -> str | None:
@@ -64,18 +74,30 @@ def skipped(ctx: Context, path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts) or under_benchmarks(ctx.root, path)
 
 
+def rust_files(ctx: Context, root: Path, pattern: str) -> set[Path]:
+    return {path for folder in root.glob(pattern) for path in folder.rglob("*.rs") if not skipped(ctx, path)}
+
+
 def sources(ctx: Context) -> list[Path]:
     root = ctx.rust_root()
-    found = set()
+    found: set[Path] = set()
     for pattern in listify(ctx.rust("sources", ["src"])):
-        for folder in root.glob(pattern):
-            found.update(path for path in folder.rglob("*.rs") if not skipped(ctx, path))
+        found.update(rust_files(ctx, root, pattern))
     return sorted(path for path in found if not excluded(ctx, rel(ctx, path), "source_exclude"))
 
 
+def crates(ctx: Context) -> set[Path]:
+    return {path.parent for path in ctx.rust_root().rglob(CARGO_TOML) if not skipped(ctx, path)}
+
+
+def crate_uses(ctx: Context, crate: Path) -> set[Path]:
+    return {path for folder in USE_DIRS for path in (crate / folder).rglob("*.rs") if not skipped(ctx, path)}
+
+
 def use_files(ctx: Context) -> list[Path]:
-    crates = {path.parent for path in ctx.rust_root().rglob("Cargo.toml") if not skipped(ctx, path)}
-    found = {path for crate in crates for folder in USE_DIRS for path in (crate / folder).rglob("*.rs") if not skipped(ctx, path)}
+    found: set[Path] = set()
+    for crate in crates(ctx):
+        found.update(crate_uses(ctx, crate))
     return sorted(found)
 
 
@@ -85,53 +107,75 @@ def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
     return [path for path in paths if ctx.in_scope(rel(ctx, path))]
 
 
-def excluded(ctx: Context, relative: str, key: str) -> bool:
+def exclude_patterns(ctx: Context, key: str) -> list[str]:
     prefix = rel(ctx, ctx.rust_root())
     prefix = "" if prefix == "." else prefix + "/"
-    patterns = [prefix + pattern.strip("/") for pattern in listify(ctx.rust(key, []))]
-    return any(relative == p or relative.startswith(p + "/") or fnmatch.fnmatch(relative, p) for p in patterns)
+    return [prefix + pattern.strip("/") for pattern in listify(ctx.rust(key, []))]
+
+
+def matches(relative: str, pattern: str) -> bool:
+    return relative == pattern or relative.startswith(pattern + "/") or fnmatch.fnmatch(relative, pattern)
+
+
+def excluded(ctx: Context, relative: str, key: str) -> bool:
+    return any(matches(relative, pattern) for pattern in exclude_patterns(ctx, key))
+
+
+def scanner_digest() -> str:
+    return hashlib.sha256(b"".join((SCAN_DIR / name).read_bytes() for name in SCAN_INPUTS)).hexdigest()
+
+
+def scanner_fresh(binary: Path, stamp: Path, digest: str) -> bool:
+    return binary.exists() and stamp.exists() and stamp.read_text() == digest
+
+
+def build_error(code: int, output: str, binary: Path) -> str | None:
+    if code == 0 and binary.exists():
+        return None
+    return missing(code, output, "clippy") or f"rust scanner build failed: {output.strip()[-300:]}"
 
 
 def build_scanner(ctx: Context) -> str | None:
     binary, stamp = ctx.work / SCAN_BIN, ctx.work / "rs-scan" / "stamp"
-    digest = hashlib.sha256(b"".join((SCAN_DIR / name).read_bytes() for name in ("main.rs", "Cargo.toml", "Cargo.lock"))).hexdigest()
-    if binary.exists() and stamp.exists() and stamp.read_text() == digest:
+    digest = scanner_digest()
+    if scanner_fresh(binary, stamp, digest):
         return None
     code, output = run(
-        [
-            *listify(ctx.rust("cargo", "cargo")),
-            "build",
-            "--release",
-            "--locked",
-            "--quiet",
-            "--manifest-path",
-            str(SCAN_DIR / "Cargo.toml"),
-        ],
+        [*cargo_bin(ctx), "build", "--release", "--locked", "--quiet", "--manifest-path", str(SCAN_DIR / CARGO_TOML)],
         cwd=ctx.root,
         env={"CARGO_TARGET_DIR": str(ctx.work / "rs-scan")},
         timeout=900,
     )
-    if code != 0 or not binary.exists():
-        return missing(code, output, "clippy") or f"rust scanner build failed: {output.strip()[-300:]}"
-    stamp.write_text(digest)
-    return None
+    error = build_error(code, output, binary)
+    if error is None:
+        stamp.write_text(digest)
+    return error
+
+
+def uses_args(uses: list[Path] | None) -> list[str]:
+    return ["--uses", *map(str, uses)] if uses else []
+
+
+def run_scanner(ctx: Context, mode: str, args: list[str]) -> tuple[list[Any] | None, str | None]:
+    code, output = run([str(ctx.work / SCAN_BIN), mode, *args], cwd=ctx.root, timeout=600)
+    if code != 0:
+        return None, f"rust scanner failed ({mode}): {output.strip()[-300:]}"
+    found: list[Any] = json.loads(output or "[]")
+    return found, None
 
 
 def scan(
     ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None, uses: list[Path] | None = None
-) -> tuple[list | None, str | None]:
+) -> tuple[list[Any] | None, str | None]:
     if not paths:
         return [], None
     error = build_scanner(ctx)
     if error:
         return None, error
-    tail = ["--uses", *map(str, uses)] if uses else []
-    code, output = run([str(ctx.work / SCAN_BIN), mode, *(extra or []), *map(str, paths), *tail], cwd=ctx.root, timeout=600)
-    if code != 0:
-        return None, f"rust scanner failed ({mode}): {output.strip()[-300:]}"
-    return json.loads(output or "[]"), None
+    return run_scanner(ctx, mode, [*(extra or []), *map(str, paths), *uses_args(uses)])
 
 
-def load_coverage(ctx: Context) -> dict | None:
+def load_coverage(ctx: Context) -> dict[str, Any] | None:
     path = ctx.work / "rs-coverage.json"
-    return json.loads(path.read_text()) if path.exists() else None
+    loaded: dict[str, Any] | None = json.loads(path.read_text()) if path.exists() else None
+    return loaded

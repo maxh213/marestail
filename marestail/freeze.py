@@ -81,7 +81,8 @@ GATE_CONFIG = [
 ]
 SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
 CSPROJ_ADDITION = re.compile(r'^\+\s*<(PackageReference|InternalsVisibleTo) Include="[^"]+"(?: Version="[^"]+")? />\s*$')
-CSPROJ_WRAPPER = re.compile(r"^\+\s*(<ItemGroup>|</ItemGroup>)?\s*$")
+CSPROJ_WRAPPERS = ("", "<ItemGroup>", "</ItemGroup>")
+DIFF_HEADERS = ("+++", "---")
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
     "architect": [
@@ -104,11 +105,27 @@ def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
 
 
 def tolerated(path: str, diff: str) -> bool:
-    if not matches(path, "**/*.csproj"):
-        return False
-    changes = [line for line in diff.splitlines() if line[:1] in ("+", "-") and not line.startswith(("+++", "---"))]
-    additions = [line for line in changes if CSPROJ_ADDITION.match(line)]
-    return bool(additions) and all(CSPROJ_ADDITION.match(line) or CSPROJ_WRAPPER.match(line) for line in changes)
+    return matches(path, "**/*.csproj") and only_csproj_additions(changed_lines(diff))
+
+
+def only_csproj_additions(changes: list[str]) -> bool:
+    return any(is_addition(line) for line in changes) and all(is_csproj_line(line) for line in changes)
+
+
+def changed_lines(diff: str) -> list[str]:
+    return [line for line in diff.splitlines() if line[:1] in ("+", "-") and not line.startswith(DIFF_HEADERS)]
+
+
+def is_addition(line: str) -> bool:
+    return CSPROJ_ADDITION.match(line) is not None
+
+
+def is_csproj_line(line: str) -> bool:
+    return is_addition(line) or is_wrapper(line)
+
+
+def is_wrapper(line: str) -> bool:
+    return line.startswith("+") and line[1:].strip() in CSPROJ_WRAPPERS
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:

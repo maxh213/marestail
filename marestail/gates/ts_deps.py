@@ -1,12 +1,13 @@
 import re
 import time
-from pathlib import Path
 
 from marestail.context import Context
+from marestail.gates.ts_tests import relative
 from marestail.report import Result
 from marestail.shell import run
 
 VIOLATION = re.compile(r"^(?:error|warn|info|hint) \S+: (?P<path>\S+?)(?:\s+→.*)?$")
+MAX_LINES = 60
 
 
 def run_gate(ctx: Context) -> Result:
@@ -15,34 +16,36 @@ def run_gate(ctx: Context) -> Result:
     source = ctx.ts("source", "src")
     command = ["npx", "depcruise", "--config", config, "--output-type", "err", source]
     code, output = run(command, cwd=ctx.ts_root(), timeout=600)
-    if ctx.scoped:
-        findings = scoped_findings(output, ctx, code)
-        ok = not findings
-    else:
-        findings = [line for line in output.splitlines() if line.strip()][:60] if code != 0 else []
-        ok = code == 0
+    findings, ok = outcome(output, ctx, code)
     summary = "dependency rules kept" if ok else "dependency rules broken"
     return Result("ts.deps", ok, summary, findings, time.time() - started)
 
 
+def outcome(output: str, ctx: Context, code: int) -> tuple[list[str], bool]:
+    if ctx.scoped:
+        findings = scoped_findings(output, ctx, code)
+        return findings, not findings
+    return failure_lines([line for line in output.splitlines() if line.strip()], code), code == 0
+
+
+def failure_lines(lines: list[str], code: int) -> list[str]:
+    return lines[:MAX_LINES] if code != 0 else []
+
+
 def scoped_findings(output: str, ctx: Context, code: int) -> list[str]:
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    lines = stripped_lines(output)
     violations = [line for line in lines if VIOLATION.match(line)]
-    if not violations:
-        return [] if code == 0 else lines[:60]
-    return [line for line in violations if in_scope_violation(line, ctx)][:60]
+    return in_scope_violations(violations, ctx) if violations else failure_lines(lines, code)
+
+
+def stripped_lines(output: str) -> list[str]:
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def in_scope_violations(violations: list[str], ctx: Context) -> list[str]:
+    return [line for line in violations if in_scope_violation(line, ctx)][:MAX_LINES]
 
 
 def in_scope_violation(line: str, ctx: Context) -> bool:
     match = VIOLATION.match(line)
-    return bool(match) and ctx.in_scope(relative(match.group("path"), ctx))
-
-
-def relative(path: str, ctx: Context) -> str:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = ctx.ts_root() / path
-    try:
-        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
-    except ValueError:
-        return path
+    return match is not None and ctx.in_scope(relative(match.group("path"), ctx))

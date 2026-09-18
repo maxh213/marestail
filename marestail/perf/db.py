@@ -7,6 +7,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from marestail import config as config_module
 from marestail.config import Config
@@ -14,6 +15,27 @@ from marestail.freeze import matches_any
 from marestail.perf import image as perf_image
 from marestail.perf import settings, trees
 from marestail.shell import run, tail
+
+__all__ = [
+    "Database",
+    "DatabaseError",
+    "build",
+    "build_database",
+    "command",
+    "disk_message",
+    "estimate_bytes",
+    "for_run",
+    "golden_meta",
+    "golden_name",
+    "golden_state",
+    "prepare",
+    "prune",
+    "refuses",
+    "release",
+    "reset",
+    "start_build",
+    "status_line",
+]
 
 DEFAULT_PREFIX = "marestail-perf-"
 DEFAULT_VOLUME = "marestail-perf-pgdata"
@@ -29,6 +51,22 @@ GIB = 1024**3
 NOT_CONFIGURED = "configure [perf.db] migrate in marestail.toml"
 REFLINK_FAILED = "reflink copy failed: the Docker data root must be on a reflink-capable filesystem such as btrfs or XFS"
 CLI = Path(__file__).resolve().parents[1] / "cli.py"
+SUPERUSER = "postgres"
+TREES_JSON = "trees.json"
+READY = "ready"
+BUILDING = "building"
+FAILED = "failed"
+IMAGE = "image"
+MIGRATE = "migrate"
+SEED_SQL = "seed.sql"
+BYTES = "bytes"
+STATE = "state"
+STARTED = "started"
+ERROR = "error"
+TABLES_SQL = (
+    "select tablename, format('%I.%I', schemaname, tablename) from pg_tables "
+    "where schemaname not in ('pg_catalog', 'information_schema') order by 2"
+)
 
 
 class DatabaseError(Exception):
@@ -73,10 +111,10 @@ class Database:
         return f"/perf/work/{self.repo_key}-{tree}"
 
 
-def build_database(config: Config, section: dict, rows: int, rows_source: str, image: str, image_source: str) -> Database:
+def build_database(config: Config, section: dict[str, Any], rows: int, rows_source: str, image: str, image_source: str) -> Database:
     return Database(
         root=config.root,
-        migrate=str(section.get("migrate", "")),
+        migrate=str(section.get(MIGRATE, "")),
         url_env=str(section.get("url_env", "DATABASE_URL")),
         rows=rows,
         rows_source=rows_source,
@@ -94,7 +132,7 @@ def build_database(config: Config, section: dict, rows: int, rows_source: str, i
 
 def for_run(config: Config) -> tuple[Database | None, str]:
     section = settings.db(config)
-    if not section.get("migrate"):
+    if not section.get(MIGRATE):
         return None, NOT_CONFIGURED
     recorded = trees.recorded(config)
     try:
@@ -105,36 +143,46 @@ def for_run(config: Config) -> tuple[Database | None, str]:
     return build_database(config, section, rows, rows_source, image, image_source), ""
 
 
-def recorded_rows(config: Config, recorded: dict) -> tuple[int, str]:
+def recorded_rows(config: Config, recorded: dict[str, Any]) -> tuple[int, str]:
     if recorded.get("rows") is not None:
-        return int(recorded["rows"]), str(recorded.get("rows_source", "trees.json"))
+        return int(recorded["rows"]), str(recorded.get("rows_source", TREES_JSON))
     return settings.effective_rows(config)
 
 
-def recorded_image(config: Config, section: dict, recorded: dict) -> tuple[str, str]:
-    if recorded.get("image"):
-        return str(recorded["image"]), str(recorded.get("image_source", "trees.json"))
-    return perf_image.resolve(config.root, section.get("image"))
+def recorded_image(config: Config, section: dict[str, Any], recorded: dict[str, Any]) -> tuple[str, str]:
+    if recorded.get(IMAGE):
+        return str(recorded[IMAGE]), str(recorded.get("image_source", TREES_JSON))
+    return perf_image.resolve(config.root, section.get(IMAGE))
 
 
 def prepare(config: Config, session: trees.Session) -> None:
     section = settings.db(config)
-    if not section.get("migrate"):
+    if not section.get(MIGRATE):
         return
-    try:
-        rows, rows_source = settings.effective_rows(config)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
-    image, image_source = perf_image.resolve(config.root, section.get("image"))
-    if image_source == "default":
-        print(f"   no Postgres version found in the repo; using {image}")
-    else:
-        print(f"   performance database image {image} from {image_source}")
+    rows, rows_source = rows_or_exit(config)
+    image, image_source = perf_image.resolve(config.root, section.get(IMAGE))
+    print(image_line(image, image_source))
     session.image, session.image_source, session.rows, session.rows_source = image, image_source, rows, rows_source
     trees.write_trees(config, session)
     if rows > 0 and seed_script(config.root) is None:
         return
-    database = build_database(config, section, rows, rows_source, image, image_source)
+    build_all(build_database(config, section, rows, rows_source, image, image_source), session)
+
+
+def rows_or_exit(config: Config) -> tuple[int, str]:
+    try:
+        return settings.effective_rows(config)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+
+
+def image_line(image: str, image_source: str) -> str:
+    if image_source == "default":
+        return f"   no Postgres version found in the repo; using {image}"
+    return f"   performance database image {image} from {image_source}"
+
+
+def build_all(database: Database, session: trees.Session) -> None:
     for tree in session.trees:
         problem = build(database, tree)
         if problem:
@@ -147,10 +195,22 @@ def release(config: Config, session: trees.Session) -> None:
     database, _ = for_run(config)
     if database is None:
         return
-    for tree in session.trees:
-        docker(database, "rm", "-f", "-v", database.tree_container(tree.name))
+    remove_tree_containers(database, session)
     if helper_running(database):
-        docker(database, "exec", database.helper, "rm", "-rf", *[database.work_dir(tree.name) for tree in session.trees])
+        docker(database, "exec", database.helper, "rm", "-rf", *work_dirs(database, session))
+
+
+def remove_tree_containers(database: Database, session: trees.Session) -> None:
+    for tree in session.trees:
+        remove_container(database, database.tree_container(tree.name))
+
+
+def work_dirs(database: Database, session: trees.Session) -> list[str]:
+    return [database.work_dir(tree.name) for tree in session.trees]
+
+
+def remove_container(database: Database, name: str) -> None:
+    docker(database, "rm", "-f", "-v", name)
 
 
 def docker(database: Database, *args: str, stdin: str | None = None, timeout: int = 600) -> tuple[int, str]:
@@ -172,7 +232,7 @@ def helper_running(database: Database) -> bool:
 def ensure_helper(database: Database) -> None:
     if helper_running(database):
         return
-    docker(database, "rm", "-f", "-v", database.helper)
+    remove_container(database, database.helper)
     image = perf_image.helper_image(database.image)
     ensure_image(database, image)
     step(
@@ -209,7 +269,7 @@ def password(database: Database) -> str:
 
 
 def connection_url(database: Database, port: int | str) -> str:
-    return f"postgresql://postgres:{password(database)}@127.0.0.1:{port}/{DATABASE}"
+    return f"postgresql://{SUPERUSER}:{password(database)}@127.0.0.1:{port}/{DATABASE}"
 
 
 def database_env(database: Database, container: str, url: str) -> dict[str, str]:
@@ -252,7 +312,7 @@ def start_postgres(database: Database, name: str, pgdata: str, port: int | None,
 def wait_ready(database: Database, name: str, timeout: int) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        code, output = docker(database, "exec", name, "pg_isready", "-q", "-h", "127.0.0.1", "-U", "postgres")
+        code, output = docker(database, "exec", name, "pg_isready", "-q", "-h", "127.0.0.1", "-U", SUPERUSER)
         if code == 0:
             return
         if "is not running" in output:
@@ -279,7 +339,7 @@ def psql(database: Database, container: str, sql: str) -> tuple[int, str]:
         "-F",
         "\t",
         "-U",
-        "postgres",
+        SUPERUSER,
         "-d",
         DATABASE,
         "-c",
@@ -290,16 +350,19 @@ def psql(database: Database, container: str, sql: str) -> tuple[int, str]:
 
 def seed_script(root: Path) -> Path | None:
     folder = root / "perf"
-    if (folder / "seed.sql").is_file():
-        return folder / "seed.sql"
+    if (folder / SEED_SQL).is_file():
+        return folder / SEED_SQL
     if not folder.is_dir():
         return None
-    candidates = sorted(
-        path
-        for path in folder.glob("seed*")
-        if path.is_file() and (path.name == "seed" or path.name.startswith("seed.")) and os.access(path, os.X_OK)
-    )
-    return candidates[0] if candidates else None
+    return next(iter(executable_seeds(folder)), None)
+
+
+def executable_seeds(folder: Path) -> list[Path]:
+    return sorted(path for path in folder.glob("seed*") if executable_seed(path))
+
+
+def executable_seed(path: Path) -> bool:
+    return path.is_file() and (path.name == "seed" or path.name.startswith("seed.")) and os.access(path, os.X_OK)
 
 
 def golden_name(database: Database, tree: trees.Tree) -> str:
@@ -320,19 +383,22 @@ def schema_identity(database: Database, tree: trees.Tree) -> str:
     if not database.migrations:
         return tree.sha
     _, listing = run(["git", "ls-tree", "-r", tree.sha], cwd=database.root)
-    entries = [line for line in listing.splitlines() if "\t" in line and matches_any(line.split("\t", 1)[1], database.migrations)]
-    return "\n".join(entries)
+    return "\n".join(migration_entries(listing, database.migrations))
 
 
-def estimate_bytes(goldens: list[dict], rows: int, min_free_gb: float) -> int:
+def migration_entries(listing: str, migrations: list[str]) -> list[str]:
+    return [line for line in listing.splitlines() if "\t" in line and matches_any(line.split("\t", 1)[1], migrations)]
+
+
+def estimate_bytes(goldens: list[dict[str, Any]], rows: int, min_free_gb: float) -> int:
     seeded = [golden for golden in goldens if int(golden.get("rows", 0)) > 0]
     if not seeded:
         return int(min_free_gb * GIB)
-    largest = max(seeded, key=lambda golden: int(golden["bytes"]))
-    return int(largest["bytes"]) * rows * 6 // (int(largest["rows"]) * 5)
+    largest = max(seeded, key=lambda golden: int(golden[BYTES]))
+    return int(largest[BYTES]) * rows * 6 // (int(largest["rows"]) * 5)
 
 
-def refuses(free: int, goldens: list[dict], rows: int, min_free_gb: float) -> bool:
+def refuses(free: int, goldens: list[dict[str, Any]], rows: int, min_free_gb: float) -> bool:
     return rows > 0 and free < estimate_bytes(goldens, rows, min_free_gb)
 
 
@@ -344,20 +410,24 @@ def log_path(database: Database, name: str) -> Path:
     return database.home / "perf-db" / f"{name}.log"
 
 
-def read_status(database: Database, name: str) -> dict:
+def read_status(database: Database, name: str) -> dict[str, Any]:
     path = status_path(database, name)
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def write_status(database: Database, name: str, data: dict) -> None:
+def write_status(database: Database, name: str, data: dict[str, Any]) -> None:
     path = status_path(database, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data) + "\n")
 
 
+def mark_building(database: Database, name: str, pid: int) -> None:
+    write_status(database, name, {STATE: BUILDING, STARTED: time.time(), "pid": pid})
+
+
 def finish_status(database: Database, name: str, state: str, error: str) -> None:
-    started = read_status(database, name).get("started", time.time())
-    write_status(database, name, {"state": state, "started": started, "finished": time.time(), "error": error})
+    started = read_status(database, name).get(STARTED, time.time())
+    write_status(database, name, {STATE: state, STARTED: started, "finished": time.time(), ERROR: error})
 
 
 def golden_ready(database: Database, name: str) -> bool:
@@ -367,11 +437,14 @@ def golden_ready(database: Database, name: str) -> bool:
 
 def golden_state(database: Database, name: str) -> str:
     if golden_ready(database, name):
-        return "ready"
-    status = read_status(database, name)
-    if status.get("state") == "building" and process_alive(status.get("pid")):
-        return "building"
-    return "failed" if status.get("state") == "failed" else "missing"
+        return READY
+    return recorded_state(read_status(database, name))
+
+
+def recorded_state(status: dict[str, Any]) -> str:
+    if status.get(STATE) == BUILDING and process_alive(status.get("pid")):
+        return BUILDING
+    return FAILED if status.get(STATE) == FAILED else "missing"
 
 
 def process_alive(pid: object) -> bool:
@@ -389,14 +462,14 @@ def status_line(database: Database, tree: trees.Tree) -> str:
     state = golden_state(database, name)
     status = read_status(database, name)
     line = f"{tree.name} {database.image} {name} {state} {elapsed(status, state)}"
-    return line + (f" {status['error']}" if state == "failed" and status.get("error") else "")
+    return line + (f" {status[ERROR]}" if state == FAILED and status.get(ERROR) else "")
 
 
-def elapsed(status: dict, state: str) -> str:
-    started = status.get("started")
+def elapsed(status: dict[str, Any], state: str) -> str:
+    started = status.get(STARTED)
     if started is None or state == "missing":
         return "-"
-    finished = time.time() if state == "building" else status.get("finished", time.time())
+    finished = time.time() if state == BUILDING else status.get("finished", time.time())
     return f"{int(finished - started)}s"
 
 
@@ -405,45 +478,55 @@ def build(database: Database, tree: trees.Tree) -> str:
     try:
         if golden_ready(database, name):
             return ""
-        write_status(database, name, {"state": "building", "started": time.time(), "pid": os.getpid()})
+        mark_building(database, name, os.getpid())
         print(f"   building {name} for the {tree.name} tree ({database.image}, rows = {database.rows})")
         build_golden(database, tree, name)
     except DatabaseError as error:
         discard_build(database, name)
-        finish_status(database, name, "failed", str(error))
+        finish_status(database, name, FAILED, str(error))
         return str(error)
-    finish_status(database, name, "ready", "")
+    finish_status(database, name, READY, "")
     print(f"   {name} ready")
     return ""
 
 
 def build_golden(database: Database, tree: trees.Tree, name: str) -> None:
-    seed = seed_script(database.root)
-    if database.rows > 0 and seed is None:
-        raise DatabaseError(f"[perf.db] rows = {database.rows} needs a perf/seed script")
-    if database.rows > 0:
-        check_disk(database, name)
+    seed = required_seed(database, name)
     container = database.golden_container(name)
     temporary = f"/perf/goldens/{name}.tmp"
     step(files(database, f"rm -rf {temporary} && mkdir -p /perf/goldens"), "preparing the golden directory")
     start_postgres(database, container, temporary, None, INIT_TIMEOUT)
     env = database_env(database, container, connection_url(database, host_port(database, container)))
     step(run(["bash", "-lc", database.migrate], cwd=tree.path, env=env, timeout=BUILD_TIMEOUT), "[perf.db] migrate")
-    if seed is not None and database.rows > 0:
-        run_seed(database, tree, container, seed, env)
-        short = short_tables(database, container)
-        if short:
-            raise DatabaseError(f"tables below {database.rows} rows after the seed: {', '.join(short)}")
+    if seed is not None:
+        seed_golden(database, tree, container, seed, env)
     step(psql(database, container, "VACUUM (ANALYZE)"), "VACUUM (ANALYZE)")
     step(psql(database, container, "CHECKPOINT"), "CHECKPOINT")
     step(docker(database, "stop", "-t", "600", container, timeout=900), f"stopping {container}")
-    docker(database, "rm", "-f", "-v", container)
+    remove_container(database, container)
     finalise_golden(database, name)
+
+
+def required_seed(database: Database, name: str) -> Path | None:
+    if database.rows <= 0:
+        return None
+    seed = seed_script(database.root)
+    if seed is None:
+        raise DatabaseError(f"[perf.db] rows = {database.rows} needs a perf/seed script")
+    check_disk(database, name)
+    return seed
+
+
+def seed_golden(database: Database, tree: trees.Tree, container: str, seed: Path, env: dict[str, str]) -> None:
+    run_seed(database, tree, container, seed, env)
+    short = short_tables(database, container)
+    if short:
+        raise DatabaseError(f"tables below {database.rows} rows after the seed: {', '.join(short)}")
 
 
 def run_seed(database: Database, tree: trees.Tree, container: str, seed: Path, env: dict[str, str]) -> None:
     label = seed.relative_to(database.root).as_posix()
-    if seed.name == "seed.sql":
+    if seed.name == SEED_SQL:
         command = [
             "exec",
             "-i",
@@ -455,7 +538,7 @@ def run_seed(database: Database, tree: trees.Tree, container: str, seed: Path, e
             "-v",
             f"rows={database.rows}",
             "-U",
-            "postgres",
+            SUPERUSER,
             "-d",
             DATABASE,
         ]
@@ -465,23 +548,23 @@ def run_seed(database: Database, tree: trees.Tree, container: str, seed: Path, e
 
 
 def short_tables(database: Database, container: str) -> list[str]:
-    listing = step(
-        psql(
-            database,
-            container,
-            "select tablename, format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog', 'information_schema') order by 2",
-        ),
-        "listing tables",
-    )
-    short = []
-    for line in listing.splitlines():
-        cells = line.split("\t")
-        if len(cells) != 2 or cells[0] in database.skip_tables:
-            continue
-        count = int(step(psql(database, container, f"select count(*) from {cells[1]}"), f"counting {cells[1]}").strip().splitlines()[-1])
-        if count < database.rows:
-            short.append(f"{cells[0]} ({count})")
-    return short
+    listing = step(psql(database, container, TABLES_SQL), "listing tables")
+    tables = seedable_tables(table_cells(listing), database.skip_tables)
+    counts = [(name, count_rows(database, container, qualified)) for name, qualified in tables]
+    return [f"{name} ({count})" for name, count in counts if count < database.rows]
+
+
+def table_cells(listing: str) -> list[list[str]]:
+    return [line.split("\t") for line in listing.splitlines()]
+
+
+def seedable_tables(rows: list[list[str]], skip_tables: list[str]) -> list[tuple[str, str]]:
+    return [(cells[0], cells[1]) for cells in rows if len(cells) == 2 and cells[0] not in skip_tables]
+
+
+def count_rows(database: Database, container: str, qualified: str) -> int:
+    output = step(psql(database, container, f"select count(*) from {qualified}"), f"counting {qualified}")
+    return int(output.strip().splitlines()[-1])
 
 
 def check_disk(database: Database, name: str) -> None:
@@ -499,10 +582,13 @@ def disk_message(name: str, needed: int, free: int) -> str:
     )
 
 
-def repo_goldens(database: Database) -> list[dict]:
+def repo_goldens(database: Database) -> list[dict[str, Any]]:
     _, output = files(database, "cat /perf/goldens/*/META.json 2>/dev/null; true")
-    metas = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
-    return [meta for meta in metas if meta.get("root") == str(database.root)]
+    return [meta for meta in parse_metas(output) if meta.get("root") == str(database.root)]
+
+
+def parse_metas(output: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
 
 
 def finalise_golden(database: Database, name: str) -> None:
@@ -512,22 +598,22 @@ def finalise_golden(database: Database, name: str) -> None:
         "name": name,
         "root": str(database.root),
         "rows": database.rows,
-        "bytes": int(output.strip().splitlines()[-1]),
-        "image": database.image,
+        BYTES: int(output.strip().splitlines()[-1]),
+        IMAGE: database.image,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     step(files(database, f"cat > {final}/META.json && touch {final}/READY", stdin=json.dumps(meta) + "\n"), "writing META.json")
 
 
 def discard_build(database: Database, name: str) -> None:
-    docker(database, "rm", "-f", "-v", database.golden_container(name))
+    remove_container(database, database.golden_container(name))
     try:
         files(database, f"rm -rf /perf/goldens/{name}.tmp")
     except DatabaseError:
         return
 
 
-def golden_meta(database: Database, name: str) -> dict:
+def golden_meta(database: Database, name: str) -> dict[str, Any]:
     code, output = files(database, f"cat /perf/goldens/{name}/META.json")
     return json.loads(output) if code == 0 else {}
 
@@ -535,7 +621,7 @@ def golden_meta(database: Database, name: str) -> dict:
 def start_build(database: Database, tree: trees.Tree) -> str:
     name = golden_name(database, tree)
     state = golden_state(database, name)
-    if state in ("ready", "building"):
+    if state in (READY, BUILDING):
         return f"{tree.name} {name} already {state}"
     log = log_path(database, name)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -547,7 +633,7 @@ def start_build(database: Database, tree: trees.Tree) -> str:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    write_status(database, name, {"state": "building", "started": time.time(), "pid": child.pid})
+    mark_building(database, name, child.pid)
     return f"building {name} for the {tree.name} tree in the background; poll marestail perf db status; log: {log}"
 
 
@@ -557,23 +643,29 @@ def reset(database: Database, tree: trees.Tree) -> tuple[int, dict[str, str]]:
         raise DatabaseError(f"golden not ready: {status_line(database, tree)}")
     started = time.monotonic()
     container = database.tree_container(tree.name)
-    docker(database, "rm", "-f", "-v", container)
+    remove_container(database, container)
     work = database.work_dir(tree.name)
+    copy_golden(database, name, work)
+    port = database.tree_port(tree.name)
+    start_postgres(database, container, work, port, READY_TIMEOUT)
+    reset_ms = round((time.monotonic() - started) * 1000)
+    return reset_ms, database_env(database, container, connection_url(database, port))
+
+
+def copy_golden(database: Database, name: str, work: str) -> None:
     code, output = files(
         database,
         f"rm -rf {work} && mkdir -p /perf/work && cp -a --reflink=always /perf/goldens/{name} {work} && rm -f {work}/READY {work}/META.json",
     )
     if code != 0:
-        lowered = output.lower()
-        raise DatabaseError(
-            REFLINK_FAILED
-            if "reflink" in lowered or "not supported" in lowered
-            else f"copying the golden failed: {' | '.join(tail(output, 3))}"
-        )
-    port = database.tree_port(tree.name)
-    start_postgres(database, container, work, port, READY_TIMEOUT)
-    reset_ms = round((time.monotonic() - started) * 1000)
-    return reset_ms, database_env(database, container, connection_url(database, port))
+        raise DatabaseError(copy_failure(output))
+
+
+def copy_failure(output: str) -> str:
+    lowered = output.lower()
+    if "reflink" in lowered or "not supported" in lowered:
+        return REFLINK_FAILED
+    return f"copying the golden failed: {' | '.join(tail(output, 3))}"
 
 
 def prune(database: Database, needed: set[str]) -> list[str]:
@@ -593,8 +685,16 @@ def down(database: Database) -> list[str]:
     _, output = docker(database, "ps", "-a", "--format", "{{.Names}}")
     names = [name for name in output.split() if name.startswith(database.prefix)]
     for name in names:
-        docker(database, "rm", "-f", "-v", name)
+        remove_container(database, name)
     return names
+
+
+@dataclass(frozen=True)
+class Request:
+    database: Database
+    active: dict[str, trees.Tree]
+    tree_name: str | None
+    wait: bool
 
 
 def command(action: str, tree_name: str | None, wait: bool) -> int:
@@ -602,9 +702,9 @@ def command(action: str, tree_name: str | None, wait: bool) -> int:
     database, problem = for_run(config)
     if database is None:
         return fail(problem, 2)
-    active = trees.active(config) or {}
+    request = Request(database, trees.active(config) or {}, tree_name, wait)
     try:
-        return ACTIONS[action](database, active, tree_name, wait)
+        return ACTIONS[action](request)
     except DatabaseError as error:
         return fail(str(error), 1)
 
@@ -614,40 +714,46 @@ def fail(message: str, code: int) -> int:
     return code
 
 
-def golden_action(database: Database, active: dict[str, trees.Tree], tree_name: str | None, wait: bool) -> int:
-    tree = active.get(tree_name or "")
+def golden_action(request: Request) -> int:
+    tree = request.active.get(request.tree_name or "")
     if tree is None:
-        return fail(f"no tree {tree_name} in a perf run in progress", 2)
-    if not wait:
-        print(start_build(database, tree))
-        return 0
+        return fail(f"no tree {request.tree_name} in a perf run in progress", 2)
+    return (build_now if request.wait else build_in_background)(request.database, tree)
+
+
+def build_now(database: Database, tree: trees.Tree) -> int:
     problem = build(database, tree)
     return fail(problem, 1) if problem else 0
 
 
-def status_action(database: Database, active: dict[str, trees.Tree], tree_name: str | None, wait: bool) -> int:
-    if not active:
+def build_in_background(database: Database, tree: trees.Tree) -> int:
+    print(start_build(database, tree))
+    return 0
+
+
+def status_action(request: Request) -> int:
+    if not request.active:
         return fail("no perf run in progress", 2)
-    for tree in active.values():
-        print(status_line(database, tree))
+    for tree in request.active.values():
+        print(status_line(request.database, tree))
     return 0
 
 
-def url_action(database: Database, active: dict[str, trees.Tree], tree_name: str | None, wait: bool) -> int:
-    if tree_name not in TREE_PORT_OFFSETS:
-        return fail(f"unknown tree {tree_name}; choose from {', '.join(TREE_PORT_OFFSETS)}", 2)
-    print(connection_url(database, database.tree_port(tree_name)))
+def url_action(request: Request) -> int:
+    if request.tree_name not in TREE_PORT_OFFSETS:
+        return fail(f"unknown tree {request.tree_name}; choose from {', '.join(TREE_PORT_OFFSETS)}", 2)
+    print(connection_url(request.database, request.database.tree_port(request.tree_name)))
     return 0
 
 
-def prune_action(database: Database, active: dict[str, trees.Tree], tree_name: str | None, wait: bool) -> int:
-    removed = prune(database, {golden_name(database, tree) for tree in active.values()})
+def prune_action(request: Request) -> int:
+    removed = prune(request.database, {golden_name(request.database, tree) for tree in request.active.values()})
     print("\n".join(f"pruned {name}" for name in removed) or "nothing to prune")
     return 0
 
 
-def down_action(database: Database, active: dict[str, trees.Tree], tree_name: str | None, wait: bool) -> int:
-    removed = down(database)
+def down_action(request: Request) -> int:
+    removed = down(request.database)
     print("\n".join(f"removed {name}" for name in removed) or "no performance database containers")
     return 0
 

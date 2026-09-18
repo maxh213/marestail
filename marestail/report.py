@@ -19,10 +19,13 @@ class Result:
 
 def render(results: list[Result], scope: str | None = None) -> str:
     lines = [render_one(result) for result in results]
-    failed = [result.gate for result in results if not result.ok]
-    verdict = "GATE PASSED" if not failed else "GATE FAILED: " + ", ".join(failed)
     header = [f"scope: {scope}", ""] if scope else []
-    return "\n".join([*header, *lines, "", verdict])
+    return "\n".join([*header, *lines, "", verdict(results)])
+
+
+def verdict(results: list[Result]) -> str:
+    failed = [result.gate for result in results if not result.ok]
+    return "GATE PASSED" if not failed else "GATE FAILED: " + ", ".join(failed)
 
 
 def render_one(result: Result) -> str:

@@ -3,12 +3,14 @@ import re
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import tail
 
+GATE = "cs.mutation"
 OUTPUT_DIR = "stryker"
 REPORT = Path("reports") / "mutation-report.json"
 BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
@@ -19,12 +21,19 @@ INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stry
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    product, tests, error = dotnet.projects(ctx)
-    if error:
-        return Result("cs.mutation", False, error, [], 0.0)
+    found = dotnet.project_pair(ctx)
+    if isinstance(found, str):
+        return Result(GATE, False, found, [], 0.0)
+    blocked = precondition(ctx, *found)
+    if blocked is not None:
+        return blocked
+    return scoped_run(ctx, found, started)
+
+
+def precondition(ctx: Context, product: Path, tests: Path) -> Result | None:
     if tests.resolve() == product.resolve():
         return Result(
-            "cs.mutation",
+            GATE,
             False,
             "stryker needs the tests in their own .csproj",
             [f"{dotnet.rel(ctx, product)}:1 holds both product and test code"],
@@ -33,42 +42,67 @@ def run_gate(ctx: Context) -> Result:
     csproj = product.read_text(errors="replace")
     if SENTRY.search(csproj) and SENTRY_SWITCH not in csproj:
         return Result(
-            "cs.mutation",
+            GATE,
             False,
             "stryker cannot roll back mutants in Sentry's generated code",
             [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"],
             0.0,
         )
+    return None
+
+
+def scoped_run(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
     scope = ctx.mutation_files("dotnet", ctx.dotnet_root(), (".cs",))
     if scope.mode == "error":
-        return Result("cs.mutation", False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], time.time() - started)
     targets = mutation_targets(ctx, scope.files)
     if scope.mode != "full" and not targets:
-        return Result.skipped("cs.mutation", "no changed C# sources")
+        return Result.skipped(GATE, "no changed C# sources")
+    return stryker(ctx, pair, targets, (scope.note, started))
+
+
+def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info: tuple[str, float]) -> Result:
+    note, started = run_info
     out = ctx.work / OUTPUT_DIR
     shutil.rmtree(out, ignore_errors=True)
-    code, output = dotnet.dotnet(ctx, ["tool", "restore"], timeout=900)
-    if code != 0:
-        message = dotnet.hint(code, output) or f"dotnet tool restore failed: {INSTALL}"
-        return Result("cs.mutation", False, message, tail(output), time.time() - started)
-    code, output = dotnet.dotnet(ctx, command(ctx, product, tests, out, targets), timeout=7200)
+    refused = restore_failure(ctx, started)
+    if refused is not None:
+        return refused
+    code, output = dotnet.dotnet(ctx, command(ctx, *pair, out, targets), timeout=7200)
     report = out / REPORT
     if not report.exists():
-        message = dotnet.hint(code, output) or missing(output, code)
-        return Result("cs.mutation", False, message, tail(output), time.time() - started)
+        return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), time.time() - started)
+    return verdict(load_mutants(ctx, report), output, note, started)
+
+
+def restore_failure(ctx: Context, started: float) -> Result | None:
+    code, output = dotnet.dotnet(ctx, ["tool", "restore"], timeout=900)
+    if code == 0:
+        return None
+    message = dotnet.hint(code, output) or f"dotnet tool restore failed: {INSTALL}"
+    return Result(GATE, False, message, tail(output), time.time() - started)
+
+
+def load_mutants(ctx: Context, report: Path) -> list[tuple[str, dict[str, Any]]]:
     files = json.loads(report.read_text()).get("files", {})
-    mutants = [
+    return [
         (dotnet.rel(ctx, file), mutant)
         for file, data in files.items()
         for mutant in data.get("mutants", [])
         if not dotnet.mutation_excluded(ctx, dotnet.rel(ctx, file))
     ]
+
+
+def verdict(mutants: list[tuple[str, dict[str, Any]]], output: str, note: str, started: float) -> Result:
     if not mutants:
-        return Result("cs.mutation", False, "no mutants were generated", tail(output), time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), time.time() - started)
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
-    summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
-    summary += f" {scope.note}" if scope.note else ""
-    return Result("cs.mutation", not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary(len(findings), len(mutants), note), findings, time.time() - started)
+
+
+def summary(failed: int, total: int, note: str) -> str:
+    text = f"{failed} of {total} mutants not killed" if failed else f"all {total} mutants killed"
+    return text + (f" {note}" if note else "")
 
 
 def mutation_targets(ctx: Context, files: list[str] | None) -> list[str]:
@@ -85,7 +119,10 @@ def missing(output: str, code: int) -> str:
 
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
-    args = [
+    prefix = dotnet.rel(ctx, ctx.dotnet_root()) + "/"
+    excludes = [f"!**/{pattern.strip('/').removeprefix(prefix)}" for pattern in dotnet.mutation_patterns(ctx)]
+    includes = ["**/" + name.removeprefix(prefix) for name in targets]
+    return [
         "stryker",
         "--skip-version-check",
         "--break-on-initial-test-failure",
@@ -99,19 +136,15 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "json",
         "-r",
         "progress",
+        *mutate(excludes + includes),
     ]
-    excludes = dotnet.listify(ctx.dotnet("mutation_exclude", [])) or dotnet.listify(ctx.dotnet("coverage_exclude", []))
-    for pattern in excludes:
-        name = pattern.strip("/")
-        if name.startswith(dotnet.rel(ctx, ctx.dotnet_root()) + "/"):
-            name = name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")
-        args += ["-m", f"!**/{name}"]
-    for name in targets:
-        args += ["-m", "**/" + name.removeprefix(dotnet.rel(ctx, ctx.dotnet_root()) + "/")]
-    return args
 
 
-def describe(name: str, mutant: dict) -> str:
+def mutate(patterns: list[str]) -> list[str]:
+    return [arg for pattern in patterns for arg in ("-m", pattern)]
+
+
+def describe(name: str, mutant: dict[str, Any]) -> str:
     line = mutant.get("location", {}).get("start", {}).get("line", 0)
     replacement = " ".join(str(mutant.get("replacement", "")).split())[:60]
     return f"{name}:{line} {mutant.get('mutatorName', 'mutant')} {mutant['status']}: {replacement}"
