@@ -19,7 +19,6 @@ SCAN_RELEASE = "21"
 DEPENDENCY_PLUGIN = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1"
 BUILD_CLASSPATH = f"{DEPENDENCY_PLUGIN}:build-classpath"
 SKIP_DIRS = {"target", "build", ".marestail", ".git", ".mvn", ".gradle", ".idea", "node_modules"}
-POM = {"m": "http://maven.apache.org/POM/4.0.0"}
 INSTALL = {
     "jdk": "install a JDK 21 or newer (java and javac on PATH, JAVA_HOME, or [java] java_home)",
     "maven": "install Maven 3.9+ (mvn on PATH), commit the Maven wrapper (./mvnw), or set [java] mvn",
@@ -119,7 +118,7 @@ def release(ctx: Context) -> str | None:
 
 
 def pom_release(path: Path) -> str | None:
-    properties = ET.parse(path).getroot().find("m:properties", POM)
+    properties = ET.parse(path).getroot().find("{*}properties")
     if properties is None:
         return None
     value = resolve_property(pom_properties(properties), "maven.compiler.release")

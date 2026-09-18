@@ -16,8 +16,7 @@ from marestail.shell import tail
 GATE = "cs.tests"
 RESULTS_DIR = "cs-tests"
 TRX_FILE = "tests.trx"
-TRX_NAMESPACE = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
-TRX = {"t": TRX_NAMESPACE}
+ANY_XML_NAMESPACE = "{*}"
 ATTRIBUTE = "ExcludeFromCodeCoverage"
 FRAME = re.compile(r"(/\S+?\.cs):line (\d+)")
 RUNSETTINGS = """<?xml version="1.0" encoding="utf-8"?>
@@ -98,7 +97,7 @@ def passed_run(ctx: Context, results: Path, output: str, started: float) -> Resu
 
 
 def passed_count(trx: Path) -> int:
-    counters = ET.parse(trx).getroot().find("t:ResultSummary/t:Counters", TRX)
+    counters = ET.parse(trx).getroot().find(trx_path("t:ResultSummary/t:Counters"))
     return int(counters.get("passed", 0)) if counters is not None else 0
 
 
@@ -141,7 +140,7 @@ def failed_tests(ctx: Context, trx: Path, tests: Path) -> list[str]:
         return []
     return [
         failure_line(ctx, result, tests)
-        for result in ET.parse(trx).getroot().findall(".//t:UnitTestResult", TRX)
+        for result in ET.parse(trx).getroot().findall(trx_path(".//t:UnitTestResult"))
         if result.get("outcome") not in ("Passed", "NotExecuted")
     ]
 
@@ -159,8 +158,15 @@ def failure_where(ctx: Context, result: ET.Element, tests: Path) -> str:
 
 
 def text_of(result: ET.Element, tag: str) -> str:
-    element = result.find(f".//{tag}", TRX)
+    element = result.find(trx_path(f".//{tag}"))
     return (element.text or "").strip() if element is not None else ""
+
+
+def trx_path(path: str) -> str:
+    nested = path.startswith(".//")
+    names = [part.split(":")[-1] for part in path.removeprefix(".//").split("/")]
+    body = "/".join(ANY_XML_NAMESPACE + name for name in names)
+    return f".//{body}" if nested else body
 
 
 def normalise(ctx: Context, raw: dict[str, Any]) -> dict[str, Any]:

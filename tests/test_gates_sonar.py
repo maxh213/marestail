@@ -244,6 +244,56 @@ def test_scanner_exclusions(tmp_path: Path, text: str, expected: str) -> None:
     assert sonar.scanner_exclusions(make_context(tmp_path)) == expected
 
 
+def write_omit(root: Path, *patterns: str) -> None:
+    listed = ", ".join(f'"{pattern}"' for pattern in patterns)
+    (root / "pyproject.toml").write_text(f"[tool.coverage.run]\nomit = [{listed}]\n")
+
+
+def write_under(root: Path, relative: str) -> Path:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x\n")
+    return path
+
+
+def test_omit_patterns_become_sonar_globs(tmp_path: Path) -> None:
+    write_omit(tmp_path, "pkg/tui/*", "pkg/__init__.py")
+    assert sonar.omit_exclusions(make_context(tmp_path)) == ["pkg/tui/**", "pkg/__init__.py"]
+
+
+def test_embedded_language_files_are_excluded_when_unconfigured(tmp_path: Path) -> None:
+    write_under(tmp_path, "pkg/jvm/Scan.java")
+    ctx = make_context(tmp_path, {"python": {"sources": ["pkg"]}})
+    assert "pkg/**/*.java" in sonar.scanner_exclusions(ctx).split(",")
+
+
+def test_configured_language_files_stay_in_analysis(tmp_path: Path) -> None:
+    write_under(tmp_path, "pkg/Scan.java")
+    ctx = make_context(tmp_path, {"python": {"sources": ["pkg"]}, "java": {}})
+    assert "pkg/**/*.java" not in sonar.scanner_exclusions(ctx).split(",")
+
+
+def test_root_python_sources_use_unprefixed_language_globs(tmp_path: Path) -> None:
+    write_under(tmp_path, "scan.rb")
+    ctx = make_context(tmp_path, {"python": {"sources": "."}})
+    assert "**/*.rb" in sonar.scanner_exclusions(ctx).split(",")
+    assert sonar.language_glob("", "rb") == "**/*.rb"
+    assert sonar.unique_patterns(["perf/**", "perf/**", "a/**"]) == ["perf/**", "a/**"]
+
+
+def test_this_repo_excludes_omitted_python_and_embedded_scanners() -> None:
+    root = Path(__file__).resolve().parent.parent
+    ctx = make_context(root, {"python": {"sources": ["marestail"]}})
+    parts = sonar.scanner_exclusions(ctx).split(",")
+    assert "marestail/tui/**" in parts
+    assert "marestail/__init__.py" in parts
+    assert "marestail/**/*.java" in parts
+    assert "marestail/**/*.mjs" in parts
+    assert "marestail/**/*.rb" in parts
+    assert "marestail/**/*.rs" in parts
+    assert "marestail/**/*.cs" in parts
+
+
 def test_properties_parsing() -> None:
     text = "# c=1\n! bang=2\n\n=novalue\na = 1\nb: two=2\nc=x:y\nlong=one,\\\n  two\nplain\n"
     assert sonar.properties(text) == [("a", "1"), ("b", "two=2"), ("c", "x:y"), ("long", "one,  two")]

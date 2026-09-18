@@ -1,3 +1,4 @@
+import argparse
 import ast
 import io
 import json
@@ -154,6 +155,10 @@ def test_help_lists_every_subcommand() -> None:
     assert listed.group(1).split(",") == ["gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"]
 
 
+def parse_help(parser: argparse.ArgumentParser, argv: list[str]) -> None:
+    parser.parse_args([*argv, "--help"])
+
+
 @pytest.mark.parametrize(
     ("argv", "flags"),
     [
@@ -168,7 +173,7 @@ def test_help_lists_every_subcommand() -> None:
 def test_subcommand_help_lists_its_flags_in_order(argv: list[str], flags: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     parser = cli.build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args([*argv, "--help"])
+        parse_help(parser, argv)
     text = capsys.readouterr().out
     positions = [text.index(flag) for flag in flags]
     assert positions == sorted(positions)
