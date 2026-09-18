@@ -26,7 +26,7 @@
 13. `./bin/marestail run --help`  
     Expected: lists `--from`, `--to`, `--auto`, `--scope`, `--focus`, `--model`, `--retries`, `--effort`, `--agent`.
 14. `rm -rf /tmp/marestail-install-check && mkdir /tmp/marestail-install-check && ./bin/marestail install /tmp/marestail-install-check`  
-    Expected: prints exactly `installed into /tmp/marestail-install-check; edit marestail.toml and sonar-project.properties` and creates `marestail.toml`, `sonar-project.properties`, `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`, plus `CLAUDE.md` and `AGENTS.md` containing `marestail gate`.
+    Expected: stdout ends with `installed into /tmp/marestail-install-check; edit marestail.toml and sonar-project.properties` (if Grok has not yet trusted the target, a preceding `trusted ... for grok project hooks` line is also printed). Creates `marestail.toml`, `sonar-project.properties`, `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`, plus `CLAUDE.md` and `AGENTS.md` containing `marestail gate`.
 15. `unset MARESTAIL_DANDELION; PATH=/usr/bin:/bin; ./bin/marestail route 2>&1; echo "exit=$?"`  
     Expected: exit code `127`, stderr contains `dandelion is not installed` and `https://github.com/maxh213/dandelion`.
 16. `./bin/marestail depth`  

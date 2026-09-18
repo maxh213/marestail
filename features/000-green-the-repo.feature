@@ -86,7 +86,7 @@ Feature: Bring marestail itself through its own gate
     When I run "marestail depth"
     Then the exit code is 0
 
-  Scenario: install command creates the expected files in an existing empty directory and prints the same line
+  Scenario: install command creates the expected files in an existing empty directory and prints the install line
     Given an existing empty temporary directory "/tmp/marestail-install-check"
     When I run "marestail install /tmp/marestail-install-check"
     Then the exit code is 0
@@ -97,7 +97,7 @@ Feature: Bring marestail itself through its own gate
     And "/tmp/marestail-install-check/guidance/ts.md" exists
     And "/tmp/marestail-install-check/CLAUDE.md" contains "marestail gate"
     And "/tmp/marestail-install-check/AGENTS.md" contains "marestail gate"
-    And stdout is exactly "installed into /tmp/marestail-install-check; edit marestail.toml and sonar-project.properties\n"
+    And stdout ends with "installed into /tmp/marestail-install-check; edit marestail.toml and sonar-project.properties\n"
 
   Scenario: route without dandelion still prints the install hint and exits 127
     Given the environment variable "MARESTAIL_DANDELION" is unset and PATH is set to "/usr/bin:/bin"
