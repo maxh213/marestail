@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -17,6 +18,7 @@ from marestail.report import Result, render, to_json
 HOOK_BLOCK_LIMIT = 5
 STORE_TRUE = "store_true"
 TREE = "--tree"
+TUI_APP = "marestail.tui.app"
 
 Payload = dict[str, Any]
 
@@ -462,10 +464,9 @@ def run_command(args: argparse.Namespace) -> int:
 
 
 def watch_command(args: argparse.Namespace) -> int:
-    from marestail.tui import app as tui_app
-
     paths = args.paths or default_watch_roots()
-    return tui_app.run([Path(p) for p in paths], args.refresh, args.all)
+    code: int = importlib.import_module(TUI_APP).run([Path(p) for p in paths], args.refresh, args.all)
+    return code
 
 
 def default_watch_roots() -> list[Path]:

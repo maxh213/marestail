@@ -164,9 +164,9 @@ def test_run_command_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def fake_tui(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     fake = Recorder(4)
-    package = types.ModuleType("marestail.tui")
-    package.app = types.SimpleNamespace(run=fake)
-    monkeypatch.setitem(sys.modules, "marestail.tui", package)
+    app = types.ModuleType(cli.TUI_APP)
+    app.run = fake
+    monkeypatch.setitem(sys.modules, cli.TUI_APP, app)
     return fake
 
 
