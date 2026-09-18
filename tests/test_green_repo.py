@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from marestail import cli, report
+from marestail import cli, graph, report
 from marestail import config as config_module
 from marestail.gates import comments, py_runtime
 from marestail.report import Result
@@ -140,6 +140,11 @@ def test_orchestration_functions_are_split_into_small_helpers() -> None:
     paths = [ROOT / name for name in SPLIT_MODULES] + sorted((ROOT / "marestail" / "gates").glob("*.py"))
     found = [finding for path in paths for finding in long_functions(path)]
     assert [finding for finding in found if not re.fullmatch(r"__init__\.py:\d+ registry", finding)] == []
+
+
+def test_this_repo_graph_starts_with_python_modules() -> None:
+    text = graph.python_graph(config_module.load(ROOT))
+    assert text.splitlines()[0] == "## Python modules"
 
 
 def test_help_lists_every_subcommand() -> None:
