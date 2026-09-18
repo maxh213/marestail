@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -197,7 +198,7 @@ def test_parsed_toml_missing_and_directory(tmp_path: Path) -> None:
 def test_parsed_toml_non_dict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "pyproject.toml"
     path.write_text("[tool]\n")
-    monkeypatch.setattr(py_crap.tomllib, "load", lambda handle: ["not", "a", "table"])
+    monkeypatch.setattr(tomllib, "load", lambda handle: ["not", "a", "table"])
     assert py_crap.parsed_toml(path) == {}
 
 
