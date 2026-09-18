@@ -34,9 +34,13 @@
 17. For each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-perf.py`, `tools/test-perf-db.py`, `tools/test-practices.py`:  
     `python3 <script>`  
     Expected: each exits `0` and the last line of output contains `ok`.
-18. `grep -R -E '#[^!]|"""|''' marestail/ --include='*.py' | grep -v '^Binary' || true`  
+18. `grep -R -E "#[^!]|\"\"\"|'''" marestail/ --include='*.py' | grep -v '^Binary' || true`  
     Expected: no matches that are comments or docstrings (shebangs and string literals are allowed).
 19. `grep -A 200 '^## Environment variables' README.md`  
     Expected: the section exists and contains every variable listed in `features/000-green-the-repo.feature`.
 20. `grep -E '\b(guidance/ruby\.md|missing path example)\b' README.md`  
     Expected: either the reference is removed or the file exists; the `docs` gate from step 3 passing covers this.
+21. `unshare -r -n env -u MARESTAIL_CLAUDE -u MARESTAIL_GROK -u MARESTAIL_KILO -u MARESTAIL_KIMI -u MARESTAIL_CURSOR PATH=/usr/bin:/bin .venv/bin/pytest tests`  
+    Expected: exit code `0`, all tests pass hermetically without network access and without calling real agent CLIs (`claude`, `grok`, `kilo`, `kimi`, `cursor`) or real SonarQube.
+22. `python3 -c "import ast, glob, sys; targets = ['marestail/runner.py', 'marestail/install.py', 'marestail/context.py'] + glob.glob('marestail/gates/*.py'); bad = [f'{p}:{n.name}({getattr(n, \"end_lineno\", 0) - n.lineno + 1} lines)' for p in sorted(targets) for n in ast.walk(ast.parse(open(p).read())) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and getattr(n, 'end_lineno', 0) - n.lineno + 1 > 30 and n.name != 'registry']; print('\n'.join(bad) if bad else 'all orchestration functions <= 30 lines'); sys.exit(1 if bad else 0)"`  
+    Expected: exit code `0`, prints `all orchestration functions <= 30 lines`; proves long orchestration functions in `runner.py`, `install.py`, `context.py`, and the gates have been split into small named helpers.

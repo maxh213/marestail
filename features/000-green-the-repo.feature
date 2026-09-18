@@ -64,6 +64,18 @@ Feature: Bring marestail itself through its own gate
     And the output contains "marestail/_deliberate_comment.py:1 comment:"
     And the output does not end with "GATE PASSED"
 
+  Scenario: no test calls a real agent CLI, a real SonarQube, or the network
+    Given the network namespace is unshared with no network access
+    And no agent CLI binary or SonarQube is on PATH
+    When I run "unshare -r -n env -u MARESTAIL_CLAUDE -u MARESTAIL_GROK -u MARESTAIL_KILO -u MARESTAIL_KIMI -u MARESTAIL_CURSOR PATH=/usr/bin:/bin .venv/bin/pytest tests"
+    Then the exit code is 0
+    And all tests pass with subprocesses faked
+
+  Scenario: long orchestration functions in runner, install, context, and the gates are split into small named helpers
+    When I statically check function lengths in "marestail/runner.py", "marestail/install.py", "marestail/context.py", and "marestail/gates/*.py"
+    Then no orchestration function exceeds 30 lines
+    And long workflows are decomposed into small named helper functions
+
   Scenario: every CLI subcommand remains available
     When I run "marestail --help"
     Then the output lists the subcommands "gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"
@@ -153,5 +165,5 @@ Feature: Bring marestail itself through its own gate
     And it notes that common variables such as HOME and PATH are ignored by the docs gate
 
   Scenario: no comments or docstrings remain under marestail/
-    When I run "grep -R -E '#[^!]|"""|'''" marestail/ --include='*.py'
+    When I run "grep -R -E \"#[^!]|\"\"\"|'''\" marestail/ --include='*.py'"
     Then the only matches are shebang lines or string literals, not comments or docstrings
