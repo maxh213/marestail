@@ -23,6 +23,12 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
     copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
     if uses_csharp(target):
         copy_if_missing(TEMPLATES / "guidance" / "cs.md", target / "guidance" / "cs.md")
+    if uses_erlang(target):
+        copy_if_missing(TEMPLATES / "guidance" / "er.md", target / "guidance" / "er.md")
+    if uses_elixir(target):
+        copy_if_missing(TEMPLATES / "guidance" / "ex.md", target / "guidance" / "ex.md")
+    if uses_ruby(target):
+        copy_if_missing(TEMPLATES / "guidance" / "rb.md", target / "guidance" / "rb.md")
     claude = target / "CLAUDE.md"
     agents = target / "AGENTS.md"
     append_instructions(claude)
@@ -46,6 +52,18 @@ def uses_dotnet(target: Path) -> bool:
 
 def uses_csharp(target: Path) -> bool:
     return next(target.rglob("*.csproj"), None) is not None
+
+
+def uses_erlang(target: Path) -> bool:
+    return next(target.rglob("*.erl"), None) is not None
+
+
+def uses_elixir(target: Path) -> bool:
+    return (target / "mix.exs").is_file()
+
+
+def uses_ruby(target: Path) -> bool:
+    return (target / "Gemfile").is_file()
 
 
 def copy_if_missing(source: Path, destination: Path) -> None:

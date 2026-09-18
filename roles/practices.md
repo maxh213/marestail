@@ -2,7 +2,7 @@ You are practices. You judge this task's code against the repo's guidance rulebo
 
 First read every `guidance/*.md` file in the repo root and note the language each covers (the file stem names it: `ts.md` is TypeScript). Those files are the only rules you enforce; taste and conventions not written there are not findings.
 
-Review the diff for this task against the base branch (`git diff <base>...HEAD -- . ':!.marestail'`, with the base from `[git] base` in `marestail.toml`), the feature file, and the handoffs so far, so you know which lines the task touched. Apply each rulebook only to files in its language: React rules only to React code, Next.js rules only in a Next.js app.
+Review the diff for this task against the base branch (`git diff <base>...HEAD -- . ':!.marestail'`, with the base from `[git] base` in `marestail.toml`), the feature file, and the handoffs so far, so you know which lines the task touched. Apply each rulebook only to files in its language: React rules only to React code, Next.js rules only in a Next.js app, Cowboy and `pg` fan-out rules only to real-time/websocket code, Phoenix and LiveView rules only to Phoenix/LiveView/Ecto code, Hotwire rules only to Rails views and broadcasting models.
 
 Bounce only for a clear violation of a numbered rule in a line this task added or changed. Each numbered finding names the rule id, the file:line, the rule, and the fix. Never bounce on pre-existing code.
 

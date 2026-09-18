@@ -189,6 +189,9 @@ def install_template():
             install.install(target, gitignore_generated=True)
         expect("gitignore-generated-no-guidance", "guidance/" in (target / ".gitignore").read_text(), False)
         expect("install-no-csharp-guidance", (target / "guidance" / "cs.md").exists(), False)
+        expect("install-no-erlang-guidance", (target / "guidance" / "er.md").exists(), False)
+        expect("install-no-elixir-guidance", (target / "guidance" / "ex.md").exists(), False)
+        expect("install-no-ruby-guidance", (target / "guidance" / "rb.md").exists(), False)
         (target / "src").mkdir()
         (target / "src" / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
         with quiet():
@@ -196,6 +199,24 @@ def install_template():
         csharp = target / "guidance" / "cs.md"
         expect("install-creates-csharp-guidance", csharp.is_file(), True)
         expect("install-csharp-guidance-matches", csharp.read_text(), (ROOT / "templates" / "guidance" / "cs.md").read_text())
+        (target / "src" / "box.erl").write_text("-module(box).\n")
+        with quiet():
+            install.install(target)
+        erlang = target / "guidance" / "er.md"
+        expect("install-creates-erlang-guidance", erlang.is_file(), True)
+        expect("install-erlang-guidance-matches", erlang.read_text(), (ROOT / "templates" / "guidance" / "er.md").read_text())
+        (target / "mix.exs").write_text("defmodule Box.MixProject do\nend\n")
+        with quiet():
+            install.install(target)
+        elixir = target / "guidance" / "ex.md"
+        expect("install-creates-elixir-guidance", elixir.is_file(), True)
+        expect("install-elixir-guidance-matches", elixir.read_text(), (ROOT / "templates" / "guidance" / "ex.md").read_text())
+        (target / "Gemfile").write_text("source \"https://rubygems.org\"\n")
+        with quiet():
+            install.install(target)
+        ruby = target / "guidance" / "rb.md"
+        expect("install-creates-ruby-guidance", ruby.is_file(), True)
+        expect("install-ruby-guidance-matches", ruby.read_text(), (ROOT / "templates" / "guidance" / "rb.md").read_text())
 
 
 def rulebook_content():
@@ -216,6 +237,43 @@ def csharp_rulebook_content():
         expect(f"cs mentions {needle}", needle in text, True)
 
 
+def erlang_rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "er.md").read_text()
+    ids = [int(n) for n in re.findall(r"\*\*ER-(\d+)", text)]
+    expect("er-rule-count", len(ids) >= 40, True)
+    expect("er-rule-contiguous", ids, list(range(1, len(ids) + 1)))
+    expect("er-rule-lines", len(text.splitlines()) <= 250, True)
+    for heading in ["## Errors & functional style", "## OTP & concurrency", "## Testing", "## Types & style", "## Cowboy & real-time"]:
+        expect(f"er heading {heading}", heading in text, True)
+    for needle in ["maybe", "gen_statem", "handle_event_function", "list_to_existing_atom", "handle_continue", "pg:", "cowboy_websocket", "simple_one_for_one"]:
+        expect(f"er mentions {needle}", needle in text, True)
+
+
+def ruby_rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "rb.md").read_text()
+    ids = [int(n) for n in re.findall(r"\*\*RB-(\d+)", text)]
+    expect("rb-rule-count", len(ids) >= 40, True)
+    expect("rb-rule-contiguous", ids, list(range(1, len(ids) + 1)))
+    expect("rb-rule-lines", len(text.splitlines()) <= 250, True)
+    for heading in ["## Convention, Ruby, OOP", "## Models & controllers", "## Hotwire", "## Testing", "## Style, stack, ops"]:
+        expect(f"rb heading {heading}", heading in text, True)
+    for needle in ["resources :", "broadcasts_to", "strict_loading", "Solid Cable", "bin/ci", "rubocop-rails-omakase", "YJIT"]:
+        expect(f"rb mentions {needle}", needle in text, True)
+
+
+def elixir_rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "ex.md").read_text()
+    ids = [int(n) for n in re.findall(r"\*\*EX-(\d+)", text)]
+    expect("ex-rule-count", len(ids) >= 40, True)
+    expect("ex-rule-contiguous", ids, list(range(1, len(ids) + 1)))
+    expect("ex-rule-lines", len(text.splitlines()) <= 250, True)
+    for heading in ["## Errors & functional style", "## OTP & concurrency", "## Testing", "## Types & style", "## Phoenix & LiveView"]:
+        expect(f"ex heading {heading}", heading in text, True)
+    for needle in ["with", "String.to_existing_atom", "assign_async", "~p", "stream/", "Phoenix.Presence", "unique_constraint", "Bandit"]:
+        expect(f"ex mentions {needle}", needle in text, True)
+    expect("ex-no-moduledoc-requirement", "@moduledoc" in text and "do not add them" in text, True)
+
+
 if __name__ == "__main__":
     pipeline_order()
     guidance_files()
@@ -227,4 +285,7 @@ if __name__ == "__main__":
     install_template()
     rulebook_content()
     csharp_rulebook_content()
+    erlang_rulebook_content()
+    elixir_rulebook_content()
+    ruby_rulebook_content()
     print("practices ok")

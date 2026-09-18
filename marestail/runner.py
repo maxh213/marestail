@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from marestail import audit, freeze, practices, prompts
+from marestail import audit, freeze, nice, practices, prompts
 from marestail import route as dandelion
 from marestail import config as config_module
 from marestail.cli import hook_focus, resolve_focus, run_gates
@@ -110,6 +110,7 @@ def run_pipeline(
     focus: list[str] | None = None,
 ) -> int:
     config = config_module.load(Path.cwd())
+    nice.apply(config)
     if model is None:
         model = config.get("agent", "model")
     route = model if dandelion.is_routed(model) else None
@@ -130,7 +131,17 @@ def run_pipeline(
         raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
     share_scope(scope_changed, hard, focused)
     state = Run(config=config, task=task.resolve(), model=model, retries=retries, agent=agent, effort=effort, scope_changed=scope_changed, focus=focused, hard=hard, route=route)
-    perf_trees.record_start(config, state.task_name)
+    log = PipelineLog(sys.stdout, state.folder / "pipeline.log")
+    sys.stdout = log
+    try:
+        return run_logged(state, start, stop, auto)
+    finally:
+        sys.stdout = log.primary
+        log.close()
+
+
+def run_logged(state: Run, start: str | None, stop: str | None, auto: bool) -> int:
+    perf_trees.record_start(state.config, state.task_name)
     outcome = 0
     for step in window(start, stop):
         if not run_step(state, step):
@@ -147,6 +158,32 @@ def run_pipeline(
     if state.perf_changes:
         print(state.perf_changes)
     return outcome
+
+
+class PipelineLog:
+    def __init__(self, primary, path: Path):
+        self.primary = primary
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = path.open("a", encoding="utf-8")
+
+    def write(self, data):
+        self.primary.write(data)
+        self.file.write(data)
+        self.file.flush()
+        return len(data)
+
+    def flush(self):
+        self.primary.flush()
+        self.file.flush()
+
+    def isatty(self):
+        return self.primary.isatty()
+
+    def close(self):
+        self.file.close()
+
+    def __getattr__(self, name):
+        return getattr(self.primary, name)
 
 
 def share_scope(scope_changed: bool, hard: bool, focus: set[str]) -> None:

@@ -18,21 +18,55 @@ CONV_BYTES = 262144
 TAIL_STALE_S = 900
 TAIL_LIMIT = 3
 TAIL_CHARS = 90
+MAX_DEPTH = 4
+SKIP_DIRS = {
+    ".git",
+    ".marestail",
+    ".next",
+    ".scannerwork",
+    ".stryker-tmp",
+    ".venv",
+    ".yarn",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "mutants",
+    "node_modules",
+    "StrykerOutput",
+    "target",
+    "vendor",
+    "venv",
+}
 
 ProcRow = tuple[int, int, int, list[str]]
 
 
 def discover(roots: list[Path]) -> list[Path]:
     found: list[Path] = []
+    seen: set[Path] = set()
     for root in roots:
-        try:
-            children = sorted(p for p in root.iterdir() if p.is_dir())
-        except OSError:
-            children = []
-        if (root / ".marestail").is_dir():
-            found.append(root)
-        found.extend(p for p in children if (p / ".marestail").is_dir())
+        walk_beds(root, 0, found, seen)
     return found
+
+
+def walk_beds(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
+    real = real_path(path)
+    if real in seen:
+        return
+    seen.add(real)
+    if (path / ".marestail").is_dir():
+        found.append(path)
+    if depth >= MAX_DEPTH:
+        return
+    try:
+        children = sorted(p for p in path.iterdir() if p.is_dir() and not p.is_symlink())
+    except OSError:
+        return
+    for child in children:
+        if child.name in SKIP_DIRS or child.name.startswith("."):
+            continue
+        walk_beds(child, depth + 1, found, seen)
 
 
 def collect_repo(root: Path) -> RepoState:
@@ -76,8 +110,23 @@ def latest_runner_line(log_path: Path | None) -> str | None:
 
 
 def collect_fleet(roots: list[Path]) -> Fleet:
-    repos = [collect_repo(root) for root in discover(roots)]
+    repos = []
+    for root in discover(roots):
+        state = collect_repo(root)
+        state.name = display_name(root, roots)
+        repos.append(state)
     return Fleet(repos=repos, scanned_at=time.time())
+
+
+def display_name(bed: Path, roots: list[Path]) -> str:
+    real = real_path(bed)
+    for root in roots:
+        try:
+            relative = real.relative_to(real_path(root)).as_posix()
+        except ValueError:
+            continue
+        return real.name if relative == "." else relative
+    return real.name
 
 
 def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
@@ -120,17 +169,20 @@ def dir_mtime(path: Path) -> float:
 
 def latest_log(root: Path) -> Path | None:
     runs = root / ".marestail" / "runs"
+    logs: list[Path] = []
     try:
-        logs = [
-            p
-            for p in runs.iterdir()
-            if p.is_file() and p.name.startswith("overnight-") and p.suffix == ".log"
-        ]
+        for path in runs.iterdir():
+            if path.is_file() and path.name.startswith("overnight-") and path.suffix == ".log":
+                logs.append(path)
+            elif path.is_dir():
+                pipeline = path / "pipeline.log"
+                if pipeline.is_file():
+                    logs.append(pipeline)
     except OSError:
         return None
     if not logs:
         return None
-    return max(logs, key=lambda p: p.name)
+    return max(logs, key=dir_mtime)
 
 
 def parse_log(path: Path) -> list[Step]:

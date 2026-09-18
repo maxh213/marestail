@@ -6,6 +6,9 @@ base = "origin/master"
 # model = "claude-opus-5"  # or dandelion/route / dandelion/route-best: ask dandelion before every session, which picks backend, model and effort
 # effort = "high"  # reasoning effort or variant; stamped on every commit
 
+# [run]
+# nice = 19  # 0 leaves the process at the shell's priority; MARESTAIL_NICE overrides; children inherit
+
 # [practices]
 # enabled = true  # the practices judge runs between architect and perf unless false; skips repos with no guidance/*.md
 
