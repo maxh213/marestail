@@ -73,6 +73,10 @@ def parsed_toml(path: Path) -> dict[str, Any]:
             loaded: Any = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+    return as_table(loaded)
+
+
+def as_table(loaded: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
