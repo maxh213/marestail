@@ -12,7 +12,7 @@ Feature: Bring marestail itself through its own gate
     When I run "marestail gate --tier full"
     Then the exit code is 0
     And the output ends with the line "GATE PASSED"
-    And every result line matches "^\[ok  \] <gate-name> <summary>  \\(<seconds>s\)$"
+    And every result line matches "^\[ok  \] .{14} .+  \(\d+\.\d+s\)$"
     And no result line starts with "[FAIL]"
 
   Scenario: default fast-tier gate still passes
