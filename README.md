@@ -111,7 +111,7 @@ After every worker the runner checks, deterministically: the handoff exists, the
 
 ## Best practices
 
-The `practices` judge reviews each task's diff against the per-language rulebooks in the repo's `guidance/` folder (`guidance/ts.md`, `guidance/ruby.md`, …; the file stem names the language). A repo with no `guidance/*.md` is skipped entirely, so the step only runs where a maintainer has added rulebooks, and `[practices] enabled = false` turns it off per repo. It bounces to the coder only for a clear violation of a numbered rule in a line the task added or changed, citing the rule id and file:line; violations in pre-existing code are listed informationally under `## Pre-existing` on a PASS. React and Next.js rules apply only where that stack is present.
+The `practices` judge reviews each task's diff against the per-language rulebooks in the repo's `guidance/` folder (`guidance/ts.md`, `guidance/cs.md`, …; the file stem names the language). A repo with no `guidance/*.md` is skipped entirely, so the step only runs where a maintainer has added rulebooks, and `[practices] enabled = false` turns it off per repo. It bounces to the coder only for a clear violation of a numbered rule in a line the task added or changed, citing the rule id and file:line; violations in pre-existing code are listed informationally under `## Pre-existing` on a PASS. React and Next.js rules apply only where that stack is present.
 
 `marestail install` places `guidance/ts.md`, the curated TypeScript/React/Next.js rulebook (rules numbered `TS-1`…), and in a repo with a `.csproj` `guidance/cs.md`, whose one rule so far (`CS-1`) requires every test to follow Arrange, Act, Assert. Guidance files are maintainer policy: committed, never gitignored, and frozen (`guidance/**` in `freeze.SPEC`), so no agent can weaken a rulebook during a run. Other languages get no shipped rulebook; write your own `guidance/<lang>.md` with one numbered rule per line.
 
@@ -134,6 +134,37 @@ A bench that touches a database runs with `--db`. With `[perf.db] migrate` set, 
 ## Writing tasks
 
 One task is one vertical slice: a user-visible outcome, thin, through every layer it needs. `marestail install` drops `tasks/README.md` into the repo with the guidance; the critic bounces a spec that delivers a layer instead of a slice unless the task declares itself a refactor.
+
+## Environment variables
+
+Every variable marestail reads. The `docs` gate ignores common ones such as `HOME` and `PATH`.
+
+| Variable | Effect |
+|---|---|
+| `MARESTAIL_AGENT` | default backend for `marestail run` when `--agent` is not given |
+| `MARESTAIL_CLAUDE` | claude binary (default `claude`) |
+| `MARESTAIL_AGY` | agy binary (default `agy`) |
+| `MARESTAIL_CURSOR` | Cursor agent binary (default `cursor-agent`) |
+| `MARESTAIL_GROK` | grok binary (default `grok`) |
+| `MARESTAIL_GROK_EFFORT` | Grok reasoning effort when `--effort` is not given |
+| `MARESTAIL_KILO` | kilo binary (default `kilo`) |
+| `MARESTAIL_KILO_VARIANT` | Kilo variant when `--effort` is not given |
+| `MARESTAIL_KIMI` | kimi binary (default `kimi`) |
+| `MARESTAIL_DANDELION` | dandelion binary (default `dandelion`) |
+| `DANDELION_CLAUDE_WORK_CONFIG_DIR` | config directory for the `claude-work` account (default `~/.claude-work`) |
+| `CLAUDE_CONFIG_DIR` | set to the directory above for `claude-work` sessions |
+| `MARESTAIL_LIMIT_WAIT_SECONDS` | seconds to wait after a rate limit (default 600) |
+| `MARESTAIL_LIMIT_WAITS` | rate-limit waits before giving up (default 12) |
+| `MARESTAIL_SCOPE`, `MARESTAIL_FOCUS` | scope and focus paths handed to the agents' Stop hooks |
+| `MARESTAIL_GATE_ACTIVE` | set to `true` while a gate runs |
+| `MARESTAIL_SONAR_PASSWORD` | admin password `marestail sonar setup` sets |
+| `MARESTAIL_PERF_DB_ROWS` | overrides `[perf.db] rows` for one run |
+| `MARESTAIL_PERF_DB_PORT` | port for the perf Postgres, overriding `[perf.db] port` |
+| `MARESTAIL_PERF_DB_PREFIX` | name prefix for the perf Postgres containers |
+| `MARESTAIL_PERF_DB_VOLUME` | Docker volume holding the goldens (default `marestail-perf-pgdata`) |
+| `MARESTAIL_PERF_DB_HOME` | where `perf-db.json` is kept (default `~/.config/marestail`) |
+| `GROK_HOME` | Grok home whose trust store `marestail install` updates (default `~/.grok`) |
+| `JAVA_HOME` | JDK the Java gates use when `[java] java_home` is not set |
 
 ## Adapting for new languages
 
