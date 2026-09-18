@@ -1,0 +1,32 @@
+[importlinter]
+root_package = marestail
+
+[importlinter:contract:gates-do-not-reach-up]
+name = Gates never import the runner, the CLI, the prompts or the pipeline
+type = forbidden
+source_modules =
+    marestail.gates
+forbidden_modules =
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+
+[importlinter:contract:foundations-import-nothing-above]
+name = Context, report, shell, config and changes import nothing above them
+type = forbidden
+source_modules =
+    marestail.context
+    marestail.report
+    marestail.shell
+    marestail.config
+    marestail.changes
+forbidden_modules =
+    marestail.gates
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.install
+    marestail.tui

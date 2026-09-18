@@ -1,0 +1,39 @@
+[project]
+name = "marestail"
+version = "0.1.0"
+description = "Gated agent pipeline: every worker must pass deterministic gates"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.coverage.run]
+source = ["marestail"]
+branch = true
+omit = ["marestail/tui/*", "marestail/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+files = ["marestail"]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+exclude = ["marestail/tui/"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+extend-exclude = ["tools/samples", "marestail/tui"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C90", "N", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 4
+
+[tool.mutmut]
+source_paths = ["marestail"]
