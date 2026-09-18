@@ -40,13 +40,14 @@ Feature: Bring marestail itself through its own gate
   Scenario: scoped gate flags still work
     When I run "marestail gate --tier fast --scope changed --focus marestail"
     Then the exit code is 0
-    And the output contains "scope: changed"
+    And the output contains a line matching "^scope: changed \(\d+ files, \d+ lines\) \+ focus: marestail$"
     When I run "marestail gate --tier fast --scope hard --focus marestail/cli.py"
     Then the exit code is 0
     And the output contains "scope: hard: marestail/cli.py"
     When I run "marestail gate --tier fast --scope all"
     Then the exit code is 0
-    And the output contains "scope: all"
+    And no output line starts with "scope:"
+    And the last line is "GATE PASSED"
 
   Scenario: combining --focus with --scope all is still a usage error
     When I run "marestail gate --tier fast --scope all --focus marestail"
@@ -99,12 +100,17 @@ Feature: Bring marestail itself through its own gate
     Then the output lists "up", "down", "setup"
     When I run "marestail perf --help"
     Then the output lists "run", "db"
-    When I run "marestail route --help"
-    Then the exit code is 0
+    When I run "marestail route --help" with "MARESTAIL_DANDELION" unset and PATH set to "/usr/bin:/bin"
+    Then the exit code is 127
+    And stderr contains "dandelion is not installed"
+    # route forwards its arguments to dandelion instead of parsing them, so --help is not answered by marestail
     When I run "marestail watch --help"
     Then the output lists "--refresh", "--all"
     When I run "marestail graph"
-    Then the exit code is 0 or the error is only about a missing optional dependency
+    Then the exit code is 0
+    And the first line of output is "## Python modules"
+    # this repo declares its import-linter root packages in .importlinter, not pyproject.toml, so graph passes
+    # grimp no package and prints grimp's TypeError traceback under that heading; the refactor keeps that output
     When I run "marestail depth"
     Then the exit code is 0
 

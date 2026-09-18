@@ -10,11 +10,11 @@
 5. `./bin/marestail gate --tier fast --json | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["scope"], len(d["results"]))'`  
    Expected: prints `all <N>` where `N` > 0 and at least one result has `"gate": "py.tests"`.
 6. `./bin/marestail gate --tier fast --scope changed --focus marestail`  
-   Expected: exit code `0`, output contains `scope: changed` and final line `GATE PASSED`.
+   Expected: exit code `0`, first line matches `^scope: changed \(\d+ files, \d+ lines\) \+ focus: marestail$` (e.g. `scope: changed (21 files, 576 lines) + focus: marestail`), final line `GATE PASSED`.
 7. `./bin/marestail gate --tier fast --scope hard --focus marestail/cli.py`  
    Expected: exit code `0`, output contains `scope: hard: marestail/cli.py` and final line `GATE PASSED`.
 8. `./bin/marestail gate --tier fast --scope all`  
-   Expected: exit code `0`, output contains `scope: all` and final line `GATE PASSED`.
+   Expected: exit code `0`, no line starts with `scope:`, final line `GATE PASSED`.
 9. `./bin/marestail gate --tier fast --scope all --focus marestail 2>&1; echo "exit=$?"`  
    Expected: exit code `2`, stderr contains `--focus cannot be combined with --scope all`.
 10. `printf '# a comment\npass\n' > marestail/_deliberate_comment.py && ./bin/marestail gate --tier fast --only comments; CODE=$?; rm -f marestail/_deliberate_comment.py; echo "exit=$CODE"`  
@@ -30,7 +30,11 @@
 15. `unset MARESTAIL_DANDELION; PATH=/usr/bin:/bin; ./bin/marestail route 2>&1; echo "exit=$?"`  
     Expected: exit code `127`, stderr contains `dandelion is not installed` and `https://github.com/maxh213/dandelion`.
 16. `./bin/marestail depth`  
-    Expected: exit code `0`, output contains a table with columns `module`, `public`, `stmts`, `ratio`, `lines`.
+    Expected: exit code `0`, output contains a table with columns `module`, `public`, `stmts`, `ratio`, `lines`.  
+    Then `env -u MARESTAIL_DANDELION PATH=/usr/bin:/bin ./bin/marestail route --help; echo "exit=$?"`  
+    Expected: `exit=127` and the `dandelion is not installed` hint; `route` forwards `--help` to dandelion instead of answering it.  
+    Then `./bin/marestail graph; echo "exit=$?"`  
+    Expected: `exit=0`, first line `## Python modules`, followed by grimp's `TypeError: build_graph() missing 1 required positional argument: 'package_name'` traceback, exactly as before the refactor (this repo keeps its root packages in `.importlinter`, which `graph` does not read).
 17. For each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-perf-db.py`, `tools/test-practices.py`:  
     `python3 <script>`  
     Expected: each exits `0` and the last line of output contains `ok`.  
