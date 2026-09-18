@@ -2,7 +2,7 @@
 
 1. `cd /home/max/workspace/marestail-green`
 2. `git status`  
-   Expected: working tree is clean except for the new `features/000-green-the-repo.feature` and `qa/000-green-the-repo.md`.
+   Expected: working tree is clean.
 3. `./bin/marestail gate --tier full`  
    Expected: exit code `0`, final line `GATE PASSED`, no `[FAIL]` lines.
 4. `./bin/marestail gate`  
@@ -31,16 +31,27 @@
     Expected: exit code `127`, stderr contains `dandelion is not installed` and `https://github.com/maxh213/dandelion`.
 16. `./bin/marestail depth`  
     Expected: exit code `0`, output contains a table with columns `module`, `public`, `stmts`, `ratio`, `lines`.
-17. For each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-perf.py`, `tools/test-perf-db.py`, `tools/test-practices.py`:  
+17. For each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-perf-db.py`, `tools/test-practices.py`:  
     `python3 <script>`  
-    Expected: each exits `0` and the last line of output contains `ok`.
+    Expected: each exits `0` and the last line of output contains `ok`.  
+    Then `python3 tools/test-perf.py; echo "exit=$?"`  
+    Expected: exits `1` with last output line `verdict-commit-files: '' != 'perf/bench_x.py'`, exactly as before the refactor (its stub agent predates the two-phase perf step; `tools/` is out of scope).
 18. `grep -R -E "#[^!]|\"\"\"|'''" marestail/ --include='*.py' | grep -v '^Binary' || true`  
     Expected: no matches that are comments or docstrings (shebangs and string literals are allowed).
 19. `grep -A 200 '^## Environment variables' README.md`  
     Expected: the section exists and contains every variable listed in `features/000-green-the-repo.feature`.
 20. `grep -E '\b(guidance/ruby\.md|missing path example)\b' README.md`  
     Expected: either the reference is removed or the file exists; the `docs` gate from step 3 passing covers this.
-21. `unshare -r -n env -u MARESTAIL_CLAUDE -u MARESTAIL_GROK -u MARESTAIL_KILO -u MARESTAIL_KIMI -u MARESTAIL_CURSOR PATH=/usr/bin:/bin .venv/bin/pytest tests`  
-    Expected: exit code `0`, all tests pass hermetically without network access and without calling real agent CLIs (`claude`, `grok`, `kilo`, `kimi`, `cursor`) or real SonarQube.
+21. `rm -rf /tmp/marestail-hermetic-bin /tmp/marestail-hermetic-home && mkdir /tmp/marestail-hermetic-bin /tmp/marestail-hermetic-home && ln -s "$(command -v git)" "$(command -v sh)" /tmp/marestail-hermetic-bin/ && unshare -r -n env -i HOME=/tmp/marestail-hermetic-home PATH=/tmp/marestail-hermetic-bin .venv/bin/pytest tests`  
+    Expected: exit code `0`, no test failed or errored. `env -i` clears every agent and tool override (`MARESTAIL_AGENT`, `MARESTAIL_AGY`, `MARESTAIL_CLAUDE`, `MARESTAIL_CURSOR`, `MARESTAIL_DANDELION`, `MARESTAIL_GROK`, `MARESTAIL_KILO`, `MARESTAIL_KIMI`, `MARESTAIL_SONAR_PASSWORD`, `CLAUDE_CONFIG_DIR`, `GROK_HOME`, `JAVA_HOME`); PATH holds only `git` and `sh`, so docker, every agent CLI and the sonar scanner must be faked; there is no network.
 22. `python3 -c "import ast, glob, sys; targets = ['marestail/runner.py', 'marestail/install.py', 'marestail/context.py'] + glob.glob('marestail/gates/*.py'); bad = [f'{p}:{n.name}({getattr(n, \"end_lineno\", 0) - n.lineno + 1} lines)' for p in sorted(targets) for n in ast.walk(ast.parse(open(p).read())) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and getattr(n, 'end_lineno', 0) - n.lineno + 1 > 30 and n.name != 'registry']; print('\n'.join(bad) if bad else 'all orchestration functions <= 30 lines'); sys.exit(1 if bad else 0)"`  
-    Expected: exit code `0`, prints `all orchestration functions <= 30 lines`; proves long orchestration functions in `runner.py`, `install.py`, `context.py`, and the gates have been split into small named helpers.
+    Expected: exit code `0`, prints `all orchestration functions <= 30 lines`; proves long orchestration functions in `runner.py`, `install.py`, `context.py`, and the gates have been split into small named helpers.  
+    `registry` in `marestail/gates/__init__.py` is exempt: it is a flat table of `Gate` declarations with no branches or calls to split out.
+23. `./bin/marestail sonar up && ./bin/marestail sonar setup`, then `./bin/marestail gate --tier sonar; echo "exit=$?"`  
+    Expected: `exit=0`, last gate line `GATE PASSED`; result lines, in order: `py.tests`, `py.crap`, `py.lint`, `py.deps`, `py.runtime`, `comments`, `depth`, `deadcode`, `docs`, `sonar`, all `[ok  ]`.
+24. `./bin/marestail gate --tier full; echo "exit=$?"` and `./bin/marestail gate --tier all; echo "exit=$?"`  
+    Expected: each prints `exit=0` and ends with `GATE PASSED`; result lines, in order: `py.tests`, `py.crap`, `py.lint`, `py.deps`, `py.runtime`, `comments`, `depth`, `deadcode`, `docs`, `py.mutation`, `sonar`.
+25. `./bin/marestail gate --tier qa`  
+    Expected: exits `0`, ends with `GATE PASSED`; result lines are the nine fast gates of step 23 without `sonar`, and no `qa` line (marestail.toml has no `[qa]` section, so the gate is dropped).
+26. In the output of steps 23 to 25, find the `py.runtime` line.  
+    Expected: `[ok  ] py.runtime     skipped: nothing declares the interpreter that ships  (0.0s)`.

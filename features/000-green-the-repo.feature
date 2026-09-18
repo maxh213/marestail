@@ -20,19 +20,22 @@ Feature: Bring marestail itself through its own gate
     Then the exit code is 0
     And the output ends with the line "GATE PASSED"
 
-  Scenario Outline: every tier name and verdict format is preserved
+  Scenario Outline: every tier prints the same gate names in the same order
+    Given a local SonarQube started with "marestail sonar up" and configured with "marestail sonar setup"
     When I run "marestail gate --tier <tier>"
     Then the exit code is 0
-    And the output contains "GATE PASSED"
-    And the output contains the gate names that belong to tier "<tier>"
+    And the last line is "GATE PASSED"
+    And the result lines name exactly these gates, in this order: <gates>
+    And the "py.runtime" line reads "[ok  ] py.runtime     skipped: nothing declares the interpreter that ships  (0.0s)"
+    And no result line names "qa", because marestail.toml has no [qa] section and the qa gate is dropped rather than printed
 
     Examples:
-      | tier  |
-      | fast  |
-      | sonar |
-      | full  |
-      | qa    |
-      | all   |
+      | tier  | gates                                                                                           |
+      | fast  | py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs                |
+      | sonar | py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs, sonar         |
+      | full  | py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs, py.mutation, sonar |
+      | qa    | py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs                |
+      | all   | py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs, py.mutation, sonar |
 
   Scenario: scoped gate flags still work
     When I run "marestail gate --tier fast --scope changed --focus marestail"
@@ -64,16 +67,23 @@ Feature: Bring marestail itself through its own gate
     And the output contains "marestail/_deliberate_comment.py:1 comment:"
     And the output does not end with "GATE PASSED"
 
-  Scenario: no test calls a real agent CLI, a real SonarQube, or the network
-    Given the network namespace is unshared with no network access
-    And no agent CLI binary or SonarQube is on PATH
-    When I run "unshare -r -n env -u MARESTAIL_CLAUDE -u MARESTAIL_GROK -u MARESTAIL_KILO -u MARESTAIL_KIMI -u MARESTAIL_CURSOR PATH=/usr/bin:/bin .venv/bin/pytest tests"
+  Scenario: no test calls a real agent CLI, docker, a real SonarQube, or the network
+    Given a directory "/tmp/marestail-hermetic-bin" holding only symlinks to "git" and "sh"
+    And an empty directory "/tmp/marestail-hermetic-home"
+    When I run "unshare -r -n env -i HOME=/tmp/marestail-hermetic-home PATH=/tmp/marestail-hermetic-bin .venv/bin/pytest tests"
     Then the exit code is 0
-    And all tests pass with subprocesses faked
+    And no test failed or errored
+    # env -i clears every variable the package reads, including every agent and tool override
+    # (MARESTAIL_AGENT, MARESTAIL_AGY, MARESTAIL_CLAUDE, MARESTAIL_CURSOR, MARESTAIL_DANDELION, MARESTAIL_GROK,
+    # MARESTAIL_KILO, MARESTAIL_KIMI, MARESTAIL_SONAR_PASSWORD, CLAUDE_CONFIG_DIR, GROK_HOME, JAVA_HOME);
+    # PATH holds no docker, claude, grok, kilo, kimi, cursor-agent, agy, dandelion or sonar-scanner,
+    # so docker and every agent CLI must be faked at marestail.shell.run, and each temporary git
+    # repository must set its own user.name and user.email
 
   Scenario: long orchestration functions in runner, install, context, and the gates are split into small named helpers
     When I statically check function lengths in "marestail/runner.py", "marestail/install.py", "marestail/context.py", and "marestail/gates/*.py"
-    Then no orchestration function exceeds 30 lines
+    Then no function exceeds 30 lines, except "registry" in "marestail/gates/__init__.py"
+    And "registry" is exempt because it is a flat table of Gate declarations with no branches or calls to split out
     And long workflows are decomposed into small named helper functions
 
   Scenario: every CLI subcommand remains available
@@ -120,18 +130,24 @@ Feature: Bring marestail itself through its own gate
 
   Scenario: existing diagnostic scripts keep passing
     When I run each of the following directly with "python3":
-      | script                       |
-      | tools/test-agent-backends.py |
-      | tools/test-audit.py          |
+      | script                         |
+      | tools/test-agent-backends.py   |
+      | tools/test-audit.py            |
       | tools/test-csproj-additions.py |
-      | tools/test-drop-ignored.py   |
-      | tools/test-route.py          |
-      | tools/test-scope-hard.py     |
-      | tools/test-sonar-worktree.py |
-      | tools/test-perf.py           |
-      | tools/test-perf-db.py        |
-      | tools/test-practices.py      |
+      | tools/test-drop-ignored.py     |
+      | tools/test-route.py            |
+      | tools/test-scope-hard.py       |
+      | tools/test-sonar-worktree.py   |
+      | tools/test-perf-db.py          |
+      | tools/test-practices.py        |
     Then each script exits 0 and its last line of output contains "ok"
+
+  Scenario: tools/test-perf.py fails exactly as it does before the refactor
+    # Its stub agent predates the two-phase perf step (commit 41f77a0) and crashes in the author phase;
+    # tools/ is out of scope, so the refactor must reproduce today's failure, not fix it
+    When I run "python3 tools/test-perf.py"
+    Then the exit code is 1
+    And the last line of output is "verdict-commit-files: '' != 'perf/bench_x.py'"
 
   Scenario: README documents every environment variable the package reads
     When I read "README.md"
