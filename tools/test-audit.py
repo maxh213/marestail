@@ -6,19 +6,20 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import audit
 from marestail.config import Config
-from marestail.pipeline import find
+from marestail.pipeline import Worker, find
 from marestail.runner import Run, problem_shape, run_worker
 
 FEATURE = "Feature: adding\n  Scenario: Adds one\n    Then it adds\n  Scenario: Probes the live session\n    Then it probes\n"
 HANDOFF = "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Probes the live session -> qa/t.e2e.mjs::probing\n"
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
@@ -94,13 +95,13 @@ def loop_guard(folder: Path, root: Path) -> None:
     state = Run(config=config, task=root / "tasks" / "t.md", model=None, retries=0, agent="claude")
     stub_agent(folder, "")
     with contextlib.redirect_stdout(io.StringIO()) as out:
-        passed = run_worker(state, find("specifier"), "")
+        passed = run_worker(state, cast(Worker, find("specifier")), "")
     expect("same-problems-stop", (passed, calls(folder)), (False, 3))
     expect("stop-message", "same problems back 3 times in a row" in out.getvalue(), True)
     state = Run(config=config, task=root / "tasks" / "t.md", model=None, retries=5, agent="claude")
     stub_agent(folder, f'if [ -f "{root}/alpha.txt" ]; then rm "{root}/alpha.txt"; else echo a > "{root}/alpha.txt"; fi\n')
     with contextlib.redirect_stdout(io.StringIO()):
-        passed = run_worker(state, find("specifier"), "")
+        passed = run_worker(state, cast(Worker, find("specifier")), "")
     expect("changing-problems-keep-retrying", (passed, calls(folder)), (False, 5))
     (root / "alpha.txt").unlink(missing_ok=True)
     expect(

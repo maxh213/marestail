@@ -6,12 +6,13 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import freeze, prompts
 from marestail.config import Config
-from marestail.pipeline import find
+from marestail.pipeline import Worker, find
 from marestail.runner import Run, run_worker
 
 CSPROJ = '<Project Sdk="Microsoft.NET.Sdk">\n  <ItemGroup>\n    <PackageReference Include="xunit" Version="2.6.6" />\n  </ItemGroup>\n</Project>\n'
@@ -19,7 +20,7 @@ PACKAGE = '    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Vers
 VISIBLE = '    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />'
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
@@ -28,7 +29,7 @@ def diff(*lines: str) -> str:
     return "diff --git a/App.csproj b/App.csproj\n--- a/App.csproj\n+++ b/App.csproj\n@@ -1,3 +1,4 @@\n" + "\n".join(lines) + "\n"
 
 
-def tolerance_rules():
+def tolerance_rules() -> None:
     expect("package-added", freeze.tolerated("App.Tests/App.Tests.csproj", diff("+" + PACKAGE)), True)
     expect("visible-added", freeze.tolerated("App.csproj", diff("+" + VISIBLE)), True)
     expect("new-itemgroup", freeze.tolerated("App.csproj", diff("+", "+  <ItemGroup>", "+" + VISIBLE, "+  </ItemGroup>")), True)
@@ -56,7 +57,7 @@ def tolerance_rules():
     expect("other-config", freeze.tolerated("Cargo.toml", diff('+bar = "1"')), False)
 
 
-def prompt_note():
+def prompt_note() -> None:
     expect("note-dotnet", "InternalsVisibleTo" in prompts.csproj_note(Config(root=Path("."), raw={"dotnet": {}})), True)
     expect("note-other", prompts.csproj_note(Config(root=Path("."), raw={"python": {}})), "")
 
@@ -92,7 +93,7 @@ def stub_agent(folder: Path, root: Path, edit: str) -> None:
     os.environ["MARESTAIL_CLAUDE"] = str(stub)
 
 
-def worker_keeps_additions():
+def worker_keeps_additions() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(Path(tmp))
         stub_agent(Path(tmp), root, f"sed -i 's|  </ItemGroup>|{PACKAGE}\\n  </ItemGroup>|' App.csproj")
@@ -100,13 +101,13 @@ def worker_keeps_additions():
             config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude"
         )
         with contextlib.redirect_stdout(io.StringIO()):
-            passed = run_worker(state, find("specifier"), "")
+            passed = run_worker(state, cast(Worker, find("specifier")), "")
         expect("addition-passes", passed, True)
         expect("addition-kept", "Mvc.Testing" in (root / "App.csproj").read_text(), True)
         expect("no-revert-commit", "Revert" in git(root, "log", "--format=%s"), False)
 
 
-def worker_reverts_other_edits():
+def worker_reverts_other_edits() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(Path(tmp))
         stub_agent(Path(tmp), root, 'sed -i \'s|Version="2.6.6"|Version="2.9.0"|\' App.csproj')
@@ -114,7 +115,7 @@ def worker_reverts_other_edits():
             config=Config(root=root, raw={"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=1, agent="claude"
         )
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            passed = run_worker(state, find("specifier"), "")
+            passed = run_worker(state, cast(Worker, find("specifier")), "")
         expect("bump-fails", passed, False)
         expect("bump-reverted", "2.6.6" in (root / "App.csproj").read_text(), True)
         expect("bump-message", "frozen" in out.getvalue(), True)

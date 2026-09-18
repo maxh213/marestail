@@ -6,24 +6,26 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import freeze, install, practices
 from marestail.config import Config
-from marestail.pipeline import find, names
+from marestail.pipeline import Judge, find, names
 from marestail.runner import Run, run_judge, run_step
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def git(root, *args):
+def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
@@ -46,7 +48,7 @@ def new_repo(tmp: str, guidance: bool = False) -> Path:
     return root
 
 
-def state(root: Path, raw=None, retries: int = 1) -> Run:
+def state(root: Path, raw: dict[str, Any] | None = None, retries: int = 1) -> Run:
     return Run(
         config=Config(root=root, raw=raw or {"git": {"base": "main"}}),
         task=root / "tasks" / "t.md",
@@ -72,13 +74,13 @@ def passing_judge(verdict: str) -> str:
 
 
 @contextlib.contextmanager
-def quiet():
+def quiet() -> Iterator[None]:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         yield
 
 
 @contextlib.contextmanager
-def agent_stub(folder: Path, body: str):
+def agent_stub(folder: Path, body: str) -> Iterator[None]:
     stub = folder / "stub-agent"
     stub.write_text(body)
     stub.chmod(0o755)
@@ -93,12 +95,12 @@ def agent_stub(folder: Path, body: str):
             if previous[key] is None:
                 os.environ.pop(key, None)
             else:
-                os.environ[key] = previous[key]
+                os.environ[key] = cast(str, previous[key])
 
 
-def pipeline_order():
+def pipeline_order() -> None:
     expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
-    judge = find("practices")
+    judge = cast(Judge, find("practices"))
     expect("practices-bounce-to", judge.bounce_to, "coder")
     expect("practices-tier", judge.tier, None)
     expect("practices-writes", judge.writes, ())
@@ -106,7 +108,7 @@ def pipeline_order():
     expect("practices-optional", judge.optional, True)
 
 
-def guidance_files():
+def guidance_files() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         expect("missing-folder", practices.files(root), [])
@@ -120,7 +122,7 @@ def guidance_files():
         expect("found-sorted", [path.name for path in practices.files(root)], ["a.md", "b.md"])
 
 
-def no_guidance_skip():
+def no_guidance_skip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         before = git(root, "rev-parse", "HEAD")
@@ -132,7 +134,7 @@ def no_guidance_skip():
         expect("noguidance-no-commit", git(root, "rev-parse", "HEAD"), before)
 
 
-def disabled_skip():
+def disabled_skip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, guidance=True)
         before = git(root, "rev-parse", "HEAD")
@@ -144,18 +146,18 @@ def disabled_skip():
         expect("disabled-no-commit", git(root, "rev-parse", "HEAD"), before)
 
 
-def freeze_guidance():
+def freeze_guidance() -> None:
     config = Config(root=Path("/tmp"), raw={})
     expect("spec-has-guidance", "guidance/**" in freeze.SPEC, True)
     expect("coder-frozen", freeze.frozen_paths(config, "coder", ["guidance/ts.md", "src/app.py"]), ["guidance/ts.md"])
     expect("practices-frozen", freeze.frozen_paths(config, "practices", ["guidance/ts.md", "src/app.py"]), ["guidance/ts.md"])
 
 
-def pass_commit():
+def pass_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, guidance=True)
         with agent_stub(Path(tmp), passing_judge("VERDICT: PASS\n")), quiet():
-            outcome, target, _ = run_judge(state(root), find("practices"))
+            outcome, target, _ = run_judge(state(root), cast(Judge, find("practices")))
         expect("pass-verdict", (outcome, target), ("PASS", None))
         expect("pass-subject", "practices verdict: PASS" in git(root, "log", "-1", "--format=%s"), True)
         expect("pass-commit-empty", git(root, "show", "--name-only", "--format=", "HEAD"), "")
@@ -165,13 +167,13 @@ def pass_commit():
         expect("tree-clean", git(root, "status", "--porcelain"), "")
 
 
-def role_file():
+def role_file() -> None:
     role = Path(__file__).resolve().parent.parent / "roles" / "practices.md"
     expect("role-exists", role.is_file(), True)
     expect("role-mentions-guidance", "guidance" in role.read_text(), True)
 
 
-def install_template():
+def install_template() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "target"
         target.mkdir()
@@ -206,7 +208,7 @@ def install_template():
         expect("install-csharp-guidance-matches", csharp.read_text(), (ROOT / "templates" / "guidance" / "cs.md").read_text())
 
 
-def rulebook_content():
+def rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "ts.md").read_text()
     ids = set(re.findall(r"\*\*TS-(\d+)", text))
     expect("rule-count", len(ids) >= 40, True)
@@ -217,7 +219,7 @@ def rulebook_content():
         expect(f"mentions {needle}", needle in text, True)
 
 
-def csharp_rulebook_content():
+def csharp_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "cs.md").read_text()
     expect("cs-rule-ids", re.findall(r"\*\*CS-(\d+)", text), ["1"])
     for needle in ["Arrange, Act, Assert", "exactly one action", "blank line", "never by comments"]:

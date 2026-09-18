@@ -2,6 +2,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -32,16 +33,16 @@ TASK = Path("/tmp/t.md")
 PROMPT = Path("/tmp/p.md")
 
 
-def state(agent=None, model="mymodel", raw=None, effort=None):
+def state(agent: str | None = None, model: str | None = "mymodel", raw: dict[str, Any] | None = None, effort: str | None = None) -> Run:
     return Run(config=Config(root=ROOT, raw=raw or {}), task=TASK, model=model, retries=0, agent=agent, effort=effort)
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def restore(keys, previous):
+def restore(keys: list[str], previous: dict[str, str | None]) -> None:
     for key in keys:
         value = previous.get(key)
         if value is None:
@@ -50,7 +51,7 @@ def restore(keys, previous):
             os.environ[key] = value
 
 
-def snapshot_existing():
+def snapshot_existing() -> None:
     expect(
         "claude",
         agent_command(state("claude")),
@@ -96,7 +97,7 @@ def snapshot_existing():
     expect("default-command", agent_command(state(None)), agent_command(state("claude")))
 
 
-def kilo_defaults():
+def kilo_defaults() -> None:
     expect(
         "kilo-default",
         kilo_command(state("kilo", model=None)),
@@ -124,7 +125,7 @@ def kilo_defaults():
     expect("kilo-via-agent-command", agent_command(state("kilo", model=None)), kilo_command(state("kilo", model=None)))
 
 
-def kimi_backend():
+def kimi_backend() -> None:
     expect(
         "kimi-command",
         kimi_command(state("kimi"), PROMPT),
@@ -141,7 +142,7 @@ def kimi_backend():
     expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
 
 
-def env_overrides():
+def env_overrides() -> None:
     keys = [
         "MARESTAIL_AGENT",
         "MARESTAIL_KILO",
@@ -185,7 +186,7 @@ def env_overrides():
     expect("flag-wins", resolve_agent(state("cursor", model=None, raw={"agent": {"backend": "kilo"}})), "cursor")
 
 
-def labels():
+def labels() -> None:
     expect("label-model-only", agent_label(state("claude")), "mymodel")
     expect("label-with-effort", agent_label(state("claude", effort="high")), "mymodel high")
     expect("label-no-model", agent_label(state("claude", model=None)), "claude")
@@ -212,7 +213,7 @@ def labels():
     expect("stamp-unlabelled", stamped("coder handoff", ""), "coder handoff")
 
 
-def kilo_output():
+def kilo_output() -> None:
     output = "\n".join(
         [
             "INFO ignore this",
@@ -237,7 +238,7 @@ def kilo_output():
         raise SystemExit(f"kilo_summary missing tokens: {summary!r}")
 
 
-def kimi_output():
+def kimi_output() -> None:
     output = "\n".join(
         [
             "notice: not json",
@@ -273,7 +274,7 @@ def kimi_output():
     )
 
 
-def verdict_parse():
+def verdict_parse() -> None:
     report = Path("/tmp/marestail-verdict-test.md")
     report.write_text("Here is my judgement.\n\nVERDICT: BOUNCE specifier\n1. fix it\n")
     parsed = parse_verdict(report)

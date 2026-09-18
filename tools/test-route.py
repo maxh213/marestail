@@ -4,7 +4,9 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -26,12 +28,12 @@ ENV_KEYS = [
 ]
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def expect_exit(name, action, fragment):
+def expect_exit(name: str, action: Callable[[], object], fragment: str) -> None:
     try:
         action()
     except SystemExit as error:
@@ -47,12 +49,12 @@ def script(path: Path, body: str) -> Path:
     return path
 
 
-def parsed(line):
+def parsed(line: str) -> tuple[str, str, str | None, dict[str, str]]:
     choice = route.parse(line)
     return choice.backend, choice.model, choice.effort, choice.env
 
 
-def parses_every_line():
+def parses_every_line() -> None:
     work = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-work").expanduser())}
     cases = {
         "claude-opus-5 high claude": ("claude", "claude-opus-5", "high", {}),
@@ -88,17 +90,21 @@ def parses_every_line():
 def dandelion_source_lines() -> list[str]:
     source = DANDELION_ROUTES.read_text()
     claude = re.search(r"CLAUDE_LINES = \{ standard: '([^']+)', max: '([^']+)' \}", source)
-    lines = []
+    lines: list[str] = []
     for entry in re.finditer(r"\{ id: '([\w-]+)'(.*?)\}", source):
         account, rest = entry.group(1), entry.group(2)
-        pair = claude.groups() if "...CLAUDE_LINES" in rest else re.search(r"standard: '([^']+)', max: '([^']+)'", rest).groups()
+        pair = (
+            cast(re.Match[str], claude).groups()
+            if "...CLAUDE_LINES" in rest
+            else cast(re.Match[str], re.search(r"standard: '([^']+)', max: '([^']+)'", rest)).groups()
+        )
         lines.extend(f"{line} {account}" for line in pair)
     for entry in re.finditer(r"providers: \[([^\]]*)\].*?line: '([^']+)'", source):
         lines.extend(f"{entry.group(2)} {account}" for account in re.findall(r"'([\w-]+)'", entry.group(1)))
     return lines
 
 
-def matches_dandelion_source():
+def matches_dandelion_source() -> None:
     if not DANDELION_ROUTES.exists():
         print(f"skipping dandelion source check: no {DANDELION_ROUTES}")
         return
@@ -122,11 +128,11 @@ def stub_dandelion(folder: Path) -> None:
     )
 
 
-def chooses(folder: Path):
+def chooses(folder: Path) -> None:
     stub_dandelion(folder)
     (folder / "plan").write_text("0 grok-4.6 xhigh grok\n1 none\n3 boom\n")
     choice, reason = route.choose("dandelion/route-best", folder)
-    expect("choose-line", (choice.line, reason), ("grok-4.6 xhigh grok", ""))
+    expect("choose-line", (cast(route.Choice, choice).line, reason), ("grok-4.6 xhigh grok", ""))
     expect("choose-none", route.choose("dandelion/route", folder), (None, "no subscription has quota left"))
     expect("choose-failure", route.choose("dandelion/route", folder)[1], "dandelion route failed with exit 3: boom")
     expect("choose-args", (folder / "calls").read_text(), "route --high\nroute\nroute\n")
@@ -134,7 +140,7 @@ def chooses(folder: Path):
     expect_exit("choose-missing", lambda: route.choose("dandelion/route", folder), route.REPO)
 
 
-def proxies(folder: Path):
+def proxies(folder: Path) -> None:
     stub_dandelion(folder)
     (folder / "plan").write_text("0 claude-opus-5 high claude\n1 none\n")
     first = subprocess.run([sys.executable, str(CLI), "route", "--high"], capture_output=True, text=True, check=False)
@@ -151,7 +157,7 @@ def proxies(folder: Path):
     expect("help-lists-route", "route" in listed.stdout, True)
 
 
-def reroutes(folder: Path):
+def reroutes(folder: Path) -> None:
     stub_dandelion(folder)
     os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"] = "/srv/work-claude"
     os.environ["SEEN"] = str(folder / "seen")
@@ -207,7 +213,7 @@ def reroutes(folder: Path):
     )
 
 
-def rejects_flags(folder: Path):
+def rejects_flags(folder: Path) -> None:
     repo = folder / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
@@ -215,7 +221,7 @@ def rejects_flags(folder: Path):
     (repo / "t.md").write_text("task\n")
     stub_dandelion(folder)
 
-    def run_cli(*args):
+    def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, str(CLI), "run", "t.md", *args], cwd=repo, capture_output=True, text=True, check=False)
 
     for flags in (["--agent", "claude"], ["--effort", "high"]):

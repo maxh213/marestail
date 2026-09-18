@@ -5,20 +5,21 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import config as config_module
 from marestail import context, prompts, rust
 from marestail.config import Config
-from marestail.pipeline import find
+from marestail.pipeline import Judge, Worker, find
 from marestail.runner import Run
 
 CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
 TOML = '[git]\nbase = "main"\n\n[comments]\npaths = ["."]\n'
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
@@ -113,10 +114,12 @@ def prompt_text(repo: Path) -> None:
     config = config_module.load(repo)
     task = repo / "t.md"
     report = repo / ".marestail" / "handoffs" / "t" / "01-coder.md"
-    hard = prompts.worker_prompt(config, find("coder"), task, "t", report, "", "m", " --scope hard --focus old.py", {"old.py"})
+    hard = prompts.worker_prompt(
+        config, cast(Worker, find("coder")), task, "t", report, "", "m", " --scope hard --focus old.py", {"old.py"}
+    )
     expect("worker-scope", ("# Scope" in hard, "hard scope: `old.py`" in hard, "--scope hard --focus old.py" in hard), (True, True, True))
-    expect("worker-no-scope", "# Scope" in prompts.worker_prompt(config, find("coder"), task, "t", report, ""), False)
-    judged = prompts.judge_prompt(config, find("hardener"), task, "t", report, "", "", "", {"old.py"})
+    expect("worker-no-scope", "# Scope" in prompts.worker_prompt(config, cast(Worker, find("coder")), task, "t", report, ""), False)
+    judged = prompts.judge_prompt(config, cast(Judge, find("hardener")), task, "t", report, "", "", "", {"old.py"})
     expect("judge-scope", "bounce only when the diff goes beyond" in judged, True)
     hard_run = Run(config=config, task=task, model=None, retries=0, scope_changed=True, focus={"old.py"}, hard=True)
     soft_run = Run(config=config, task=task, model=None, retries=0, scope_changed=True, focus={"old.py"})
