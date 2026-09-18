@@ -7,7 +7,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -38,21 +40,21 @@ print(json.dumps({"target": "rows in a", "unit": "rows", "better": "lower", "val
 """
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def git(root, *args):
+def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def docker(*args):
+def docker(*args: str) -> str:
     return subprocess.run(["docker", *args], capture_output=True, text=True).stdout.strip()
 
 
 @contextlib.contextmanager
-def quiet():
+def quiet() -> Iterator[None]:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         yield
 
@@ -84,15 +86,16 @@ def goldens_listing(database: perf_db.Database) -> list[str]:
     return docker("exec", database.helper, "ls", "/perf/goldens").split()
 
 
-def sample_values(config) -> list[dict]:
+def sample_values(config: config_module.Config) -> list[dict[str, Any]]:
     return [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
 
 
-def seeded_golden(config, session, root):
+def seeded_golden(config: config_module.Config, session: perf_trees.Session, root: Path) -> tuple[perf_db.Database, str]:
     with quiet():
         perf_db.prepare(config, session)
     expect("image-resolved", (session.image, session.image_source), ("postgres:16", "docker-compose.yml"))
-    database, problem = perf_db.for_run(config)
+    found, problem = perf_db.for_run(config)
+    database = cast(perf_db.Database, found)
     expect("database-configured", problem, "")
     head = head_tree(session)
     name = perf_db.golden_name(database, head)
@@ -109,7 +112,7 @@ def seeded_golden(config, session, root):
     return database, name
 
 
-def short_seed_fails(root, database, head, seeded_name):
+def short_seed_fails(root: Path, database: perf_db.Database, head: perf_trees.Tree, seeded_name: str) -> str:
     (root / "perf" / "seed.sql").write_text(SHORT_SEED)
     short_name = perf_db.golden_name(database, head)
     expect("seed-bytes-change-name", short_name != seeded_name, True)
@@ -125,18 +128,19 @@ def short_seed_fails(root, database, head, seeded_name):
     return short_name
 
 
-def prune_unneeded(database, seeded_name, short_name):
+def prune_unneeded(database: perf_db.Database, seeded_name: str, short_name: str) -> None:
     removed = perf_db.prune(database, {short_name})
     expect("prune-removed", removed, [seeded_name])
     expect("prune-gone", seeded_name in goldens_listing(database), False)
 
 
-def empty_golden_in_background(config, session, root):
+def empty_golden_in_background(config: config_module.Config, session: perf_trees.Session, root: Path) -> None:
     (root / "perf" / "seed.sql").unlink()
     os.environ[settings.ROWS_ENV] = "0"
     session.rows, session.rows_source = 0, settings.ROWS_ENV
     perf_trees.write_trees(config, session)
-    database, _ = perf_db.for_run(config)
+    found, _ = perf_db.for_run(config)
+    database = cast(perf_db.Database, found)
     head = head_tree(session)
     expect("background-started", perf_db.start_build(database, head).startswith("building golden_"), True)
     name = perf_db.golden_name(database, head)
@@ -152,14 +156,14 @@ def empty_golden_in_background(config, session, root):
     os.environ.pop(settings.ROWS_ENV)
 
 
-def missing_seed_fails(config, session):
+def missing_seed_fails(config: config_module.Config, session: perf_trees.Session) -> None:
     database = perf_db.build_database(config, settings.db(config), 1000, "test", "postgres:16", "test")
     with quiet():
         problem = perf_db.build(database, head_tree(session))
     expect("missing-seed", "[perf.db] rows = 1000 needs a perf/seed script" in problem, True)
 
 
-def checks(config, session, root):
+def checks(config: config_module.Config, session: perf_trees.Session, root: Path) -> None:
     database, seeded_name = seeded_golden(config, session, root)
     short_name = short_seed_fails(root, database, head_tree(session), seeded_name)
     prune_unneeded(database, seeded_name, short_name)
@@ -167,14 +171,14 @@ def checks(config, session, root):
     missing_seed_fails(config, session)
 
 
-def remove_test_docker():
+def remove_test_docker() -> None:
     for name in docker("ps", "-a", "--format", "{{.Names}}").split():
         if name.startswith(PREFIX):
             docker("rm", "-f", "-v", name)
     docker("volume", "rm", VOLUME)
 
 
-def main():
+def main() -> None:
     home = tempfile.TemporaryDirectory()
     os.environ.update(
         {

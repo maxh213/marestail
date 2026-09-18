@@ -13,7 +13,7 @@ from marestail.gates.sonar import git_mounts, scanner_command
 CREDS = {"url": "http://127.0.0.1:9000", "token": "test-token"}
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 

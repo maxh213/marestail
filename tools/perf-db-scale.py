@@ -27,11 +27,11 @@ MIGRATE = (
 SEED = "insert into t select g, (g % 10000) / 100.0, now() - make_interval(secs => g), md5(g::text) from generate_series(1, :rows) g;\n"
 
 
-def git(root, *args):
+def git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 
-def docker(*args):
+def docker(*args: str) -> str:
     return subprocess.run(["docker", *args], capture_output=True, text=True).stdout.strip()
 
 
@@ -52,14 +52,14 @@ def make_repo(tmp: str) -> Path:
     return root
 
 
-def remove_test_docker():
+def remove_test_docker() -> None:
     for name in docker("ps", "-a", "--format", "{{.Names}}").split():
         if name.startswith(PREFIX):
             docker("rm", "-f", "-v", name)
     docker("volume", "rm", VOLUME)
 
 
-def measure(config) -> str:
+def measure(config: config_module.Config) -> str:
     with perf_trees.measuring(config, "scale") as session:
         try:
             started = time.monotonic()
@@ -83,7 +83,7 @@ def measure(config) -> str:
     )
 
 
-def main():
+def main() -> None:
     home = tempfile.TemporaryDirectory()
     os.environ.update(
         {
