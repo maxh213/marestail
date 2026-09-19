@@ -1,3 +1,4 @@
+import contextlib
 import curses
 import textwrap
 from dataclasses import dataclass
@@ -74,10 +75,8 @@ def shift_left(y: int, x: int, text: str) -> tuple[int, int, str]:
 
 
 def write_cell(win: curses.window, y: int, x: int, text: str, attr: int) -> None:
-    try:
+    with contextlib.suppress(curses.error):
         win.addstr(y, x, text, attr)
-    except curses.error:
-        pass
 
 
 def draw_box(win: curses.window, rect: Rect, border: Border, attr: int) -> None:
@@ -340,7 +339,7 @@ class ConversationPanel(Panel):
 
     def render(self, win: curses.window, rect: Rect, focused: bool, state: WatchState) -> None:
         self.ensure_lines(rect.w - 1)
-        put(win, rect.y, rect.x, self.heading()[:rect.w], state.theme.heading)
+        put(win, rect.y, rect.x, self.heading()[: rect.w], state.theme.heading)
         self.page = max(1, rect.h - 1)
         self.place_scroll()
         paint_lines(win, rect, self.lines[self.scroll : self.scroll + self.page], state)

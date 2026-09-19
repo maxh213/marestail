@@ -124,7 +124,11 @@ def worker_sections(worker: Worker | None) -> list[tuple[str, str]]:
     if worker is None:
         return []
     return named_texts(
-        (("prompt", read_text(worker.prompt_path)), ("handoff", read_text(worker.handoff_path)), ("result", result_text(worker.result_path)))
+        (
+            ("prompt", read_text(worker.prompt_path)),
+            ("handoff", read_text(worker.handoff_path)),
+            ("result", result_text(worker.result_path)),
+        )
     )
 
 
@@ -435,10 +439,7 @@ def parse_ps_line(line: str) -> ProcRow | None:
 
 
 def is_pipeline(tokens: list[str]) -> bool:
-    return any(
-        os.path.basename(token) == "cli.py" and tokens[index + 1] == "run"
-        for index, token in enumerate(tokens[:-1])
-    )
+    return any(os.path.basename(token) == "cli.py" and tokens[index + 1] == "run" for index, token in enumerate(tokens[:-1]))
 
 
 def gate_activity(rows: list[ProcRow], pipeline: list[int]) -> str | None:
@@ -456,7 +457,9 @@ def child_map(rows: list[ProcRow]) -> dict[int, list[int]]:
     return children
 
 
-def descendant_gates(children: dict[int, list[int]], by_pid: dict[int, tuple[int, list[str]]], pipeline: list[int]) -> list[tuple[int, str]]:
+def descendant_gates(
+    children: dict[int, list[int]], by_pid: dict[int, tuple[int, list[str]]], pipeline: list[int]
+) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     stack = [child for pid in pipeline for child in children.get(pid, [])]
     while stack:
@@ -579,7 +582,9 @@ def bundle_inner(tokens: list[str]) -> str | None:
 
 
 def docker_inner(tokens: list[str]) -> str | None:
-    return next((compose_run_target(tokens, index) for index, token in enumerate(tokens[:-3]) if docker_compose_run(token, tokens, index)), None)
+    return next(
+        (compose_run_target(tokens, index) for index, token in enumerate(tokens[:-3]) if docker_compose_run(token, tokens, index)), None
+    )
 
 
 def docker_compose_run(token: str, tokens: list[str], index: int) -> bool:
@@ -637,9 +642,7 @@ def real_path(root: Path) -> Path:
 
 def git_line(root: Path, args: list[str]) -> str:
     try:
-        out = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10
-        )
+        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return ""
     if out.returncode != 0:

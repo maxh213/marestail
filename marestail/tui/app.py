@@ -1,3 +1,4 @@
+import contextlib
 import curses
 import locale
 import time
@@ -107,10 +108,8 @@ class WatchSession:
 
 
 def hide_cursor() -> None:
-    try:
+    with contextlib.suppress(curses.error):
         curses.curs_set(0)
-    except curses.error:
-        pass
 
 
 def refresh_fleet(roots: list[Path], state: WatchState, show_all: bool) -> None:
@@ -159,7 +158,7 @@ def draw_frame(
 
 def draw_legend(win: curses.window, height: int, width: int, state: WatchState) -> None:
     rows = [f" {glyph}  {meaning}" for glyph, meaning in LEGEND]
-    inner = max(len(row) for row in rows + [" key "])
+    inner = max(len(row) for row in [*rows, " key "])
     rect = Rect(max(1, (height - len(rows) - 2) // 2), max(0, (width - inner - 2) // 2), len(rows) + 2, inner + 2)
     draw_box(win, rect, ROUND, state.theme.border_focus)
     put(win, rect.y, rect.x + 2, " key ", state.theme.heading)
