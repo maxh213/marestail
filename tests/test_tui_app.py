@@ -87,6 +87,16 @@ def test_session_panel_actions(tmp_path: Path, monkeypatch: Any) -> None:
     assert session.handle_panel(ord("z")) is None
 
 
+def test_handle_key_forwards_to_detail(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 0.0, True)
+    session.detail = ConversationPanel(repo(tmp_path))
+    monkeypatch.setattr(session.detail, "on_key", reply("handled"))
+    assert session.handle_key(ord("j")) is None
+    assert session.detail is not None
+
+
 def test_session_quit_open_and_back(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(app, "init_theme", mono_theme)
     monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
