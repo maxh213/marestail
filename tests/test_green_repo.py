@@ -3,8 +3,10 @@ import ast
 import io
 import json
 import re
+import shutil
 import socket
 import subprocess
+import sys
 import tokenize
 from pathlib import Path
 
@@ -12,11 +14,27 @@ import pytest
 
 from marestail import cli, graph, report
 from marestail import config as config_module
-from marestail.gates import comments, configured_gates, py_runtime
+from marestail.gates import comments, configured_gates, py_mutation, py_runtime
 from marestail.report import Result
 from tests.conftest import ForbiddenCallError, make_context
 
-ROOT = Path(__file__).resolve().parent.parent
+
+def repo_root() -> Path:
+    return Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
+
+
+ROOT = repo_root()
+PASSING_SCRIPTS = [
+    "test-agent-backends.py",
+    "test-audit.py",
+    "test-csproj-additions.py",
+    "test-drop-ignored.py",
+    "test-route.py",
+    "test-scope-hard.py",
+    "test-sonar-worktree.py",
+    "test-practices.py",
+]
+PERF_FAIL_LINE = "verdict-commit-files: '' != 'perf/bench_x.py'"
 FAST_GATES = ["py.tests", "py.crap", "py.lint", "py.deps", "py.runtime", "comments", "depth", "deadcode", "docs"]
 RESULT_LINE = re.compile(r"^\[ok  \] .{14} .+  \(\d+\.\d+s\)$")
 DOCUMENTED = [
@@ -194,6 +212,79 @@ def test_tools_scripts_still_find_every_name_they_import(script: Path) -> None:
         if module.startswith("marestail") and not hasattr(__import__(module, fromlist=[name]), name)
     ]
     assert missing == []
+
+
+def last_line(text: str) -> str:
+    lines = [line for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def run_tools_script(name: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, str(ROOT / "tools" / name)], cwd=ROOT, capture_output=True, text=True, timeout=180)
+
+
+def under_mutmut() -> bool:
+    return Path.cwd().name == "mutants"
+
+
+def restricted_path() -> bool:
+    return shutil.which("ps") is None or under_mutmut()
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+@pytest.mark.parametrize("name", PASSING_SCRIPTS)
+def test_diagnostic_script_exits_ok(name: str) -> None:
+    completed = run_tools_script(name)
+    assert completed.returncode == 0
+    assert "ok" in last_line(completed.stdout + completed.stderr)
+
+
+@pytest.mark.skipif(restricted_path() or shutil.which("docker") is None, reason="perf-db needs docker")
+def test_perf_db_script_exits_ok() -> None:
+    completed = run_tools_script("test-perf-db.py")
+    assert completed.returncode == 0
+    assert "ok" in last_line(completed.stdout + completed.stderr)
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+def test_tools_test_perf_fails_as_before() -> None:
+    completed = run_tools_script("test-perf.py")
+    assert completed.returncode == 1
+    assert last_line(completed.stdout + completed.stderr) == PERF_FAIL_LINE
+
+
+def test_unchecked_mutants_fail_the_mutation_gate() -> None:
+    assert py_mutation.STATUS_BY_EXIT_CODE[None] == "not checked"
+    assert "not checked" not in py_mutation.PASSING
+    assert "no tests" not in py_mutation.PASSING
+    assert "survived" not in py_mutation.PASSING
+
+
+def test_full_tier_runs_mutation_before_sonar() -> None:
+    names = gate_names("full")
+    assert names[-2:] == ["py.mutation", "sonar"]
+    assert "py.mutation" in names
+
+
+def test_repo_root_is_the_git_toplevel() -> None:
+    assert repo_root() == ROOT
+    assert (ROOT / "marestail.toml").is_file()
+
+
+def test_last_line_and_mutmut_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert last_line("") == ""
+    assert last_line("\n\nok\n") == "ok"
+    monkeypatch.chdir(tmp_path)
+    assert under_mutmut() is False
+    assert restricted_path() is False
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert restricted_path() is True
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/ps")
+    folder = tmp_path / "mutants"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    assert under_mutmut() is True
+    assert restricted_path() is True
 
 
 def readme_section() -> str:

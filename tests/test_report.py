@@ -25,6 +25,11 @@ def test_render_one_exactly_max_findings() -> None:
     assert report.render_one(result).splitlines()[-1] == "       f39"
 
 
+def test_render_one_hides_a_single_extra_finding() -> None:
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(41)])
+    assert report.render_one(result).splitlines()[-1] == "       ... 1 more"
+
+
 def test_render_passed_without_scope() -> None:
     assert report.render([Result("a", True, "fine")]) == "[ok  ] a              fine  (0.0s)\n\nGATE PASSED"
 

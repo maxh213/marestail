@@ -77,21 +77,14 @@ def default_bg() -> int:
 
 def color_theme() -> Theme:
     bg = default_bg()
-    rich = curses.COLORS >= 256
-    amber = 178 if rich else curses.COLOR_YELLOW
-    fern = 70 if rich else curses.COLOR_GREEN
-    heather = 141 if rich else curses.COLOR_MAGENTA
-    sage = 108 if rich else curses.COLOR_WHITE
-    moss = 65 if rich else curses.COLOR_GREEN
-    ember = 167 if rich else curses.COLOR_RED
-    plum = 96 if rich else curses.COLOR_MAGENTA
-    curses.init_pair(PAIR_HEADING, amber, bg)
-    curses.init_pair(PAIR_WORKER, fern, bg)
-    curses.init_pair(PAIR_JUDGE, heather, bg)
-    curses.init_pair(PAIR_SECONDARY, sage, bg)
-    curses.init_pair(PAIR_SELECTED, curses.COLOR_WHITE, plum)
-    curses.init_pair(PAIR_BORDER, moss, bg)
-    curses.init_pair(PAIR_BOUNCED, ember, bg)
+    palette = color_palette(curses.COLORS >= 256)
+    curses.init_pair(PAIR_HEADING, palette[0], bg)
+    curses.init_pair(PAIR_WORKER, palette[1], bg)
+    curses.init_pair(PAIR_JUDGE, palette[2], bg)
+    curses.init_pair(PAIR_SECONDARY, palette[3], bg)
+    curses.init_pair(PAIR_SELECTED, curses.COLOR_WHITE, palette[6])
+    curses.init_pair(PAIR_BORDER, palette[4], bg)
+    curses.init_pair(PAIR_BOUNCED, palette[5], bg)
     return Theme(
         heading=curses.color_pair(PAIR_HEADING) | curses.A_BOLD,
         worker=curses.color_pair(PAIR_WORKER),
@@ -105,6 +98,20 @@ def color_theme() -> Theme:
         passed=curses.color_pair(PAIR_WORKER) | curses.A_BOLD,
         idle=curses.color_pair(PAIR_SECONDARY) | curses.A_DIM,
         colors=True,
+    )
+
+
+def color_palette(rich: bool) -> tuple[int, int, int, int, int, int, int]:
+    if rich:
+        return (178, 70, 141, 108, 65, 167, 96)
+    return (
+        curses.COLOR_YELLOW,
+        curses.COLOR_GREEN,
+        curses.COLOR_MAGENTA,
+        curses.COLOR_WHITE,
+        curses.COLOR_GREEN,
+        curses.COLOR_RED,
+        curses.COLOR_MAGENTA,
     )
 
 

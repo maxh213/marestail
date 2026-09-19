@@ -1,8 +1,5 @@
-import fnmatch
 import json
 import time
-import tomllib
-from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
@@ -46,55 +43,10 @@ def radon_command(ctx: Context) -> list[str]:
 
 
 def scored(radon: dict[str, list[Block]], coverage: dict[str, Any], ctx: Context) -> list[Block]:
-    omitted = coverage_omits(ctx)
     result = []
     for file, blocks in radon.items():
-        result.extend(scored_unless_omitted(file, blocks, coverage, ctx, omitted))
+        result.extend(scored_file(file, blocks, coverage["files"].get(file, {}), scoped_lines(file, ctx)))
     return result
-
-
-def scored_unless_omitted(file: str, blocks: list[Block], coverage: dict[str, Any], ctx: Context, omitted: list[str]) -> list[Block]:
-    if omitted_file(file, omitted):
-        return []
-    return scored_file(file, blocks, coverage["files"].get(file, {}), scoped_lines(file, ctx))
-
-
-def coverage_omits(ctx: Context) -> list[str]:
-    return as_patterns(run_section(ctx).get("omit", []))
-
-
-def run_section(ctx: Context) -> dict[str, Any]:
-    return mapping(mapping(mapping(parsed_toml(ctx.root / "pyproject.toml"), "tool"), "coverage"), "run")
-
-
-def parsed_toml(path: Path) -> dict[str, Any]:
-    try:
-        with path.open("rb") as handle:
-            loaded: Any = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
-    return as_table(loaded)
-
-
-def as_table(loaded: Any) -> dict[str, Any]:
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def mapping(data: Any, key: str) -> dict[str, Any]:
-    value = data.get(key) if isinstance(data, dict) else None
-    return value if isinstance(value, dict) else {}
-
-
-def as_patterns(omit: Any) -> list[str]:
-    return list(map(str, omit)) if isinstance(omit, list) else listed_omit(omit)
-
-
-def listed_omit(omit: Any) -> list[str]:
-    return [omit] if isinstance(omit, str) else []
-
-
-def omitted_file(file: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(file, pattern) for pattern in patterns)
 
 
 def scored_file(file: str, blocks: list[Block], file_coverage: dict[str, Any], gated: set[int] | None) -> list[Block]:

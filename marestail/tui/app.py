@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from .collect import collect_fleet
+from .model import Fleet
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
 from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
 
@@ -30,46 +31,79 @@ def run(roots: list[Path], refresh: float = 2.0, show_all: bool = False) -> int:
 def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bool) -> int:
     hide_cursor()
     stdscr.timeout(TICK_MS)
-    state = WatchState(fleet=None, theme=init_theme(), tick=0)
-    panels = [panel_cls() for panel_cls in PANELS]
-    active = 0
-    detail: ConversationPanel | None = None
-    legend = False
-    collected = 0.0
+    session = WatchSession(roots, refresh, show_all)
     while True:
+        code = session.tick(stdscr)
+        if code is not None:
+            return code
+
+
+class WatchSession:
+    def __init__(self, roots: list[Path], refresh: float, show_all: bool) -> None:
+        self.roots = roots
+        self.refresh = refresh
+        self.show_all = show_all
+        self.state = WatchState(fleet=None, theme=init_theme(), tick=0)
+        self.panels = [panel_cls() for panel_cls in PANELS]
+        self.active = 0
+        self.detail: ConversationPanel | None = None
+        self.legend = False
+        self.collected = 0.0
+
+    def tick(self, stdscr: curses.window) -> int | None:
+        self.maybe_refresh()
+        draw(stdscr, self.panels[self.active], self.detail, self.state, self.legend)
+        return self.handle_key(stdscr.getch())
+
+    def maybe_refresh(self) -> None:
         now = time.monotonic()
-        if now - collected >= refresh:
-            refresh_fleet(roots, state, show_all)
-            if detail is not None:
-                detail.sync(state.fleet)
-            collected = now
-        draw(stdscr, panels[active], detail, state, legend)
-        key = stdscr.getch()
+        if now - self.collected < self.refresh:
+            return
+        refresh_fleet(self.roots, self.state, self.show_all)
+        if self.detail is not None:
+            self.detail.sync(self.state.fleet)
+        self.collected = now
+
+    def handle_key(self, key: int) -> int | None:
+        if key in (-1, curses.KEY_RESIZE, ord("?")):
+            return self.handle_idle(key)
+        if self.detail is not None:
+            return self.handle_detail(key)
+        return self.handle_nav(key)
+
+    def handle_idle(self, key: int) -> None:
         if key == -1:
-            state.tick += 1
-            continue
-        if key == curses.KEY_RESIZE:
-            continue
+            self.state.tick += 1
         if key == ord("?"):
-            legend = not legend
-            continue
-        if detail is not None:
-            if detail.on_key(key, state) == "back":
-                detail = None
-            continue
+            self.legend = not self.legend
+        return None
+
+    def handle_nav(self, key: int) -> int | None:
         if key == ord("\t"):
-            active = (active + 1) % len(panels)
-            continue
+            self.active = (self.active + 1) % len(self.panels)
+            return None
         if key == ord("r"):
-            collected = 0.0
-            continue
-        action = panels[active].on_key(key, state)
+            self.collected = 0.0
+            return None
+        return self.handle_panel(key)
+
+    def handle_detail(self, key: int) -> None:
+        if self.detail is not None and self.detail.on_key(key, self.state) == "back":
+            self.detail = None
+        return None
+
+    def handle_panel(self, key: int) -> int | None:
+        action = self.panels[self.active].on_key(key, self.state)
         if action == "quit":
             return 0
         if action == "open":
-            repo = selected_repo(state)
-            if repo is not None:
-                detail = ConversationPanel(repo)
+            self.open_detail()
+        return None
+
+    def open_detail(self) -> None:
+        repo = selected_repo(self.state)
+        if repo is not None:
+            self.detail = ConversationPanel(repo)
 
 
 def hide_cursor() -> None:
@@ -81,31 +115,46 @@ def hide_cursor() -> None:
 
 def refresh_fleet(roots: list[Path], state: WatchState, show_all: bool) -> None:
     try:
-        fleet = collect_fleet(roots)
-        if not show_all:
-            fleet.repos = [repo for repo in fleet.repos if repo.alive]
-        state.fleet = fleet
+        state.fleet = filtered_fleet(collect_fleet(roots), show_all)
         state.error = None
     except Exception as error:
         state.error = f"collect failed: {error}"[:60]
     state.selected = max(0, min(state.selected, max(0, len(worker_rows(state.fleet)) - 1)))
 
 
+def filtered_fleet(fleet: Fleet, show_all: bool) -> Fleet:
+    if not show_all:
+        fleet.repos = [repo for repo in fleet.repos if repo.alive]
+    return fleet
+
+
 def draw(stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
+    draw_body(stdscr, panel, detail, state, legend, height, width)
+    stdscr.noutrefresh()
+    curses.doupdate()
+
+
+def draw_body(
+    stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool, height: int, width: int
+) -> None:
     if width < MIN_W or height < MIN_H:
         notice = f"resize to at least {MIN_W}x{MIN_H}"
         put(stdscr, height // 2, max(0, (width - len(notice)) // 2), notice, state.theme.heading)
-    else:
-        draw_header(stdscr, width, state)
-        draw_footer(stdscr, height, width, detail, state)
-        target = detail if detail is not None else panel
-        target.render(stdscr, Rect(2, 0, height - 3, width), True, state)
-        if legend:
-            draw_legend(stdscr, height, width, state)
-    stdscr.noutrefresh()
-    curses.doupdate()
+        return
+    draw_frame(stdscr, panel, detail, state, legend, height, width)
+
+
+def draw_frame(
+    stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool, height: int, width: int
+) -> None:
+    draw_header(stdscr, width, state)
+    draw_footer(stdscr, height, width, detail, state)
+    target = detail if detail is not None else panel
+    target.render(stdscr, Rect(2, 0, height - 3, width), True, state)
+    if legend:
+        draw_legend(stdscr, height, width, state)
 
 
 def draw_legend(win: curses.window, height: int, width: int, state: WatchState) -> None:
@@ -132,12 +181,12 @@ def status_text(state: WatchState) -> str:
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:
-    if detail is not None:
-        hints = "j/k scroll · PgUp/PgDn · q back"
-        if detail.follow:
-            hints += " ⇊"
-    else:
-        hints = "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
-    put(win, height - 1, 1, hints, state.theme.secondary)
+    put(win, height - 1, 1, footer_hints(detail), state.theme.secondary)
     if state.error:
         put(win, height - 1, width - len(state.error) - 1, state.error, state.theme.bounced)
+
+
+def footer_hints(detail: ConversationPanel | None) -> str:
+    if detail is None:
+        return "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
+    return "j/k scroll · PgUp/PgDn · q back" + (" ⇊" if detail.follow else "")

@@ -7,7 +7,6 @@ from typing import Any
 
 from marestail import dotnet, erlang, java, rust
 from marestail.context import Context
-from marestail.gates.py_crap import coverage_omits
 from marestail.report import Result
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -44,18 +43,6 @@ DOTNET_EXCLUSIONS = [
     ".scannerwork/**",
     BENCHMARKS,
 ]
-EMBEDDED_LANGUAGE_FILES = (
-    ("java", "java"),
-    ("ts", "mjs"),
-    ("ts", "js"),
-    ("ruby", "rb"),
-    ("rust", "rs"),
-    ("dotnet", "cs"),
-    ("elixir", "exs"),
-    ("erlang", "escript"),
-)
-EMBEDDED_TREES = ("tui", "jvm", "js", "rb", "rs", "cs", "erl", "ex")
-
 Credentials = dict[str, str]
 
 
@@ -173,65 +160,7 @@ def declared_properties(ctx: Context) -> set[str]:
 
 def scanner_exclusions(ctx: Context) -> str:
     patterns = project_exclusions(ctx)
-    base = patterns if BENCHMARKS in patterns else [*patterns, BENCHMARKS]
-    return ",".join(unique_patterns([*base, *analysis_exclusions(ctx)]))
-
-
-def analysis_exclusions(ctx: Context) -> list[str]:
-    return [*omit_exclusions(ctx), *embedded_language_exclusions(ctx), *embedded_tree_exclusions(ctx)]
-
-
-def embedded_tree_exclusions(ctx: Context) -> list[str]:
-    return [tree_glob(source, name) for source in python_source_dirs(ctx) for name in EMBEDDED_TREES if tree_present(ctx, source, name)]
-
-
-def tree_present(ctx: Context, source: str, name: str) -> bool:
-    prefix = source.strip("/")
-    return (ctx.root / name).is_dir() if prefix in ("", ".") else (ctx.root / prefix / name).is_dir()
-
-
-def tree_glob(source: str, name: str) -> str:
-    prefix = source.strip("/") or "."
-    return f"{name}/**" if prefix == "." else f"{prefix}/{name}/**"
-
-
-def omit_exclusions(ctx: Context) -> list[str]:
-    return [as_sonar_glob(pattern) for pattern in coverage_omits(ctx)]
-
-
-def as_sonar_glob(pattern: str) -> str:
-    return f"{pattern[:-1]}**" if pattern.endswith("/*") else pattern
-
-
-def embedded_language_exclusions(ctx: Context) -> list[str]:
-    return [pattern for pattern in language_globs(ctx) if glob_exists(ctx, pattern)]
-
-
-def language_globs(ctx: Context) -> list[str]:
-    return [
-        language_glob(source, suffix)
-        for section, suffix in EMBEDDED_LANGUAGE_FILES
-        if ctx.config.section(section) is None
-        for source in python_source_dirs(ctx)
-    ]
-
-
-def language_glob(source: str, suffix: str) -> str:
-    prefix = source.strip("/") or "."
-    return f"**/*.{suffix}" if prefix == "." else f"{prefix}/**/*.{suffix}"
-
-
-def python_source_dirs(ctx: Context) -> list[str]:
-    sources = ctx.python("sources", ["."])
-    return [str(item) for item in sources] if isinstance(sources, list) else [str(sources)]
-
-
-def glob_exists(ctx: Context, pattern: str) -> bool:
-    return next(ctx.root.glob(pattern), None) is not None
-
-
-def unique_patterns(patterns: list[str]) -> list[str]:
-    return list(dict.fromkeys(patterns))
+    return ",".join(patterns if BENCHMARKS in patterns else [*patterns, BENCHMARKS])
 
 
 def project_exclusions(ctx: Context) -> list[str]:
