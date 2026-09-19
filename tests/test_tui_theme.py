@@ -31,13 +31,17 @@ class FakeCurses:
     def start_color() -> None:
         return None
 
+    colors_on = True
+    default_ok = True
+
     @staticmethod
     def has_colors() -> bool:
-        return True
+        return FakeCurses.colors_on
 
     @staticmethod
     def use_default_colors() -> None:
-        return None
+        if not FakeCurses.default_ok:
+            raise curses.error("no")
 
 
 def test_mono_and_glyphs() -> None:
@@ -59,6 +63,8 @@ def test_mono_and_glyphs() -> None:
 
 def test_color_theme(monkeypatch: Any) -> None:
     monkeypatch.setattr(theme, "curses", FakeCurses)
+    FakeCurses.colors_on = True
+    FakeCurses.default_ok = True
     FakeCurses.COLORS = 8
     colored = theme.color_theme()
     assert colored.colors is True
@@ -71,9 +77,10 @@ def test_color_theme(monkeypatch: Any) -> None:
 
 def test_init_theme_paths(monkeypatch: Any) -> None:
     monkeypatch.setattr(theme, "curses", FakeCurses)
-    FakeCurses.has_colors = staticmethod(lambda: False)
+    FakeCurses.default_ok = True
+    FakeCurses.colors_on = False
     assert theme.init_theme().colors is False
-    FakeCurses.has_colors = staticmethod(lambda: True)
+    FakeCurses.colors_on = True
 
     def boom() -> theme.Theme:
         raise curses.error("no")
@@ -81,16 +88,13 @@ def test_init_theme_paths(monkeypatch: Any) -> None:
     monkeypatch.setattr(theme, "color_theme", boom)
     assert theme.init_theme().colors is False
     monkeypatch.setattr(theme, "color_theme", lambda: theme.mono_theme())
-    FakeCurses.has_colors = staticmethod(lambda: True)
+    FakeCurses.colors_on = True
     assert theme.init_theme().colors is False
 
 
 def test_default_bg(monkeypatch: Any) -> None:
     monkeypatch.setattr(theme, "curses", FakeCurses)
+    FakeCurses.default_ok = True
     assert theme.default_bg() == -1
-
-    def boom() -> None:
-        raise curses.error("no")
-
-    FakeCurses.use_default_colors = staticmethod(boom)
+    FakeCurses.default_ok = False
     assert theme.default_bg() == FakeCurses.COLOR_BLACK

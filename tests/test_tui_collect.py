@@ -161,14 +161,16 @@ def test_latest_log_and_transcript(tmp_path: Path, monkeypatch: Any) -> None:
     write(tmp_path / ".marestail" / "runs" / "overnight-a.log", "a")
     write(tmp_path / ".marestail" / "runs" / "overnight-b.log", "b")
     write(tmp_path / ".marestail" / "runs" / "other.txt", "c")
-    assert collect.latest_log(tmp_path).name == "overnight-b.log"
+    found = collect.latest_log(tmp_path)
+    assert found is not None
+    assert found.name == "overnight-b.log"
     monkeypatch.setattr(collect, "claude_homes", lambda: [tmp_path / "home"])
     folder = tmp_path / "home" / "projects" / str(tmp_path).replace("/", "-")
     write(folder / "a.jsonl", "{}\n")
     monkeypatch.setattr(collect, "dir_mtime", lambda path: 1)
-    monkeypatch.setattr(collect.time, "time", lambda: 1)
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 1)
     assert collect.live_transcript(tmp_path) == folder / "a.jsonl"
-    monkeypatch.setattr(collect.time, "time", lambda: 1 + collect.TAIL_STALE_S + 1)
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 1 + collect.TAIL_STALE_S + 1)
     assert collect.live_transcript(tmp_path) is None
     assert collect.live_transcript(tmp_path / "missing") is None
 
@@ -196,9 +198,9 @@ def test_proc_rows_and_parse(monkeypatch: Any) -> None:
     class Out:
         stdout = "header\n1 0 2 python cli.py run\nbad\n1 x 2 a b\n"
 
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **opts: Out())
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **opts: Out())
     assert collect.proc_rows()[0][0] == 1
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **opts: (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **opts: (_ for _ in ()).throw(OSError("no")))
     assert collect.proc_rows() == []
     assert collect.parse_ps_line("1 2") is None
 
@@ -242,14 +244,14 @@ def test_agent_process_and_fmt() -> None:
 
 def test_git_line_and_paths(tmp_path: Path, monkeypatch: Any) -> None:
     assert collect.git_line(tmp_path, ["status"]) == ""
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **opts: (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **opts: (_ for _ in ()).throw(OSError("no")))
     assert collect.git_line(tmp_path, ["status"]) == ""
 
     class Ok:
         returncode = 0
         stdout = "ok\n"
 
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **opts: Ok())
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **opts: Ok())
     assert collect.git_line(tmp_path, ["status"]) == "ok"
     assert collect.cwd_of(0) is None
     assert collect.under_root(None, tmp_path) is False
@@ -311,7 +313,7 @@ def test_formatted_tail_and_fresh_log(tmp_path: Path, monkeypatch: Any) -> None:
     assert collect.formatted_tail(path, 1, 1000) == ["hi"]
     assert collect.fresh_log([]) is None
     monkeypatch.setattr(collect, "dir_mtime", lambda path: 1)
-    monkeypatch.setattr(collect.time, "time", lambda: 1)
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 1)
     assert collect.fresh_log([path]) == path
 
 

@@ -72,7 +72,7 @@ class WatchSession:
             return self.handle_detail(key)
         return self.handle_nav(key)
 
-    def handle_idle(self, key: int) -> None:
+    def handle_idle(self, key: int) -> int | None:
         if key == -1:
             self.state.tick += 1
         if key == ord("?"):
@@ -88,7 +88,7 @@ class WatchSession:
             return None
         return self.handle_panel(key)
 
-    def handle_detail(self, key: int) -> None:
+    def handle_detail(self, key: int) -> int | None:
         if self.detail is not None and self.detail.on_key(key, self.state) == "back":
             self.detail = None
         return None
