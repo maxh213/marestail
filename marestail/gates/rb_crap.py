@@ -9,6 +9,8 @@ from marestail.gates.rb_tests import COVERAGE_JSON, relative_path
 from marestail.report import Result
 from marestail.ruby import scan, scanned, sources
 
+ruby_sources = sources
+
 GATE = "rb.crap"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
 OPENER = re.compile(r"^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b")
