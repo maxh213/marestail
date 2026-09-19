@@ -97,7 +97,7 @@ def test_scoped_scores_touched_methods(tmp_path: Path, fake_run: Any) -> None:
 
 def test_sources_in_scope(tmp_path: Path) -> None:
     write_tree(tmp_path)
-    assert rb_crap.ruby_sources(make_context(tmp_path)) == [tmp_path / "app/models/user.rb", tmp_path / "lib/tool.rb"]
+    assert ruby.sources(make_context(tmp_path)) == [tmp_path / "app/models/user.rb", tmp_path / "lib/tool.rb"]
     ctx = make_context(tmp_path, focus={"lib"})
     assert rb_crap.sources_in_scope(ctx) == [tmp_path / "lib/tool.rb"]
 

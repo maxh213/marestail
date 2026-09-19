@@ -7,8 +7,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates.rb_tests import COVERAGE_JSON, relative_path
 from marestail.report import Result
-from marestail.ruby import scan, scanned
-from marestail.ruby import sources as ruby_sources
+from marestail.ruby import scan, scanned, sources
 
 GATE = "rb.crap"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
@@ -45,7 +44,7 @@ def above(scored: list[dict[str, Any]], limit: float) -> list[dict[str, Any]]:
 
 
 def sources_in_scope(ctx: Context) -> list[Path]:
-    files = ruby_sources(ctx)
+    files = sources(ctx)
     if not ctx.scoped:
         return files
     return [path for path in files if ctx.in_scope(str(path.relative_to(ctx.root)))]
