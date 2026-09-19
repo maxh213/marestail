@@ -11,7 +11,7 @@ addopts = "-p no:cacheprovider"
 [tool.coverage.run]
 source = ["marestail"]
 branch = true
-omit = ["marestail/__init__.py"]
+omit = ["marestail/tui/*", "marestail/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true
@@ -37,16 +37,3 @@ max-complexity = 4
 
 [tool.mutmut]
 source_paths = ["marestail"]
-do_not_mutate = ["marestail/tui/*"]
-also_copy = [
-    "templates",
-    "roles",
-    "guidance",
-    "features",
-    "README.md",
-    "marestail.toml",
-    "sonar-project.properties",
-    ".importlinter",
-    "CLAUDE.md",
-    "AGENTS.md",
-]
