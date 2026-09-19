@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import dotnet, erlang, java, ruby, rust
-from marestail.gates import deadcode, rb_crap
+from marestail.gates import deadcode
 from tests.conftest import make_context
 
 VULTURE = "\n".join(
@@ -163,7 +163,7 @@ def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: t
         calls.append((mode, found))
         return reply
 
-    monkeypatch.setattr(rb_crap, "ruby_sources", lambda ctx: files)
+    monkeypatch.setattr(ruby, "sources", lambda ctx: files)
     monkeypatch.setattr(ruby, "scan", scan)
 
     assert deadcode.ruby_findings(make_context(tmp_path, {"ruby": {}})) == expected
@@ -171,7 +171,7 @@ def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: t
 
 
 def test_ruby_findings_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rb_crap, "ruby_sources", lambda ctx: [])
+    monkeypatch.setattr(ruby, "sources", lambda ctx: [])
 
     assert deadcode.ruby_findings(make_context(tmp_path, {"ruby": {}})) == []
 

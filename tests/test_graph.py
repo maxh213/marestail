@@ -8,7 +8,6 @@ import pytest
 from marestail import dotnet, erlang, graph, java, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
-from marestail.gates import rb_crap
 from tests.conftest import FakeRun, make_context
 
 EDGES = [{"from": "A", "to": "B", "symbol": "s", "fun": "f/1"}, {"from": "B", "to": "C", "symbol": "t", "fun": "g/0"}]
@@ -116,7 +115,7 @@ def test_ruby_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append((mode, files, extra))
         return 0, json.dumps([{"from": "A", "to": "B", "constant": "B"}, {"from": "C"}])
 
-    monkeypatch.setattr(rb_crap, "ruby_sources", sources([tmp_path / "a.rb"]))
+    monkeypatch.setattr(ruby, "sources", sources([tmp_path / "a.rb"]))
     monkeypatch.setattr(ruby, "scan", scan)
     assert graph.ruby_graph(config(tmp_path, {"ruby": {}})) == "## Ruby modules\nA -> B (B)\nC -> None (None)"
     assert calls == [("deps", [tmp_path / "a.rb"], [str(tmp_path)])]
@@ -124,13 +123,13 @@ def test_ruby_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize(("output", "expected"), [("", "## Ruby modules\n"), (" not json \n", "## Ruby modules\nnot json")])
 def test_ruby_graph_odd_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str, expected: str) -> None:
-    monkeypatch.setattr(rb_crap, "ruby_sources", sources([tmp_path / "a.rb"]))
+    monkeypatch.setattr(ruby, "sources", sources([tmp_path / "a.rb"]))
     monkeypatch.setattr(ruby, "scan", lambda *args, **kwargs: (1, output))
     assert graph.ruby_graph(config(tmp_path, {"ruby": {}})) == expected
 
 
 def test_ruby_graph_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rb_crap, "ruby_sources", sources([]))
+    monkeypatch.setattr(ruby, "sources", sources([]))
     assert graph.ruby_graph(config(tmp_path, {"ruby": {}})) == ""
 
 

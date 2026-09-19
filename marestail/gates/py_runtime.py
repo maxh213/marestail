@@ -6,8 +6,7 @@ import tomllib
 from itertools import takewhile
 from pathlib import Path
 
-from marestail.context import Context
-from marestail.perf.scope import under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.report import Result
 
 GATE = "py.runtime"

@@ -7,7 +7,8 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates.rb_tests import COVERAGE_JSON, relative_path
 from marestail.report import Result
-from marestail.ruby import SKIP_DIRS, scan, scanned
+from marestail.ruby import scan, scanned
+from marestail.ruby import sources as ruby_sources
 
 GATE = "rb.crap"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
@@ -41,16 +42,6 @@ def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[dict[str
 
 def above(scored: list[dict[str, Any]], limit: float) -> list[dict[str, Any]]:
     return sorted((f for f in scored if f["crap"] > limit), key=lambda f: -f["crap"])
-
-
-def kept_source(ctx: Context, path: Path) -> bool:
-    return not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
-
-
-def ruby_sources(ctx: Context) -> list[Path]:
-    root = ctx.ruby_root()
-    folders = ctx.ruby("sources", ["app", "lib"])
-    return sorted(path for folder in folders for path in (root / folder).rglob("*.rb") if kept_source(ctx, path))
 
 
 def sources_in_scope(ctx: Context) -> list[Path]:

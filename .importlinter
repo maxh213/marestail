@@ -1,6 +1,20 @@
 [importlinter]
 root_package = marestail
 
+[importlinter:contract:layers]
+name = Dependencies point down: CLI, then pipeline commands, then prompts, then gates, then language adapters, then context, then shell
+type = layers
+layers =
+    marestail.cli
+    marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup
+    marestail.prompts : marestail.audit : marestail.practices
+    marestail.gates
+    marestail.depth | marestail.graph
+    marestail.dotnet | marestail.erlang | marestail.java | marestail.ruby | marestail.rust
+    marestail.context | marestail.pipeline | marestail.freeze | marestail.sonar.client
+    marestail.report | marestail.config | marestail.changes
+    marestail.shell
+
 [importlinter:contract:gates-do-not-reach-up]
 name = Gates never import the runner, the CLI, the prompts or the pipeline
 type = forbidden
@@ -12,6 +26,12 @@ forbidden_modules =
     marestail.prompts
     marestail.pipeline
     marestail.tui
+    marestail.perf
+    marestail.install
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
 
 [importlinter:contract:foundations-import-nothing-above]
 name = Context, report, shell, config and changes import nothing above them
@@ -22,6 +42,9 @@ source_modules =
     marestail.shell
     marestail.config
     marestail.changes
+    marestail.pipeline
+    marestail.freeze
+    marestail.sonar.client
 forbidden_modules =
     marestail.gates
     marestail.runner
@@ -30,3 +53,46 @@ forbidden_modules =
     marestail.pipeline
     marestail.install
     marestail.tui
+    marestail.perf
+    marestail.route
+    marestail.graph
+    marestail.depth
+    marestail.audit
+    marestail.practices
+    marestail.freeze
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+    marestail.sonar.setup
+
+[importlinter:contract:language-adapters-stay-below-gates]
+name = Language adapters never import gates, the runner, the CLI or perf
+type = forbidden
+source_modules =
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+forbidden_modules =
+    marestail.gates
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.install
+    marestail.tui
+    marestail.perf
+    marestail.route
+    marestail.audit
+    marestail.practices
+
+[importlinter:contract:protect-gate-cycles]
+name = Cycle finder is private to gates
+type = protected
+protected_modules =
+    marestail.gates._cycles
+allowed_importers =
+    marestail.gates

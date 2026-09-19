@@ -1,12 +1,14 @@
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from marestail.changes import base_exists, changed_files, changed_lines, file_lines
-from marestail.config import Config
+from marestail.config import Config, focus_paths
 
 CHANGED = "changed"
 DEFAULT_BASE = "origin/master"
+BENCHMARKS = "perf"
 
 
 @dataclass(frozen=True)
@@ -18,6 +20,14 @@ class MutationScope:
 
 def matches(path: str, relative: Path, suffixes: tuple[str, ...]) -> bool:
     return path.endswith(suffixes) and Path(path).is_relative_to(relative)
+
+
+def is_benchmark(relative: str | Path) -> bool:
+    return Path(relative).parts[:1] == (BENCHMARKS,)
+
+
+def under_benchmarks(root: Path, path: Path) -> bool:
+    return is_benchmark(path.relative_to(root))
 
 
 def scoped_files(files: list[str]) -> MutationScope:
@@ -204,3 +214,41 @@ def build(config: Config, scope_changed: bool, focus: set[str] | None = None, ha
     if hard:
         return hard_context(config, focused)
     return diff_context(config, scope_changed or bool(focused), focused)
+
+
+def resolve_focus(config: Config, focus: set[str]) -> set[str]:
+    resolved = {path: locate_focus(config, path) for path in focus}
+    missing = missing_focus(resolved)
+    if missing:
+        raise SystemExit(f"focus path not found under {config.root}: {', '.join(missing)}")
+    return found_focus(resolved)
+
+
+def found_focus(resolved: dict[str, str | None]) -> set[str]:
+    return {entry for entry in resolved.values() if entry is not None}
+
+
+def missing_focus(resolved: dict[str, str | None]) -> list[str]:
+    return sorted(path for path, entry in resolved.items() if entry is None)
+
+
+def locate_focus(config: Config, path: str) -> str | None:
+    candidate = Path(path.strip())
+    full = candidate if candidate.is_absolute() else config.root / candidate
+    if not full.exists():
+        return None
+    try:
+        return full.resolve().relative_to(config.root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def hook_focus(config: Config) -> set[str]:
+    found = set()
+    for path in focus_paths(config):
+        entry = locate_focus(config, path)
+        if entry is None:
+            sys.stderr.write(f"warning: ignoring missing focus path: {path}\n")
+        else:
+            found.add(entry)
+    return found

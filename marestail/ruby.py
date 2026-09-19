@@ -66,3 +66,13 @@ def relative(path: str, ctx: Context) -> str:
         return str(candidate.resolve().relative_to(ctx.root.resolve()))
     except ValueError:
         return path
+
+
+def kept_source(ctx: Context, path: Path) -> bool:
+    return not any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
+
+
+def sources(ctx: Context) -> list[Path]:
+    root = ctx.ruby_root()
+    folders = ctx.ruby("sources", ["app", "lib"])
+    return sorted(path for folder in folders for path in (root / folder).rglob("*.rb") if kept_source(ctx, path))

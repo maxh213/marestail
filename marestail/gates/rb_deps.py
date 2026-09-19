@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates.rb_crap import ruby_sources
 from marestail.report import Result
-from marestail.ruby import scan, scanned
+from marestail.ruby import scan, scanned, sources
 
 GATE = "rb.deps"
 CONTROLLERS = "app/controllers"
@@ -22,7 +21,7 @@ DEFAULT_LAYERS = [
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    files = ruby_sources(ctx)
+    files = sources(ctx)
     if not files:
         return Result.skipped(GATE, "no ruby sources")
     code, output = scan(ctx, "deps", files, extra=[str(ctx.root)])

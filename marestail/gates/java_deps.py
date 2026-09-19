@@ -5,7 +5,7 @@ from typing import Any
 
 from marestail import java
 from marestail.context import Context
-from marestail.gates.cs_deps import cycle_findings, under
+from marestail.gates._cycles import cycle_findings, under
 from marestail.report import Result
 
 GATE = "java.deps"

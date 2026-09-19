@@ -14,8 +14,9 @@ from typing import Any
 from marestail import audit, freeze, practices, prompts
 from marestail import config as config_module
 from marestail import route as dandelion
-from marestail.cli import hook_focus, resolve_focus, run_gates
 from marestail.config import Config
+from marestail.context import hook_focus, resolve_focus
+from marestail.gates import run_gates
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
 from marestail.perf import review as perf_review

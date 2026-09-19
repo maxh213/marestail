@@ -102,9 +102,9 @@ def edge_lines(edges: Iterable[dict[str, Any]], label: str) -> str:
 
 
 def ruby_graph(config: Config) -> str:
-    from marestail.gates.rb_crap import ruby_sources
+    from marestail.ruby import sources
 
-    return scanned_graph(config, "ruby", "Ruby", ruby_sources, ruby_body)
+    return scanned_graph(config, "ruby", "Ruby", sources, ruby_body)
 
 
 def ruby_body(ctx: Context, files: list[Path]) -> str:

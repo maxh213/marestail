@@ -4,7 +4,6 @@ import json
 import os
 import sys
 import time
-import traceback
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import config as config_module
 from marestail import context as context_module
-from marestail import gates as gates_module
+from marestail.context import hook_focus, locate_focus
+from marestail.context import resolve_focus as resolve_focus
+from marestail.gates import configured_gates as configured_gates
+from marestail.gates import run_gates as run_gates
+from marestail.gates import run_gates_with_context
+from marestail.gates import run_one as run_one
 from marestail.report import Result, render, to_json
 
 HOOK_BLOCK_LIMIT = 5
@@ -199,67 +203,6 @@ def passed(results: list[Result]) -> bool:
     return all(result.ok for result in results)
 
 
-def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False) -> list[Result]:
-    results, _ = run_gates_with_context(tier, scope_changed, only, focus, hard)
-    return results
-
-
-def run_gates_with_context(
-    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False
-) -> tuple[list[Result], context_module.Context]:
-    os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
-    config = config_module.load(Path.cwd())
-    ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard)
-    return [run_one(gate, ctx) for gate in configured_gates(config, tier, only)], ctx
-
-
-def gate_focus(config: config_module.Config, focus: set[str], hard: bool) -> set[str]:
-    focused = resolve_focus(config, focus)
-    return focused | hook_focus(config) if hard else focused
-
-
-def configured_gates(config: config_module.Config, tier: str, only: set[str] | None) -> list[gates_module.Gate]:
-    return [gate for gate in gates_module.select(tier, only) if not gate.section or config.section(gate.section) is not None]
-
-
-def resolve_focus(config: config_module.Config, focus: set[str]) -> set[str]:
-    resolved = {path: locate_focus(config, path) for path in focus}
-    missing = missing_focus(resolved)
-    if missing:
-        raise SystemExit(f"focus path not found under {config.root}: {', '.join(missing)}")
-    return found_focus(resolved)
-
-
-def found_focus(resolved: dict[str, str | None]) -> set[str]:
-    return {entry for entry in resolved.values() if entry is not None}
-
-
-def missing_focus(resolved: dict[str, str | None]) -> list[str]:
-    return sorted(path for path, entry in resolved.items() if entry is None)
-
-
-def locate_focus(config: config_module.Config, path: str) -> str | None:
-    candidate = Path(path.strip())
-    full = candidate if candidate.is_absolute() else config.root / candidate
-    if not full.exists():
-        return None
-    try:
-        return full.resolve().relative_to(config.root.resolve()).as_posix()
-    except ValueError:
-        return None
-
-
-def hook_focus(config: config_module.Config) -> set[str]:
-    found = set()
-    for path in config_module.focus_paths(config):
-        entry = locate_focus(config, path)
-        if entry is None:
-            sys.stderr.write(f"warning: ignoring missing focus path: {path}\n")
-        else:
-            found.add(entry)
-    return found
-
-
 def hook_scope(config: config_module.Config) -> tuple[set[str], bool]:
     found = hook_focus(config)
     for path in filter(None, os.environ.get("MARESTAIL_FOCUS", "").split(os.pathsep)):
@@ -271,27 +214,6 @@ def hook_scope(config: config_module.Config) -> tuple[set[str], bool]:
 
 def scope_line(ctx: context_module.Context) -> str | None:
     return ctx.scope_summary() if ctx.scoped else None
-
-
-def run_one(gate: gates_module.Gate, ctx: context_module.Context) -> Result:
-    started = time.time()
-    try:
-        return gate.run(ctx)
-    except BaseException as error:
-        if not isinstance(error, Exception | SystemExit):
-            raise
-        return crashed(gate, error, started)
-
-
-def crashed(gate: gates_module.Gate, error: BaseException, started: float) -> Result:
-    detail = " ".join(str(error).split())[:200]
-    return Result(
-        gate.name,
-        False,
-        f"{gate.name} crashed: {type(error).__name__} {detail}",
-        traceback.format_exc().strip().splitlines()[-6:],
-        time.time() - started,
-    )
 
 
 def parse_only(value: str | None) -> set[str] | None:

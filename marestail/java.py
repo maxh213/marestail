@@ -7,8 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context
-from marestail.perf.scope import under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 JVM_DIR = Path(__file__).resolve().parent / "jvm"

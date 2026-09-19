@@ -146,10 +146,9 @@ def describe(file: Path, kind: str, item: Any) -> str:
 def ruby_findings(ctx: Context) -> list[str]:
     if ctx.config.section("ruby") is None:
         return []
-    from marestail.gates.rb_crap import ruby_sources
-    from marestail.ruby import scan
+    from marestail.ruby import scan, sources
 
-    files = ruby_sources(ctx)
+    files = sources(ctx)
     if not files:
         return []
     code, output = scan(ctx, "dead", files)

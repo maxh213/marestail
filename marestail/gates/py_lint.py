@@ -1,7 +1,6 @@
 import time
 
-from marestail.context import Context
-from marestail.perf.scope import is_benchmark
+from marestail.context import Context, is_benchmark
 from marestail.report import Result
 from marestail.shell import run
 

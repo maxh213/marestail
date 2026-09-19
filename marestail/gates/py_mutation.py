@@ -3,8 +3,7 @@ import shutil
 import time
 from pathlib import Path
 
-from marestail.context import Context, MutationScope
-from marestail.perf.scope import is_benchmark
+from marestail.context import Context, MutationScope, is_benchmark
 from marestail.report import Result
 from marestail.shell import run, tail
 

@@ -10,8 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from marestail.context import Context
-from marestail.perf.scope import under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.report import Result
 from marestail.shell import run
 

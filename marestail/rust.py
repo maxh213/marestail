@@ -6,8 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context
-from marestail.perf.scope import under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 CARGO_TOML = "Cargo.toml"

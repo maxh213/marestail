@@ -5,7 +5,7 @@ from typing import Any
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates.cs_deps import cycle_findings
+from marestail.gates._cycles import cycle_findings
 from marestail.report import Result
 
 GATE = "er.deps"
