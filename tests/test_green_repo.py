@@ -12,7 +12,7 @@ import pytest
 
 from marestail import cli, graph, report
 from marestail import config as config_module
-from marestail.gates import comments, py_runtime
+from marestail.gates import comments, configured_gates, py_runtime
 from marestail.report import Result
 from tests.conftest import ForbiddenCallError, make_context
 
@@ -54,7 +54,7 @@ def package_files() -> list[Path]:
 
 
 def gate_names(tier: str) -> list[str]:
-    return [gate.name for gate in cli.configured_gates(config_module.load(ROOT), tier, None)]
+    return [gate.name for gate in configured_gates(config_module.load(ROOT), tier, None)]
 
 
 @pytest.mark.parametrize(

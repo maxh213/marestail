@@ -11,13 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail import config as config_module
 from marestail import context as context_module
-from marestail.context import hook_focus
-from marestail.context import locate_focus as locate_focus
-from marestail.context import resolve_focus as resolve_focus
-from marestail.gates import configured_gates as configured_gates
-from marestail.gates import run_gates as run_gates
-from marestail.gates import run_gates_with_context as run_gates_with_context
-from marestail.gates import run_one as run_one
+from marestail.context import hook_focus, locate_focus
+from marestail.gates import run_gates_with_context
 from marestail.report import Result, render, to_json
 
 HOOK_BLOCK_LIMIT = 5

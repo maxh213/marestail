@@ -288,35 +288,35 @@ def registry(monkeypatch: pytest.MonkeyPatch, repo: Path) -> Recorder:
 
 
 def test_run_gates_with_context(registry: Recorder, repo: Path) -> None:
-    results, ctx = cli.run_gates_with_context("full", True, {"lint"}, {"src"})
+    results, ctx = gates_module.run_gates_with_context("full", True, {"lint"}, {"src"})
     assert (results, ctx.root, ctx.focus, ctx.hard) == ([PASS, FAIL], repo, {"src"}, False)
     assert registry.calls == [("full", {"lint"})]
     assert os.environ["MARESTAIL_GATE_ACTIVE"] == "true"
 
 
 def test_run_gates_hard_adds_configured_focus(registry: Recorder, capsys: pytest.CaptureFixture[str]) -> None:
-    _, ctx = cli.run_gates_with_context("fast", True, None, None, True)
+    _, ctx = gates_module.run_gates_with_context("fast", True, None, None, True)
     assert (ctx.focus, ctx.hard) == ({"src"}, True)
     assert capsys.readouterr().err == "warning: ignoring missing focus path: gone\n"
-    assert cli.run_gates("fast", False, None) == [PASS, FAIL]
+    assert gates_module.run_gates("fast", False, None) == [PASS, FAIL]
 
 
 def test_resolve_focus(repo: Path) -> None:
     (repo / "src").mkdir()
     (repo / "b.py").write_text("")
     config = config_module.load(repo)
-    assert cli.resolve_focus(config, {" src ", str(repo / "b.py")}) == {"src", "b.py"}
+    assert context_module.resolve_focus(config, {" src ", str(repo / "b.py")}) == {"src", "b.py"}
     with pytest.raises(SystemExit) as raised:
-        cli.resolve_focus(config, {"src", "zz", "aa"})
+        context_module.resolve_focus(config, {"src", "zz", "aa"})
     assert str(raised.value) == f"focus path not found under {repo}: aa, zz"
 
 
 def test_locate_focus_outside_the_repo(repo: Path, tmp_path: Path) -> None:
     config = config_module.load(repo)
-    assert cli.locate_focus(config, str(tmp_path)) is None
-    assert cli.locate_focus(config, "..") is None
-    assert cli.locate_focus(config, "missing") is None
-    assert cli.locate_focus(config, ".") == "."
+    assert context_module.locate_focus(config, str(tmp_path)) is None
+    assert context_module.locate_focus(config, "..") is None
+    assert context_module.locate_focus(config, "missing") is None
+    assert context_module.locate_focus(config, ".") == "."
 
 
 def test_hook_scope_reads_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -351,21 +351,21 @@ def crashing(error: BaseException) -> Gate:
 def test_run_one_reports_crashes(repo: Path, monkeypatch: pytest.MonkeyPatch, error: BaseException, summary: str) -> None:
     clock = iter([10.0, 12.5])
     monkeypatch.setattr(time, "time", lambda: next(clock))
-    result = cli.run_one(crashing(error), make_context(repo))
+    result = gates_module.run_one(crashing(error), make_context(repo))
     assert (result.gate, result.ok, result.summary, result.seconds) == ("boom", False, summary, 2.5)
     assert any(line.startswith(f"{type(error).__name__}: ") for line in result.findings)
     assert 1 < len(result.findings) <= 6
 
 
 def test_run_one_returns_the_result(repo: Path) -> None:
-    assert cli.run_one(fake_gate("lint", None, PASS), make_context(repo)) is PASS
+    assert gates_module.run_one(fake_gate("lint", None, PASS), make_context(repo)) is PASS
 
 
 def test_run_one_lets_interrupts_through(repo: Path) -> None:
     gate = crashing(KeyboardInterrupt())
     ctx = make_context(repo)
     with pytest.raises(KeyboardInterrupt):
-        cli.run_one(gate, ctx)
+        gates_module.run_one(gate, ctx)
 
 
 @pytest.mark.parametrize(("value", "expected"), [(None, None), ("", None), ("a", {"a"}), (" a , b,a", {"a", "b"})])
