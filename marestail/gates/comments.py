@@ -11,7 +11,7 @@ from types import ModuleType
 from typing import Any
 
 from marestail.context import Context, under_benchmarks
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 SKIP_DIRS = {
     "node_modules",
@@ -43,7 +43,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     findings = [finding for scanner in SCANNERS for finding in scanner(ctx)]
     summary = "no comments" if not findings else f"{len(findings)} comments or docstrings"
-    return Result("comments", not findings, summary, findings, time.time() - started)
+    return Result("comments", not findings, summary, findings, elapsed(started))
 
 
 def files(ctx: Context, suffixes: tuple[str, ...]) -> list[Path]:

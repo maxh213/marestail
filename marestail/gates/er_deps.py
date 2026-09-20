@@ -6,7 +6,7 @@ from typing import Any
 from marestail import erlang
 from marestail.context import Context
 from marestail.gates._cycles import cycle_findings
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "er.deps"
 MAX_LINES = 60
@@ -21,10 +21,10 @@ def run_gate(ctx: Context) -> Result:
     code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=900)
     failed = erlang.trouble(code, output, "sources failed to compile")
     if failed:
-        return Result(GATE, False, *failed, time.time() - started)
+        return Result(GATE, False, *failed, elapsed(started))
     code, output = erlang.escript(ctx, "deps.escript", beam_paths(ebin), timeout=600)
     if code != 0:
-        return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], elapsed(started))
     return cycles_result(ctx, project_edges(json.loads(output), module_paths(ctx, sources)), started)
 
 
@@ -47,4 +47,4 @@ def project_edges(edges: list[dict[str, Any]], modules: dict[str, str]) -> list[
 def cycles_result(ctx: Context, edges: list[dict[str, Any]], started: float) -> Result:
     findings = erlang.in_scope_findings(ctx, cycle_findings(edges))
     summary = f"{len(findings)} dependency cycles" if findings else "dependency graph acyclic"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))

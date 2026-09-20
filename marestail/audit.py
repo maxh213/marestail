@@ -9,13 +9,16 @@ SPACE = re.compile(r"\s")
 BULLET = "-"
 ARROW = "->"
 SEPARATOR = "::"
+FEATURES = "features"
+FEATURE_GLOB = "*.feature"
+MISSING = -1
 
 Trace = tuple[str, str, str]
 Found = tuple[Trace, int]
 
 
 def listing(folder: Path, pattern: str) -> list[Path]:
-    return sorted(folder.glob(pattern)) if folder.exists() else []
+    return sorted(folder.glob(pattern))
 
 
 def related_files(folder: Path, pattern: str, task_name: str) -> list[Path]:
@@ -24,11 +27,11 @@ def related_files(folder: Path, pattern: str, task_name: str) -> list[Path]:
 
 
 def is_related(file: Path, task_name: str) -> bool:
-    return file.stem in task_name or task_name.endswith(file.stem)
+    return file.stem in task_name
 
 
 def feature_files(config: Config, task_name: str) -> list[Path]:
-    return related_files(config.root / "features", "*.feature", task_name)
+    return related_files(config.root / FEATURES, FEATURE_GLOB, task_name)
 
 
 def scenarios(files: list[Path]) -> list[str]:
@@ -71,24 +74,33 @@ def word_end(text: str, start: int) -> int:
 
 def line_end(text: str, start: int) -> int:
     end = text.find("\n", start)
-    return len(text) if end < 0 else end
+    if end == MISSING:
+        return len(text)
+    return end
 
 
 def traces(text: str) -> list[Trace]:
     found: list[Trace] = []
     start = 0
-    for _ in range(len(text) + 1):
-        if start >= len(text):
-            break
-        trace, end = line_trace(text, start)
+    for index in range(len(text)):
+        if index < start:
+            continue
+        trace, end = line_trace(text, index)
         found += trace
-        start = line_end(text, end) + 1
+        start = line_after(text, end)
     return found
+
+
+def line_after(text: str, pos: int) -> int:
+    head, *tail = text[pos:].split("\n", 1)
+    return pos + len(head) + (0, 1)[bool(tail)]
 
 
 def line_trace(text: str, start: int) -> tuple[list[Trace], int]:
     dash = skip_spaces(text, start)
-    if dash >= line_end(text, start) or text[dash] != BULLET:
+    if dash >= line_end(text, start):
+        return [], start
+    if text[dash] != BULLET:
         return [], start
     found = bullet_trace(text, dash + 1)
     return ([found[0]], found[1]) if found else ([], start)
@@ -116,7 +128,9 @@ def spaced_trace(text: str, start: int, begin: int) -> Found | None:
 def arrows(text: str, begin: int) -> list[int]:
     end = line_end(text, begin)
     found = [index for index in range(begin + 1, end) if text.startswith(ARROW, index)]
-    return [*found, skip_spaces(text, end)] if end < len(text) else found
+    if end == len(text):
+        return found
+    return [*found, skip_spaces(text, end)]
 
 
 def arrow_target(text: str, arrow: int) -> tuple[tuple[str, str], int] | None:
@@ -124,7 +138,9 @@ def arrow_target(text: str, arrow: int) -> tuple[tuple[str, str], int] | None:
         return None
     begin = skip_spaces(text, arrow + len(ARROW))
     split = text.find(SEPARATOR, begin + 1, word_end(text, begin))
-    return named_target(text, begin, split) if split >= 0 else None
+    if split == MISSING:
+        return None
+    return named_target(text, begin, split)
 
 
 def named_target(text: str, begin: int, split: int) -> tuple[tuple[str, str], int] | None:

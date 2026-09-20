@@ -660,6 +660,14 @@ def option_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
     return {flag: action.help for action in parser._actions for flag in action.option_strings}
 
 
+def positional_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
+    return {action.dest: action.help for action in parser._actions if not action.option_strings}
+
+
+def parse_argv(parser: argparse.ArgumentParser, argv: list[str]) -> None:
+    parser.parse_args(argv)
+
+
 def choice_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
     return {choice.dest: choice.help for choice in subparsers_action(parser)._choices_actions}
 
@@ -726,7 +734,10 @@ def test_run_parser_defaults_and_help() -> None:
     retries = next(action for action in parser._actions if "--retries" in action.option_strings)
     assert (retries.metavar, retries.type) == ("N", int)
     agent = next(action for action in parser._actions if "--agent" in action.option_strings)
-    assert list(agent.choices or []) == ["claude", "agy", "grok", "cursor", "kilo", "kimi"]
+    assert list(agent.choices or []) == list(cli.AGENT_CHOICES)
+    assert positional_help(parser)["task"] == cli.HELP_TASK
+    scope = next(action for action in parser._actions if "--scope" in action.option_strings)
+    assert list(scope.choices or []) == list(cli.SCOPE_CHOICES)
 
 
 def test_watch_install_sonar_defaults() -> None:
@@ -739,15 +750,29 @@ def test_watch_install_sonar_defaults() -> None:
     assert option_help(subparser("install"))["--gitignore-generated"] == "add the files marestail generates to the target's .gitignore"
     sonar = subparser("sonar")
     action = next(item for item in sonar._actions if item.dest == "action")
-    assert list(action.choices or []) == ["up", "down", "setup"]
+    assert list(action.choices or []) == list(cli.SONAR_ACTIONS)
+    assert positional_help(subparser("watch"))["paths"] == cli.HELP_WATCH_PATHS
+
+
+def test_unknown_scope_is_rejected() -> None:
+    parser = subparser("gate")
+    with pytest.raises(SystemExit):
+        parse_argv(parser, ["--scope", "nope"])
+
+
+def test_unknown_tier_is_rejected() -> None:
+    parser = subparser("gate")
+    with pytest.raises(SystemExit):
+        parse_argv(parser, ["--tier", "nope"])
 
 
 def test_perf_parser_defaults_and_help() -> None:
     perf = subparser("perf")
     action = subparsers_action(perf)
     assert (action.dest, action.required) == ("perf_command", True)
+    parser = cli.build_parser()
     with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["perf"])
+        parse_argv(parser, ["perf"])
     assert choice_help(perf) == {
         "run": "take samples of one perf/bench_* script on one tree",
         "db": "manage the local performance database",
@@ -770,8 +795,9 @@ def test_perf_parser_defaults_and_help() -> None:
 
 def require_tree(parser: argparse.ArgumentParser) -> None:
     assert next(action.required for action in parser._actions if "--tree" in action.option_strings) is True
+    argv = parser_args_without_tree(parser)
     with pytest.raises(SystemExit):
-        parser.parse_args(parser_args_without_tree(parser))
+        parser.parse_args(argv)
 
 
 def parser_args_without_tree(parser: argparse.ArgumentParser) -> list[str]:
@@ -784,6 +810,6 @@ def test_perf_tree_and_db_commands_are_required() -> None:
     database = nested_parser(perf, "db")
     assert subparsers_action(database).required is True
     with pytest.raises(SystemExit):
-        database.parse_args([])
+        parse_argv(database, [])
     require_tree(nested_parser(database, "golden"))
     require_tree(nested_parser(database, "url"))

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from marestail import java
 from marestail.context import Context, MutationScope
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "java.mutation"
@@ -24,14 +24,14 @@ def run_gate(ctx: Context) -> Result:
         return blocked
     scope = ctx.mutation_files("java", ctx.java_root(), (".java",))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     return run_scope(ctx, scope, started)
 
 
 def pom_problem(ctx: Context) -> Result | None:
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error, [])
     if PITEST.split(":")[1] not in java.pom(ctx).read_text(errors="replace"):
         return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"], 0.0)
     return None
@@ -59,12 +59,12 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     code, output = java.mvn(ctx, command(ctx, targets, out), timeout=int(ctx.java("mutation_timeout", 7200)))
     report = out / "mutations.xml"
     if not report.exists():
-        return Result(GATE, False, java.maven_hint(code, output) or missing(output, code), tail(output), time.time() - started)
+        return Result(GATE, False, java.maven_hint(code, output) or missing(output, code), tail(output), elapsed(started))
     mutants = viable(report)
     if not mutants:
-        return Result(GATE, False, NO_MUTANTS, tail(output), time.time() - started)
+        return Result(GATE, False, NO_MUTANTS, tail(output), elapsed(started))
     findings = survivors(ctx, mutants)
-    return Result(GATE, not findings, summarise(len(findings), len(mutants), note), findings, time.time() - started)
+    return Result(GATE, not findings, summarise(len(findings), len(mutants), note), findings, elapsed(started))
 
 
 def viable(report: Path) -> list[ET.Element]:

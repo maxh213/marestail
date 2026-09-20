@@ -7,7 +7,7 @@ from itertools import takewhile
 from pathlib import Path
 
 from marestail.context import Context, under_benchmarks
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "py.runtime"
 FROM_LINE = re.compile(r"^\s*FROM\s+(\S+)", re.MULTILINE | re.IGNORECASE)
@@ -31,7 +31,7 @@ def run_gate(ctx: Context) -> Result:
     findings = agreement_findings(ctx, shipped, source) + parse_findings(ctx, root, shipped)
     named = f"{name(shipped)} from {source}"
     summary = f"{named}; tooling agrees and every source parses" if not findings else f"{len(findings)} findings against {named}"
-    return Result(GATE, not findings, ctx.global_note(summary), findings, time.time() - started)
+    return Result(GATE, not findings, ctx.global_note(summary), findings, elapsed(started))
 
 
 def name(version: Version) -> str:

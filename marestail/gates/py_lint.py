@@ -1,7 +1,7 @@
 import time
 
 from marestail.context import Context, is_benchmark
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 GATE = "py.lint"
@@ -14,7 +14,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed python files")
     findings = lint_findings(ctx)
     summary = "ruff, ruff format, mypy clean" if not findings else f"{len(findings)} problems"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def lint_findings(ctx: Context) -> list[str]:

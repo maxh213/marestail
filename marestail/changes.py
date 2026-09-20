@@ -3,6 +3,9 @@ from pathlib import Path
 from marestail.shell import run
 
 STATUS = ["git", "status", "--porcelain", "--untracked-files=all"]
+STATUS_WIDTH = 2
+PATH_START = 3
+RENAME_ARROW = " -> "
 
 
 def changed_files(root: Path, base: str) -> set[str]:
@@ -19,9 +22,20 @@ def diff_names(root: Path, command: list[str]) -> set[str]:
 
 
 def parse_line(line: str) -> str:
-    if line[:2].strip() and line[2:3] == " " and len(line) > 3:
-        return line[3:].split(" -> ")[-1]
-    return line.strip()
+    path = porcelain_path(line)
+    if path is None:
+        return line.strip()
+    return path.split(RENAME_ARROW)[-1]
+
+
+def porcelain_path(line: str) -> str | None:
+    if len(line) <= PATH_START:
+        return None
+    if not line[:STATUS_WIDTH].strip():
+        return None
+    if line[STATUS_WIDTH] != " ":
+        return None
+    return line[PATH_START:]
 
 
 def changed_lines(root: Path, base: str) -> dict[str, set[int]]:

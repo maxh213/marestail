@@ -1,7 +1,17 @@
 import json
+import time
+
+import pytest
 
 from marestail import report
 from marestail.report import Result
+from tests.conftest import Clock
+
+
+def test_elapsed_subtracts_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "time", Clock(1000.0, 0.25))
+    started = time.time()
+    assert report.elapsed(started) == 0.25
 
 
 def test_skipped() -> None:

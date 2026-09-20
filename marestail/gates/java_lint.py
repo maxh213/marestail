@@ -8,7 +8,7 @@ from typing import Any
 
 from marestail import java
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 GATE = "java.lint"
@@ -25,7 +25,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed Java files")
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error, [])
     files = java.files(ctx)
     if not files:
         return Result.skipped(GATE, "no Java sources")
@@ -37,7 +37,7 @@ def untouched(ctx: Context) -> bool:
 
 
 def failure(summary: str, findings: list[str], started: float) -> Result:
-    return Result(GATE, False, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, False, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def lint(ctx: Context, files: list[Path], started: float) -> Result:
@@ -70,7 +70,7 @@ def finish(findings: list[str], pmd: list[str], error: str | None, started: floa
         return failure(error, findings, started)
     combined = sorted(set(findings + pmd))
     summary = "javac -Xlint:all and PMD clean" if not combined else f"{len(combined)} problems"
-    return Result(GATE, not combined, summary, combined[:MAX_LINES], time.time() - started)
+    return Result(GATE, not combined, summary, combined[:MAX_LINES], elapsed(started))
 
 
 def suppression_findings(ctx: Context, files: list[Path]) -> list[str]:

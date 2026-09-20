@@ -7,9 +7,11 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates._coverage import ER_COVERAGE
 from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import crap_result as crap_result
 from marestail.gates._crap import scored_functions as scored_functions
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 COVERAGE_JSON = ER_COVERAGE
 GATE = "er.crap"
@@ -19,7 +21,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; er.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; er.tests must run first", [])
     coverage = json.loads(coverage_path.read_text())
     files = files_in_scope(coverage, ctx)
     if not files:
@@ -27,9 +29,9 @@ def run_gate(ctx: Context) -> Result:
     code, output = erlang.escript(ctx, "complexity.escript", list(map(str, files)), timeout=600)
     failed = erlang.trouble(code, output, "complexity script failed", output.splitlines()[-10:])
     if failed:
-        return Result(GATE, False, *failed, time.time() - started)
+        return Result(GATE, False, *failed, elapsed(started))
     functions = scoped_functions(json.loads(output), ctx)
-    return crap_result(GATE, scored_functions(functions, coverage, ctx), float(ctx.erlang("crap_max", 4)), started)
+    return crap_result(GATE, scored_functions(functions, coverage, ctx), float(ctx.erlang(KEY, DEFAULT)), started)
 
 
 def files_in_scope(coverage: dict[str, Any], ctx: Context) -> list[Path]:

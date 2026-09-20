@@ -9,7 +9,7 @@ from marestail.gates._cycles import cycle_findings as cycle_findings
 from marestail.gates._cycles import dependency_graph as dependency_graph
 from marestail.gates._cycles import strongly_connected as strongly_connected
 from marestail.gates._cycles import under as under
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "cs.deps"
 LAYERS_FILE = ".dotnet-layers.json"
@@ -29,9 +29,9 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no C# sources")
     data, error = dotnet.scan(ctx, "deps", files)
     if error:
-        return Result(GATE, False, error, [], time.time() - started)
+        return Result(GATE, False, error, [], elapsed(started))
     findings = scoped(ctx, layer_findings(ctx, layers, data) + cycle_findings(data["edges"]))
-    return Result(GATE, not findings, summary(findings), findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary(findings), findings[:MAX_LINES], elapsed(started))
 
 
 def scoped(ctx: Context, findings: list[str]) -> list[str]:

@@ -3,7 +3,9 @@ from typing import Any
 
 from marestail import java
 from marestail.context import Context
-from marestail.report import Result
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
+from marestail.report import Result, elapsed
 
 GATE = "java.crap"
 FILE = "file"
@@ -16,13 +18,13 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = java.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; java.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; java.tests must run first", [])
     files = java.in_scope(ctx, java.sources(ctx))
     if not files:
         return Result.skipped(GATE, "no Java files in scope")
     members, error = java.scan(ctx, "complexity", files)
     if error:
-        return Result(GATE, False, error, [], time.time() - started)
+        return Result(GATE, False, error, [], elapsed(started))
     return judge(ctx, gated_members(ctx, members), coverage, started)
 
 
@@ -33,11 +35,11 @@ def gated_members(ctx: Context, members: list[dict[str, Any]]) -> list[dict[str,
 
 
 def judge(ctx: Context, members: list[dict[str, Any]], coverage: dict[str, Any], started: float) -> Result:
-    limit = float(ctx.java("crap_max", 4))
+    limit = float(ctx.java(KEY, DEFAULT))
     scored = [score(ctx, member, coverage) for member in members]
     offenders = worst(scored, limit)
     summary = f"{len(scored)} methods, {len(offenders)} above CRAP {limit:g}"
-    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], time.time() - started)
+    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
 
 
 def worst(scored: list[dict[str, Any]], limit: float) -> list[dict[str, Any]]:

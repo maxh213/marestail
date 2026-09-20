@@ -4,7 +4,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "rs.lint"
 CLIPPY_ARGS = ["-D", "warnings", "-D", "clippy::pedantic"]
@@ -18,10 +18,10 @@ def run_gate(ctx: Context) -> Result:
     code, output = rust.cargo(ctx, clippy_command(ctx), timeout=1800)
     problem = rust.missing(code, output, "clippy")
     if problem:
-        return Result(GATE, False, "clippy missing", [problem], time.time() - started)
+        return Result(GATE, False, "clippy missing", [problem], elapsed(started))
     findings = clippy_or_failure(code, output, ctx) + format_findings(ctx)
     summary = f"{len(findings)} problems" if findings else "clippy and rustfmt clean"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def nothing_changed(ctx: Context) -> bool:

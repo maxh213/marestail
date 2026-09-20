@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.ruby import scan, scanned, sources
 
 GATE = "rb.deps"
@@ -26,10 +26,10 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no ruby sources")
     code, output = scan(ctx, "deps", files, extra=[str(ctx.root)])
     if code != 0:
-        return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], elapsed(started))
     findings = violations(scanned(output), load_layers(ctx), ctx)
     summary = f"{len(findings)} layer breaks" if findings else "layer contracts kept"
-    return Result(GATE, not findings, summary, findings[:60], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:60], elapsed(started))
 
 
 def violations(edges: list[dict[str, Any]], layers: list[dict[str, Any]], ctx: Context) -> list[str]:

@@ -4,7 +4,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "rs.deps"
 
@@ -18,11 +18,11 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no rust sources")
     edges, error = rust.scan(ctx, "deps", files, extra=["--root", str(ctx.rust_root())])
     if error:
-        return Result(GATE, False, "dependency scanner failed", [error], time.time() - started)
+        return Result(GATE, False, "dependency scanner failed", [error], elapsed(started))
     relative = relative_edges(ctx, edges)
     findings = layer_findings(ctx, relative) + cycle_findings(ctx, relative)
     summary = f"{len(findings)} dependency breaks" if findings else "layer contracts kept, no module cycles"
-    return Result(GATE, not findings, summary, findings[:60], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:60], elapsed(started))
 
 
 def relative_edges(ctx: Context, edges: list[Edge] | None) -> list[Edge]:

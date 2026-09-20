@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import Any
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 VULTURE_HEAD = re.compile(r":(\d+): (unused \w+|unreachable code) (.+)")
@@ -34,7 +34,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     findings = collected(ctx)
     summary = "nothing unreachable" if not findings else f"{len(findings)} dead definitions"
-    return Result("deadcode", not findings, summary, findings, time.time() - started)
+    return Result("deadcode", not findings, summary, findings, elapsed(started))
 
 
 def collected(ctx: Context) -> list[str]:

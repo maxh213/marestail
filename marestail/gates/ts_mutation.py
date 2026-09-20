@@ -6,7 +6,7 @@ from typing import Any
 
 from marestail.context import Context, MutationScope, is_benchmark
 from marestail.javascript import rel as relative
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 REPORT = "reports/mutation/mutation.json"
@@ -19,7 +19,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     scope = ctx.mutation_files("ts", ctx.ts_root(), (".ts", ".tsx"))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     return mutated(ctx, scope, started)
 
 
@@ -38,7 +38,7 @@ def stryker_result(ctx: Context, scope: MutationScope, command: list[str], start
     try:
         code, output = run(command, cwd=ctx.ts_root(), timeout=7200)
         if not report.exists():
-            return Result(GATE, False, f"stryker produced no report (exit {code})", tail(output), time.time() - started)
+            return Result(GATE, False, f"stryker produced no report (exit {code})", tail(output), elapsed(started))
         survivors = surviving(json.loads(report.read_text()), ctx)
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -48,7 +48,7 @@ def stryker_result(ctx: Context, scope: MutationScope, command: list[str], start
 def survivor_result(survivors: list[str], note: str, started: float) -> Result:
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
     summary += f" {note}" if note else ""
-    return Result(GATE, not survivors, summary, survivors, time.time() - started)
+    return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
 def mutation_command(mutate: list[str]) -> list[str]:

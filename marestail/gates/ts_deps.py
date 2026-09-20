@@ -3,7 +3,7 @@ import time
 
 from marestail.context import Context
 from marestail.javascript import rel as relative
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 VIOLATION = re.compile(r"^(?:error|warn|info|hint) \S+: (?P<path>\S+?)(?:\s+→.*)?$")
@@ -18,7 +18,7 @@ def run_gate(ctx: Context) -> Result:
     code, output = run(command, cwd=ctx.ts_root(), timeout=600)
     findings, ok = outcome(output, ctx, code)
     summary = "dependency rules kept" if ok else "dependency rules broken"
-    return Result("ts.deps", ok, summary, findings, time.time() - started)
+    return Result("ts.deps", ok, summary, findings, elapsed(started))
 
 
 def outcome(output: str, ctx: Context, code: int) -> tuple[list[str], bool]:

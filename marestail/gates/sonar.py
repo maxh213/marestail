@@ -7,7 +7,7 @@ from typing import Any
 
 from marestail import dotnet, erlang, java, rust
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
 
@@ -16,6 +16,7 @@ SECTION = "sonar"
 SCANNER_IMAGE = "sonarsource/sonar-scanner-cli"
 POLL_SECONDS = 5
 POLL_LIMIT = 120
+FAILED_TAIL = 15
 DOTNET_SCANNER = "dotnet-sonarscanner"
 DOTNET_SCANNER_VERSION = "11.3.0"
 DOTNET_REPORT_TASK = Path(".sonarqube") / "out" / ".sonar" / "report-task.txt"
@@ -69,13 +70,13 @@ def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
     key = ctx.config.get(SECTION, "project_key")
     code, output, task_file = scan(ctx, creds, key)
     if code != 0:
-        return Result(GATE, False, "scanner failed", tail(output), time.time() - started)
+        return Result(GATE, False, "scanner failed", tail(output), elapsed(started))
     error = wait_for_analysis(client, task_file)
     if error:
-        return Result(GATE, False, "analysis did not complete", [error, *tail(output, 15)], time.time() - started)
+        return Result(GATE, False, "analysis did not complete", [error, *tail(output, FAILED_TAIL)], elapsed(started))
     findings, status = collect(ctx, client, key)
     findings += language_findings(ctx, client, key)
-    return Result(GATE, not findings, summarize(ctx, findings, status), findings, time.time() - started)
+    return Result(GATE, not findings, summarize(ctx, findings, status), findings, elapsed(started))
 
 
 def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:

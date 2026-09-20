@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context, MutationScope, is_benchmark
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.ruby import SKIP_DIRS, bundle, listify, relative
 from marestail.shell import run, tail
 
@@ -28,7 +28,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "disabled: [ruby] mutation = false")
     scope = ctx.mutation_files("ruby", ctx.ruby_root(), (".rb",))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     return scoped_run(ctx, scope, started)
 
 
@@ -46,9 +46,9 @@ def nothing_to_mutate(scope: MutationScope, subjects: list[str]) -> bool:
 def bundle_problem(ctx: Context, started: float) -> Result | None:
     code, _ = run([*bundler(ctx), "info", "mutant"], cwd=ctx.ruby_root(), timeout=120)
     if code == 127:
-        return Result(GATE, False, "bundle not available", ["bundle is not installed: install ruby and bundler"], time.time() - started)
+        return Result(GATE, False, "bundle not available", ["bundle is not installed: install ruby and bundler"], elapsed(started))
     if code != 0:
-        return Result(GATE, False, "mutant is not in the bundle", [f"mutant is not installed: {INSTALL}"], time.time() - started)
+        return Result(GATE, False, "mutant is not in the bundle", [f"mutant is not installed: {INSTALL}"], elapsed(started))
     return None
 
 
@@ -65,7 +65,7 @@ def mutate(ctx: Context, subjects: list[str], note: str, started: float) -> Resu
 def stdout_result(ctx: Context, code: int, output: str, started: float, note: str) -> Result:
     match = RESULTS_LINE.search(output)
     if not match:
-        return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), time.time() - started)
+        return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), elapsed(started))
     return verdict(int(match.group(1)), stdout_findings(output, ctx), output, started, note)
 
 
@@ -80,7 +80,7 @@ def newest_report(created: set[Path]) -> dict[str, Any] | None:
 def session_result(ctx: Context, created: set[Path], output: str, started: float, note: str = "") -> Result:
     report = newest_report(created)
     if report is None:
-        return Result(GATE, False, "mutant session report unreadable", tail(output), time.time() - started)
+        return Result(GATE, False, "mutant session report unreadable", tail(output), elapsed(started))
     total, failures = session_failures(report, ctx)
     return verdict(total, failures, output, started, note)
 
@@ -111,10 +111,10 @@ def mutation_kind(result: dict[str, Any]) -> str:
 
 def verdict(total: int, failures: list[Failure], output: str, started: float, note: str = "") -> Result:
     if total == 0:
-        return Result(GATE, False, "no mutants were generated", tail(output), time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
     findings = [describe(*failure, count) for failure, count in Counter(failures).items()]
     summary = f"{len(failures)} of {total} mutants not killed" if findings else f"all {total} mutants killed"
-    return Result(GATE, not findings, with_note(summary, note), findings[:MAX_FINDINGS], time.time() - started)
+    return Result(GATE, not findings, with_note(summary, note), findings[:MAX_FINDINGS], elapsed(started))
 
 
 def with_note(summary: str, note: str) -> str:

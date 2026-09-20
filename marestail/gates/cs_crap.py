@@ -3,7 +3,9 @@ from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
-from marestail.report import Result
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
+from marestail.report import Result, elapsed
 
 GATE = "cs.crap"
 
@@ -12,13 +14,13 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = dotnet.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; cs.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; cs.tests must run first", [])
     files = dotnet.in_scope(ctx, dotnet.sources(ctx))
     if not files:
         return Result.skipped(GATE, "no C# files in scope")
     members, error = dotnet.scan(ctx, "complexity", files)
     if error:
-        return Result(GATE, False, error, [], time.time() - started)
+        return Result(GATE, False, error, [], elapsed(started))
     return verdict(ctx, scoped_members(ctx, members), coverage, started)
 
 
@@ -29,11 +31,11 @@ def scoped_members(ctx: Context, members: list[dict[str, Any]]) -> list[dict[str
 
 
 def verdict(ctx: Context, members: list[dict[str, Any]], coverage: dict[str, Any], started: float) -> Result:
-    limit = float(ctx.dotnet("crap_max", 4))
+    limit = float(ctx.dotnet(KEY, DEFAULT))
     scored = [score(ctx, member, coverage) for member in members]
     worst = offenders(scored, limit)
     summary = f"{len(scored)} members, {len(worst)} above CRAP {limit:g}"
-    return Result(GATE, not worst, summary, [describe(f) for f in worst], time.time() - started)
+    return Result(GATE, not worst, summary, [describe(f) for f in worst], elapsed(started))
 
 
 def offenders(scored: list[dict[str, Any]], limit: float) -> list[dict[str, Any]]:

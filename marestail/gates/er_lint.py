@@ -4,7 +4,7 @@ from pathlib import Path
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "er.lint"
 MAX_LINES = 60
@@ -50,10 +50,10 @@ def lint(ctx: Context, batches: list[list[str]], started: float) -> Result:
         code, output = erlang.erlc(ctx, args, timeout=900)
         problem = erlang.hint(code, output)
         if problem:
-            return Result(GATE, False, problem, [problem], time.time() - started)
+            return Result(GATE, False, problem, [problem], elapsed(started))
         findings.extend(batch_findings(code, output, ctx))
     summary = f"{len(findings)} problems" if findings else "erlc strong warnings clean"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def batch_findings(code: int, output: str, ctx: Context) -> list[str]:

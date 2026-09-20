@@ -5,7 +5,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import PY_COVERAGE
 from marestail.gates._coverage import scoped_lines as scoped_lines
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 COVERAGE_JSON = PY_COVERAGE
@@ -17,13 +17,13 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     code, output = run(pytest_command(ctx), cwd=ctx.python_root(), timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", tail(output), time.time() - started)
+        return Result(GATE, False, "tests failed", tail(output), elapsed(started))
     coverage = load_coverage(ctx)
     findings = coverage_findings(coverage, ctx)
     percent = coverage["totals"]["percent_covered"]
     scope = " on changed lines" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def pytest_command(ctx: Context) -> list[str]:

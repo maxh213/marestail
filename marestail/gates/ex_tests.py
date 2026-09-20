@@ -8,7 +8,7 @@ from marestail.elixir import COVERAGE
 from marestail.gates._coverage import EX_COVERAGE
 from marestail.gates._coverage import coverage_findings as coverage_findings
 from marestail.gates._coverage import relative_path as relative_path
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 COVERAGE_SCRIPT = COVERAGE
@@ -22,12 +22,12 @@ def run_gate(ctx: Context) -> Result:
     coverdata = root / "cover" / "default.coverdata"
     code, output = run(["mix", "test", "--cover", "--export-coverage", "default"], cwd=root, timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", tail(output), time.time() - started)
+        return Result(GATE, False, "tests failed", tail(output), elapsed(started))
     if not coverdata.exists():
-        return Result(GATE, False, "no coverdata exported", tail(output), time.time() - started)
+        return Result(GATE, False, "no coverdata exported", tail(output), elapsed(started))
     extracted, c_output = export_coverage(ctx, root, coverdata)
     if not extracted:
-        return Result(GATE, False, "coverage extraction failed", tail(c_output), time.time() - started)
+        return Result(GATE, False, "coverage extraction failed", tail(c_output), elapsed(started))
     return coverage_result(ctx, json.loads((ctx.work / COVERAGE_JSON).read_text()), output, started)
 
 
@@ -43,7 +43,7 @@ def coverage_result(ctx: Context, coverage: dict[str, Any], output: str, started
     percent = scoped_percent(coverage, ctx) if ctx.scoped else total
     scope = " on changed lines" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def scoped_percent(coverage: dict[str, Any], ctx: Context) -> float:

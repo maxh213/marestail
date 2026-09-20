@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.ruby import bundle, relative
 from marestail.shell import run
 
@@ -20,12 +20,10 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed ruby files")
     code, output = run(bundle(ctx, "rubocop", "--format", "json", "--force-exclusion"), cwd=root, timeout=900)
     if code == 127:
-        return Result(
-            GATE, False, "rubocop missing", ["rubocop is not installed: add gem 'rubocop' and bundle install"], time.time() - started
-        )
+        return Result(GATE, False, "rubocop missing", ["rubocop is not installed: add gem 'rubocop' and bundle install"], elapsed(started))
     findings = lint_findings(code, output, ctx)
     summary = f"{len(findings)} problems" if findings else "rubocop clean"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def nothing_changed(ctx: Context, root: Path) -> bool:

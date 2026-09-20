@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 GATE = "py.deps"
@@ -17,16 +17,16 @@ def run_gate(ctx: Context) -> Result:
     env = {"PYTHONPATH": str(ctx.python_root())}
     code, output = run([ctx.python_bin("lint-imports"), "--no-cache"], cwd=ctx.root, env=env, timeout=600)
     if code == 0:
-        return Result(GATE, True, "import contracts kept", [], time.time() - started)
+        return Result(GATE, True, "import contracts kept", [], elapsed(started))
     if ctx.scoped and BROKEN_MARKER in output:
         return scoped_result(output, ctx, started)
-    return Result(GATE, False, "import contracts broken", broken_lines(output), time.time() - started)
+    return Result(GATE, False, "import contracts broken", broken_lines(output), elapsed(started))
 
 
 def scoped_result(output: str, ctx: Context, started: float) -> Result:
     findings = scoped_violations(output, ctx)
     summary = "import contracts kept in scope" if not findings else "import contracts broken in scope"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def scoped_violations(output: str, ctx: Context) -> list[str]:

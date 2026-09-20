@@ -1,7 +1,12 @@
 import json
+import time
 from dataclasses import asdict, dataclass, field
 
 MAX_FINDINGS_SHOWN = 40
+
+
+def elapsed(started: float) -> float:
+    return time.time() - started
 
 
 @dataclass

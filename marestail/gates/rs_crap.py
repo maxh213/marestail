@@ -5,9 +5,11 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "rs.crap"
 
@@ -16,13 +18,13 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = rust.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; rs.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; rs.tests must run first", [])
     files = crap_files(ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")
     functions, error = rust.scan(ctx, "complexity", files)
     if error:
-        return Result(GATE, False, "complexity scanner failed", [error], time.time() - started)
+        return Result(GATE, False, "complexity scanner failed", [error], elapsed(started))
     return crap_result(ctx, coverage, functions, started)
 
 
@@ -36,11 +38,11 @@ def ignored_path(ignored: str | None, path: Path) -> bool:
 
 
 def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[Any] | None, started: float) -> Result:
-    limit = float(ctx.rust("crap_max", 4))
+    limit = float(ctx.rust(KEY, DEFAULT))
     scored = [score(fn, coverage["files"].get(rust.rel(ctx, fn["file"]), {}), ctx) for fn in functions or []]
     offenders = above(scored, limit)
     summary = f"{len(scored)} functions, {len(offenders)} above CRAP {limit:g}"
-    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], time.time() - started)
+    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
 
 
 def measured(lines: dict[str, int], start: int, end: int) -> list[int]:

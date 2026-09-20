@@ -7,7 +7,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import RB_COVERAGE
 from marestail.gates._coverage import relative_path as relative_path
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.ruby import bundle
 from marestail.shell import run, tail
 
@@ -22,10 +22,10 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.ruby_root()
     code, output = run(bundle(ctx, "rspec"), cwd=root, timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", tail(output), time.time() - started)
+        return Result(GATE, False, "tests failed", tail(output), elapsed(started))
     resultset = root / RESULTSET
     if not resultset.exists():
-        return Result(GATE, False, "no coverage/.resultset.json; SimpleCov must run with rspec", tail(output), time.time() - started)
+        return Result(GATE, False, "no coverage/.resultset.json; SimpleCov must run with rspec", tail(output), elapsed(started))
     coverage = load_resultset(resultset, ctx)
     percent = percent_covered(coverage, ctx)
     if ctx.scoped:
@@ -33,7 +33,7 @@ def run_gate(ctx: Context) -> Result:
     (ctx.work / COVERAGE_JSON).write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)
     summary = f"{count_examples(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope_note(ctx)} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def scope_note(ctx: Context) -> str:

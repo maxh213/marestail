@@ -7,7 +7,7 @@ from urllib.parse import unquote, urlparse
 
 from marestail import dotnet
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "cs.lint"
@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed C# files")
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
-        return Result(GATE, False, found, [], time.time() - started)
+        return Result(GATE, False, found, [], elapsed(started))
     return analyse(ctx, found, started)
 
 
@@ -42,12 +42,12 @@ def analyse(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
 def no_sarif(ctx: Context, project: Path, outcome: tuple[int, str], started: float) -> Result:
     code, output = outcome
     message = dotnet.hint(code, output) or f"no SARIF written for {dotnet.rel(ctx, project)}; the build did not compile"
-    return Result(GATE, False, message, tail(output), time.time() - started)
+    return Result(GATE, False, message, tail(output), elapsed(started))
 
 
 def verdict(findings: list[str], started: float) -> Result:
     summary = f"analyzers clean (AnalysisLevel {ANALYSIS_LEVEL}, Recommended)" if not findings else f"{len(findings)} problems"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def build_args(project: Path, sarif: Path) -> list[str]:

@@ -49,6 +49,20 @@ def test_scenario_titles_stop_when_search_does_not_advance(monkeypatch: pytest.M
     assert audit.scenario_titles("abcdefghij") == ["t"] * 11
 
 
+def test_traces_empty_and_stuck_cursor_do_not_loop() -> None:
+    assert audit.traces("") == []
+    assert audit.traces("x") == []
+
+
+def test_line_after_skips_the_newline() -> None:
+    assert audit.line_after("ab\ncd", 0) == 3
+    assert audit.line_after("ab\ncd", 2) == 3
+    assert audit.line_after("ab", 0) == 2
+    assert audit.line_after("ab", 2) == 2
+    assert audit.line_after("ab\ncd\nef", 0) == 3
+    assert audit.line_after("ab\ncd\nef", 3) == 6
+
+
 def test_traces_stop_when_the_cursor_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(audit, "line_trace", lambda _text, start: ([], start))
     monkeypatch.setattr(audit, "line_end", lambda _text, end: end - 1)
@@ -115,6 +129,53 @@ def test_listing_sorts_and_filters(tmp_path: Path) -> None:
         write(tmp_path / name, "x")
     assert audit.listing(tmp_path, "*.md") == [tmp_path / "a.md", tmp_path / "b.md"]
     assert audit.listing(tmp_path / "missing", "*.md") == []
+
+
+def test_is_related_accepts_stem_inside_the_task_name() -> None:
+    inside = Path("log.feature")
+    suffix = Path("login.feature")
+    assert audit.is_related(inside, "login") is True
+    assert audit.is_related(suffix, "x-login") is True
+    assert audit.is_related(inside, "other") is False
+
+
+def test_line_end_keeps_a_newline_at_the_start() -> None:
+    assert audit.line_end("\nabc", 0) == 0
+    assert audit.line_end("abc", 0) == 3
+    assert audit.MISSING == -1
+
+
+def test_line_trace_on_spaces_without_a_bullet() -> None:
+    assert audit.line_trace("   ", 0) == ([], 0)
+    assert audit.traces("   ") == []
+
+
+def test_arrows_on_a_single_line_do_not_append_past_the_end() -> None:
+    text = "- a -> b::c"
+    found = audit.arrows(text, 0)
+    assert found == [text.index("->")]
+    assert len(text) not in found
+
+
+def test_arrow_target_without_a_separator_is_missing() -> None:
+    assert audit.arrow_target("- a -> b", 5) is None
+    assert audit.arrow_target("not-an-arrow", 0) is None
+
+
+def test_named_target_end_index_is_past_the_name() -> None:
+    text = "- a -> b::cdef"
+    split = text.index("::")
+    found = audit.named_target(text, text.index("b"), split)
+    assert found is not None
+    (file, name), end = found
+    assert (file, name) == ("b", "cdef")
+    assert end == split + len(audit.SEPARATOR) + len(name)
+
+
+def test_feature_paths_use_the_module_constants(tmp_path: Path) -> None:
+    write(tmp_path / audit.FEATURES / "t.feature", "x")
+    assert audit.FEATURE_GLOB == "*.feature"
+    assert [file.name for file in audit.feature_files(config(tmp_path), "t")] == ["t.feature"]
 
 
 def test_scenarios_across_files(tmp_path: Path) -> None:

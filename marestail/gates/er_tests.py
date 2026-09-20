@@ -7,7 +7,7 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates._coverage import ER_COVERAGE
 from marestail.gates._coverage import coverage_findings as coverage_findings
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 COVERAGE_JSON = ER_COVERAGE
@@ -28,7 +28,7 @@ def run_gate(ctx: Context) -> Result:
         return Result(GATE, False, "no eunit test files", [erlang.NO_TESTS], 0.0)
     failed = erlang.compile_with_tests(ctx, sources, tests, ctx.work / EBIN, ctx.work / TEST_EBIN)
     if failed:
-        return Result(GATE, False, *failed, time.time() - started)
+        return Result(GATE, False, *failed, elapsed(started))
     return run_eunit(ctx, started)
 
 
@@ -39,9 +39,9 @@ def run_eunit(ctx: Context, started: float) -> Result:
     code, output = erlang.escript(ctx, "eunit_cover.escript", [str(ebin), str(test_ebin), str(out_json)], timeout=1800)
     failed = erlang.trouble(code, output, EUNIT_FAILURES.get(code, "eunit run failed"))
     if failed:
-        return Result(GATE, False, *failed, time.time() - started)
+        return Result(GATE, False, *failed, elapsed(started))
     if not out_json.exists():
-        return Result(GATE, False, "no coverage report written", tail(output), time.time() - started)
+        return Result(GATE, False, "no coverage report written", tail(output), elapsed(started))
     return coverage_result(ctx, json.loads(out_json.read_text()), output, started)
 
 
@@ -50,7 +50,7 @@ def coverage_result(ctx: Context, coverage: dict[str, Any], output: str, started
     percent = coverage["totals"]["percent_covered"]
     scope = " on changed files" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def count_tests(output: str) -> str:

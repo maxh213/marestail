@@ -8,7 +8,7 @@ from typing import Any
 
 from marestail import java
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "java.tests"
@@ -25,7 +25,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error, [])
     build = java.build_dir(ctx)
     reports, site = build / "surefire-reports", build / "site" / "jacoco"
     code, output = run_maven(ctx, reports, site)
@@ -46,7 +46,7 @@ def run_maven(ctx: Context, reports: Path, site: Path) -> tuple[int, str]:
 
 
 def failed(summary: str, findings: list[str], started: float) -> Result:
-    return Result(GATE, False, summary, findings, time.time() - started)
+    return Result(GATE, False, summary, findings, elapsed(started))
 
 
 def test_problem(code: int, output: str, passed: int, failures: list[str], started: float) -> Result | None:
@@ -72,7 +72,7 @@ def check_coverage(ctx: Context, report: Path, passed: int, output: str, started
     findings = coverage_findings(coverage, ctx)
     scope = " on changed files" if ctx.scoped else ""
     summary = f"{passed} passed, coverage {coverage['totals']['percent_covered']:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def read_suites(ctx: Context, suites: list[Path]) -> tuple[int, list[str]]:

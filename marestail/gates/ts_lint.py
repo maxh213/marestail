@@ -6,7 +6,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
 from marestail.javascript import rel as relative
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 MAX_LINES = 60
@@ -21,7 +21,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("ts.lint", "no changed typescript files")
     findings = tsc_findings(ctx) + eslint_findings(ctx)
     summary = "tsc and eslint clean" if not findings else f"{len(findings)} problems"
-    return Result("ts.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result("ts.lint", not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def tsc_findings(ctx: Context) -> list[str]:

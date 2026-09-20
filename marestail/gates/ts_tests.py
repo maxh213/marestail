@@ -7,7 +7,7 @@ from marestail.context import Context
 from marestail.gates._coverage import TS_COVERAGE_DIR
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
 from marestail.javascript import labelled
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 COVERAGE_DIR = TS_COVERAGE_DIR
@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     jest = ctx.ts("runner", "vitest") == "jest"
     code, output = run(jest_command(ctx) if jest else vitest_command(ctx), cwd=ctx.ts_root(), timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", failures(ctx, jest) or tail(output), time.time() - started)
+        return Result(GATE, False, "tests failed", failures(ctx, jest) or tail(output), elapsed(started))
     return passed(ctx, output, started)
 
 
@@ -34,13 +34,13 @@ def failures(ctx: Context, jest: bool) -> list[str]:
 def passed(ctx: Context, output: str, started: float) -> Result:
     uninstrumented = in_scope_findings([f"{relative_path(name, ctx)}:1 not instrumented" for name in UNINSTRUMENTED.findall(output)], ctx)
     if uninstrumented:
-        return Result(GATE, False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, time.time() - started)
+        return Result(GATE, False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, elapsed(started))
     coverage = read_coverage(ctx)
     if not coverage:
-        return Result(GATE, False, "no coverage report; check [ts] runner and sources", tail(output), time.time() - started)
+        return Result(GATE, False, "no coverage report; check [ts] runner and sources", tail(output), elapsed(started))
     findings = coverage_findings(coverage, ctx)
     summary = f"{count_tests(output)} passed, {len(findings)} uncovered lines/branches (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def read_coverage(ctx: Context) -> dict[str, Any]:

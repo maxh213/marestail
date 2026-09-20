@@ -6,7 +6,7 @@ from typing import Any
 from marestail import java
 from marestail.context import Context
 from marestail.gates._cycles import cycle_findings, under
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "java.deps"
 LAYERS_FILE = ".java-layers.json"
@@ -28,13 +28,13 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no Java sources")
     data, error = java.scan(ctx, "deps", files)
     if error:
-        return Result(GATE, False, error, [], time.time() - started)
+        return Result(GATE, False, error, [], elapsed(started))
     return verdict(scoped_findings(ctx, layer_findings(ctx, layers, data) + cycle_findings(data["edges"])), started)
 
 
 def verdict(findings: list[str], started: float) -> Result:
     summary = "layer contracts kept" if not findings else f"{len(findings)} layer breaks"
-    return Result(GATE, not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def scoped_findings(ctx: Context, findings: list[str]) -> list[str]:

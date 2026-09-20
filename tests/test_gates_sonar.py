@@ -11,6 +11,12 @@ from tests.conftest import make_context
 
 CREDS = {"url": "http://sonar:9000", "token": "tok"}
 KEY = "proj"
+
+
+def test_failed_analysis_tail_length() -> None:
+    assert sonar.FAILED_TAIL == 15
+
+
 Responder = Callable[[str, dict[str, Any]], dict[str, Any]]
 
 

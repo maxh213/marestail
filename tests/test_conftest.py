@@ -18,9 +18,13 @@ def test_gate_shape_keeps_gate_ok_summary_and_findings() -> None:
     assert conftest.gate_shape(result) == ("docs", True, "ok", ["a"])
 
 
-def test_gate_shape_rejects_a_blank_gate_or_missing_seconds() -> None:
+def test_gate_shape_rejects_a_blank_gate() -> None:
+    blank = Result("", True, "ok", [], 0.0)
     with pytest.raises(AssertionError):
-        conftest.gate_shape(Result("", True, "ok", [], 0.0))
+        conftest.gate_shape(blank)
+
+
+def test_gate_shape_rejects_missing_seconds() -> None:
     broken = Result("g", True, "ok", [], 0.0)
     broken.seconds = cast(float, None)
     with pytest.raises(AssertionError):

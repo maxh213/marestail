@@ -47,8 +47,10 @@ class FakeScan:
     def __init__(self, reply: tuple[Any, str | None]) -> None:
         self.reply = reply
         self.calls: list[tuple[str, list[Path]]] = []
+        self.contexts: list[Any] = []
 
     def __call__(self, ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
+        self.contexts.append(ctx)
         self.calls.append((mode, paths))
         return self.reply
 
@@ -72,8 +74,12 @@ def test_skips_without_files_in_scope(tmp_path: Path) -> None:
 
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, (None, "C# scanner failed (complexity): boom"))
-    assert view(cs_crap.run_gate(project(tmp_path))) == ("cs.crap", False, "C# scanner failed (complexity): boom", [])
+    ctx = project(tmp_path)
+    result = cs_crap.run_gate(ctx)
+    assert view(result) == ("cs.crap", False, "C# scanner failed (complexity): boom", [])
+    assert result.seconds < 1_000_000
     assert fake.calls == [("complexity", [tmp_path / "App" / "A.cs", tmp_path / "App" / "B.cs"])]
+    assert fake.contexts == [ctx]
 
 
 def test_scores_all_members(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

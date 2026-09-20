@@ -26,6 +26,31 @@ HOOK_BLOCK_LIMIT = 5
 STORE_TRUE = "store_true"
 TREE = "--tree"
 TUI_APP = "marestail.tui.app"
+SCOPE_CHOICES = ("all", "changed", "hard")
+TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
+AGENT_CHOICES = ("claude", "agy", "grok", "cursor", "kilo", "kimi")
+HELP_TASK = "path to the task file"
+HELP_GATE_SCOPE = "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths"
+HELP_RUN_SCOPE = (
+    "changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, "
+    "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
+    "the smallest supporting edits"
+)
+HELP_FOCUS = "add a file or directory to the gate scope (repeatable); implies --scope changed"
+HELP_MODEL = "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
+HELP_RETRIES = "attempts per role; 0 means unlimited (default)"
+HELP_EFFORT = "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant); stamped on every commit"
+HELP_AGENT = "agent backend (claude, agy, grok, cursor, kilo, or kimi)"
+HELP_ONLY = "comma separated gate names"
+HELP_HOOK = "behave as a Claude Code Stop hook"
+HELP_GITIGNORE = "add the files marestail generates to the target's .gitignore"
+HELP_REFRESH = "seconds between redraws"
+HELP_WATCH_ALL = "show every repo with a .marestail directory, not just those with a running pipeline"
+HELP_WATCH_PATHS = "directories to scan for repos with a .marestail directory"
+HELP_AUTO = "skip the approval pause after the critic"
+HELP_PERF_DB = "reset the tree's performance database before every sample"
+HELP_WAIT = "block until the build finishes instead of detaching"
+SONAR_ACTIONS = ("up", "down", "setup")
 
 Payload = dict[str, Any]
 
@@ -65,13 +90,13 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     sample.add_argument("script")
     sample.add_argument(TREE, required=True)
     sample.add_argument("--samples", type=int, default=1)
-    sample.add_argument("--db", action=STORE_TRUE, help="reset the tree's performance database before every sample")
+    sample.add_argument("--db", action=STORE_TRUE, help=HELP_PERF_DB)
     sample.set_defaults(handler=perf_run_command)
     database = actions.add_parser("db", help="manage the local performance database")
     db_actions = database.add_subparsers(dest="db_command", required=True)
     golden = db_actions.add_parser("golden", help="build the seeded golden data directory for one tree")
     golden.add_argument(TREE, required=True)
-    golden.add_argument("--wait", action=STORE_TRUE, help="block until the build finishes instead of detaching")
+    golden.add_argument("--wait", action=STORE_TRUE, help=HELP_WAIT)
     golden.set_defaults(handler=perf_db_command)
     db_actions.add_parser("status", help="print the golden status of every tree in the perf run").set_defaults(handler=perf_db_command)
     url = db_actions.add_parser("url", help="print the database URL for one tree")
@@ -98,17 +123,17 @@ def perf_run_command(args: argparse.Namespace) -> int:
 
 
 def add_gate(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--tier", choices=["fast", "sonar", "full", "qa", "all"], default="fast")
-    add_scope(parser, "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths")
+    parser.add_argument("--tier", choices=TIER_CHOICES, default="fast")
+    add_scope(parser, HELP_GATE_SCOPE)
     add_focus(parser)
-    parser.add_argument("--only", help="comma separated gate names")
+    parser.add_argument("--only", help=HELP_ONLY)
     parser.add_argument("--json", action=STORE_TRUE)
-    parser.add_argument("--hook", action=STORE_TRUE, help="behave as a Claude Code Stop hook")
+    parser.add_argument("--hook", action=STORE_TRUE, help=HELP_HOOK)
     parser.set_defaults(handler=gate_command)
 
 
 def add_scope(parser: argparse.ArgumentParser, help_text: str) -> None:
-    parser.add_argument("--scope", choices=["all", "changed", "hard"], default=None, help=help_text)
+    parser.add_argument("--scope", choices=SCOPE_CHOICES, help=help_text)
 
 
 def add_focus(parser: argparse.ArgumentParser) -> None:
@@ -117,61 +142,39 @@ def add_focus(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="PATH",
-        help="add a file or directory to the gate scope (repeatable); implies --scope changed",
+        help=HELP_FOCUS,
     )
 
 
 def add_run(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("task", help="path to the task file")
-    parser.add_argument("--from", dest="start", default=None)
-    parser.add_argument("--to", dest="stop", default=None)
-    parser.add_argument("--auto", action=STORE_TRUE, help="skip the approval pause after the critic")
-    add_scope(
-        parser,
-        "changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from the smallest supporting edits",
-    )
+    parser.add_argument("task", help=HELP_TASK)
+    parser.add_argument("--from", dest="start")
+    parser.add_argument("--to", dest="stop")
+    parser.add_argument("--auto", action=STORE_TRUE, help=HELP_AUTO)
+    add_scope(parser, HELP_RUN_SCOPE)
     add_focus(parser)
-    parser.add_argument(
-        "--model", default=None, help="the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=0,
-        metavar="N",
-        help="attempts per role; 0 means unlimited (default)",
-    )
-    parser.add_argument(
-        "--effort",
-        default=None,
-        help="reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant); stamped on every commit",
-    )
-    parser.add_argument(
-        "--agent",
-        choices=["claude", "agy", "grok", "cursor", "kilo", "kimi"],
-        default=None,
-        help="agent backend (claude, agy, grok, cursor, kilo, or kimi)",
-    )
+    parser.add_argument("--model", help=HELP_MODEL)
+    parser.add_argument("--retries", type=int, default=0, metavar="N", help=HELP_RETRIES)
+    parser.add_argument("--effort", help=HELP_EFFORT)
+    parser.add_argument("--agent", choices=AGENT_CHOICES, help=HELP_AGENT)
     parser.set_defaults(handler=run_command)
 
 
 def add_install(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("target", nargs="?", default=".")
-    parser.add_argument("--gitignore-generated", action=STORE_TRUE, help="add the files marestail generates to the target's .gitignore")
+    parser.add_argument("--gitignore-generated", action=STORE_TRUE, help=HELP_GITIGNORE)
     parser.set_defaults(handler=install_command)
 
 
 def add_sonar(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("action", choices=["up", "down", "setup"])
+    parser.add_argument("action", choices=SONAR_ACTIONS)
     parser.set_defaults(handler=sonar_command)
 
 
 def add_watch(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("paths", nargs="*", help="directories to scan for repos with a .marestail directory")
-    parser.add_argument("--refresh", type=float, default=2.0, help="seconds between redraws")
-    parser.add_argument(
-        "--all", action=STORE_TRUE, help="show every repo with a .marestail directory, not just those with a running pipeline"
-    )
+    parser.add_argument("paths", nargs="*", help=HELP_WATCH_PATHS)
+    parser.add_argument("--refresh", type=float, default=2.0, help=HELP_REFRESH)
+    parser.add_argument("--all", action=STORE_TRUE, help=HELP_WATCH_ALL)
     parser.set_defaults(handler=watch_command)
 
 

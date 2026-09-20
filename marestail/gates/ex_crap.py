@@ -7,9 +7,11 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates._coverage import EX_COVERAGE
 from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import crap_result as crap_result
 from marestail.gates._crap import scored_functions as scored_functions
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 COVERAGE_JSON = EX_COVERAGE
 GATE = "ex.crap"
@@ -19,7 +21,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; ex.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; ex.tests must run first", [])
     coverage = json.loads(coverage_path.read_text())
     root = ctx.elixir_root()
     files = files_in_scope(coverage, root, ctx)
@@ -27,9 +29,9 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no files in scope")
     code, output = elixir.scan(ctx, "complexity", files, timeout=600)
     if code != 0:
-        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], elapsed(started))
     functions = hunk_functions(json.loads(output), ctx)
-    return crap_result(GATE, scored_functions(functions, coverage, ctx), float(ctx.elixir("crap_max", 4)), started)
+    return crap_result(GATE, scored_functions(functions, coverage, ctx), float(ctx.elixir(KEY, DEFAULT)), started)
 
 
 def files_in_scope(coverage: dict[str, Any], root: Path, ctx: Context) -> list[Path]:

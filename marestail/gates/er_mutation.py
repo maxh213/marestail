@@ -8,7 +8,7 @@ from typing import Any
 
 from marestail import erlang
 from marestail.context import Context, MutationScope
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "er.mutation"
@@ -59,7 +59,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, erlang.NO_SOURCES)
     scope = ctx.mutation_files("erlang", ctx.erlang_root(), (".erl",))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     return plan(Job(ctx, started, scope, sources, mutate_files(ctx, sources, scope.files)))
 
 

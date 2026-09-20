@@ -6,7 +6,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "rs.mutation"
@@ -30,7 +30,7 @@ def mutants_problem(ctx: Context, started: float) -> Result | None:
     problem = rust.missing(code, output, "mutants")
     if problem or code != 0:
         finding = problem or f"cargo mutants --version failed: {output.strip()[-200:]}"
-        return Result(GATE, False, "cargo-mutants missing", [finding], time.time() - started)
+        return Result(GATE, False, "cargo-mutants missing", [finding], elapsed(started))
     return None
 
 
@@ -39,7 +39,7 @@ def mutate(ctx: Context, files: list[Path], started: float) -> Result:
     code, output = rust.cargo(ctx, command(ctx, files), timeout=int(ctx.rust("mutation_timeout", 7200)))
     report = ctx.work / OUTPUT / "outcomes.json"
     if not report.exists():
-        return Result(GATE, False, f"cargo mutants produced no outcomes.json (exit {code})", tail(output), time.time() - started)
+        return Result(GATE, False, f"cargo mutants produced no outcomes.json (exit {code})", tail(output), elapsed(started))
     return verdict(ctx, json.loads(report.read_text()), output, started)
 
 
@@ -84,13 +84,13 @@ def mutation_summary(survived: list[Outcome], viable: list[Outcome]) -> str:
 def verdict(ctx: Context, report: dict[str, Any], output: str, started: float) -> Result:
     outcomes = report.get("outcomes", [])
     if baseline_failed(outcomes):
-        return Result(GATE, False, "tests fail before any mutation", tail(output), time.time() - started)
+        return Result(GATE, False, "tests fail before any mutation", tail(output), elapsed(started))
     viable = viable_mutants(outcomes)
     if not viable:
-        return Result(GATE, False, "no viable mutants were generated", tail(output), time.time() - started)
+        return Result(GATE, False, "no viable mutants were generated", tail(output), elapsed(started))
     survived = survivors(viable)
     findings = [describe(ctx, o) for o in survived]
-    return Result(GATE, not survived, mutation_summary(survived, viable), findings[:MAX_FINDINGS], time.time() - started)
+    return Result(GATE, not survived, mutation_summary(survived, viable), findings[:MAX_FINDINGS], elapsed(started))
 
 
 def describe(ctx: Context, outcome: Outcome) -> str:

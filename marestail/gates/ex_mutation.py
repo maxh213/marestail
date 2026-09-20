@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from marestail.context import Context, MutationScope
 from marestail.elixir import project_files
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 scoped_sources = project_files
@@ -20,7 +20,7 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.elixir_root()
     scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     files = scoped_sources(ctx, root, scope.files or [])
     if nothing_changed(scope, files):
         return Result.skipped(GATE, "no changed elixir sources")
@@ -34,11 +34,11 @@ def nothing_changed(scope: MutationScope, files: list[str]) -> bool:
 def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], started: float) -> Result:
     missing = muex_missing(root)
     if missing:
-        return Result(GATE, False, *missing, time.time() - started)
+        return Result(GATE, False, *missing, elapsed(started))
     _, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=cast(int, mutation_timeout(ctx)))
     report = read_report(output)
     if isinstance(report, str):
-        return Result(GATE, False, report, tail(output), time.time() - started)
+        return Result(GATE, False, report, tail(output), elapsed(started))
     return report_result(ctx, scope, report.get("mutations", []), output, started)
 
 
@@ -64,10 +64,10 @@ def read_report(output: str) -> dict[str, Any] | str:
 
 def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, Any]], output: str, started: float) -> Result:
     if not mutations:
-        return Result(GATE, False, "no mutants were generated", tail(output), time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
     findings = [describe(ctx, mutation) for mutation in mutations if status(mutation) not in PASSING]
     summary = mutation_summary(len(findings), counted(mutations), scope.note)
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def status(mutation: dict[str, Any]) -> str:

@@ -10,7 +10,7 @@ from xml.sax.saxutils import escape
 
 from marestail import dotnet
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "cs.tests"
@@ -42,16 +42,16 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
-        return Result(GATE, False, found, [], time.time() - started)
+        return Result(GATE, False, found, [], elapsed(started))
     findings = attribute_findings(ctx)
     if findings:
         summary = f"{len(findings)} [{ATTRIBUTE}] in sources; exclusions belong in [dotnet] coverage_exclude"
-        return Result(GATE, False, summary, findings, time.time() - started)
+        return Result(GATE, False, summary, findings, elapsed(started))
     return run_tests(ctx, found, started)
 
 
 def failed(message: str, output: str, started: float) -> Result:
-    return Result(GATE, False, message, tail(output), time.time() - started)
+    return Result(GATE, False, message, tail(output), elapsed(started))
 
 
 def run_tests(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
@@ -68,7 +68,7 @@ def run_tests(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
 def test_failure(ctx: Context, outcome: tuple[int, str], tests: Path, started: float) -> Result:
     code, output = outcome
     findings = failed_tests(ctx, ctx.work / RESULTS_DIR / TRX_FILE, tests) or tail(output)
-    return Result(GATE, False, dotnet.hint(code, output) or "tests failed", findings, time.time() - started)
+    return Result(GATE, False, dotnet.hint(code, output) or "tests failed", findings, elapsed(started))
 
 
 def test_args(tests: Path, settings: Path, results: Path) -> list[str]:
@@ -109,7 +109,7 @@ def coverage_run(ctx: Context, coverage: dict[str, Any], outcome: tuple[int, str
     findings = coverage_findings(coverage, ctx)
     scope = " on changed files" if ctx.scoped else ""
     summary = f"{passed} passed, coverage {coverage['totals']['percent_covered']:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def has_attribute(line: str) -> bool:

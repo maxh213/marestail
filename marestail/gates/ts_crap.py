@@ -5,9 +5,11 @@ from typing import Any
 from marestail import javascript
 from marestail.context import Context
 from marestail.gates._coverage import TS_COVERAGE_DIR
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.report import Result
+from marestail.report import Result, elapsed
 
 GATE = "ts.crap"
 
@@ -16,14 +18,14 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / TS_COVERAGE_DIR / "coverage-final.json"
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; ts.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; ts.tests must run first", [])
     coverage = json.loads(coverage_path.read_text())
     files = scoped_files(coverage, ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")
     code, output = javascript.scan(ctx, "complexity", files)
     if code != 0:
-        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], elapsed(started))
     return crap_result(ctx, coverage, json.loads(output), started)
 
 
@@ -32,11 +34,11 @@ def scoped_files(coverage: dict[str, Any], ctx: Context) -> list[str]:
 
 
 def crap_result(ctx: Context, coverage: dict[str, Any], parsed: list[dict[str, Any]], started: float) -> Result:
-    limit = float(ctx.ts("crap_max", 4))
+    limit = float(ctx.ts(KEY, DEFAULT))
     functions = [score(fn, coverage[fn["file"]], ctx) for fn in parsed if touches_hunk(fn, ctx)]
     worst = above(functions, limit)
     summary = f"{len(functions)} functions, {len(worst)} above CRAP {limit:g}"
-    return Result(GATE, not worst, summary, [describe(fn, "complexity") for fn in worst], time.time() - started)
+    return Result(GATE, not worst, summary, [describe(fn, "complexity") for fn in worst], elapsed(started))
 
 
 def touches_hunk(fn: dict[str, Any], ctx: Context) -> bool:

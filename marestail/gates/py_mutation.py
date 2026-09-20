@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context, MutationScope, is_benchmark
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 GATE = "py.mutation"
@@ -32,7 +32,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     scope = ctx.mutation_files("python", ctx.python_root(), (".py",))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     patterns = mutant_patterns(ctx, scope.files or [])
     if nothing_to_mutate(scope, patterns):
         return Result.skipped(GATE, "no changed python sources")
@@ -52,11 +52,11 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
         timeout=7200,
     )
     if code != 0 and "mutants" not in output.lower():
-        return Result(GATE, False, "mutmut failed", tail(output), time.time() - started)
+        return Result(GATE, False, "mutmut failed", tail(output), elapsed(started))
     total, survivors = surviving(ctx, patterns)
     if total == 0:
-        return Result(GATE, False, "no mutants were generated", tail(output), time.time() - started)
-    return Result(GATE, not survivors, mutation_summary(total, survivors, note), survivors, time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
+    return Result(GATE, not survivors, mutation_summary(total, survivors, note), survivors, elapsed(started))
 
 
 def mutation_summary(total: int, survivors: list[str], note: str) -> str:

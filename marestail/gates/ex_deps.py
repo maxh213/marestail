@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 GATE = "ex.deps"
@@ -13,9 +13,9 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.elixir_root()
     code, output = run(["mix", "xref", "graph", "--format", "cycles", "--fail-above", "0"], cwd=root, timeout=600)
     if code == 0:
-        return Result(GATE, True, "dependency graph acyclic", [], time.time() - started)
+        return Result(GATE, True, "dependency graph acyclic", [], elapsed(started))
     if not ctx.scoped:
-        return Result(GATE, False, "dependency cycles found", cycle_lines(output), time.time() - started)
+        return Result(GATE, False, "dependency cycles found", cycle_lines(output), elapsed(started))
     return scoped_result(ctx, root, output, started)
 
 
@@ -30,10 +30,10 @@ def cycle_line(line: str) -> bool:
 def scoped_result(ctx: Context, root: Path, output: str, started: float) -> Result:
     cycles = parse_cycles(output)
     if not cycles:
-        return Result(GATE, False, "xref failed", tail(output), time.time() - started)
+        return Result(GATE, False, "xref failed", tail(output), elapsed(started))
     findings = cycle_findings(cycles, ctx, root)
     summary = f"{len(findings)} dependency cycles in scope" if findings else "no dependency cycles in scope"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def cycle_findings(cycles: list[list[str]], ctx: Context, root: Path) -> list[str]:

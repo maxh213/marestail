@@ -5,9 +5,11 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import PY_COVERAGE
 from marestail.gates._coverage import scoped_lines as scoped_lines
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 COVERAGE_JSON = PY_COVERAGE
@@ -20,17 +22,17 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; py.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; py.tests must run first", [])
     code, output = run(radon_command(ctx), cwd=ctx.python_root())
     if code != 0:
-        return Result(GATE, False, "radon failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "radon failed", output.splitlines()[-10:], elapsed(started))
     functions = scored(json.loads(output), json.loads(coverage_path.read_text()), ctx)
-    limit = float(ctx.python("crap_max", 4))
+    limit = float(ctx.python(KEY, DEFAULT))
     offenders = above(functions, limit)
     findings = list(map(describe, offenders))
     scope = " on changed functions" if ctx.scoped else ""
     summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}{scope}"
-    return Result(GATE, not offenders, summary, findings, time.time() - started)
+    return Result(GATE, not offenders, summary, findings, elapsed(started))
 
 
 def radon_command(ctx: Context) -> list[str]:

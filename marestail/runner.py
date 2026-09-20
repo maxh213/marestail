@@ -24,7 +24,7 @@ from marestail.perf import samples as perf_samples
 from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
-from marestail.report import Result, render
+from marestail.report import Result, elapsed, render
 from marestail.shell import clean, run
 
 PASS = "PASS"
@@ -953,7 +953,7 @@ def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
         return True
     limited, describe = outcome_readers(backend)
     if not limited(code, output):
-        print(f"   {label} finished in {(time.time() - started) / 60:.1f} min: {describe(output)}")
+        print(f"   {label} finished in {(elapsed(started)) / 60:.1f} min: {describe(output)}")
         return True
     wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
     return False

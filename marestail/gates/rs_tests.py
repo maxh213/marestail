@@ -5,7 +5,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "rs.tests"
@@ -33,9 +33,9 @@ def ignore_args(ctx: Context) -> list[str]:
 def test_failure(code: int, output: str, started: float) -> Result | None:
     problem = rust.missing(code, output, "llvm-cov")
     if problem:
-        return Result(GATE, False, "cargo llvm-cov missing", [problem], time.time() - started)
+        return Result(GATE, False, "cargo llvm-cov missing", [problem], elapsed(started))
     if code != 0:
-        return Result(GATE, False, "tests failed", tail(output), time.time() - started)
+        return Result(GATE, False, "tests failed", tail(output), elapsed(started))
     return None
 
 
@@ -48,20 +48,20 @@ def write_report(ctx: Context, flag: str, name: str, ignore: list[str], started:
     path.unlink(missing_ok=True)
     code, output = rust.cargo(ctx, ["llvm-cov", "report", flag, *ignore, "--output-path", str(path)], timeout=600)
     if code != 0 or not path.exists():
-        return Result(GATE, False, f"cargo llvm-cov report {flag} produced no report", tail(output), time.time() - started)
+        return Result(GATE, False, f"cargo llvm-cov report {flag} produced no report", tail(output), elapsed(started))
     return None
 
 
 def coverage_result(ctx: Context, output: str, started: float) -> Result:
     coverage = merge(ctx)
     if not coverage["files"]:
-        return Result(GATE, False, "coverage report lists no source files", tail(output), time.time() - started)
+        return Result(GATE, False, "coverage report lists no source files", tail(output), elapsed(started))
     (ctx.work / "rs-coverage.json").write_text(json.dumps(coverage))
     findings = coverage_findings(coverage, ctx)
     passed = sum(int(count) for count in PASSED.findall(output))
     scope = " on changed files" if ctx.scope_changed else ""
     summary = f"{passed} passed, line coverage {coverage['totals']['percent_covered']:.1f}%, {len(findings)} gaps{scope} (need 0)"
-    return Result(GATE, not findings, summary, findings, time.time() - started)
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def merge(ctx: Context) -> dict[str, Any]:

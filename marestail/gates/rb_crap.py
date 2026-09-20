@@ -7,9 +7,11 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import RB_COVERAGE
 from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.ruby import scan, scanned, sources
 
 COVERAGE_JSON = RB_COVERAGE
@@ -24,23 +26,23 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; rb.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; rb.tests must run first", [])
     coverage = json.loads(coverage_path.read_text())
     files = sources_in_scope(ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")
     code, output = scan(ctx, "complexity", files)
     if code != 0:
-        return Result(GATE, False, "complexity scanner failed", output.splitlines()[-10:], time.time() - started)
+        return Result(GATE, False, "complexity scanner failed", output.splitlines()[-10:], elapsed(started))
     return crap_result(ctx, coverage, functions_in_scope(scanned(output), ctx), started)
 
 
 def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]], started: float) -> Result:
-    limit = float(ctx.ruby("crap_max", 4))
+    limit = float(ctx.ruby(KEY, DEFAULT))
     scored = [score(fn, coverage["files"].get(relative_path(fn["file"], ctx), {}), ctx) for fn in functions]
     offenders = above(scored, limit)
     summary = f"{len(scored)} methods, {len(offenders)} above CRAP {limit:g}"
-    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], time.time() - started)
+    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
 
 
 def sources_in_scope(ctx: Context) -> list[Path]:

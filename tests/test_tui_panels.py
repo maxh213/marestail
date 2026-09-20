@@ -82,16 +82,27 @@ def state_of(fleet: Fleet | None = None) -> WatchState:
 
 def test_put_and_clip() -> None:
     win: Any = FakeWin(4, 10)
+    put(win, 0, 0, "ab")
+    put(win, 0, 3, "z", 5)
     put(win, -1, 0, "x")
     put(win, 0, 20, "x")
     put(win, 0, -2, "hello")
     put(win, 1, 0, "")
     win.fail = True
     put(win, 2, 0, "nope")
+    assert (0, 0, "ab", 0) in win.cells
+    assert (0, 3, "z", 5) in win.cells
     assert clip_text(0, 0, "", 4, 10) is None
     assert offscreen(-1, 0, 4, 10) is True
     assert shift_left(0, 2, "ab") == (0, 2, "ab")
     assert shift_left(0, -1, "ab") == (0, 0, "b")
+    assert panels.surely("x") == "x"
+    assert panels.surely(0) == 0
+    assert panels.skip() is None
+    assert panels.none_of("a") is None
+    assert panels.present("a") is True
+    assert panels.present(None) is False
+    assert panels.keep_pos(1, 2, "t") == (1, 2, "t")
 
 
 def test_draw_box_and_helpers() -> None:

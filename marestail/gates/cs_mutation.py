@@ -7,7 +7,7 @@ from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
-from marestail.report import Result
+from marestail.report import Result, elapsed
 from marestail.shell import tail
 
 GATE = "cs.mutation"
@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
-        return Result(GATE, False, found, [], 0.0)
+        return Result(GATE, False, found, [])
     blocked = precondition(ctx, *found)
     if blocked is not None:
         return blocked
@@ -54,7 +54,7 @@ def precondition(ctx: Context, product: Path, tests: Path) -> Result | None:
 def scoped_run(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
     scope = ctx.mutation_files("dotnet", ctx.dotnet_root(), (".cs",))
     if scope.mode == "error":
-        return Result(GATE, False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     targets = mutation_targets(ctx, scope.files)
     if scope.mode != "full" and not targets:
         return Result.skipped(GATE, "no changed C# sources")
@@ -71,7 +71,7 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
     code, output = dotnet.dotnet(ctx, command(ctx, *pair, out, targets), timeout=7200)
     report = out / REPORT
     if not report.exists():
-        return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), time.time() - started)
+        return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), elapsed(started))
     return verdict(load_mutants(ctx, report), output, note, started)
 
 
@@ -80,7 +80,7 @@ def restore_failure(ctx: Context, started: float) -> Result | None:
     if code == 0:
         return None
     message = dotnet.hint(code, output) or f"dotnet tool restore failed: {INSTALL}"
-    return Result(GATE, False, message, tail(output), time.time() - started)
+    return Result(GATE, False, message, tail(output), elapsed(started))
 
 
 def load_mutants(ctx: Context, report: Path) -> list[tuple[str, dict[str, Any]]]:
@@ -95,9 +95,9 @@ def load_mutants(ctx: Context, report: Path) -> list[tuple[str, dict[str, Any]]]
 
 def verdict(mutants: list[tuple[str, dict[str, Any]]], output: str, note: str, started: float) -> Result:
     if not mutants:
-        return Result(GATE, False, "no mutants were generated", tail(output), time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
-    return Result(GATE, not findings, summary(len(findings), len(mutants), note), findings, time.time() - started)
+    return Result(GATE, not findings, summary(len(findings), len(mutants), note), findings, elapsed(started))
 
 
 def summary(failed: int, total: int, note: str) -> str:

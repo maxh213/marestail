@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from marestail import gates
-from marestail.gates import Gate
+from marestail.gates import Gate, _crap
 from marestail.report import Result
 from tests.conftest import make_context
 
@@ -28,14 +28,25 @@ def expected_registry() -> list[tuple[str, str, str | None]]:
     return [*fast, *shared, *mutation, ("sonar", "sonar", "sonar"), ("qa", "qa", "qa")]
 
 
+def test_crap_key_and_default() -> None:
+    assert (_crap.KEY, _crap.DEFAULT) == ("crap_max", 4)
+
+
 def test_registry_order_and_tiers() -> None:
     assert [(gate.name, gate.tier, gate.section) for gate in gates.registry()] == expected_registry()
 
 
 def test_registry_runners_are_gate_modules() -> None:
     runners = {gate.name: gate.run for gate in gates.registry()}
-    assert (runners["qa"].__module__, runners["depth"].__module__) == ("marestail.gates.qa", "marestail.gates.depth")
-    assert all(runner.__name__ == "run_gate" for runner in runners.values())
+    expected = {name: f"marestail.gates.{module}" for name, _, _, module in gates.GATE_SPECS}
+    assert {name: runner.__module__ for name, runner in runners.items()} == expected
+    assert all(runner.__name__ == gates.RUN_GATE for runner in runners.values())
+
+
+def test_gate_from_and_load_runner() -> None:
+    gate = gates.gate_from(("docs", "fast", "docs", "docs"))
+    assert (gate.name, gate.tier, gate.section, gate.run.__module__) == ("docs", "fast", "docs", "marestail.gates.docs")
+    assert gates.load_runner("qa").__name__ == "run_gate"
 
 
 @pytest.mark.parametrize(

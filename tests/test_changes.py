@@ -18,10 +18,23 @@ from tests.conftest import FakeRun, commit_all, git
         ("abc d", "abc d"),
         ("M ", "M"),
         ("MM", "MM"),
+        ("M  ", "M"),
+        ("XY a", "a"),
+        ("XY  ", " "),
+        ("  a.py", "a.py"),
     ],
 )
 def test_parse_line(line: str, expected: str) -> None:
     assert changes.parse_line(line) == expected
+
+
+def test_porcelain_path_rejects_short_and_unstaged_lines() -> None:
+    assert changes.porcelain_path("M") is None
+    assert changes.porcelain_path("M  ") is None
+    assert changes.porcelain_path("MMa.py") is None
+    assert changes.porcelain_path("M a.py") is None
+    assert changes.porcelain_path(" M a.py") == "a.py"
+    assert (changes.STATUS_WIDTH, changes.PATH_START, changes.RENAME_ARROW) == (2, 3, " -> ")
 
 
 @pytest.mark.parametrize(("line", "expected"), [("+++ b/a.py", "a.py"), ("+++ /dev/null", None), ("+++ a.py ", "a.py")])
@@ -70,7 +83,7 @@ def test_failures_give_empty_results(tmp_path: Path, fake_run: Callable[..., Fak
     assert changes.untracked(tmp_path) == set()
     assert changes.base_exists(tmp_path, "main") is False
     assert fake.calls[-1] == ["git", "rev-parse", "--verify", "--quiet", "main"]
-    assert fake.options[0]["cwd"] == tmp_path
+    assert [option["cwd"] for option in fake.options] == [tmp_path] * len(fake.options)
 
 
 def test_changed_files_commands(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
