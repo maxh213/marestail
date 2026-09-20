@@ -285,13 +285,16 @@ def without_guidance(state: Run, judge: Judge) -> bool:
     return judge.name == "practices" and not practices.files(state.config.root)
 
 
+MAX_JUDGE_ROUNDS = 1000
+
+
 def run_judge_loop(state: Run, judge: Judge) -> bool:
-    previous, bounce = "", 0
-    while True:
+    previous = ""
+    for bounce in range(MAX_JUDGE_ROUNDS):
         done, previous = judge_round(state, judge, previous, bounce)
         if done is not None:
             return done
-        bounce += 1
+    return False
 
 
 def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[bool | None, str]:

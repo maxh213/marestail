@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.gates import comments
-from tests.conftest import make_context
+from tests.conftest import Clock, gate_shape, make_context
 
 EVERYWHERE = {"comments": {"paths": ["."]}}
 
@@ -23,7 +23,14 @@ def test_clean_tree_passes(tmp_path: Path) -> None:
 
     result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
 
-    assert (result.gate, result.ok, result.summary, result.findings) == ("comments", True, "no comments", [])
+    assert gate_shape(result) == ("comments", True, "no comments", [])
+
+
+def test_clean_tree_measures_elapsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write(tmp_path, "a.py", "x = 1\n")
+    monkeypatch.setattr(comments.time, "time", Clock())
+    result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
+    assert result.seconds == 0.25
 
 
 def test_python_comments_and_docstrings_are_reported(tmp_path: Path) -> None:

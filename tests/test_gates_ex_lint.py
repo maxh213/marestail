@@ -8,7 +8,7 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_lint
 from marestail.report import Result
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, gate_shape, make_context
 
 COMPILE_OUTPUT = """==> app
 Compiling 2 files (.ex)
@@ -24,7 +24,7 @@ error: undefined function g/0
 
 
 def shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, elixir_root: str = ".", **fields: Any) -> Context:

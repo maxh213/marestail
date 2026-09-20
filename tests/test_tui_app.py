@@ -49,6 +49,13 @@ def reply(value: str | None) -> Any:
     return lambda key, state: value
 
 
+def test_surely_keeps_missing_values() -> None:
+    assert app.surely("x") == "x"
+    assert app.surely(None) is None
+    assert app.is_code(3) is True
+    assert app.is_code(None) is False
+
+
 def test_run_wraps(monkeypatch: Any) -> None:
     seen: dict[str, Any] = {}
 

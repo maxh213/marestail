@@ -81,3 +81,32 @@ def test_wanted_gate(tier: str, only: set[str] | None, expected: bool) -> None:
 
 def test_gate_runner_signature(tmp_path: Path) -> None:
     assert Gate("a", "fast", None, noop).run(make_context(tmp_path)) == Result("x", True, "")
+
+
+def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
+    seen: list[tuple[object, ...]] = []
+
+    def fake(
+        tier: str,
+        scope_changed: bool,
+        only: set[str] | None,
+        focus: set[str] | None = None,
+        hard: bool = False,
+    ) -> tuple[list[Result], str]:
+        seen.append((tier, scope_changed, only, focus, hard))
+        return [Result("g", True, "ok")], "ctx"
+
+    monkeypatch.setattr(gates, "run_gates_with_context", fake)
+    return seen
+
+
+def test_run_gates_forwards_every_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = capture_run_gates(monkeypatch)
+    assert gates.run_gates("full", True, {"docs"}, {"src"}, True) == [Result("g", True, "ok")]
+    assert seen == [("full", True, {"docs"}, {"src"}, True)]
+
+
+def test_run_gates_defaults_are_unfocused_and_soft(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = capture_run_gates(monkeypatch)
+    assert gates.run_gates("fast", False, None) == [Result("g", True, "ok")]
+    assert seen == [("fast", False, None, None, False)]

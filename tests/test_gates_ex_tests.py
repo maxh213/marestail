@@ -9,7 +9,7 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_tests
 from marestail.report import Result
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, gate_shape, make_context
 
 Reply = tuple[int, str]
 COVERAGE = {
@@ -23,7 +23,7 @@ MIX_OUTPUT = "Running ExUnit\n......\nFinished in 0.1 seconds\n6 tests, 0 failur
 
 
 def shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, coverdata: bool = True, **fields: Any) -> Context:

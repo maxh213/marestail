@@ -8,7 +8,7 @@ import pytest
 from marestail.context import Context
 from marestail.gates import ex_mutation
 from marestail.report import Result
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, gate_shape, make_context
 
 MUTATIONS = [
     {"location": {"file": "lib/a.ex", "line": 4}, "mutator": "Muex.Mutator.Arithmetic", "status": "Survived", "description": "+ -> -"},
@@ -20,7 +20,7 @@ MUTATIONS = [
 
 
 def shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, settings: dict[str, Any] | None = None, **fields: Any) -> Context:

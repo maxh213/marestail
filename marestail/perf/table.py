@@ -58,7 +58,9 @@ def header_index(lines: list[str]) -> int | None:
 
 
 def table_end(lines: list[str], end: int) -> int:
-    while end < len(lines) and lines[end].startswith("|"):
+    for _ in range(max(len(lines) - end, 0)):
+        if not lines[end].startswith("|"):
+            return end
         end += 1
     return end
 

@@ -38,7 +38,9 @@ def scenarios(files: list[Path]) -> list[str]:
 def scenario_titles(text: str) -> list[str]:
     titles: list[str] = []
     found = SCENARIO.search(text)
-    while found:
+    for _ in range(len(text) + 1):
+        if not found:
+            break
         title, end = scenario_title(text, found.end())
         titles += title
         found = SCENARIO.search(text, end)
@@ -75,7 +77,9 @@ def line_end(text: str, start: int) -> int:
 def traces(text: str) -> list[Trace]:
     found: list[Trace] = []
     start = 0
-    while start < len(text):
+    for _ in range(len(text) + 1):
+        if start >= len(text):
+            break
         trace, end = line_trace(text, start)
         found += trace
         start = line_end(text, end) + 1

@@ -257,6 +257,47 @@ def test_judge_loop_stops_after_bounce_limit(tmp_path: Path, monkeypatch: pytest
     assert capsys.readouterr().out == "hardener still bouncing after 1 rounds; stopping for a human\n"
 
 
+def test_judge_loop_stops_after_max_rounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    rounds = patch(monkeypatch, runner, "judge_round", (None, "x"))
+    assert runner.run_judge_loop(state, CRITIC) is False
+    assert len(rounds.calls) == 1000
+    assert rounds.calls[0] == (state, CRITIC, "", 0)
+    assert rounds.calls[1] == (state, CRITIC, "x", 1)
+    assert rounds.calls[-1] == (state, CRITIC, "x", 999)
+
+
+def test_author_round_pins_config_session_and_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    session = Session(task="task")
+    note = tmp_path / "note.md"
+    note.write_text("n")
+    benches = patch(monkeypatch, perf_review, "bench_scripts", ["perf/b.py"])
+    section = patch(monkeypatch, perf_trees, "prompt_section", "trees")
+    heads = patch(monkeypatch, runner, "head", "abc")
+    invoke = patch(monkeypatch, runner, "invoke")
+    discard = patch(monkeypatch, runner, "discard_edits")
+    stage = patch(monkeypatch, runner, "stage_writes")
+    recorded = patch(monkeypatch, runner, "record_staged")
+    restore = patch(monkeypatch, runner, "restore_files")
+    ignored = patch(monkeypatch, runner, "drop_ignored_since", ["x"])
+    prints = patch(monkeypatch, runner, "fingerprints", {"perf/b.py": "1"}, {"perf/b.py": "2"})
+    prompt = patch(monkeypatch, prompts, "perf_author_prompt", "PROMPT")
+    patch(monkeypatch, runner, "agent_label", "claude")
+    assert runner.author_round(state, PERF, session, note, "fb") is True
+    assert benches.calls == [(state.config,), (state.config,)]
+    assert section.calls == [(state.config, session)]
+    assert heads.calls == [(state.config,)]
+    assert prompt.calls == [(state.config, state.task, state.task_name, "trees", note, "fb")]
+    assert invoke.calls == [(state, "note", "PROMPT")]
+    assert discard.calls == [(state.config, ("keep", note), ("writes", PERF.writes))]
+    assert stage.calls == [(state.config, PERF.writes)]
+    assert recorded.calls == [(state.config, "note benches", "perf", "claude")]
+    assert ignored.calls == [(state.config, "abc")]
+    assert restore.calls == [(state.config, ["x"])]
+    assert prints.calls == [(state.config, ["perf/b.py"]), (state.config, ["perf/b.py"])]
+
+
 @pytest.mark.parametrize(("target", "worked", "calls"), [("critic", True, 0), (None, False, 1)])
 def test_judge_loop_stops_when_rework_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str | None, worked: bool, calls: int

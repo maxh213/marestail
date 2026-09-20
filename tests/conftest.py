@@ -8,6 +8,7 @@ import pytest
 
 from marestail.config import Config
 from marestail.context import Context
+from marestail.report import Result
 
 Reply = tuple[int, str]
 MUTMUT_COPIES = (
@@ -24,6 +25,24 @@ MUTMUT_COPIES = (
     "tools",
     "bin",
 )
+
+
+class Clock:
+    def __init__(self, start: float = 1000.0, step: float = 0.25) -> None:
+        self.next = start
+        self.step = step
+
+    def __call__(self) -> float:
+        now = self.next
+        self.next += self.step
+        return now
+
+
+def gate_shape(result: Result) -> tuple[str, bool, str, list[str]]:
+    assert isinstance(result.gate, str) and result.gate
+    assert result.seconds is not None
+    assert result.seconds >= 0
+    return result.gate, result.ok, result.summary, result.findings
 
 
 class FakeRun:

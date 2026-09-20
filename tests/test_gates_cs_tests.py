@@ -8,13 +8,13 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_tests
 from marestail.report import Result
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 NS = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
 
 
 def view(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, section: dict[str, Any] | None = None, extra: dict[str, str] | None = None, **fields: Any) -> Any:

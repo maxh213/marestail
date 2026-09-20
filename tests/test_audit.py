@@ -35,6 +35,26 @@ def test_scenario_titles(text: str, expected: list[str]) -> None:
     assert audit.scenario_titles(text) == expected
 
 
+def test_scenario_titles_stop_when_search_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Hit:
+        def end(self) -> int:
+            return 9
+
+    class Pattern:
+        def search(self, *_args: object, **_kwargs: object) -> Hit:
+            return Hit()
+
+    monkeypatch.setattr(audit, "SCENARIO", Pattern())
+    monkeypatch.setattr(audit, "scenario_title", lambda _text, start: (["t"], start))
+    assert audit.scenario_titles("abcdefghij") == ["t"] * 11
+
+
+def test_traces_stop_when_the_cursor_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(audit, "line_trace", lambda _text, start: ([], start))
+    monkeypatch.setattr(audit, "line_end", lambda _text, end: end - 1)
+    assert audit.traces("ab") == []
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

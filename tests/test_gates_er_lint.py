@@ -8,14 +8,14 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates import er_lint
 from marestail.report import Result
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, gate_shape, make_context
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 WARNINGS = ["+warn_export_all", "+warn_export_vars", "+warn_shadow_vars", "+warn_obsolete_guard", "+warn_unused_import", "-Werror"]
 
 
 def shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, names: tuple[str, ...] = ("src/a.erl", "test/a_tests.erl"), **fields: Any) -> Context:

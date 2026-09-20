@@ -47,7 +47,9 @@ class Tarjan:
         self.work.append((node, iter(sorted(self.graph[node]))))
 
     def drain(self) -> None:
-        while self.work:
+        for _ in range(len(self.graph) * len(self.graph) + 1):
+            if not self.work:
+                break
             node, children = self.work[-1]
             child = next(children, None)
             if child is None:

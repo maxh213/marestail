@@ -7,7 +7,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_crap
 from marestail.report import Result
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 COVERAGE = {
     "files": {
@@ -24,7 +24,7 @@ MEMBERS = [member("Low", 3, 5, 2), member("High", 3, 5, 6), member("Dead", 20, 2
 
 
 def view(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, coverage: dict[str, Any] | None = COVERAGE, **fields: Any) -> Any:

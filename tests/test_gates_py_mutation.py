@@ -6,7 +6,7 @@ import pytest
 
 from marestail.context import MutationScope
 from marestail.gates import py_mutation
-from tests.conftest import make_context
+from tests.conftest import Clock, gate_shape, make_context
 
 FULL = {"python": {"mutation_scope": "all"}}
 
@@ -20,7 +20,7 @@ def write_meta(root: Path, name: str, codes: dict[str, Any]) -> None:
 def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(py_mutation)
     result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
-    assert (result.gate, result.ok, result.summary) == (
+    assert gate_shape(result)[:3] == (
         "py.mutation",
         False,
         '[python] mutation_scope must be "changed" or "all", got \'some\'',
@@ -28,10 +28,17 @@ def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
     assert fake.calls == []
 
 
+def test_bad_setting_measures_elapsed(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_run(py_mutation)
+    monkeypatch.setattr(py_mutation.time, "time", Clock())
+    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
+    assert result.seconds == 0.25
+
+
 def test_nothing_changed_skips(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(py_mutation)
     result = py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"tests/test_a.py", "perf/b.py"}))
-    assert (result.ok, result.summary) == (True, "skipped: no changed python sources")
+    assert gate_shape(result)[:3] == ("py.mutation", True, "skipped: no changed python sources")
     assert fake.calls == []
 
 

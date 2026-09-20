@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import _coverage, rb_tests
-from tests.conftest import make_context
+from tests.conftest import Clock, gate_shape, make_context
 
 RSPEC_OK = "Randomized with seed 1\n\nFinished in 0.4 seconds\n12 examples, 0 failures\n"
 THEN_ARM = "[:then, 1, 4, 6, 4, 20]"
@@ -37,6 +37,7 @@ def run(ctx: Any, fake_run: Any, reply: tuple[int, str]) -> Any:
     result = rb_tests.run_gate(ctx)
     assert fake.calls == [["bundle", "exec", "rspec"]]
     assert fake.options == [{"cwd": ctx.ruby_root(), "timeout": 1800}]
+    gate_shape(result)
     return result
 
 
@@ -44,6 +45,12 @@ def test_failing_tests(tmp_path: Path, fake_run: Any) -> None:
     result = run(make_context(tmp_path), fake_run, (1, "\n".join(f"line {n}" for n in range(40))))
     assert (result.gate, result.ok, result.summary) == ("rb.tests", False, "tests failed")
     assert result.findings == [f"line {n}" for n in range(10, 40)]
+
+
+def test_failing_tests_measure_elapsed(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rb_tests.time, "time", Clock())
+    result = run(make_context(tmp_path), fake_run, (1, "failed"))
+    assert result.seconds == 0.25
 
 
 def test_missing_resultset(tmp_path: Path, fake_run: Any) -> None:

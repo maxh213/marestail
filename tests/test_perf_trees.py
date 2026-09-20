@@ -48,6 +48,25 @@ def test_recorded_and_active(tmp_path: Path) -> None:
     assert trees.trees_file(config).read_text().endswith("}\n")
 
 
+def test_close_removes_non_head_worktrees(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    config = config_at(tmp_path)
+    extra = tmp_path / "wt"
+    extra.mkdir()
+    trees.write_trees(config, trees.Session("t1", [trees.Tree("head", "aaa", tmp_path)]))
+    removed: list[tuple[Path, bool]] = []
+    monkeypatch.setattr(trees.shutil, "rmtree", lambda path, ignore_errors=False: removed.append((path, ignore_errors)))
+    fake = fake_run(trees, [(0, ""), (0, "")])
+    session = trees.Session("t1", [trees.Tree("head", "aaa", tmp_path), trees.Tree("baseline", "bbb", extra)])
+    trees.close(config, session)
+    assert fake.calls == [
+        ["git", "worktree", "remove", "--force", str(extra)],
+        ["git", "worktree", "prune"],
+    ]
+    assert [option["cwd"] for option in fake.options] == [tmp_path, tmp_path]
+    assert removed == [(extra, True)]
+    assert not trees.trees_file(config).exists()
+
+
 def test_record_start_keeps_the_first_commit(git_repo: Path) -> None:
     config = config_at(git_repo)
     first = commit_file(git_repo, "a")

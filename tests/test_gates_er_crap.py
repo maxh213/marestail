@@ -9,13 +9,13 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates import _crap, er_crap
 from marestail.report import Result
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, gate_shape, make_context
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 
 
 def shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, coverage: dict[str, Any] | None = None, raw: dict[str, Any] | None = None, **fields: Any) -> Context:

@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 
 from marestail import dotnet
-from marestail.gates import cs_deps
+from marestail.gates import _cycles, cs_deps
 from marestail.report import Result
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 LAYERS = {
     "layers": [
@@ -43,7 +43,7 @@ FINDINGS = [
 
 
 def view(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, layers: dict[str, Any] | None = LAYERS, **fields: Any) -> Any:
@@ -133,6 +133,14 @@ def test_under(path: str, folder: str, expected: bool) -> None:
 def test_cycle_findings() -> None:
     edges = [edge("a", "b", 3), edge("a", "b", 1), edge("b", "c", 2), edge("c", "a", 7), edge("d", "d", 1), edge("x", "y", 1)]
     assert cs_deps.cycle_findings(edges) == ["a:1 dependency cycle: a <-> b <-> c"]
+
+
+def test_drain_gives_up_when_work_never_clears(monkeypatch: pytest.MonkeyPatch) -> None:
+    tarjan = _cycles.Tarjan({"a": set(), "b": set()})
+    tarjan.work = [("a", iter([]))]
+    monkeypatch.setattr(tarjan, "finish", lambda _node: None)
+    tarjan.drain()
+    assert tarjan.work[0][0] == "a"
 
 
 def test_strongly_connected() -> None:

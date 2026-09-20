@@ -258,6 +258,7 @@ def test_panel_helpers(tmp_path: Path) -> None:
     assert panels.skip() is None
     assert panels.none_of() is None
     assert panels.surely("x") == "x"
+    assert panels.surely(None) is None
     assert panels.missing_fleet(0) is None
     assert panels.present(0) is True
     assert panels.present(None) is False

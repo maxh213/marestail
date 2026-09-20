@@ -23,6 +23,13 @@ def repo(root: Path, **fields: Any) -> RepoState:
     return RepoState(name=root.name, root=root, branch="main", head="abc", task="t", **fields)
 
 
+def test_surely_keeps_missing_values() -> None:
+    assert collect.surely("x") == "x"
+    assert collect.surely(None) is None
+    assert collect.present(0) is True
+    assert collect.present(None) is False
+
+
 def test_work_path(tmp_path: Path) -> None:
     assert collect.work_path(tmp_path) == tmp_path / collect.WORK
     assert collect.work_path(tmp_path, "runs", "x") == tmp_path / collect.WORK / "runs" / "x"

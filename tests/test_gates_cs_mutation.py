@@ -7,13 +7,13 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_mutation
 from marestail.report import Result
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 NO_BASE = "(no base origin/master; full run)"
 
 
 def view(result: Result) -> tuple[str, bool, str, list[str]]:
-    return result.gate, result.ok, result.summary, result.findings
+    return gate_shape(result)
 
 
 def project(root: Path, csproj: str = "<Project />", section: dict[str, Any] | None = None, **fields: Any) -> Any:

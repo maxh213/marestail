@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, ruby, rust
 from marestail.gates import deadcode
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 VULTURE = "\n".join(
     [
@@ -22,7 +22,7 @@ PYTHON = {"python": {"sources": ["marestail"]}}
 def test_nothing_configured_passes(tmp_path: Path) -> None:
     result = deadcode.run_gate(make_context(tmp_path))
 
-    assert (result.gate, result.ok, result.summary, result.findings) == ("deadcode", True, "nothing unreachable", [])
+    assert gate_shape(result) == ("deadcode", True, "nothing unreachable", [])
 
 
 def test_python_findings_through_the_gate(tmp_path: Path, fake_run: Any) -> None:

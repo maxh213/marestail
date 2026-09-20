@@ -38,6 +38,14 @@ def test_pre_cell(pre: float | None, expected: str) -> None:
     assert table.pre_cell(measurement(pre=pre)) == expected
 
 
+def test_table_end_stops_at_the_first_non_row() -> None:
+    lines = ["| a |\n", "|---|\n", "| 1 |\n", "after\n", "| not |\n"]
+    assert table.table_end(lines, 2) == 3
+    assert table.table_end(["| a |\n"], 1) == 1
+    assert table.table_end(["| a |\n", "| b |\n"], 0) == 2
+    assert table.table_end(["| a |\n"], 5) == 5
+
+
 def test_parse_without_table() -> None:
     assert table.parse("# Title\n") == table.Table("# Title\n", [], [], "")
 
