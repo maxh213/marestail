@@ -12,10 +12,7 @@ from typing import Any
 
 from marestail.context import Context, under_benchmarks
 from marestail.report import Result
-from marestail.shell import run
 
-SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "js" / "ts_comments.mjs"
-EX_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "comments.exs"
 SKIP_DIRS = {
     "node_modules",
     ".venv",
@@ -124,19 +121,23 @@ def scanned(ctx: Context, code: int, output: str, failure: str, fallback: str = 
 
 
 def ts_findings(ctx: Context) -> list[str]:
+    from marestail import javascript
+
     ts_root = ctx.config.get("ts", "root")
     paths = files(ctx, TS_SUFFIXES)
     if ts_root is None or not paths:
         return []
-    code, output = run(["node", str(SCRIPT), str(ctx.root / ts_root), *map(str, paths)], cwd=ctx.root)
+    code, output = javascript.scan(ctx, "comments", paths, cwd=ctx.root)
     return scanned(ctx, code, output, "comment scanner failed")
 
 
 def elixir_findings(ctx: Context) -> list[str]:
+    from marestail import elixir
+
     paths = files(ctx, (".ex", ".exs"))
     if not paths:
         return []
-    code, output = run(["elixir", str(EX_SCRIPT), *map(str, paths)], cwd=ctx.root)
+    code, output = elixir.scan(ctx, "comments", paths, cwd=ctx.root)
     return scanned(ctx, code, output, "elixir comment scanner failed")
 
 

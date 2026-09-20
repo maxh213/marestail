@@ -5,7 +5,9 @@ from typing import Any
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates.er_tests import COVERAGE_JSON, relative_path
+from marestail.gates._coverage import ER_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import relative_path
+from marestail.gates._crap import crap_result, scored_functions
 from marestail.report import Result
 
 GATE = "er.crap"
@@ -34,20 +36,6 @@ def files_in_scope(coverage: dict[str, Any], ctx: Context) -> list[Path]:
 
 def existing_files(coverage: dict[str, Any]) -> list[Path]:
     return [Path(name) for name in coverage.get("files", {}) if Path(name).exists()]
-
-
-def scored_functions(functions: list[dict[str, Any]], coverage: dict[str, Any], ctx: Context) -> list[dict[str, Any]]:
-    return [score(fn, coverage["files"].get(fn["file"], {}), ctx) for fn in functions]
-
-
-def crap_result(gate: str, scored: list[dict[str, Any]], limit: float, started: float) -> Result:
-    offenders = sorted((entry for entry in scored if entry["crap"] > limit), key=crap_order)
-    summary = f"{len(scored)} functions, {len(offenders)} above CRAP {limit:g}"
-    return Result(gate, not offenders, summary, [describe(entry) for entry in offenders], time.time() - started)
-
-
-def crap_order(entry: dict[str, Any]) -> float:
-    return float(-entry["crap"])
 
 
 def scoped_functions(functions: list[dict[str, Any]], ctx: Context) -> list[dict[str, Any]]:
@@ -80,23 +68,3 @@ def touches_hunk(fn: dict[str, Any], ends: dict[tuple[str, int], int], ctx: Cont
         return True
     end = ends[(fn["file"], fn["line"])]
     return any(fn["line"] <= line <= end for line in gated)
-
-
-def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[str, Any]:
-    complexity = fn["complexity"]
-    covered_ratio = file_cov.get("percent_covered", 100.0) / 100.0
-    crap = complexity**2 * (1 - covered_ratio) ** 3 + complexity
-    return {
-        "file": relative_path(fn["file"], ctx),
-        "line": fn["line"],
-        "name": fn["name"],
-        "complexity": complexity,
-        "cov": covered_ratio,
-        "crap": crap,
-    }
-
-
-def describe(entry: dict[str, Any]) -> str:
-    return (
-        f"{entry['file']}:{entry['line']} {entry['name']} crap={entry['crap']:.1f} (cc={entry['complexity']}, coverage={entry['cov']:.0%})"
-    )

@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from marestail.gates import ts_tests
+from marestail import javascript
+from marestail.gates import _coverage, ts_tests
 from tests.conftest import make_context
 
 TS = {"ts": {"root": "web"}}
@@ -235,18 +236,18 @@ def test_count_tests(output: str, expected: str) -> None:
     [("src/a.ts", "web/src/a.ts"), ("/elsewhere/a.ts", "/elsewhere/a.ts"), ("../web/b.ts", "web/b.ts")],
 )
 def test_relative(tmp_path: Path, path: str, expected: str) -> None:
-    assert ts_tests.relative(path, make_context(tmp_path, TS)) == expected
+    assert javascript.rel(path, make_context(tmp_path, TS)) == expected
 
 
 def test_relative_path_strips_and_keeps_the_original_when_outside(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, TS)
 
-    assert ts_tests.relative_path("  src/a.ts \n", ctx) == "web/src/a.ts"
-    assert ts_tests.relative_path(" /elsewhere/a.ts ", ctx) == " /elsewhere/a.ts "
-    assert ts_tests.relative_path(str(tmp_path / "x.ts"), ctx) == "x.ts"
+    assert javascript.labelled("  src/a.ts \n", ctx) == "web/src/a.ts"
+    assert javascript.labelled(" /elsewhere/a.ts ", ctx) == " /elsewhere/a.ts "
+    assert javascript.labelled(str(tmp_path / "x.ts"), ctx) == "x.ts"
 
 
 def test_in_scope_findings(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, scope_changed=True, changed={"a.ts"})
 
-    assert ts_tests.in_scope_findings(["a.ts:1 x: y", "b.ts:2 a.ts:1"], ctx) == ["a.ts:1 x: y"]
+    assert _coverage.in_scope_findings(["a.ts:1 x: y", "b.ts:2 a.ts:1"], ctx) == ["a.ts:1 x: y"]

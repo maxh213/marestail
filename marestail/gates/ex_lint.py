@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
+from marestail.elixir import project_files as scoped_sources
 from marestail.report import Result
 from marestail.shell import run
 
@@ -43,19 +44,6 @@ def scoped_run(ctx: Context, root: Path, started: float) -> Result:
 
 def compile_findings(output: str, files: list[str]) -> list[str]:
     return [f"compile: {line}" for block in scoped_blocks(output, files) for line in block.splitlines() if line.strip()]
-
-
-def scoped_sources(ctx: Context, root: Path, files: list[str]) -> list[str]:
-    prefix = root.relative_to(ctx.root)
-    relatives = [strip_prefix(path, prefix) for path in files]
-    return sorted(str(path) for path in relatives if (root / path).is_file())
-
-
-def strip_prefix(path: str, prefix: Path) -> Path:
-    relative = Path(path)
-    if str(prefix) == ".":
-        return relative
-    return relative.relative_to(prefix)
 
 
 def scoped_blocks(output: str, files: list[str]) -> list[str]:

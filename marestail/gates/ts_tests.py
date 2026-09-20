@@ -1,14 +1,15 @@
 import json
 import re
 import time
-from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
+from marestail.gates._coverage import TS_COVERAGE_DIR as COVERAGE_DIR
+from marestail.gates._coverage import in_scope_findings
+from marestail.javascript import labelled as relative_path
 from marestail.report import Result
 from marestail.shell import run, tail
 
-COVERAGE_DIR = "ts-coverage"
 JEST_RESULTS = "ts-tests.json"
 UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)
 GATE = "ts.tests"
@@ -37,10 +38,6 @@ def passed(ctx: Context, output: str, started: float) -> Result:
     findings = coverage_findings(coverage, ctx)
     summary = f"{count_tests(output)} passed, {len(findings)} uncovered lines/branches (need 0)"
     return Result(GATE, not findings, summary, findings, time.time() - started)
-
-
-def in_scope_findings(findings: list[str], ctx: Context) -> list[str]:
-    return [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
 
 
 def read_coverage(ctx: Context) -> dict[str, Any]:
@@ -122,24 +119,6 @@ def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
         findings.extend(uncovered_statements(relative, data, gated))
         findings.extend(uncovered_branches(relative, data, gated))
     return findings
-
-
-def located(path: str, ctx: Context) -> str | None:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = ctx.ts_root() / path
-    try:
-        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
-    except ValueError:
-        return None
-
-
-def relative(path: str, ctx: Context) -> str:
-    return located(path, ctx) or path
-
-
-def relative_path(file: str, ctx: Context) -> str:
-    return located(file.strip(), ctx) or file
 
 
 def uncovered_statements(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:

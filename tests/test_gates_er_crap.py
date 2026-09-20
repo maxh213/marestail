@@ -7,7 +7,7 @@ import pytest
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates import er_crap
+from marestail.gates import _crap, er_crap
 from marestail.report import Result
 from tests.conftest import FakeRun, make_context
 
@@ -136,8 +136,9 @@ def test_touches_hunk_bounds(tmp_path: Path, lines: set[int], expected: bool) ->
 
 def test_score(tmp_path: Path) -> None:
     fn = {"file": str(tmp_path / "a.erl"), "line": 3, "name": "f/0", "complexity": 2}
-    scored = er_crap.score(fn, {"percent_covered": 0.0}, make_context(tmp_path))
+    scored = _crap.file_percent_score(fn, {"percent_covered": 0.0}, make_context(tmp_path))
     assert scored == {"file": "a.erl", "line": 3, "name": "f/0", "complexity": 2, "cov": 0.0, "crap": 6.0}
+    assert _crap.file_percent_score(fn, {}, make_context(tmp_path))["cov"] == 1.0
 
 
 def test_crap_result_orders_by_score() -> None:
@@ -146,6 +147,6 @@ def test_crap_result_orders_by_score() -> None:
         {"file": "b", "line": 2, "name": "y", "complexity": 9, "cov": 0.25, "crap": 9.5},
         {"file": "c", "line": 3, "name": "z", "complexity": 4, "cov": 1.0, "crap": 4.0},
     ]
-    result = er_crap.crap_result("g", scored, 4.0, 0.0)
+    result = _crap.crap_result("g", scored, 4.0, 0.0)
     expected = ["b:2 y crap=9.5 (cc=9, coverage=25%)", "a:1 x crap=5.0 (cc=5, coverage=100%)"]
     assert shape(result) == ("g", False, "3 functions, 2 above CRAP 4", expected)

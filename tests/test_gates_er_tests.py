@@ -7,7 +7,7 @@ import pytest
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates import er_tests
+from marestail.gates import _coverage, er_tests
 from marestail.report import Result
 from tests.conftest import FakeRun, make_context
 
@@ -142,8 +142,8 @@ def test_scoped_to_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun
 
 def test_relative_path(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
-    assert er_tests.relative_path(str(tmp_path / "src" / "a.erl"), ctx) == "src/a.erl"
-    assert er_tests.relative_path("/outside/a.erl", ctx) == "/outside/a.erl"
+    assert _coverage.relative_path(str(tmp_path / "src" / "a.erl"), ctx) == "src/a.erl"
+    assert _coverage.relative_path("/outside/a.erl", ctx) == "/outside/a.erl"
 
 
 @pytest.mark.parametrize(
@@ -161,9 +161,9 @@ def test_count_tests(output: str, expected: str) -> None:
 
 
 def test_gated_missing() -> None:
-    assert er_tests.gated_missing({"missing_lines": [1, 2, 3]}, None) == [1, 2, 3]
-    assert er_tests.gated_missing({"missing_lines": [1, 2, 3]}, {2, 5}) == [2]
-    assert er_tests.gated_missing({}, {2}) == []
+    assert _coverage.gated_missing({"missing_lines": [1, 2, 3]}, None) == [1, 2, 3]
+    assert _coverage.gated_missing({"missing_lines": [1, 2, 3]}, {2, 5}) == [2]
+    assert _coverage.gated_missing({}, {2}) == []
 
 
 @pytest.mark.parametrize(

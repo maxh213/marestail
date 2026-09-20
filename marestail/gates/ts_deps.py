@@ -2,7 +2,7 @@ import re
 import time
 
 from marestail.context import Context
-from marestail.gates.ts_tests import relative
+from marestail.javascript import rel as relative
 from marestail.report import Result
 from marestail.shell import run
 

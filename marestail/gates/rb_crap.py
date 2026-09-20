@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates.rb_tests import COVERAGE_JSON, relative_path
+from marestail.gates._coverage import RB_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import relative_path
+from marestail.gates._crap import above, describe
 from marestail.report import Result
 from marestail.ruby import scan, scanned, sources
-
-ruby_sources = sources
 
 GATE = "rb.crap"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
@@ -39,10 +39,6 @@ def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[dict[str
     offenders = above(scored, limit)
     summary = f"{len(scored)} methods, {len(offenders)} above CRAP {limit:g}"
     return Result(GATE, not offenders, summary, [describe(f) for f in offenders], time.time() - started)
-
-
-def above(scored: list[dict[str, Any]], limit: float) -> list[dict[str, Any]]:
-    return sorted((f for f in scored if f["crap"] > limit), key=lambda f: -f["crap"])
 
 
 def sources_in_scope(ctx: Context) -> list[Path]:
@@ -146,7 +142,3 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
         "cov": covered,
         "crap": complexity**2 * (1 - covered) ** 3 + complexity,
     }
-
-
-def describe(f: dict[str, Any]) -> str:
-    return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['cc']}, coverage={f['cov']:.0%})"

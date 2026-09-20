@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_lint
 from marestail.report import Result
@@ -108,8 +109,8 @@ def test_scoped_blocks() -> None:
 def test_scoped_sources(tmp_path: Path) -> None:
     project(tmp_path, "app")
     ctx = make_context(tmp_path, {"elixir": {"root": "app"}})
-    assert ex_lint.scoped_sources(ctx, tmp_path / "app", ["app/lib/b.ex", "app/lib/a.ex", "app/lib/zz.ex"]) == ["lib/a.ex", "lib/b.ex"]
-    assert ex_lint.scoped_sources(ctx, tmp_path, ["app/lib/a.ex", "lib/a.ex"]) == ["app/lib/a.ex"]
+    assert elixir.project_files(ctx, tmp_path / "app", ["app/lib/b.ex", "app/lib/a.ex", "app/lib/zz.ex"]) == ["lib/a.ex", "lib/b.ex"]
+    assert elixir.project_files(ctx, tmp_path, ["app/lib/a.ex", "lib/a.ex"]) == ["app/lib/a.ex"]
 
 
 def test_relevant() -> None:

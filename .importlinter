@@ -2,17 +2,18 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: CLI, then pipeline commands, then prompts, then gates, then language adapters, then context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, prompts, gates, depth/graph, language adapters, context, then shell
 type = layers
 layers =
+    marestail.tui
     marestail.cli
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup
     marestail.prompts : marestail.audit : marestail.practices
     marestail.gates
-    marestail.depth | marestail.graph
-    marestail.dotnet | marestail.erlang | marestail.java | marestail.ruby | marestail.rust
-    marestail.context | marestail.pipeline | marestail.freeze | marestail.sonar.client
-    marestail.report | marestail.config | marestail.changes
+    marestail.depth : marestail.graph
+    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client
+    marestail.report : marestail.config : marestail.changes
     marestail.shell
 
 [importlinter:contract:gates-do-not-reach-up]
@@ -65,6 +66,8 @@ forbidden_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.javascript
+    marestail.elixir
     marestail.sonar.setup
 
 [importlinter:contract:language-adapters-stay-below-gates]
@@ -76,6 +79,8 @@ source_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.javascript
+    marestail.elixir
 forbidden_modules =
     marestail.gates
     marestail.runner
@@ -88,11 +93,15 @@ forbidden_modules =
     marestail.route
     marestail.audit
     marestail.practices
+    marestail.graph
+    marestail.depth
 
-[importlinter:contract:protect-gate-cycles]
-name = Cycle finder is private to gates
+[importlinter:contract:protect-gate-internals]
+name = Gate helpers are private to gates
 type = protected
 protected_modules =
     marestail.gates._cycles
+    marestail.gates._crap
+    marestail.gates._coverage
 allowed_importers =
     marestail.gates

@@ -8,7 +8,6 @@ from typing import Any, TypeGuard, cast
 
 from marestail.config import Config
 from marestail.context import Context, under_benchmarks
-from marestail.shell import run
 
 SKIP_DIRS = {
     "node_modules",
@@ -32,8 +31,7 @@ SKIP_DIRS = {
     "spec",
     "target",
 }
-TS_SCRIPT = Path(__file__).resolve().parent.parent / "scanners" / "js" / "ts_depth.mjs"
-EX_SCRIPT = Path(__file__).resolve().parent.parent / "scanners" / "ex" / "depth.exs"
+
 SHALLOW_MIN_PUBLIC = 4
 SHALLOW_MAX_RATIO = 6.0
 LONG_FILE_LINES = 300
@@ -239,11 +237,13 @@ def targeted_forwarders(label: str, found: list[Item]) -> list[str]:
 
 
 def ts_modules(config: Config) -> list[Module]:
+    from marestail import javascript
+
     ts_root = config.root / config.get("ts", "root", ".")
     files = ts_files(ts_root, ts_root / config.get("ts", "source", "src"))
     if not files:
         return []
-    code, output = run(["node", str(TS_SCRIPT), str(ts_root), *map(str, files)], cwd=ts_root)
+    code, output = javascript.scan(Context(config=config), "depth", files)
     if code != 0:
         raise SystemExit(f"ts depth analysis failed: {output[-300:]}")
     return [ts_module(entry, config.root) for entry in json.loads(output)]
@@ -283,11 +283,13 @@ def plain_modules(output: str, repo: Path) -> list[Module]:
 
 
 def elixir_modules(config: Config) -> list[Module]:
+    from marestail import elixir
+
     root = config.root / config.get(ELIXIR, "root", ".")
     files = source_files(root, "*.ex", "_test.exs")
     if not files:
         return []
-    code, output = run([ELIXIR, str(EX_SCRIPT), *map(str, files)], cwd=root)
+    code, output = elixir.scan(Context(config=config), "depth", files)
     if code != 0:
         return []
     return plain_modules(output, config.root)

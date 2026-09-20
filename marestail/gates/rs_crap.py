@@ -5,7 +5,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
-from marestail.gates.rb_crap import above, describe
+from marestail.gates._crap import above, describe
 from marestail.report import Result
 
 GATE = "rs.crap"

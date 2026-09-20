@@ -3,15 +3,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from marestail import elixir
 from marestail.context import Context
-from marestail.gates.er_crap import crap_result, scored_functions
-from marestail.gates.er_tests import relative_path
-from marestail.gates.ex_tests import COVERAGE_JSON
+from marestail.gates._coverage import EX_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import relative_path
+from marestail.gates._crap import crap_result, scored_functions
 from marestail.report import Result
-from marestail.shell import run
 
 GATE = "ex.crap"
-SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "complexity.exs"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -24,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     files = files_in_scope(coverage, root, ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")
-    code, output = run(["elixir", str(SCRIPT), *map(str, files)], cwd=root, timeout=600)
+    code, output = elixir.scan(ctx, "complexity", files, timeout=600)
     if code != 0:
         return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], time.time() - started)
     functions = hunk_functions(json.loads(output), ctx)

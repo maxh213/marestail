@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from marestail import dotnet, erlang, java, ruby, rust
+from marestail import dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.gates import comments
 from tests.conftest import make_context
 
@@ -110,14 +110,14 @@ def test_docstrings(text: str, expected: list[int]) -> None:
 
 def test_ts_findings_needs_a_ts_root(tmp_path: Path, fake_run: Any) -> None:
     write(tmp_path, "a.ts", "// x\n")
-    fake = fake_run(comments)
+    fake = fake_run(javascript)
 
     assert comments.ts_findings(make_context(tmp_path, EVERYWHERE)) == []
     assert fake.calls == []
 
 
 def test_ts_findings_needs_files(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(comments)
+    fake = fake_run(javascript)
 
     assert comments.ts_findings(make_context(tmp_path, {**EVERYWHERE, "ts": {"root": "web"}})) == []
     assert fake.calls == []
@@ -126,34 +126,34 @@ def test_ts_findings_needs_files(tmp_path: Path, fake_run: Any) -> None:
 def test_ts_findings_runs_the_scanner(tmp_path: Path, fake_run: Any) -> None:
     source = write(tmp_path, "web/a.tsx", "// x\n")
     reply = json.dumps([{"file": str(source), "line": 4, "text": "// x"}])
-    fake = fake_run(comments, [(0, reply)])
+    fake = fake_run(javascript, [(0, reply)])
 
     findings = comments.ts_findings(make_context(tmp_path, {**EVERYWHERE, "ts": {"root": "web"}}))
 
     assert findings == ["web/a.tsx:4 comment: // x"]
-    assert fake.calls == [["node", str(comments.SCRIPT), str(tmp_path / "web"), str(source)]]
+    assert fake.calls == [["node", str(javascript.COMMENTS), str(tmp_path / "web"), str(source)]]
     assert fake.options[0]["cwd"] == tmp_path
 
 
 def test_ts_scanner_failure_keeps_the_output_tail(tmp_path: Path, fake_run: Any) -> None:
     write(tmp_path, "a.js", "// x\n")
-    fake_run(comments, [(2, "  " + "a" * 50 + "b" * 200 + "  \n")])
+    fake_run(javascript, [(2, "  " + "a" * 50 + "b" * 200 + "  \n")])
 
     assert comments.ts_findings(make_context(tmp_path, {**EVERYWHERE, "ts": {"root": "."}})) == ["comment scanner failed: " + "b" * 200]
 
 
 def test_elixir_findings(tmp_path: Path, fake_run: Any) -> None:
     source = write(tmp_path, "lib/a.ex", "# x\n")
-    fake = fake_run(comments, [(0, json.dumps([{"file": str(source), "line": 1, "text": "# x"}])), (1, "boom")])
+    fake = fake_run(elixir, [(0, json.dumps([{"file": str(source), "line": 1, "text": "# x"}])), (1, "boom")])
     ctx = make_context(tmp_path, EVERYWHERE)
 
     assert comments.elixir_findings(ctx) == ["lib/a.ex:1 comment: # x"]
     assert comments.elixir_findings(ctx) == ["elixir comment scanner failed: boom"]
-    assert fake.calls[0] == ["elixir", str(comments.EX_SCRIPT), str(source)]
+    assert fake.calls[0] == ["elixir", str(elixir.COMMENTS), str(source)]
 
 
 def test_elixir_findings_without_files(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(comments)
+    fake = fake_run(elixir)
 
     assert comments.elixir_findings(make_context(tmp_path, EVERYWHERE)) == []
     assert fake.calls == []

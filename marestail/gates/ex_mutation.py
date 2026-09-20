@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from marestail.context import Context, MutationScope
-from marestail.gates.ex_lint import scoped_sources
+from marestail.elixir import project_files as scoped_sources
 from marestail.report import Result
 from marestail.shell import run, tail
 

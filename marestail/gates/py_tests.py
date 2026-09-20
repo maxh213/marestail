@@ -3,11 +3,12 @@ import time
 from typing import Any
 
 from marestail.context import Context
+from marestail.gates._coverage import PY_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import scoped_lines
 from marestail.report import Result
 from marestail.shell import run, tail
 
 GATE = "py.tests"
-COVERAGE_JSON = "py-coverage.json"
 COVERAGE_XML = "py-coverage.xml"
 
 
@@ -60,16 +61,6 @@ def file_findings(file: str, data: dict[str, Any], gated: set[int] | None) -> li
 
 def in_gate(line: int, gated: set[int] | None) -> bool:
     return gated is None or line in gated
-
-
-def scoped_lines(file: str, ctx: Context) -> set[int] | None:
-    if not ctx.scoped:
-        return None
-    relative = (ctx.python_root() / file).resolve().relative_to(ctx.root)
-    path = str(relative)
-    if not ctx.in_scope(path):
-        return set()
-    return ctx.gated_lines(path)
 
 
 def gated_intersect(lines: list[int], gated: set[int] | None) -> list[int]:

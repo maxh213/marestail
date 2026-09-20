@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_crap
 from marestail.report import Result
@@ -44,27 +45,27 @@ def test_skips_without_files(tmp_path: Path, coverage: dict[str, Any]) -> None:
 
 
 def test_script_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake_run(ex_crap, [(1, "\n".join(str(n) for n in range(12)))])
+    fake_run(elixir, [(1, "\n".join(str(n) for n in range(12)))])
     result = ex_crap.run_gate(project(tmp_path))
     assert shape(result) == ("ex.crap", False, "complexity script failed", [str(n) for n in range(2, 12)])
 
 
 def test_scores_functions(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(ex_crap, [(0, json.dumps(FUNCTIONS))])
+    fake = fake_run(elixir, [(0, json.dumps(FUNCTIONS))])
     result = ex_crap.run_gate(project(tmp_path))
     findings = ["lib/a.ex:6 big/2 crap=8.1 (cc=5, coverage=50%)", "lib/b.ex:1 plain/0 crap=6.0 (cc=6, coverage=100%)"]
     assert shape(result) == ("ex.crap", False, "3 functions, 2 above CRAP 4", findings)
-    assert fake.calls == [["elixir", str(ex_crap.SCRIPT), "lib/a.ex", str(tmp_path / "b.ex")]]
+    assert fake.calls == [["elixir", str(elixir.COMPLEXITY), "lib/a.ex", str(tmp_path / "b.ex")]]
     assert fake.options == [{"cwd": tmp_path / "app", "timeout": 600}]
 
 
 def test_configured_limit(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake_run(ex_crap, [(0, json.dumps(FUNCTIONS))])
+    fake_run(elixir, [(0, json.dumps(FUNCTIONS))])
     assert ex_crap.run_gate(project(tmp_path, raw={"crap_max": 10})).summary == "3 functions, 0 above CRAP 10"
 
 
 def test_scoped(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(ex_crap, [(0, json.dumps(FUNCTIONS[:2]))])
+    fake = fake_run(elixir, [(0, json.dumps(FUNCTIONS[:2]))])
     ctx = project(tmp_path, scope_changed=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {3}})
     assert shape(ex_crap.run_gate(ctx)) == ("ex.crap", True, "1 functions, 0 above CRAP 4", [])
     assert fake.calls[0][2:] == ["lib/a.ex"]

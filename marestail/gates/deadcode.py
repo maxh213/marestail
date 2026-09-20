@@ -14,7 +14,7 @@ from marestail.shell import run
 VULTURE_HEAD = re.compile(r":(\d+): (unused \w+|unreachable code) (.+)")
 VULTURE_CONFIDENCE = re.compile(r"\d+% confidence\)")
 PYTHON_KINDS = ["unused function", "unused method", "unused class", "unused import", "unused property", "unreachable code"]
-EX_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "deadcode.exs"
+
 PYTHON_DECORATORS = [
     "@*.route",
     "@*.before_request",
@@ -201,12 +201,14 @@ def unused_function(label: str, entry: dict[str, Any]) -> str:
 
 
 def elixir_findings(ctx: Context) -> list[str]:
+    from marestail import elixir
+
     if ctx.config.section("elixir") is None:
         return []
     root = ctx.elixir_root()
     out = ctx.work / "ex-deadcode.json"
     out.unlink(missing_ok=True)
-    code, output = run(elixir_command(ctx, out), cwd=root, timeout=900)
+    code, output = run(elixir.deadcode_command(ctx, out), cwd=root, timeout=900)
     if code != 0 or not out.exists():
         return [failed(ELIXIR_FAILED, output)]
     return elixir_entries(json.loads(out.read_text()), root, ctx)
@@ -263,20 +265,6 @@ def xref_args(ctx: Context, ebin: Path) -> list[str]:
     beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
     ignore = erlang.listify(ctx.erlang("deadcode_ignore", []))
     return (["--ignore", ",".join(ignore)] if ignore else []) + beams
-
-
-def elixir_command(ctx: Context, out: Path) -> list[str]:
-    command = ["mix", "run", "--no-start", str(EX_SCRIPT), "--out", str(out)]
-    preset = ctx.elixir("preset")
-    if preset:
-        command += ["--preset", str(preset)]
-    modules = ctx.elixir("deadcode_ignore_modules", [])
-    if modules:
-        command += ["--ignore-modules", ",".join(modules)]
-    names = ctx.elixir("deadcode_ignore", [])
-    if names:
-        command += ["--ignore", ",".join(names)]
-    return command
 
 
 SCANNERS = [

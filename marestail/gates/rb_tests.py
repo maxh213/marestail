@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
+from marestail.gates._coverage import RB_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import relative_path
 from marestail.report import Result
 from marestail.ruby import bundle
 from marestail.shell import run, tail
 
 GATE = "rb.tests"
-COVERAGE_JSON = "rb-coverage.json"
 RESULTSET = Path("coverage/.resultset.json")
 BRANCH_SPAN = re.compile(r"\[\s*:\w+\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*\]")
 
@@ -161,14 +162,6 @@ def percent_covered(coverage: dict[str, Any], ctx: Context) -> float:
 
 def scoped_hits(coverage: dict[str, Any], ctx: Context) -> list[Any]:
     return [hits for file, data in coverage["files"].items() if ctx.in_scope(file) for hits in file_hits(file, data, ctx)]
-
-
-def relative_path(file: str, ctx: Context) -> str:
-    path = Path(file)
-    try:
-        return str(path.resolve().relative_to(ctx.root.resolve()))
-    except ValueError:
-        return file
 
 
 def count_examples(output: str) -> str:

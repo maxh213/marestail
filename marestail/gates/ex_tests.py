@@ -4,13 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates.er_tests import coverage_findings, relative_path
+from marestail.elixir import COVERAGE as COVERAGE_SCRIPT
+from marestail.gates._coverage import EX_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import coverage_findings, relative_path
 from marestail.report import Result
 from marestail.shell import run, tail
 
 GATE = "ex.tests"
-COVERAGE_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "coverage.exs"
-COVERAGE_JSON = "ex-coverage.json"
 
 
 def run_gate(ctx: Context) -> Result:

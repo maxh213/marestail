@@ -1,16 +1,16 @@
 import json
 import time
 from itertools import takewhile
-from pathlib import Path
 from typing import Any
 
 from marestail import erlang
 from marestail.context import Context
+from marestail.gates._coverage import ER_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import coverage_findings
 from marestail.report import Result
 from marestail.shell import tail
 
 GATE = "er.tests"
-COVERAGE_JSON = "er-coverage.json"
 TESTS_PASSED = " tests passed"
 EBIN = "er-ebin"
 TEST_EBIN = "er-test-ebin"
@@ -50,30 +50,6 @@ def coverage_result(ctx: Context, coverage: dict[str, Any], output: str, started
     scope = " on changed files" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
     return Result(GATE, not findings, summary, findings, time.time() - started)
-
-
-def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
-    findings: list[str] = []
-    for file_str, data in sorted(coverage["files"].items()):
-        relative = relative_path(file_str, ctx)
-        if ctx.in_scope(relative):
-            findings.extend(f"{relative}:{line} not covered" for line in gated_missing(data, ctx.gated_lines(relative)))
-    return findings
-
-
-def gated_missing(data: dict[str, Any], gated: set[int] | None) -> list[int]:
-    missing: list[int] = data.get("missing_lines", [])
-    if gated is None:
-        return missing
-    return [line for line in missing if line in gated]
-
-
-def relative_path(file_str: str, ctx: Context) -> str:
-    path = Path(file_str)
-    try:
-        return str(path.resolve().relative_to(ctx.root.resolve()))
-    except ValueError:
-        return file_str
 
 
 def count_tests(output: str) -> str:

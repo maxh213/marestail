@@ -4,7 +4,8 @@ import time
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates.ts_tests import in_scope_findings, relative
+from marestail.gates._coverage import in_scope_findings
+from marestail.javascript import rel as relative
 from marestail.report import Result
 from marestail.shell import run
 

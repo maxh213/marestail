@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from marestail import javascript
 from marestail.gates import ts_crap
 from tests.conftest import make_context
 
@@ -43,7 +44,7 @@ def test_missing_coverage_fails(tmp_path: Path) -> None:
 
 def test_nothing_in_scope_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     setup(tmp_path, {str(tmp_path / "web" / "a.ts"): file_coverage({}, {})})
-    fake = fake_run(ts_crap)
+    fake = fake_run(javascript)
 
     result = ts_crap.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/b.ts"}))
 
@@ -53,7 +54,7 @@ def test_nothing_in_scope_is_skipped(tmp_path: Path, fake_run: Any) -> None:
 
 def test_script_failure_shows_the_last_lines(tmp_path: Path, fake_run: Any) -> None:
     setup(tmp_path, {str(tmp_path / "web" / "a.ts"): file_coverage({}, {})})
-    fake_run(ts_crap, [(1, "\n".join(str(n) for n in range(15)))])
+    fake_run(javascript, [(1, "\n".join(str(n) for n in range(15)))])
 
     result = ts_crap.run_gate(make_context(tmp_path, TS))
 
@@ -69,13 +70,13 @@ def test_scores_functions_and_sorts_offenders(tmp_path: Path, fake_run: Any) -> 
         function(source, "full", 20, 25, 4),
         function(source, "empty", 30, 35, 1),
     ]
-    fake = fake_run(ts_crap, [(0, json.dumps(functions))])
+    fake = fake_run(javascript, [(0, json.dumps(functions))])
 
     result = ts_crap.run_gate(make_context(tmp_path, TS))
 
     assert (result.ok, result.summary) == (False, "4 functions, 2 above CRAP 4")
     assert result.findings == ["web/a.ts:10 none crap=12.0 (cc=3, coverage=0%)", "web/a.ts:1 half crap=8.1 (cc=5, coverage=50%)"]
-    assert fake.calls == [["node", str(ts_crap.SCRIPT), str(tmp_path / "web"), source]]
+    assert fake.calls == [["node", str(javascript.COMPLEXITY), str(tmp_path / "web"), source]]
     assert fake.options == [{"cwd": tmp_path / "web"}]
 
 
@@ -83,7 +84,7 @@ def test_limit_is_configurable_and_scope_limits_functions(tmp_path: Path, fake_r
     source = str(tmp_path / "web" / "a.ts")
     setup(tmp_path, {source: file_coverage({1: 0, 10: 0}, {})})
     functions = [function(source, "touched", 1, 5, 2), function(source, "untouched", 10, 15, 9)]
-    fake_run(ts_crap, [(0, json.dumps(functions))])
+    fake_run(javascript, [(0, json.dumps(functions))])
     ctx = make_context(
         tmp_path, {"ts": {"root": "web", "crap_max": 5.5}}, scope_changed=True, changed={"web/a.ts"}, changed_lines_map={"web/a.ts": {5}}
     )
@@ -100,7 +101,7 @@ def test_limit_is_configurable_and_scope_limits_functions(tmp_path: Path, fake_r
 def test_passing_run(tmp_path: Path, fake_run: Any) -> None:
     source = str(tmp_path / "web" / "a.ts")
     setup(tmp_path, {source: file_coverage({1: 1}, {})})
-    fake_run(ts_crap, [(0, json.dumps([function(source, "f", 1, 2, 4)]))])
+    fake_run(javascript, [(0, json.dumps([function(source, "f", 1, 2, 4)]))])
 
     result = ts_crap.run_gate(make_context(tmp_path, TS))
 

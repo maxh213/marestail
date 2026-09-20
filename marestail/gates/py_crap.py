@@ -3,7 +3,9 @@ import time
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates.py_tests import COVERAGE_JSON, scoped_lines
+from marestail.gates._coverage import PY_COVERAGE as COVERAGE_JSON
+from marestail.gates._coverage import scoped_lines
+from marestail.gates._crap import above, describe
 from marestail.report import Result
 from marestail.shell import run
 
@@ -27,14 +29,6 @@ def run_gate(ctx: Context) -> Result:
     scope = " on changed functions" if ctx.scoped else ""
     summary = f"{len(functions)} functions, {len(offenders)} above CRAP {limit:g}{scope}"
     return Result(GATE, not offenders, summary, findings, time.time() - started)
-
-
-def above(functions: list[Block], limit: float) -> list[Block]:
-    return sorted((f for f in functions if f["crap"] > limit), key=crap_descending)
-
-
-def crap_descending(function: Block) -> float:
-    return -float(function["crap"])
 
 
 def radon_command(ctx: Context) -> list[str]:
@@ -83,7 +77,3 @@ def score(file: str, block: Block, covered: float) -> Block:
     complexity = block["complexity"]
     crap = complexity**2 * (1 - covered) ** 3 + complexity
     return {"file": file, "line": block["lineno"], "name": block["name"], "cc": complexity, "cov": covered, "crap": crap}
-
-
-def describe(f: Block) -> str:
-    return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['cc']}, coverage={f['cov']:.0%})"

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from marestail import depth, dotnet, erlang, java, ruby, rust
+from marestail import depth, dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
 from marestail.depth import Module
@@ -211,7 +211,7 @@ def ts_config(root: Path) -> Config:
 
 
 def test_ts_modules_without_files(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(depth)
+    fake = fake_run(javascript)
     write(tmp_path, {"web/src/a.test.ts": "", "web/src/a.js": ""})
     assert depth.ts_modules(ts_config(tmp_path)) == []
     assert fake.calls == []
@@ -220,24 +220,24 @@ def test_ts_modules_without_files(tmp_path: Path, fake_run: Callable[..., FakeRu
 def test_ts_modules(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     write(tmp_path, {"web/src/b.tsx": "", "web/src/a.ts": "", "web/src/tests/c.ts": "", "web/src/x.test.ts": "", "web/other/d.ts": ""})
     entry = {"file": str(tmp_path / "web/src/a.ts"), "exports": ["a"], "statements": 4, "passThroughs": [{"line": 2, "name": "f"}]}
-    fake = fake_run(depth, [(0, json.dumps([entry]))])
+    fake = fake_run(javascript, [(0, json.dumps([entry]))])
     modules = depth.ts_modules(ts_config(tmp_path))
     web = tmp_path / "web"
-    assert fake.calls == [["node", str(depth.TS_SCRIPT), str(web), str(web / "src/a.ts"), str(web / "src/b.tsx")]]
+    assert fake.calls == [["node", str(javascript.DEPTH), str(web), str(web / "src/a.ts"), str(web / "src/b.tsx")]]
     assert fake.options[0]["cwd"] == web
     assert modules == [Module("web/src/a.ts", ["a"], 4, ["web/src/a.ts:2 f only forwards its arguments"])]
 
 
 def test_ts_modules_custom_source(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     write(tmp_path, {"lib/a.ts": ""})
-    fake = fake_run(depth, [(0, "[]")])
+    fake = fake_run(javascript, [(0, "[]")])
     assert depth.ts_modules(Config(root=tmp_path, raw={"ts": {"source": "lib"}})) == []
     assert fake.calls[0][3:] == [str(tmp_path / "lib/a.ts")]
 
 
 def test_ts_modules_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     write(tmp_path, {"web/src/a.ts": ""})
-    fake_run(depth, [(1, "x" * 10 + "y" * 300)])
+    fake_run(javascript, [(1, "x" * 10 + "y" * 300)])
     config = ts_config(tmp_path)
     with pytest.raises(SystemExit) as raised:
         depth.ts_modules(config)
@@ -250,16 +250,16 @@ def test_elixir_modules(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> Non
         {"file": str(tmp_path / "app/lib/a.ex"), "public": ["f"], "statements": 3, "pass_throughs": ["raw"]},
         {"file": str(tmp_path / "app/lib/b.ex")},
     ]
-    fake = fake_run(depth, [(0, json.dumps(items))])
+    fake = fake_run(elixir, [(0, json.dumps(items))])
     config = Config(root=tmp_path, raw={"elixir": {"root": "app"}})
     assert depth.elixir_modules(config) == [Module("app/lib/a.ex", ["f"], 3, ["raw"]), Module("app/lib/b.ex", [], 0, [])]
     app = tmp_path / "app"
-    assert fake.calls == [["elixir", str(depth.EX_SCRIPT), str(app / "lib/a.ex"), str(app / "lib/b.ex")]]
+    assert fake.calls == [["elixir", str(elixir.DEPTH), str(app / "lib/a.ex"), str(app / "lib/b.ex")]]
     assert fake.options[0]["cwd"] == app
 
 
 def test_elixir_modules_empty_and_failing(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(depth, [(1, "boom")])
+    fake = fake_run(elixir, [(1, "boom")])
     config = Config(root=tmp_path, raw={"elixir": {}})
     assert depth.elixir_modules(config) == []
     assert fake.calls == []
