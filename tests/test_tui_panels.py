@@ -2,6 +2,7 @@ import curses
 from pathlib import Path
 from typing import Any
 
+from marestail.tui import panels
 from marestail.tui.model import Fleet, Process, RepoState, Step, Worker
 from marestail.tui.panels import (
     ConversationPanel,
@@ -220,3 +221,119 @@ def test_conversation_panel(tmp_path: Path, monkeypatch: Any) -> None:
         pass
     else:
         raise AssertionError("render")
+
+
+def test_panel_helpers(tmp_path: Path) -> None:
+    assert panels.skip() is None
+    assert panels.none_of() is None
+    assert panels.present(0) is True
+    assert panels.present(None) is False
+    assert panels.task_label(None) == "none"
+    assert panels.task_label("t") == "t"
+    assert panels.selected_border(True) is panels.HEAVY
+    assert panels.selected_border(False) is panels.ROUND
+    theme = mono_theme()
+    assert panels.selected_border_attr(theme, True) == theme.border_focus
+    assert panels.selected_border_attr(theme, False) == theme.border
+    assert panels.pick_selected([], 0) is None
+    live = make_repo(tmp_path)
+    assert panels.pick_row([live], 9) is live
+    assert panels.enter_action(0) == "handled"
+    assert panels.enter_action(1) == "open"
+    assert panels.quit_action(1) == "quit"
+    assert panels.same_root(tmp_path, live) is True
+    assert panels.add_gap(3) == 4
+    assert panels.in_strip(1, (1, step())) is False
+    assert panels.in_strip(4, (0, step())) is True
+    assert panels.plain_line("x") == ("x", False)
+    assert panels.wrap_flagged(10, "hi")[0] == ("hi", False)
+    assert panels.zero_index(None, None) == 0
+    assert panels.index_or_zero(None, live) == 0
+    assert panels.blank_marquee("abc", 2, 0) == ""
+    assert panels.just_text("abc", 2, 0) == "abc"
+    assert panels.scrolled_text("abcdef", 3, 0) == "abc"
+    assert panels.fit_or_scroll("ab", 5, 0) == "ab"
+    assert panels.pick_marquee(0) is panels.blank_marquee
+    assert panels.worker_tails(None) == []
+    assert panels.blank_tail(Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None), 1, state_of()) == ""
+    assert panels.skip_gate_row(FakeWin(), 4, 0, 10, live, state_of()) == 4
+    assert panels.is_target(live, (0, live)) is True
+    win: Any = FakeWin()
+    panels.paint_dead(win, 0, 0, 10, live, False, state_of())
+    panels.paint_alive(win, 1, 0, 20, make_repo(tmp_path, alive=True), False, state_of())
+    panels.paint_idle_selected(win, 2, 0, 20, make_repo(tmp_path, alive=True), True, state_of())
+    panels.paint_idle_plain(win, 3, 0, 20, make_repo(tmp_path, alive=True), False, state_of())
+    assert panels.gate_label_text(None) is None
+    assert panels.gate_label_text("g") == "in gate: g"
+    assert panels.runner_label_text("") is None
+    assert panels.runner_label_text("r") == "runner: r"
+    assert panels.in_gate_text("g").startswith("in gate")
+    assert panels.runner_text("r").startswith("runner")
+    assert panels.seconds_of(Process(1, 3, "m", "claude")).endswith("s")
+    assert panels.fmt_from_process(None) is None
+    assert panels.minutes_label(None) is None
+    assert panels.format_minutes(2.0) == "2m"
+    tiny = Rect(0, 0, 1, 1)
+    panels.tiny_box(win, tiny, ROUND, 0)
+    panels.paint_sides(win, 0, 4, "|", 0, 1)
+    assert panels.bed_fits(Rect(0, 0, 5, 10), (0, 10)) is False
+    assert panels.bed_fits(Rect(0, 0, 5, 10), (0, 1)) is True
+    assert panels.empty_repos(None) is True
+    assert panels.empty_repos(Fleet(repos=[], scanned_at=0)) is True
+    panel = ConversationPanel(live)
+    assert panels.live_heading(live).endswith("live")
+    worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None)
+    busy = make_repo(tmp_path, worker=worker)
+    assert "01-coder" in panels.worker_heading(busy)
+    panels.follow_bottom(panel, 4)
+    assert panel.scroll == 4
+    assert panels.back_key(panel, ord("q")) == "back"
+    assert panels.end_key(panel, 0) == "handled"
+    assert panel.follow is True
+    assert panels.apply_scroll(panel, None) is None
+    assert panels.scrolled(panel, ord("z")) is None
+    assert panels.section_lines_for(8, "p", "hi")[0][1] is True
+    panels.apply_clip(win, None, 0)
+    panels.write_clipped(win, (0, 0, "x"), 0)
+    panels.apply_repo(panel, None)
+    panel.rebuild_lines(12)
+    assert panel.built_for == 12
+    assert panels.keep_pos(1, 2, "ab") == (1, 2, "ab")
+    assert panels.shift_neg(1, -1, "ab") == (1, 0, "b")
+    panels.write_cell(win, 0, 0, "ok", 0)
+    panels.paint_box(win, Rect(0, 0, 3, 5), ROUND, 0)
+    assert panels.is_worker_row(live) is True
+    assert panels.placed([5, 5], 0, 10, 0) is True
+    busy_watch = state_of()
+    panels.paint_bed_frame(win, Rect(0, 0, 6, 20), live, False, busy_watch, 16)
+    panels.put_tail(win, 0, 0, 10, busy_watch, 0, "tail")
+    panels.paint_tails(win, 1, 0, 20, live, busy_watch)
+    assert panels.paint_gate_row(win, 2, 0, 10, make_repo(tmp_path, gate_activity="g"), busy_watch) == 3
+    assert panels.draw_gate_row(win, 3, 0, 10, live, busy_watch) == 3
+    worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None)
+    busy = make_repo(tmp_path, worker=worker)
+    panels.draw_busy_from_repo(win, 4, 0, 40, busy, False, busy_watch)
+    assert panels.marquee_summary(worker, 8, busy_watch)
+    panels.paint_busy_plain(win, 5, 0, 40, worker, busy_watch, "h ", "t")
+    panels.paint_busy_selected(win, 6, 0, 40, worker, busy_watch, "h ", "t")
+    panels.draw_busy_row(win, 7, 0, 40, worker, False, busy_watch)
+    panels.put_step(win, 8, 0, busy_watch, (0, step()))
+    assert panels.wrapped_body("hello", 8)
+    assert panels.flatten_sections([("n", "b")], 8)
+    fleet_panel = FleetPanel()
+    panels.empty_fleet(fleet_panel, win, Rect(0, 0, 5, 20), busy_watch)
+    assert panels.visible_beds(Rect(0, 0, 20, 20), [5, 5], 0)
+    panels.paint_one_bed(win, Rect(0, 0, 20, 40), [live], [5], live, busy_watch, 0, 0)
+    panels.paint_beds(win, Rect(0, 0, 20, 40), [live], [5], 0, live, busy_watch)
+    watch = state_of(Fleet(repos=[live], scanned_at=0))
+    assert panels.move_up(watch, 1, curses.KEY_UP) == "handled"
+    assert panels.move_down(watch, 2, curses.KEY_DOWN) == "handled"
+    assert panels.no_move(watch, 0, ord("x")) is None
+    assert panels.run_scroll(panel, panels.scroll_up) == "handled"
+    panels.scroll_down(panel)
+    panels.scroll_page_up(panel)
+    panels.scroll_page_down(panel)
+    panels.scroll_home(panel)
+    panel.take_repo(live)
+    panel.ensure_lines(10)
+    assert panel.built_for == 10

@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from marestail.tui import app
 from marestail.tui.model import Fleet, RepoState
-from marestail.tui.panels import ConversationPanel, FleetPanel, WatchState
+from marestail.tui.panels import ConversationPanel, FleetPanel, Rect, WatchState
 from marestail.tui.theme import mono_theme
 
 
@@ -190,3 +190,81 @@ def test_filtered_fleet(tmp_path: Path) -> None:
     fleet = Fleet(repos=[repo(tmp_path, True), repo(tmp_path / "x", False)], scanned_at=0)
     assert len(app.filtered_fleet(fleet, True).repos) == 2
     assert len(app.filtered_fleet(fleet, False).repos) == 1
+
+
+def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
+    assert app.skip() is None
+    assert app.is_code(None) is False
+    assert app.is_code(0) is True
+    assert isinstance(app.instantiate(FleetPanel), FleetPanel)
+    assert app.idle_handler(-1) is app.WatchSession.handle_idle
+    assert app.idle_handler(ord("x")) is None
+    assert app.detail_handler(None) is None
+    assert app.detail_handler(ConversationPanel(repo(tmp_path))) is app.WatchSession.handle_detail
+    assert app.key_action(None, 1, WatchState(fleet=None, theme=mono_theme(), tick=0)) is None
+    assert app.repo_alive(repo(tmp_path, True)) is True
+    fleet = Fleet(repos=[repo(tmp_path, True), repo(tmp_path / "d", False)], scanned_at=0)
+    app.keep_alive_repos(fleet)
+    assert len(fleet.repos) == 1
+    app.keep_all_repos(fleet)
+    assert app.legend_row(("⚘", "run")) == " ⚘  run"
+    assert "select" in app.fleet_hints(None)
+    detail = ConversationPanel(repo(tmp_path))
+    assert app.detail_hints(detail).startswith("j/k")
+    detail.follow = True
+    assert "⇊" in app.detail_hints(detail)
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    app.set_fleet(watch, fleet)
+    assert watch.fleet is fleet
+    app.apply_fleet(watch, (None, "err"))
+    assert watch.error == "err"
+    monkeypatch.setattr(app, "collect_fleet", lambda roots: (_ for _ in ()).throw(RuntimeError("x")))
+    empty, error = app.collected_fleet([tmp_path], True)
+    assert empty is None
+    assert error is not None and error.startswith("collect failed:")
+    box = app.Caught()
+    with box:
+        pass
+    assert box.error is None
+    with box:
+        raise ValueError("boom")
+    assert isinstance(box.error, ValueError)
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
+    app.set_detail(session, repo(tmp_path))
+    assert session.detail is not None
+    session.close_detail()
+    assert session.detail is None
+    app.open_repo(session, None)
+    assert session.detail is None
+    assert session.quit_watch() == 0
+    session.bump_tick()
+    session.toggle_legend()
+    session.cycle_panel(ord("\t"))
+    session.request_refresh(ord("r"))
+    assert session.collected == 0.0
+    assert app.detail_backs(None, ord("q"), session.state) is False
+    monkeypatch.setattr(app, "draw_legend", lambda *args: None)
+    scr = as_window(FakeScr(10, 10))
+    app.draw_too_small(scr, FleetPanel(), None, session.state, False, 10, 10)
+    app.put_error(scr, 10, 10, WatchState(fleet=None, theme=mono_theme(), tick=0, error="e"))
+    session.legend = True
+    app.legend_put(scr, Rect(0, 0, 5, 20), session.state, 0, " row")
+    assert "select" in app.footer_hints(None)
+    assert "j/k" in app.footer_hints(detail)
+    session.detail = ConversationPanel(repo(tmp_path))
+    session.sync_detail()
+    session.open_from_panel()
+    assert session.detail is not None
+    session.handle_nav(ord("r"))
+    session.refresh_now(0.0)
+    app.draw_body(scr, FleetPanel(), None, session.state, False, 24, 80)
+    app.draw_frame(scr, FleetPanel(), None, session.state, False, 24, 80)
+    session.detail = None
+    monkeypatch.setattr("marestail.tui.app.curses.doupdate", lambda: None)
+    scr_keys = FakeScr()
+    scr_keys.keys = [ord("q")]
+    monkeypatch.setattr(session.panels[0], "on_key", reply("quit"))
+    assert app.run_session(session, as_window(scr_keys)) == 0

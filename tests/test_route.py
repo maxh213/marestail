@@ -85,8 +85,9 @@ def test_require_passes_when_installed(dandelion: str) -> None:
     route.require()
 
 
-def test_command_without_dandelion(missing: str, capsys: pytest.CaptureFixture[str]) -> None:
-    assert route.command(["--high"]) == 127
+@pytest.mark.parametrize("args", [["--high"], ["--help"]])
+def test_command_without_dandelion(missing: str, capsys: pytest.CaptureFixture[str], args: list[str]) -> None:
+    assert route.command(args) == 127
     assert capsys.readouterr().err == route.install_hint()
 
 

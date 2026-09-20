@@ -164,6 +164,7 @@ def test_orchestration_functions_are_split_into_small_helpers() -> None:
 def test_this_repo_graph_starts_with_python_modules() -> None:
     text = graph.python_graph(config_module.load(ROOT))
     assert text.splitlines()[0] == "## Python modules"
+    assert "package_name" in text
 
 
 def test_help_lists_every_subcommand() -> None:

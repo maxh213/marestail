@@ -98,3 +98,28 @@ def test_default_bg(monkeypatch: Any) -> None:
     assert theme.default_bg() == -1
     FakeCurses.default_ok = False
     assert theme.default_bg() == FakeCurses.COLOR_BLACK
+
+
+def test_theme_dispatch_helpers(monkeypatch: Any) -> None:
+    monkeypatch.setattr(theme, "curses", FakeCurses)
+    mono = theme.mono_theme()
+    assert theme.running_glyph("PASS") == theme.GLYPH_RUNNING
+    assert theme.verdict_glyph("BOUNCE") == theme.GLYPH_BOUNCED
+    assert theme.verdict_glyph("PASS") == theme.GLYPH_PASSED
+    assert theme.verdict_glyph(None) == theme.GLYPH_DONE
+    assert theme.running_attr(mono, None) == mono.worker
+    assert theme.verdict_attr(mono, "BOUNCE") == mono.bounced
+    assert theme.verdict_attr(mono, "PASS") == mono.passed
+    assert theme.verdict_attr(mono, None) == mono.done
+    assert theme.blank_vine(8) == ""
+    assert theme.full_vine(5) == theme.vine(5)
+    assert theme.rich_palette() == theme.RICH_PALETTE
+    assert theme.basic_palette()[0] == FakeCurses.COLOR_YELLOW
+    FakeCurses.default_ok = True
+    assert theme.try_color().colors is True
+
+    def boom() -> theme.Theme:
+        raise curses.error("no")
+
+    monkeypatch.setattr(theme, "color_theme", boom)
+    assert theme.try_color().colors is False
