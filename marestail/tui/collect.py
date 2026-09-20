@@ -1,14 +1,19 @@
 import ast
+import contextlib
 import json
 import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
+from functools import partial
+from itertools import chain, starmap
 from pathlib import Path
+from typing import Any, TypeGuard, cast
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
-BACKENDS = ("claude", "grok", "agy", "cursor-agent", "kilo", "kimi")
+BACKENDS = frozenset({"claude", "grok", "agy", "cursor-agent", "kilo", "kimi"})
 STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")
@@ -19,41 +24,84 @@ TAIL_STALE_S = 900
 TAIL_LIMIT = 3
 TAIL_CHARS = 90
 WORK = ".marestail"
+NAMED_TOOLS = ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vitest", "jest", "tsc", "eslint")
+FIELD_KEYS = ("file_path", "command", "pattern")
+MODEL_FLAGS = frozenset({"--model", "-m"})
 
 ProcRow = tuple[int, int, int, list[str]]
+
+
+def skip(*_args: object, **_kwargs: object) -> Any:
+    return None
 
 
 def work_path(root: Path, *parts: str) -> Path:
     return root.joinpath(WORK, *parts)
 
 
-def has_work(root: Path) -> bool:
-    return work_path(root).is_dir()
+def none_of(*_args: object, **_kwargs: object) -> Any:
+    return None
 
 
-def discover(roots: list[Path]) -> list[Path]:
-    found: list[Path] = []
-    for root in roots:
-        found.extend(discover_root(root))
-    return found
+def present[T](value: T | None) -> TypeGuard[T]:
+    return value is not None
+
+
+def surely[T](value: T | None) -> T:
+    return cast(T, value)
+
+
+def empty_list(*_args: object) -> list[Any]:
+    return []
+
+
+def blank(*_args: object) -> str:
+    return ""
+
+
+def false_of(*_args: object) -> bool:
+    return False
+
+
+def ident(value: object) -> Any:
+    return value
+
+
+def entries(folder: Path) -> list[Path]:
+    with contextlib.suppress(OSError):
+        return list(folder.iterdir())
+    return []
+
+
+def has_marestail(child: Path) -> bool:
+    return work_path(child).is_dir()
+
+
+def self_repo(root: Path) -> list[Path]:
+    return {True: [root]}.get(has_marestail(root), [])
 
 
 def discover_root(root: Path) -> list[Path]:
-    found = [root] if has_work(root) else []
-    return found + [child for child in list_dirs(root) if has_work(child)]
+    return [*self_repo(root), *filter(has_marestail, list_dirs(root))]
+
+
+def discover(roots: list[Path]) -> list[Path]:
+    return list(chain.from_iterable(map(discover_root, roots)))
 
 
 def list_dirs(root: Path) -> list[Path]:
-    try:
-        return sorted(path for path in root.iterdir() if path.is_dir())
-    except OSError:
-        return []
+    return sorted(filter(Path.is_dir, entries(root)))
 
 
 def collect_repo(root: Path) -> RepoState:
     state = repo_shell(root)
     attach_live(state, real_path(root), proc_rows())
     return state
+
+
+def repo_steps(log_path: Path | None) -> list[Step]:
+    chosen = (empty_list, parse_log)[log_path is not None]
+    return chosen(surely(log_path))
 
 
 def repo_shell(root: Path) -> RepoState:
@@ -65,7 +113,7 @@ def repo_shell(root: Path) -> RepoState:
         head=git_line(root, ["log", "-1", "--format=%h%x20%s"]),
         task=task_name(root),
         log_path=log_path,
-        steps=parse_log(log_path) if log_path is not None else [],
+        steps=repo_steps(log_path),
     )
 
 
@@ -73,65 +121,111 @@ def attach_live(state: RepoState, real: Path, rows: list[ProcRow]) -> None:
     pipeline = pipeline_pids(rows, real)
     state.alive = bool(pipeline)
     bind_running(state, rows, real)
-    if state.alive:
-        attach_activity(state, rows, pipeline, real)
+    chosen = (skip, attach_activity)[state.alive]
+    chosen(state, rows, pipeline, real)
+
+
+def is_pipeline_row(real: Path, row: ProcRow) -> bool:
+    pid, _, _, tokens = row
+    return False not in (is_pipeline(tokens), under_root(cwd_of(pid), real))
+
+
+def row_pid(row: ProcRow) -> int:
+    return row[0]
 
 
 def pipeline_pids(rows: list[ProcRow], real: Path) -> list[int]:
-    return [pid for pid, _, _, tokens in rows if is_pipeline(tokens) and under_root(cwd_of(pid), real)]
+    return list(map(row_pid, filter(partial(is_pipeline_row, real), rows)))
+
+
+def set_worker(state: RepoState, running: Step, rows: list[ProcRow], real: Path) -> None:
+    state.worker = build_worker(state, running, rows, real)
 
 
 def bind_running(state: RepoState, rows: list[ProcRow], real: Path) -> None:
     running = running_step(state.steps)
-    if running is not None:
-        state.worker = build_worker(state, running, rows, real)
+    chosen = (skip, set_worker)[running is not None]
+    chosen(state, surely(running), rows, real)
+
+
+def last_if_running(steps: list[Step]) -> Step | None:
+    return {True: steps[-1]}.get(steps[-1].status == "running")
 
 
 def running_step(steps: list[Step]) -> Step | None:
-    return steps[-1] if steps and steps[-1].status == "running" else None
+    chosen = (none_of, last_if_running)[bool(steps)]
+    return chosen(steps)
+
+
+def copy_tails(state: RepoState) -> None:
+    surely(state.worker).tail_lines = state.tail_lines
+
+
+def set_runner(state: RepoState) -> None:
+    state.runner_activity = latest_runner_line(state.log_path)
+
+
+def maybe_runner(state: RepoState) -> None:
+    chosen = (skip, set_runner)[state.gate_activity is None]
+    chosen(state)
+
+
+def bind_tails_or_runner(state: RepoState) -> None:
+    chosen = (maybe_runner, copy_tails)[state.worker is not None]
+    chosen(state)
 
 
 def attach_activity(state: RepoState, rows: list[ProcRow], pipeline: list[int], real: Path) -> None:
     state.gate_activity = gate_activity(rows, pipeline)
     state.tail_lines = transcript_tail(real)
-    if state.worker is not None:
-        state.worker.tail_lines = state.tail_lines
-    elif state.gate_activity is None:
-        state.runner_activity = latest_runner_line(state.log_path)
+    bind_tails_or_runner(state)
+
+
+def last_item(lines: list[str]) -> str:
+    return lines[-1]
+
+
+def last_or_none(lines: list[str]) -> str | None:
+    chosen = (none_of, last_item)[bool(lines)]
+    return chosen(lines)
 
 
 def latest_runner_line(log_path: Path | None) -> str | None:
-    lines = nonempty_lines(log_path)
-    return lines[-1] if lines else None
+    return last_or_none(nonempty_lines(log_path))
 
 
 def nonempty_lines(log_path: Path | None) -> list[str]:
-    return [] if log_path is None else stripped_lines(log_path)
+    chosen = (empty_list, stripped_lines)[log_path is not None]
+    return chosen(surely(log_path))
+
+
+def read_ignore(log_path: Path) -> list[str]:
+    with contextlib.suppress(OSError):
+        return log_path.read_text(errors="ignore").splitlines()
+    return []
 
 
 def stripped_lines(log_path: Path) -> list[str]:
-    try:
-        return [line.strip() for line in log_path.read_text(errors="ignore").splitlines() if line.strip()]
-    except OSError:
-        return []
+    return list(filter(None, map(str.strip, read_ignore(log_path))))
 
 
 def collect_fleet(roots: list[Path]) -> Fleet:
-    repos = [collect_repo(root) for root in discover(roots)]
-    return Fleet(repos=repos, scanned_at=time.time())
+    return Fleet(repos=list(map(collect_repo, discover(roots))), scanned_at=time.time())
+
+
+def add_live(sections: list[tuple[str, str]], live: list[str]) -> None:
+    sections.append(("live", "\n".join(live)))
 
 
 def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
     sections = worker_sections(repo.worker)
     live = transcript_conversation(real_path(repo.root))
-    if live:
-        sections.append(("live", "\n".join(live)))
+    chosen = (skip, add_live)[bool(live)]
+    chosen(sections, live)
     return sections
 
 
-def worker_sections(worker: Worker | None) -> list[tuple[str, str]]:
-    if worker is None:
-        return []
+def worker_texts(worker: Worker) -> list[tuple[str, str]]:
     return named_texts(
         (
             ("prompt", read_text(worker.prompt_path)),
@@ -141,72 +235,97 @@ def worker_sections(worker: Worker | None) -> list[tuple[str, str]]:
     )
 
 
+def worker_sections(worker: Worker | None) -> list[tuple[str, str]]:
+    chosen = (empty_list, worker_texts)[worker is not None]
+    return chosen(surely(worker))
+
+
+def has_text(pair: tuple[str, str | None]) -> TypeGuard[tuple[str, str]]:
+    return pair[1] is not None
+
+
 def named_texts(pairs: tuple[tuple[str, str | None], ...]) -> list[tuple[str, str]]:
-    return [(name, text) for name, text in pairs if text is not None]
+    return list(filter(has_text, pairs))
+
+
+def newest_name(candidates: list[Path]) -> str:
+    return max(candidates, key=dir_mtime).name
 
 
 def task_name(root: Path) -> str | None:
     candidates = list_task_dirs(work_path(root, "handoffs")) + list_task_dirs(work_path(root, "runs"))
-    return max(candidates, key=dir_mtime).name if candidates else None
+    chosen = (none_of, newest_name)[bool(candidates)]
+    return chosen(candidates)
 
 
 def list_task_dirs(parent: Path) -> list[Path]:
-    try:
-        return [path for path in parent.iterdir() if path.is_dir()]
-    except OSError:
-        return []
+    return list(filter(Path.is_dir, entries(parent)))
 
 
 def dir_mtime(path: Path) -> float:
-    try:
+    with contextlib.suppress(OSError):
         return path.stat().st_mtime
-    except OSError:
-        return 0.0
+    return 0.0
+
+
+def log_name(path: Path) -> str:
+    return path.name
+
+
+def newest_log(logs: list[Path]) -> Path:
+    return max(logs, key=log_name)
 
 
 def latest_log(root: Path) -> Path | None:
     logs = overnight_logs(work_path(root, "runs"))
-    return max(logs, key=lambda path: path.name) if logs else None
+    chosen = (none_of, newest_log)[bool(logs)]
+    return chosen(logs)
 
 
 def overnight_logs(runs: Path) -> list[Path]:
-    try:
-        return [path for path in runs.iterdir() if is_overnight_log(path)]
-    except OSError:
-        return []
+    return list(filter(is_overnight_log, entries(runs)))
 
 
 def is_overnight_log(path: Path) -> bool:
-    return path.is_file() and path.name.startswith("overnight-") and path.suffix == ".log"
+    return False not in (path.is_file(), path.name.startswith("overnight-"), path.suffix == ".log")
 
 
 def parse_log(path: Path) -> list[Step]:
     lines = read_lines(path)
     steps: list[Step] = []
-    for line in lines:
-        apply_log_line(steps, line)
+    list(map(partial(apply_log_line, steps), lines))
     stamp_running(steps, lines)
     return steps
 
 
 def read_lines(path: Path) -> list[str]:
-    try:
+    with contextlib.suppress(OSError):
         return path.read_text(errors="replace").splitlines()
-    except OSError:
-        return []
+    return []
+
+
+def try_finish(steps: list[Step], line: str) -> None:
+    chosen = (accept_verdict, skip)[accept_finish(steps, line)]
+    chosen(steps, line)
 
 
 def apply_log_line(steps: list[Step], line: str) -> None:
-    if accept_start(steps, line) or accept_finish(steps, line):
-        return
-    accept_verdict(steps, line)
+    chosen = (try_finish, skip)[accept_start(steps, line)]
+    chosen(steps, line)
+
+
+def append_step(steps: list[Step], matched: re.Match[str]) -> None:
+    steps.append(new_step(matched))
+
+
+def stored_start(steps: list[Step], matched: re.Match[str] | None) -> bool:
+    chosen = (skip, append_step)[matched is not None]
+    chosen(steps, surely(matched))
+    return matched is not None
 
 
 def accept_start(steps: list[Step], line: str) -> bool:
-    matched = STEP_RE.match(line)
-    if matched:
-        steps.append(new_step(matched))
-    return matched is not None
+    return stored_start(steps, STEP_RE.match(line))
 
 
 def new_step(matched: re.Match[str]) -> Step:
@@ -221,50 +340,95 @@ def new_step(matched: re.Match[str]) -> Step:
     )
 
 
-def accept_finish(steps: list[Step], line: str) -> bool:
-    matched = FINISH_RE.match(line)
-    if matched:
-        finish_step(steps, matched)
+def stored_finish(steps: list[Step], matched: re.Match[str] | None) -> bool:
+    chosen = (skip, finish_step)[matched is not None]
+    chosen(steps, surely(matched))
     return matched is not None
 
 
+def accept_finish(steps: list[Step], line: str) -> bool:
+    return stored_finish(steps, FINISH_RE.match(line))
+
+
+def set_verdict(steps: list[Step], matched: re.Match[str]) -> None:
+    steps[-1].verdict = matched.group(1)
+
+
+def apply_verdict(steps: list[Step], matched: re.Match[str] | None) -> None:
+    chosen = (skip, set_verdict)[False not in (matched is not None, bool(steps))]
+    chosen(steps, surely(matched))
+
+
 def accept_verdict(steps: list[Step], line: str) -> None:
-    matched = VERDICT_RE.match(line)
-    if matched and steps:
-        steps[-1].verdict = matched.group(1)
+    apply_verdict(steps, VERDICT_RE.match(line))
+
+
+def is_running_last(steps: list[Step]) -> bool:
+    return steps[-1].status == "running"
+
+
+def last_running(steps: list[Step]) -> bool:
+    chosen = (false_of, is_running_last)[bool(steps)]
+    return chosen(steps)
+
+
+def mark_running(steps: list[Step], lines: list[str]) -> None:
+    steps[-1].summary = collapse(last_text(lines))
 
 
 def stamp_running(steps: list[Step], lines: list[str]) -> None:
-    if steps and steps[-1].status == "running":
-        steps[-1].summary = collapse(last_text(lines))
+    chosen = (skip, mark_running)[last_running(steps)]
+    chosen(steps, lines)
 
 
 def last_text(lines: list[str]) -> str:
-    return next((line for line in reversed(lines) if line.strip()), "")
+    return next(filter(str.strip, reversed(lines)), "")
 
 
-def finish_step(steps: list[Step], matched: re.Match[str]) -> None:
-    step = running_named(steps, matched.group(1)) or running_step(steps)
-    if step is None:
-        return
+def chosen_step(steps: list[Step], matched: re.Match[str]) -> Step | None:
+    return next(filter(present, (running_named(steps, matched.group(1)), running_step(steps))), None)
+
+
+def complete_step(step: Step, matched: re.Match[str]) -> None:
     step.status = "done"
     step.minutes = float(matched.group(2))
     step.summary = summary_of(matched.group(3))
 
 
+def complete_if_found(step: Step | None, matched: re.Match[str]) -> None:
+    chosen = (skip, complete_step)[step is not None]
+    chosen(surely(step), matched)
+
+
+def finish_step(steps: list[Step], matched: re.Match[str]) -> None:
+    complete_if_found(chosen_step(steps, matched), matched)
+
+
+def running_label(label: str, step: Step) -> bool:
+    return False not in (step.label == label, step.status == "running")
+
+
 def running_named(steps: list[Step], label: str) -> Step | None:
-    return next((step for step in reversed(steps) if step.label == label and step.status == "running"), None)
+    return next(filter(partial(running_label, label), reversed(steps)), None)
+
+
+def collapse_rest(rest: str, _matched: re.Match[str] | None) -> str:
+    return collapse(rest)
+
+
+def eval_quote(_rest: str, matched: re.Match[str]) -> str:
+    with contextlib.suppress(ValueError, SyntaxError):
+        return collapse(str(ast.literal_eval(matched.group(1))))
+    return collapse(matched.group(1)[1:-1])
+
+
+def quoted_or_plain(rest: str, matched: re.Match[str] | None) -> str:
+    chosen = (collapse_rest, eval_quote)[matched is not None]
+    return chosen(rest, surely(matched))
 
 
 def summary_of(rest: str) -> str:
-    matched = QUOTED_RE.search(rest)
-    if matched is None:
-        return collapse(rest)
-    try:
-        value = ast.literal_eval(matched.group(1))
-    except (ValueError, SyntaxError):
-        return collapse(matched.group(1)[1:-1])
-    return collapse(str(value))
+    return quoted_or_plain(rest, QUOTED_RE.search(rest))
 
 
 def collapse(text: str) -> str:
@@ -275,226 +439,401 @@ def transcript_tail(root: Path) -> list[str]:
     return transcript_conversation(root, TAIL_LIMIT, TAIL_BYTES)
 
 
+def empty_at(_path: Path | None, _max_lines: int, _window: int) -> list[str]:
+    return []
+
+
+def formatted_if(path: Path | None, max_lines: int, window: int) -> list[str]:
+    chosen = (empty_at, formatted_tail)[path is not None]
+    return chosen(surely(path), max_lines, window)
+
+
 def transcript_conversation(root: Path, max_lines: int = 200, window: int = CONV_BYTES) -> list[str]:
-    path = live_transcript(root)
-    return [] if path is None else formatted_tail(path, max_lines, window)
+    return formatted_if(live_transcript(root), max_lines, window)
 
 
 def formatted_tail(path: Path, max_lines: int, window: int) -> list[str]:
-    entries = [entry for line in transcript_lines(path, window) for entry in [format_entry(line)] if entry]
-    return entries[-max_lines:]
+    return list(filter(None, map(format_entry, transcript_lines(path, window))))[-max_lines:]
+
+
+def expand_var(value: str) -> Path:
+    return Path(value).expanduser()
+
+
+def expanded_env(name: str) -> Path | None:
+    chosen = (none_of, expand_var)[bool(os.environ.get(name))]
+    return chosen(os.environ.get(name, ""))
+
+
+def work_home() -> Path:
+    return Path(next(filter(None, (os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR"), "~/.claude-work")))).expanduser()
 
 
 def claude_homes() -> list[Path]:
-    work = os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR") or "~/.claude-work"
-    homes = [Path.home() / ".claude", Path(work).expanduser()]
-    configured = os.environ.get("CLAUDE_CONFIG_DIR")
-    if configured:
-        homes.append(Path(configured).expanduser())
-    return homes
+    homes: tuple[Path | None, ...] = (Path.home() / ".claude", work_home(), expanded_env("CLAUDE_CONFIG_DIR"))
+    return cast(list[Path], list(filter(present, homes)))
+
+
+def project_jsonl(root: Path, home: Path) -> list[Path]:
+    return jsonl_logs(home / "projects" / str(root).replace("/", "-"))
 
 
 def live_transcript(root: Path) -> Path | None:
-    logs = [path for home in claude_homes() for path in jsonl_logs(home / "projects" / str(root).replace("/", "-"))]
-    return fresh_log(logs)
+    return fresh_log(list(chain.from_iterable(map(partial(project_jsonl, root), claude_homes()))))
 
 
 def jsonl_logs(folder: Path) -> list[Path]:
-    try:
-        return [path for path in folder.iterdir() if is_jsonl(path)]
-    except OSError:
-        return []
+    return list(filter(is_jsonl, entries(folder)))
 
 
 def is_jsonl(path: Path) -> bool:
-    return path.is_file() and path.suffix == ".jsonl"
+    return False not in (path.is_file(), path.suffix == ".jsonl")
+
+
+def newest_fresh(logs: list[Path]) -> Path | None:
+    newest = max(logs, key=dir_mtime)
+    return (newest, None)[time.time() - dir_mtime(newest) > TAIL_STALE_S]
 
 
 def fresh_log(logs: list[Path]) -> Path | None:
-    if not logs:
-        return None
-    newest = max(logs, key=dir_mtime)
-    return None if time.time() - dir_mtime(newest) > TAIL_STALE_S else newest
+    chosen = (none_of, newest_fresh)[bool(logs)]
+    return chosen(logs)
+
+
+def load_tail(path: Path, window: int) -> tuple[int, bytes]:
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        handle.seek(max(0, size - window))
+        return size, handle.read()
+
+
+def read_tail(path: Path, window: int) -> tuple[int, bytes | None]:
+    with contextlib.suppress(OSError):
+        return load_tail(path, window)
+    return 0, None
+
+
+def empty_lines(_size: int, _raw: bytes | None, _window: int) -> list[str]:
+    return []
+
+
+def split_tail(size: int, raw: bytes, window: int) -> list[str]:
+    lines = raw.decode(errors="replace").splitlines()
+    return (lines, lines[1:])[size > window]
+
+
+def decode_tail(pair: tuple[int, bytes | None], window: int) -> list[str]:
+    size, raw = pair
+    chosen = (empty_lines, split_tail)[raw is not None]
+    return chosen(size, surely(raw), window)
 
 
 def transcript_lines(path: Path, window: int = TAIL_BYTES) -> list[str]:
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as handle:
-            handle.seek(max(0, size - window))
-            raw = handle.read()
-    except OSError:
-        return []
-    lines = raw.decode(errors="replace").splitlines()
-    return lines[1:] if size > window else lines
+    return decode_tail(read_tail(path, window), window)
 
 
-def format_entry(line: str) -> str | None:
-    data = parsed_json(line)
-    if not isinstance(data, dict) or data.get("type") != "assistant":
-        return None
+def assistant_dict(data: object) -> bool:
+    return False not in (isinstance(data, dict), getattr(data, "get", none_of)("type") == "assistant")
+
+
+def first_from(data: dict[str, object]) -> str | None:
     return first_block(message_content(data.get("message")))
 
 
+def assistant_block(data: object) -> str | None:
+    chosen = (none_of, first_from)[assistant_dict(data)]
+    return chosen(cast(dict[str, object], data))
+
+
+def format_entry(line: str) -> str | None:
+    return assistant_block(parsed_json(line))
+
+
 def parsed_json(line: str) -> object:
-    try:
+    with contextlib.suppress(json.JSONDecodeError):
         return json.loads(line)
-    except json.JSONDecodeError:
-        return None
-
-
-def message_content(message: object) -> list[object]:
-    if not isinstance(message, dict):
-        return []
-    content = message.get("content")
-    return content if isinstance(content, list) else []
-
-
-def first_block(content: list[object]) -> str | None:
-    return next((text for text in rendered_blocks(content) if text), None)
-
-
-def rendered_blocks(content: list[object]) -> list[str | None]:
-    return [render_block(block) for block in content if isinstance(block, dict)]
-
-
-def render_block(block: dict[str, object]) -> str | None:
-    kind = block.get("type")
-    if kind == "thinking":
-        return thinking_line(block)
-    if kind == "text":
-        return text_line(block)
-    if kind == "tool_use":
-        return tool_line(block)
     return None
 
 
+def dict_content(message: dict[str, object]) -> list[object]:
+    return list_or_empty(message.get("content"))
+
+
+def list_or_empty(content: object) -> list[object]:
+    chosen = (empty_list, ident)[isinstance(content, list)]
+    return cast(list[object], chosen(content))
+
+
+def message_content(message: object) -> list[object]:
+    chosen = (empty_list, dict_content)[isinstance(message, dict)]
+    return chosen(cast(dict[str, object], message))
+
+
+def first_block(content: list[object]) -> str | None:
+    return next(filter(None, rendered_blocks(content)), None)
+
+
+def is_dict(block: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(block, dict)
+
+
+def rendered_blocks(content: list[object]) -> list[str | None]:
+    return list(map(render_block, filter(is_dict, content)))
+
+
 def thinking_line(block: dict[str, object]) -> str | None:
-    text = collapse(str(block.get("thinking") or ""))[:TAIL_CHARS]
-    return f"💭 {text}" if text else None
+    return prefix_text("💭 ", collapse(str(or_blank(block.get("thinking"))))[:TAIL_CHARS])
+
+
+def prefix_text(prefix: str, text: str) -> str | None:
+    return {True: None}.get(not text, prefix + text)
+
+
+def or_blank(value: object) -> str:
+    return cast(str, {True: ""}.get(not value, value))
+
+
+def nonempty(text: str) -> str | None:
+    return {True: None}.get(not text, text)
 
 
 def text_line(block: dict[str, object]) -> str | None:
-    text = collapse(str(block.get("text") or ""))
-    return text or None
+    return nonempty(collapse(str(or_blank(block.get("text")))))
+
+
+def tool_text(name: str, block: dict[str, object]) -> str:
+    return f"⚒ {name} {tool_detail(block.get('input'))}".rstrip()
+
+
+def tool_named(name: str, block: dict[str, object]) -> str | None:
+    collapsed = collapse(str(name))
+    chosen = (none_of, tool_text)[bool(collapsed)]
+    return chosen(collapsed, block)
 
 
 def tool_line(block: dict[str, object]) -> str | None:
-    name = collapse(str(block.get("name") or ""))
-    return f"⚒ {name} {tool_detail(block.get('input'))}".rstrip() if name else None
+    return tool_named(or_blank(block.get("name")), block)
+
+
+def missing_block(_block: dict[str, object]) -> str | None:
+    return None
+
+
+def render_block(block: dict[str, object]) -> str | None:
+    chosen = BLOCK_RENDER.get(str(block.get("type")), missing_block)
+    return chosen(block)
+
+
+BLOCK_RENDER: dict[str, Callable[[dict[str, object]], str | None]] = {
+    "thinking": thinking_line,
+    "text": text_line,
+    "tool_use": tool_line,
+}
 
 
 def tool_detail(value: object) -> str:
-    return next((detail for detail in tool_fields(value) if detail), "")
+    return next(filter(None, tool_fields(value)), "")
+
+
+def has_field(value: dict[str, object], key: str) -> bool:
+    return stripped_str(value.get(key))
+
+
+def field_text(value: dict[str, object], key: str) -> str:
+    return collapse(str(value[key]))[:TAIL_CHARS]
+
+
+def dict_fields(value: dict[str, object]) -> list[str]:
+    return list(map(partial(field_text, value), filter(partial(has_field, value), FIELD_KEYS)))
 
 
 def tool_fields(value: object) -> list[str]:
-    if not isinstance(value, dict):
-        return []
-    return [collapse(str(value[key]))[:TAIL_CHARS] for key in ("file_path", "command", "pattern") if stripped_str(value.get(key))]
+    chosen = (empty_list, dict_fields)[isinstance(value, dict)]
+    return chosen(cast(dict[str, object], value))
 
 
 def stripped_str(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip())
+    return False not in (isinstance(value, str), bool(getattr(value, "strip", blank)()))
+
+
+def worker_without_task(state: RepoState, step: Step, process: Process | None) -> Worker:
+    return Worker(step=step, process=process, result_path=None, prompt_path=None, handoff_path=None)
+
+
+def worker_with_task(state: RepoState, step: Step, process: Process | None) -> Worker:
+    base = work_path(state.root)
+    task = surely(state.task)
+    return Worker(
+        step=step,
+        process=process,
+        result_path=existing(base / "runs" / task / f"{step.label}.json"),
+        prompt_path=existing(base / "runs" / task / f"{step.label}.prompt.md"),
+        handoff_path=existing(base / "handoffs" / task / f"{step.label}.md"),
+    )
 
 
 def build_worker(state: RepoState, step: Step, rows: list[ProcRow], real: Path) -> Worker:
     process = matching_agent(rows, real)
-    if state.task is None:
-        return Worker(step=step, process=process, result_path=None, prompt_path=None, handoff_path=None)
-    base = work_path(state.root)
-    return Worker(
-        step=step,
-        process=process,
-        result_path=existing(base / "runs" / state.task / f"{step.label}.json"),
-        prompt_path=existing(base / "runs" / state.task / f"{step.label}.prompt.md"),
-        handoff_path=existing(base / "handoffs" / state.task / f"{step.label}.md"),
-    )
+    chosen = (worker_without_task, worker_with_task)[state.task is not None]
+    return chosen(state, step, process)
+
+
+def agent_under(real: Path, process: Process) -> bool:
+    return under_root(cwd_of(process.pid), real)
+
+
+def elapsed_of(item: Process) -> int:
+    return item.elapsed_s
+
+
+def min_process(found: list[Process]) -> Process:
+    return min(found, key=elapsed_of)
+
+
+def min_elapsed(found: list[Process]) -> Process | None:
+    chosen = (min_process, none_of)[not found]
+    return chosen(found)
 
 
 def matching_agent(rows: list[ProcRow], real: Path) -> Process | None:
-    found = [process for process in agents_of(rows) if under_root(cwd_of(process.pid), real)]
-    return min(found, key=lambda item: item.elapsed_s) if found else None
+    return min_elapsed(list(filter(partial(agent_under, real), agents_of(rows))))
+
+
+def row_agent(pid: int, _ppid: int, elapsed: int, tokens: list[str]) -> Process | None:
+    return agent_process(pid, elapsed, tokens)
 
 
 def agents_of(rows: list[ProcRow]) -> list[Process]:
-    return [process for pid, _, elapsed, tokens in rows if (process := agent_process(pid, elapsed, tokens)) is not None]
+    return list(filter(None, starmap(row_agent, rows)))
 
 
 def existing(path: Path) -> Path | None:
-    return path if path.is_file() else None
+    return {True: path}.get(path.is_file())
 
 
 def proc_rows() -> list[ProcRow]:
-    return [row for line in ps_lines() if (row := parse_ps_line(line)) is not None]
+    return list(filter(None, map(parse_ps_line, ps_lines())))
+
+
+def run_ps() -> str:
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        return subprocess.run(["ps", "-eo", "pid,ppid,etimes,args"], capture_output=True, text=True, timeout=10).stdout
+    return ""
 
 
 def ps_lines() -> list[str]:
-    try:
-        out = subprocess.run(["ps", "-eo", "pid,ppid,etimes,args"], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return out.stdout.splitlines()[1:]
+    return run_ps().splitlines()[1:]
+
+
+def ints_row(parts: list[str]) -> ProcRow | None:
+    with contextlib.suppress(ValueError):
+        return int(parts[0]), int(parts[1]), int(parts[2]), parts[3].split()
+    return None
+
+
+def parsed_parts(parts: list[str]) -> ProcRow | None:
+    chosen = (none_of, ints_row)[len(parts) >= 4]
+    return chosen(parts)
 
 
 def parse_ps_line(line: str) -> ProcRow | None:
-    parts = line.split(None, 3)
-    if len(parts) < 4:
-        return None
-    try:
-        return int(parts[0]), int(parts[1]), int(parts[2]), parts[3].split()
-    except ValueError:
-        return None
+    return parsed_parts(line.split(None, 3))
+
+
+def cli_run_at(tokens: list[str], index: int) -> bool:
+    return False not in (os.path.basename(tokens[index]) == "cli.py", tokens[index + 1] == "run")
 
 
 def is_pipeline(tokens: list[str]) -> bool:
-    return any(os.path.basename(token) == "cli.py" and tokens[index + 1] == "run" for index, token in enumerate(tokens[:-1]))
+    return any(map(partial(cli_run_at, tokens), range(max(0, len(tokens) - 1))))
+
+
+def pid_entry(row: ProcRow) -> tuple[int, tuple[int, list[str]]]:
+    pid, _, elapsed, tokens = row
+    return pid, (elapsed, tokens)
+
+
+def first_of(item: tuple[int, str]) -> int:
+    return item[0]
+
+
+def gate_text(found: list[tuple[int, str]]) -> str:
+    elapsed, label = max(found, key=first_of)
+    return f"{label} {fmt_seconds(elapsed)}"
+
+
+def format_gate(found: list[tuple[int, str]]) -> str | None:
+    chosen = (none_of, gate_text)[bool(found)]
+    return chosen(found)
 
 
 def gate_activity(rows: list[ProcRow], pipeline: list[int]) -> str | None:
-    found = descendant_gates(child_map(rows), {pid: (elapsed, tokens) for pid, _, elapsed, tokens in rows}, pipeline)
-    if not found:
-        return None
-    elapsed, label = max(found, key=lambda item: item[0])
-    return f"{label} {fmt_seconds(elapsed)}"
+    return format_gate(descendant_gates(child_map(rows), dict(map(pid_entry, rows)), pipeline))
+
+
+def add_child(children: dict[int, list[int]], row: ProcRow) -> None:
+    pid, ppid, _, _ = row
+    children.setdefault(ppid, []).append(pid)
 
 
 def child_map(rows: list[ProcRow]) -> dict[int, list[int]]:
     children: dict[int, list[int]] = {}
-    for pid, ppid, _, _ in rows:
-        children.setdefault(ppid, []).append(pid)
+    list(map(partial(add_child, children), rows))
     return children
+
+
+def kids(children: dict[int, list[int]], pid: int) -> list[int]:
+    return children.get(pid, [])
+
+
+def start_stack(children: dict[int, list[int]], pipeline: list[int]) -> list[int]:
+    return list(chain.from_iterable(map(partial(kids, children), pipeline)))
+
+
+def push_level(children: dict[int, list[int]], stack: list[int], found: list[int]) -> Any:
+    found.extend(stack)
+    extra = list(chain.from_iterable(map(partial(kids, children), stack)))
+    chosen = (skip, push_level)[bool(extra)]
+    chosen(children, extra, found)
+
+
+def unwind(children: dict[int, list[int]], stack: list[int]) -> list[int]:
+    found: list[int] = []
+    push_level(children, stack, found)
+    return found
+
+
+def gate_hit_pid(by_pid: dict[int, tuple[int, list[str]]], pid: int) -> list[tuple[int, str]]:
+    return gate_hit(by_pid.get(pid, (0, [])))
 
 
 def descendant_gates(
     children: dict[int, list[int]], by_pid: dict[int, tuple[int, list[str]]], pipeline: list[int]
 ) -> list[tuple[int, str]]:
-    found: list[tuple[int, str]] = []
-    stack = [child for pid in pipeline for child in children.get(pid, [])]
-    while stack:
-        pid = stack.pop()
-        found.extend(gate_hit(by_pid.get(pid, (0, []))))
-        stack.extend(children.get(pid, []))
-    return found
+    return list(chain.from_iterable(map(partial(gate_hit_pid, by_pid), unwind(children, start_stack(children, pipeline)))))
 
 
 def gate_hit(row: tuple[int, list[str]]) -> list[tuple[int, str]]:
     elapsed, tokens = row
     label = classify_gate(tokens)
-    return [(elapsed, label)] if label is not None else []
+    return ([], [(elapsed, surely(label))])[label is not None]
+
+
+def classified(tokens: list[str], names: list[str]) -> str | None:
+    chosen = (none_of, gate_label)[not skipped_gate(tokens, names)]
+    return chosen(tokens, names)
 
 
 def classify_gate(tokens: list[str]) -> str | None:
-    names = [os.path.basename(token) for token in tokens]
-    return None if skipped_gate(tokens, names) else gate_label(tokens, names)
+    return classified(tokens, list(map(os.path.basename, tokens)))
 
 
 def skipped_gate(tokens: list[str], names: list[str]) -> bool:
-    return is_pipeline(tokens) or any(name in BACKENDS for name in names)
+    return True in (is_pipeline(tokens), bool(BACKENDS.intersection(names)))
 
 
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
-    return next((label for label in gate_candidates(tokens, names) if label is not None), None)
+    return next(filter(present, gate_candidates(tokens, names)), None)
 
 
 def gate_candidates(tokens: list[str], names: list[str]) -> tuple[str | None, ...]:
@@ -515,165 +854,282 @@ def gate_candidates(tokens: list[str], names: list[str]) -> tuple[str | None, ..
 
 
 def named_one(names: list[str], tool: str) -> str | None:
-    return tool if tool in names else None
+    return {True: tool}.get(tool in names)
+
+
+def mix_from(mix: str | None) -> str | None:
+    chosen = (none_of, mix_kind)[mix is not None]
+    return chosen(surely(mix))
 
 
 def mix_gate(tokens: list[str]) -> str | None:
-    mix = after(tokens, "mix")
-    return None if mix is None else mix_kind(mix)
+    return mix_from(after(tokens, "mix"))
 
 
 def mix_kind(mix: str) -> str:
-    return "mix test" if mix == "test" else "mix"
+    return ("mix", "mix test")[mix == "test"]
 
 
 def named_command(tokens: list[str], program: str, argument: str, label: str) -> str | None:
-    return label if after(tokens, program) == argument else None
+    return {True: label}.get(after(tokens, program) == argument)
 
 
 def scanner_sonar(names: list[str]) -> str | None:
-    return "sonar" if "sonar-scanner" in names else None
+    return {True: "sonar"}.get("sonar-scanner" in names)
+
+
+def has_sonarqube(token: str) -> bool:
+    return "sonarqube" in token
 
 
 def sonarqube_token(tokens: list[str]) -> str | None:
-    return "sonar" if any("sonarqube" in token for token in tokens) else None
+    return {True: "sonar"}.get(any(map(has_sonarqube, tokens)))
+
+
+def has_sonar(token: str) -> bool:
+    return "sonar" in token
+
+
+def sonar_if_named(tokens: list[str], _names: list[str] | None = None) -> str | None:
+    return {True: "sonar"}.get(any(map(has_sonar, tokens)))
 
 
 def java_sonar(names: list[str], tokens: list[str]) -> str | None:
-    if "java" not in names:
-        return None
-    return "sonar" if any("sonar" in token for token in tokens) else None
-
-
-def maven_gate(names: list[str], tokens: list[str]) -> str | None:
-    return None if not maven_cmd(names) else maven_kind(tokens)
+    chosen = (none_of, partial(sonar_if_named, tokens))["java" in names]
+    return chosen(names)
 
 
 def maven_cmd(names: list[str]) -> bool:
-    return "mvn" in names or "mvnw" in names
+    return True in ("mvn" in names, "mvnw" in names)
+
+
+def maven_gate(names: list[str], tokens: list[str]) -> str | None:
+    return {True: None}.get(not maven_cmd(names), maven_kind(tokens))
+
+
+def has_pitest(token: str) -> bool:
+    return "pitest" in token
 
 
 def maven_kind(tokens: list[str]) -> str:
-    return "pitest" if any("pitest" in token for token in tokens) else "mvn"
+    return ("mvn", "pitest")[any(map(has_pitest, tokens))]
+
+
+def has_pmd(token: str) -> bool:
+    return token.endswith("PmdCli")
+
+
+def pmd_if_java(tokens: list[str], _names: list[str] | None = None) -> str | None:
+    return {True: "pmd"}.get(any(map(has_pmd, tokens)))
 
 
 def pmd_gate(names: list[str], tokens: list[str]) -> str | None:
-    if "java" not in names:
-        return None
-    return "pmd" if any(token.endswith("PmdCli") for token in tokens) else None
-
-
-NAMED_TOOLS = ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vitest", "jest", "tsc", "eslint")
+    chosen = (none_of, partial(pmd_if_java, tokens))["java" in names]
+    return chosen(names)
 
 
 def named_tool(names: list[str]) -> str | None:
-    return next((tool for tool in NAMED_TOOLS if tool in names), None)
+    return next(filter(partial(contained, names), NAMED_TOOLS), None)
+
+
+def contained(names: list[str], tool: str) -> bool:
+    return tool in names
+
+
+def has_eunit(token: str) -> bool:
+    return "eunit" in token
+
+
+def erlc_eunit(names: list[str]) -> str | None:
+    return {True: "eunit"}.get("erlc" in names)
+
+
+def token_eunit(tokens: list[str]) -> str | None:
+    return {True: "eunit"}.get(any(map(has_eunit, tokens)))
 
 
 def eunit_gate(names: list[str], tokens: list[str]) -> str | None:
-    if "erlc" in names:
-        return "eunit"
-    return "eunit" if any("eunit" in token for token in tokens) else None
+    return next(filter(present, (erlc_eunit(names), token_eunit(tokens))), None)
+
+
+def basename_is(tokens: list[str], name: str, index: int) -> bool:
+    return os.path.basename(tokens[index]) == name
+
+
+def token_after(tokens: list[str], index: int) -> str:
+    return tokens[index + 1]
 
 
 def after(tokens: list[str], name: str) -> str | None:
-    for index, token in enumerate(tokens[:-1]):
-        if os.path.basename(token) == name:
-            return tokens[index + 1]
-    return None
+    return next(map(partial(token_after, tokens), filter(partial(basename_is, tokens, name), range(max(0, len(tokens) - 1)))), None)
+
+
+def is_bundle_exec(tokens: list[str], index: int) -> bool:
+    return False not in (os.path.basename(tokens[index]) == "bundle", tokens[index + 1] == "exec")
+
+
+def bundle_at(tokens: list[str], index: int) -> str:
+    return os.path.basename(tokens[index + 2])
 
 
 def bundle_inner(tokens: list[str]) -> str | None:
-    for index, token in enumerate(tokens[:-2]):
-        if os.path.basename(token) == "bundle" and tokens[index + 1] == "exec":
-            return os.path.basename(tokens[index + 2])
-    return None
+    return next(map(partial(bundle_at, tokens), filter(partial(is_bundle_exec, tokens), range(max(0, len(tokens) - 2)))), None)
+
+
+def docker_compose_run(token: str, tokens: list[str], index: int) -> bool:
+    return False not in (os.path.basename(token) == "docker", tokens[index + 1 : index + 3] == ["compose", "run"])
+
+
+def docker_at(tokens: list[str], index: int) -> bool:
+    return docker_compose_run(tokens[index], tokens, index)
 
 
 def docker_inner(tokens: list[str]) -> str | None:
     return next(
-        (compose_run_target(tokens, index) for index, token in enumerate(tokens[:-3]) if docker_compose_run(token, tokens, index)), None
+        filter(present, map(partial(compose_run_target, tokens), filter(partial(docker_at, tokens), range(max(0, len(tokens) - 3))))),
+        None,
     )
 
 
-def docker_compose_run(token: str, tokens: list[str], index: int) -> bool:
-    return os.path.basename(token) == "docker" and tokens[index + 1 : index + 3] == ["compose", "run"]
+def not_flag(token: str) -> bool:
+    return not token.startswith("-")
+
+
+def second_basename(inner: list[str]) -> str:
+    return os.path.basename(inner[1])
+
+
+def inner_name(inner: list[str]) -> str | None:
+    chosen = (none_of, second_basename)[len(inner) > 1]
+    return chosen(inner)
 
 
 def compose_run_target(tokens: list[str], index: int) -> str | None:
-    inner = [token for token in tokens[index + 3 :] if not token.startswith("-")]
-    return os.path.basename(inner[1]) if len(inner) > 1 else None
+    return inner_name(list(filter(not_flag, tokens[index + 3 :])))
 
 
-def fmt_seconds(seconds: int) -> str:
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}m"
+def secs_fmt(seconds: int) -> str | None:
+    return {True: f"{seconds}s"}.get(seconds < 60)
+
+
+def mins_fmt(seconds: int) -> str | None:
+    return {True: f"{seconds // 60}m"}.get(seconds < 3600)
+
+
+def hours_fmt(seconds: int) -> str:
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
+def fmt_seconds(seconds: int) -> str:
+    return surely(next(filter(present, (secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds)))))
+
+
+def make_process(pid: int, elapsed: int, tokens: list[str], backend: str) -> Process:
+    return Process(pid=pid, elapsed_s=elapsed, model=model_of(tokens), backend=backend)
+
+
+def process_of(pid: int, elapsed: int, tokens: list[str], backend: str | None) -> Process | None:
+    chosen = (none_of, make_process)[backend is not None]
+    return chosen(pid, elapsed, tokens, surely(backend))
+
+
 def agent_process(pid: int, elapsed: int, tokens: list[str]) -> Process | None:
-    backend = None if is_pipeline(tokens) else backend_of(tokens)
-    return None if backend is None else Process(pid=pid, elapsed_s=elapsed, model=model_of(tokens), backend=backend)
+    chosen = (backend_of, none_of)[is_pipeline(tokens)]
+    return process_of(pid, elapsed, tokens, chosen(tokens))
+
+
+def in_backends(name: str) -> bool:
+    return name in BACKENDS
 
 
 def backend_of(tokens: list[str]) -> str | None:
-    return next((name for token in tokens for name in [os.path.basename(token)] if name in BACKENDS), None)
+    return next(filter(in_backends, map(os.path.basename, tokens)), None)
+
+
+def is_model_flag(tokens: list[str], index: int) -> bool:
+    return tokens[index] in MODEL_FLAGS
 
 
 def model_of(tokens: list[str]) -> str:
-    return next(
-        (tokens[index + 1] for index, token in enumerate(tokens[:-1]) if token in ("--model", "-m")),
-        "",
-    )
+    return next(map(partial(token_after, tokens), filter(partial(is_model_flag, tokens), range(max(0, len(tokens) - 1)))), "")
 
 
 def cwd_of(pid: int) -> Path | None:
-    try:
+    with contextlib.suppress(OSError):
         return Path(os.readlink(f"/proc/{pid}/cwd"))
-    except OSError:
-        return None
+    return None
+
+
+def path_under(cwd: Path, root: Path) -> bool:
+    return True in (cwd == root, root in cwd.parents)
 
 
 def under_root(cwd: Path | None, root: Path) -> bool:
-    if cwd is None:
-        return False
-    return cwd == root or root in cwd.parents
+    chosen = (false_of, path_under)[cwd is not None]
+    return chosen(surely(cwd), root)
 
 
 def real_path(root: Path) -> Path:
-    try:
+    with contextlib.suppress(OSError):
         return root.resolve()
-    except OSError:
-        return root
+    return root
 
 
-def git_line(root: Path, args: list[str]) -> str:
-    try:
-        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if out.returncode != 0:
-        return ""
+def run_git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str] | None:
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10)
+    return None
+
+
+def ok_git(out: subprocess.CompletedProcess[str] | None) -> bool:
+    return False not in (out is not None, getattr(out, "returncode", 1) == 0)
+
+
+def stripped_out(out: subprocess.CompletedProcess[str]) -> str:
     return out.stdout.strip()
 
 
-def read_text(path: Path | None) -> str | None:
-    if path is None:
-        return None
-    try:
+def git_stdout(out: subprocess.CompletedProcess[str] | None) -> str:
+    chosen = (blank, stripped_out)[ok_git(out)]
+    return chosen(surely(out))
+
+
+def git_line(root: Path, args: list[str]) -> str:
+    return git_stdout(run_git(root, args))
+
+
+def load_text(path: Path) -> str | None:
+    with contextlib.suppress(OSError):
         return path.read_text(errors="replace")
-    except OSError:
-        return None
+    return None
+
+
+def read_text(path: Path | None) -> str | None:
+    chosen = (none_of, load_text)[path is not None]
+    return chosen(surely(path))
+
+
+def decoded_if(raw: str | None) -> str | None:
+    chosen = (none_of, decoded_result)[raw is not None]
+    return chosen(surely(raw))
 
 
 def result_text(path: Path | None) -> str | None:
-    raw = read_text(path)
-    return None if raw is None else decoded_result(raw)
+    return decoded_if(read_text(path))
+
+
+def dict_result(data: dict[str, object]) -> object:
+    return data.get("result")
+
+
+def result_field(data: object) -> object:
+    chosen = (none_of, dict_result)[isinstance(data, dict)]
+    return chosen(cast(dict[str, object], data))
+
+
+def str_or_raw(result: object, raw: str) -> str:
+    return (raw, cast(str, result))[isinstance(result, str)]
 
 
 def decoded_result(raw: str) -> str:
-    data = parsed_json(raw)
-    result = data.get("result") if isinstance(data, dict) else None
-    return result if isinstance(result, str) else raw
+    return str_or_raw(result_field(parsed_json(raw)), raw)

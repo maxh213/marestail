@@ -5,7 +5,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.shell import run
 
-SCANNERS = Path(__file__).resolve().parent.parent / "scanners" / "ex"
+SCANNERS = Path(__file__).resolve().parent / "ex"
 COMMENTS = SCANNERS / "comments.exs"
 COMPLEXITY = SCANNERS / "complexity.exs"
 DEADCODE = SCANNERS / "deadcode.exs"

@@ -65,6 +65,8 @@ def test_ruby_bin_falls_back_to_docker(tmp_path: Path, fake_run: Any, raw: dict[
 def test_script_paths() -> None:
     assert ruby.SCRIPT.name == "scan.rb"
     assert ruby.SCRIPT.parent.name == "rb"
+    assert Path(ruby.__file__).resolve().parent / "rb" / "scan.rb" == ruby.SCRIPT
+    assert ruby.SCRIPT.is_file()
     assert (ruby.MARESTAIL_ROOT / "marestail" / "ruby.py").exists()
 
 

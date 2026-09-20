@@ -12,7 +12,7 @@ from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
 MARESTAIL_ROOT = PACKAGE.parent
-SCAN_DIR = MARESTAIL_ROOT / "scanners" / "cs" / "scan"
+SCAN_DIR = PACKAGE / "cs" / "scan"
 SCAN_PROJECT = PACKAGE / "cs" / "scan" / "Scan.csproj"
 PROGRAM_CS = "Program.cs"
 PROJECT_FILE = "Scan.csproj"

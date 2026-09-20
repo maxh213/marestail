@@ -9,7 +9,9 @@ def test_script_names() -> None:
     assert elixir.script("comments").name == "comments.exs"
     assert elixir.script("complexity").name == "complexity.exs"
     assert elixir.script("coverage").name == "coverage.exs"
+    assert Path(elixir.__file__).resolve().parent / "ex" == elixir.SCANNERS
     assert elixir.DEADCODE.parent.name == "ex"
+    assert elixir.DEADCODE.is_file()
 
 
 def test_scan(tmp_path: Path, fake_run: Any) -> None:

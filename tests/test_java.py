@@ -286,11 +286,13 @@ def test_load_coverage(tmp_path: Path) -> None:
 
 
 def test_frozen_java_project_files_live_in_the_package() -> None:
-    assert java.TOOLS_POM == java.PACKAGE / "jvm" / "tools" / "pom.xml"
-    assert java.PMD_RULESET == java.PACKAGE / "jvm" / "pmd-ruleset.xml"
+    assert java.JVM_DIR == java.PACKAGE / "jvm"
+    assert java.TOOLS_POM == java.JVM_DIR / "tools" / "pom.xml"
+    assert java.PMD_RULESET == java.JVM_DIR / "pmd-ruleset.xml"
     assert java.SCAN_SOURCE == java.JVM_DIR / "Scan.java"
     assert java.TOOLS_POM.is_file()
     assert java.PMD_RULESET.is_file()
+    assert java.SCAN_SOURCE.is_file()
 
 
 def test_stamp_matches(tmp_path: Path) -> None:

@@ -368,6 +368,12 @@ def test_colocated_project_and_source() -> None:
     assert dotnet.colocated(root / "src" / "Program.cs", root / "Scan.csproj") is False
 
 
+def test_scanner_sources_live_in_the_package() -> None:
+    assert dotnet.SCAN_DIR == dotnet.PACKAGE / "cs" / "scan"
+    assert (dotnet.SCAN_DIR / dotnet.PROGRAM_CS).is_file()
+    assert (dotnet.SCAN_DIR / dotnet.PROJECT_FILE).is_file()
+
+
 def test_build_scanner_stages_a_split_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
     write(tmp_path / "scan", {dotnet.PROGRAM_CS: "class P {}"})
     write(tmp_path / "frozen", {dotnet.PROJECT_FILE: APP})

@@ -11,7 +11,9 @@ def test_script_names() -> None:
     assert javascript.script("comments").name == "ts_comments.mjs"
     assert javascript.script("complexity").name == "ts_complexity.mjs"
     assert javascript.script("depth").name == "ts_depth.mjs"
+    assert Path(javascript.__file__).resolve().parent / "js" == javascript.SCANNERS
     assert javascript.COMMENTS.parent.name == "js"
+    assert javascript.COMMENTS.is_file()
 
 
 def test_scan(tmp_path: Path, fake_run: Any) -> None:

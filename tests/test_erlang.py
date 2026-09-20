@@ -25,6 +25,11 @@ def test_listify(value: Any, expected: list[str]) -> None:
     assert erlang.listify(value) == expected
 
 
+def test_script_dir_is_in_the_package() -> None:
+    assert Path(erlang.__file__).resolve().parent / "erl" == erlang.SCRIPT_DIR
+    assert (erlang.SCRIPT_DIR / "deps.escript").is_file()
+
+
 def test_host_erlang_probes_once(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, [(0, "")])
     ctx = make_context(tmp_path)

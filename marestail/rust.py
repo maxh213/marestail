@@ -11,7 +11,7 @@ from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
 CARGO_TOML = "Cargo.toml"
-SCAN_DIR = PACKAGE.parent / "scanners" / "rs" / "scan"
+SCAN_DIR = PACKAGE / "rs" / "scan"
 SCAN_MANIFEST = PACKAGE / "rs" / "scan" / CARGO_TOML
 SCAN_BIN = Path("rs-scan") / "release" / "marestail-rs-scan"
 SCAN_INPUTS = ("main.rs", CARGO_TOML, "Cargo.lock")

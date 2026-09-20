@@ -11,10 +11,10 @@ from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
-JVM_DIR = PACKAGE.parent / "scanners" / "jvm"
+JVM_DIR = PACKAGE / "jvm"
 SCAN_SOURCE = JVM_DIR / "Scan.java"
-TOOLS_POM = PACKAGE / "jvm" / "tools" / "pom.xml"
-PMD_RULESET = PACKAGE / "jvm" / "pmd-ruleset.xml"
+TOOLS_POM = JVM_DIR / "tools" / "pom.xml"
+PMD_RULESET = JVM_DIR / "pmd-ruleset.xml"
 SCAN_RELEASE = "21"
 DEPENDENCY_PLUGIN = "org.apache.maven.plugins:maven-dependency-plugin:3.8.1"
 BUILD_CLASSPATH = f"{DEPENDENCY_PLUGIN}:build-classpath"

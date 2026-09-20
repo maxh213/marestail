@@ -4,7 +4,7 @@ from pathlib import Path
 from marestail.context import Context
 from marestail.shell import run
 
-SCANNERS = Path(__file__).resolve().parent.parent / "scanners" / "js"
+SCANNERS = Path(__file__).resolve().parent / "js"
 COMMENTS = SCANNERS / "ts_comments.mjs"
 COMPLEXITY = SCANNERS / "ts_complexity.mjs"
 DEPTH = SCANNERS / "ts_depth.mjs"

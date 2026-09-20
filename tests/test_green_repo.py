@@ -2,6 +2,7 @@ import argparse
 import ast
 import io
 import json
+import os
 import re
 import shutil
 import socket
@@ -65,13 +66,22 @@ DOCUMENTED = [
     "JAVA_HOME",
 ]
 SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/context.py"]
-SCANNER_SOURCE_SUFFIXES = {".java", ".cs", ".mjs", ".rb", ".rs", ".escript", ".exs"}
+SCANNER_SOURCES = [
+    "marestail/cs/scan/Program.cs",
+    "marestail/erl/comments.escript",
+    "marestail/ex/comments.exs",
+    "marestail/js/ts_comments.mjs",
+    "marestail/jvm/Scan.java",
+    "marestail/rb/scan.rb",
+    "marestail/rs/scan/main.rs",
+]
 FROZEN_SCANNER_PROJECTS = [
     "marestail/cs/scan/Scan.csproj",
     "marestail/jvm/pmd-ruleset.xml",
     "marestail/jvm/tools/pom.xml",
     "marestail/rs/scan/Cargo.toml",
 ]
+HERMETIC_BINARIES = ("git", "sh")
 
 
 def package_files() -> list[Path]:
@@ -261,11 +271,16 @@ def test_tools_test_perf_fails_as_before() -> None:
     assert last_line(completed.stdout + completed.stderr) == PERF_FAIL_LINE
 
 
-def test_unchecked_mutants_fail_the_mutation_gate() -> None:
+def test_unchecked_mutants_fail_the_mutation_gate(tmp_path: Path) -> None:
     assert py_mutation.STATUS_BY_EXIT_CODE[None] == "not checked"
     assert "not checked" not in py_mutation.PASSING
     assert "no tests" not in py_mutation.PASSING
     assert "survived" not in py_mutation.PASSING
+    folder = tmp_path / "mutants"
+    folder.mkdir()
+    (folder / "a.py.meta").write_text(json.dumps({"exit_code_by_key": {"pkg.fn__mutmut_1": None}}))
+    total, survivors = py_mutation.surviving(make_context(tmp_path), [])
+    assert (total, survivors) == (1, ["pkg.fn__mutmut_1: not checked"])
 
 
 def test_full_tier_runs_mutation_before_sonar() -> None:
@@ -283,6 +298,7 @@ def test_last_line_and_mutmut_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert last_line("") == ""
     assert last_line("\n\nok\n") == "ok"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/ps")
     assert under_mutmut() is False
     assert restricted_path() is False
     monkeypatch.setattr(shutil, "which", lambda name: None)
@@ -324,12 +340,60 @@ def test_no_comments_or_docstrings_under_marestail() -> None:
     assert [found for path in package_files() for found in comments_in(path) + docstrings_in(path)] == []
 
 
-def test_non_python_scanner_sources_are_outside_the_package() -> None:
-    found = [path.relative_to(ROOT).as_posix() for path in (ROOT / "marestail").rglob("*") if path.suffix in SCANNER_SOURCE_SUFFIXES]
-    assert found == []
+def test_scanner_sources_live_where_origin_located_them() -> None:
+    missing = [name for name in SCANNER_SOURCES + FROZEN_SCANNER_PROJECTS if not (ROOT / name).is_file()]
+    assert missing == []
+    assert not (ROOT / "scanners").exists()
 
 
-def test_frozen_scanner_projects_stay_in_the_package() -> None:
-    missing = [name for name in FROZEN_SCANNER_PROJECTS if not (ROOT / name).is_file()]
-    moved = [name for name in FROZEN_SCANNER_PROJECTS if (ROOT / "scanners" / Path(name).relative_to("marestail")).is_file()]
-    assert missing + moved == []
+def hermetic_bin(folder: Path) -> Path:
+    folder.mkdir()
+    for name in HERMETIC_BINARIES:
+        found = shutil.which(name)
+        assert found is not None
+        (folder / name).symlink_to(found)
+    return folder
+
+
+def test_suite_passes_without_network_or_agent_clis(tmp_path: Path) -> None:
+    if restricted_path() or os.environ.get("MARESTAIL_HERMETIC") == "1":
+        pytest.skip("already hermetic")
+    if shutil.which("unshare") is None:
+        pytest.skip("unshare is not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = ["HOME=" + str(home), "PATH=" + str(hermetic_bin(tmp_path / "bin")), "MARESTAIL_HERMETIC=1"]
+    completed = subprocess.run(
+        ["unshare", "-r", "-n", "env", "-i", *env, str(ROOT / ".venv" / "bin" / "pytest"), "tests", "-q", "-p", "no:cacheprovider"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def write_tiny_mutmut_project(root: Path) -> None:
+    (root / "pkg").mkdir()
+    (root / "pkg" / "__init__.py").write_text("def add(left: int, right: int) -> int:\n    return left + right\n")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_add.py").write_text(
+        "from pkg import add\n\ndef test_add() -> None:\n    assert add(1, 2) == 3\n    assert add(2, 2) == 4\n"
+    )
+    (root / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["pkg"]\n')
+
+
+def test_mutmut_kills_mutants_on_a_tiny_package(tmp_path: Path) -> None:
+    if restricted_path() or os.environ.get("MARESTAIL_HERMETIC") == "1":
+        pytest.skip("mutmut needs a writable tree and a normal pytest")
+    write_tiny_mutmut_project(tmp_path)
+    completed = subprocess.run(
+        [sys.executable, "-m", "mutmut", "run", "--max-children", "1"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    total, survivors = py_mutation.surviving(make_context(tmp_path), [])
+    assert total > 0, completed.stdout + completed.stderr
+    assert survivors == [], survivors

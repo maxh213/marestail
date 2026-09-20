@@ -90,18 +90,22 @@ def test_copy_if_missing_keeps_existing(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("existing", "expected"),
+    ("existing", "keeps"),
     [
-        ("# Rules\n\nbe nice\n\n\n", "# Rules\n\nbe nice\n\n" + (TEMPLATES / "CLAUDE.md").read_text()),
-        ("run marestail gate first", "run marestail gate first"),
-        ("", (TEMPLATES / "CLAUDE.md").read_text()),
+        ("# Rules\n\nbe nice\n\n\n", False),
+        ("run marestail gate first", True),
+        ("", False),
     ],
 )
-def test_append_instructions(tmp_path: Path, existing: str, expected: str) -> None:
+def test_append_instructions(tmp_path: Path, existing: str, keeps: bool) -> None:
     path = tmp_path / "CLAUDE.md"
     path.write_text(existing)
     install.append_instructions(path)
-    assert path.read_text() == expected
+    if keeps:
+        assert path.read_text() == existing
+        return
+    snippet = (TEMPLATES / "CLAUDE.md").read_text()
+    assert path.read_text() == existing.rstrip() + ("\n\n" if existing else "") + snippet
 
 
 def test_merge_hook_keeps_other_settings(tmp_path: Path) -> None:

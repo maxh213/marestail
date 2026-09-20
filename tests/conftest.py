@@ -5,12 +5,25 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from coverage.files import GlobMatcher, prep_patterns
 
 from marestail.config import Config
 from marestail.context import Context
 
 Reply = tuple[int, str]
+MUTMUT_COPIES = (
+    "templates",
+    "roles",
+    "guidance",
+    "features",
+    "README.md",
+    "marestail.toml",
+    "sonar-project.properties",
+    ".importlinter",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "tools",
+    "bin",
+)
 
 
 class FakeRun:
@@ -64,26 +77,35 @@ def make_context(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -
 FORBIDDEN_BINARIES = frozenset(
     {"docker", "claude", "grok", "kilo", "kimi", "cursor-agent", "agy", "dandelion", "sonar-scanner", "curl", "wget"}
 )
-TUI_OMIT = "tui"
 
 
-def cover_tui_sources(config: pytest.Config) -> None:
-    plugin = config.pluginmanager.getplugin("_cov")
-    controller = getattr(plugin, "cov_controller", None)
-    cov = getattr(controller, "cov", None)
-    inorout = getattr(cov, "_inorout", None)
-    if cov is None or inorout is None:
+def git_toplevel() -> Path | None:
+    completed = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        return None
+    return Path(completed.stdout.strip())
+
+
+def link_from_root(root: Path, here: Path, name: str) -> None:
+    source = root / name
+    destination = here / name
+    if destination.exists() or not source.exists():
         return
-    omit = [pattern for pattern in cov.config.run_omit if TUI_OMIT not in pattern.replace("\\", "/")]
-    if omit == list(cov.config.run_omit):
+    destination.symlink_to(source)
+
+
+def populate_mutmut_tree(here: Path) -> None:
+    if here.name != "mutants":
         return
-    cov.config.run_omit = omit
-    inorout.omit = prep_patterns(omit)
-    inorout.omit_match = GlobMatcher(inorout.omit, "omit", "Omit", inorout._debug) if inorout.omit else None
+    root = git_toplevel()
+    if root is None or root == here:
+        return
+    for name in MUTMUT_COPIES:
+        link_from_root(root, here, name)
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    cover_tui_sources(config)
+    populate_mutmut_tree(Path.cwd())
 
 
 class ForbiddenCallError(RuntimeError):
