@@ -9,10 +9,13 @@ from typing import Any
 from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
+PACKAGE = Path(__file__).resolve().parent
 CARGO_TOML = "Cargo.toml"
-SCAN_DIR = Path(__file__).resolve().parent.parent / "scanners" / "rs" / "scan"
+SCAN_DIR = PACKAGE.parent / "scanners" / "rs" / "scan"
+SCAN_MANIFEST = PACKAGE / "rs" / "scan" / CARGO_TOML
 SCAN_BIN = Path("rs-scan") / "release" / "marestail-rs-scan"
 SCAN_INPUTS = ("main.rs", CARGO_TOML, "Cargo.lock")
+STAGE = "rs-scan-src"
 SKIP_DIRS = {"target", ".marestail", ".git", "node_modules", "mutants.out", "mutants.out.old"}
 USE_DIRS = ("tests", "examples", "benches")
 LLVM_TOOLS = (("LLVM_COV", "llvm-cov"), ("LLVM_PROFDATA", "llvm-profdata"))
@@ -120,8 +123,17 @@ def excluded(ctx: Context, relative: str, key: str) -> bool:
     return any(matches(relative, pattern) for pattern in exclude_patterns(ctx, key))
 
 
+def scan_input(name: str) -> Path:
+    bundled = SCAN_DIR / name
+    if bundled.is_file():
+        return bundled
+    if name == CARGO_TOML:
+        return SCAN_MANIFEST
+    return bundled
+
+
 def scanner_digest() -> str:
-    return hashlib.sha256(b"".join((SCAN_DIR / name).read_bytes() for name in SCAN_INPUTS)).hexdigest()
+    return hashlib.sha256(b"".join(scan_input(name).read_bytes() for name in SCAN_INPUTS)).hexdigest()
 
 
 def scanner_fresh(binary: Path, stamp: Path, digest: str) -> bool:
@@ -134,13 +146,24 @@ def build_error(code: int, output: str, binary: Path) -> str | None:
     return missing(code, output, "clippy") or f"rust scanner build failed: {output.strip()[-300:]}"
 
 
+def staged_crate(ctx: Context) -> Path:
+    manifest = scan_input(CARGO_TOML)
+    if manifest.parent == SCAN_DIR:
+        return SCAN_DIR
+    stage = ctx.work / STAGE
+    stage.mkdir(parents=True, exist_ok=True)
+    for name in SCAN_INPUTS:
+        shutil.copy(scan_input(name), stage / name)
+    return stage
+
+
 def build_scanner(ctx: Context) -> str | None:
     binary, stamp = ctx.work / SCAN_BIN, ctx.work / "rs-scan" / "stamp"
     digest = scanner_digest()
     if scanner_fresh(binary, stamp, digest):
         return None
     code, output = run(
-        [*cargo_bin(ctx), "build", "--release", "--locked", "--quiet", "--manifest-path", str(SCAN_DIR / CARGO_TOML)],
+        [*cargo_bin(ctx), "build", "--release", "--locked", "--quiet", "--manifest-path", str(staged_crate(ctx) / CARGO_TOML)],
         cwd=ctx.root,
         env={"CARGO_TARGET_DIR": str(ctx.work / "rs-scan")},
         timeout=900,

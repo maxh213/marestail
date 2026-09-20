@@ -168,8 +168,9 @@ def test_build_scanner_builds_and_stamps(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust, [(0, "")])
     ctx = make_context(tmp_path, {"rust": {"cargo": "cargo1"}})
     assert rust.build_scanner(ctx) is None
-    manifest = str(rust.SCAN_DIR / "Cargo.toml")
+    manifest = str(tmp_path / ".marestail" / rust.STAGE / rust.CARGO_TOML)
     assert fake.calls == [["cargo1", "build", "--release", "--locked", "--quiet", "--manifest-path", manifest]]
+    assert (tmp_path / ".marestail" / rust.STAGE / "main.rs").is_file()
     assert fake.options == [{"cwd": tmp_path, "env": {"CARGO_TARGET_DIR": str(tmp_path / ".marestail" / "rs-scan")}, "timeout": 900}]
     assert stamp(tmp_path).read_text() == rust.scanner_digest()
 
@@ -191,6 +192,30 @@ def test_build_scanner_failures(tmp_path: Path, fake_run: Any, reply: tuple[int,
 def test_scanner_digest_is_sha256() -> None:
     assert len(rust.scanner_digest()) == 64
     assert rust.SCAN_INPUTS == ("main.rs", "Cargo.toml", "Cargo.lock")
+
+
+def test_scan_input_uses_the_frozen_manifest() -> None:
+    assert rust.scan_input("main.rs") == rust.SCAN_DIR / "main.rs"
+    assert rust.scan_input("Cargo.lock") == rust.SCAN_DIR / "Cargo.lock"
+    assert rust.scan_input(rust.CARGO_TOML) == rust.SCAN_MANIFEST
+
+
+def test_scan_input_prefers_a_bundled_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundled = tmp_path / rust.CARGO_TOML
+    bundled.write_text("[package]\nname = 'x'\n")
+    monkeypatch.setattr(rust, "SCAN_DIR", tmp_path)
+    assert rust.scan_input(rust.CARGO_TOML) == bundled
+
+
+def test_scan_input_keeps_missing_non_manifest_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rust, "SCAN_DIR", tmp_path)
+    assert rust.scan_input("main.rs") == tmp_path / "main.rs"
+
+
+def test_staged_crate_reuses_a_bundled_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rust, "SCAN_DIR", tmp_path)
+    (tmp_path / rust.CARGO_TOML).write_text("[package]\n")
+    assert rust.staged_crate(make_context(tmp_path)) == tmp_path
 
 
 def fresh_scanner(root: Path) -> None:

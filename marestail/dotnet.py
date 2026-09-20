@@ -2,6 +2,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -9,10 +10,15 @@ from typing import Any, TypeGuard
 from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
-MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
-SCAN_DIR = Path(__file__).resolve().parent.parent / "scanners" / "cs" / "scan"
+PACKAGE = Path(__file__).resolve().parent
+MARESTAIL_ROOT = PACKAGE.parent
+SCAN_DIR = MARESTAIL_ROOT / "scanners" / "cs" / "scan"
+SCAN_PROJECT = PACKAGE / "cs" / "scan" / "Scan.csproj"
+PROGRAM_CS = "Program.cs"
+PROJECT_FILE = "Scan.csproj"
 SCAN_DLL = "marestail-cs-scan.dll"
 SCAN_OUT = "cs-scan"
+STAGE = "cs-scan-src"
 IMAGE = "mcr.microsoft.com/dotnet/sdk:8.0"
 DOTNET = "dotnet"
 COVERAGE_JSON = "cs-coverage.json"
@@ -238,8 +244,21 @@ def load_coverage(ctx: Context) -> dict[str, Any] | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def scanner_source() -> Path:
+    return SCAN_DIR / PROGRAM_CS
+
+
+def bundled_project() -> Path:
+    return SCAN_DIR / PROJECT_FILE
+
+
+def scanner_project() -> Path:
+    bundled = bundled_project()
+    return bundled if bundled.is_file() else SCAN_PROJECT
+
+
 def scanner_digest() -> str:
-    return hashlib.sha256((SCAN_DIR / "Program.cs").read_bytes() + (SCAN_DIR / "Scan.csproj").read_bytes()).hexdigest()
+    return hashlib.sha256(scanner_source().read_bytes() + scanner_project().read_bytes()).hexdigest()
 
 
 def scanner_current(out: Path, digest: str) -> bool:
@@ -247,10 +266,27 @@ def scanner_current(out: Path, digest: str) -> bool:
     return (out / SCAN_DLL).exists() and stamp.exists() and stamp.read_text() == digest
 
 
-def scanner_build_args(out: Path) -> list[str]:
+def colocated(source: Path, project: Path) -> bool:
+    return source.parent == project.parent
+
+
+def staged_project(ctx: Context, source: Path, project: Path) -> Path:
+    stage = ctx.work / STAGE
+    stage.mkdir(parents=True, exist_ok=True)
+    shutil.copy(project, stage / PROJECT_FILE)
+    shutil.copy(source, stage / PROGRAM_CS)
+    return stage / PROJECT_FILE
+
+
+def build_project(ctx: Context) -> Path:
+    source, project = scanner_source(), scanner_project()
+    return project if colocated(source, project) else staged_project(ctx, source, project)
+
+
+def scanner_build_args(out: Path, project: Path) -> list[str]:
     return [
         "build",
-        str(SCAN_DIR / "Scan.csproj"),
+        str(project),
         "-c",
         "Release",
         "-nologo",
@@ -272,7 +308,7 @@ def build_scanner(ctx: Context) -> str | None:
     digest = scanner_digest()
     if scanner_current(out, digest):
         return None
-    code, output = dotnet(ctx, scanner_build_args(out), cwd=ctx.root, timeout=900)
+    code, output = dotnet(ctx, scanner_build_args(out, build_project(ctx)), cwd=ctx.root, timeout=900)
     if not produced(code, out / SCAN_DLL):
         return failure(code, output, "C# scanner build failed")
     (out / "stamp").write_text(digest)

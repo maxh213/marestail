@@ -66,6 +66,12 @@ DOCUMENTED = [
 ]
 SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/context.py"]
 SCANNER_SOURCE_SUFFIXES = {".java", ".cs", ".mjs", ".rb", ".rs", ".escript", ".exs"}
+FROZEN_SCANNER_PROJECTS = [
+    "marestail/cs/scan/Scan.csproj",
+    "marestail/jvm/pmd-ruleset.xml",
+    "marestail/jvm/tools/pom.xml",
+    "marestail/rs/scan/Cargo.toml",
+]
 
 
 def package_files() -> list[Path]:
@@ -321,3 +327,9 @@ def test_no_comments_or_docstrings_under_marestail() -> None:
 def test_non_python_scanner_sources_are_outside_the_package() -> None:
     found = [path.relative_to(ROOT).as_posix() for path in (ROOT / "marestail").rglob("*") if path.suffix in SCANNER_SOURCE_SUFFIXES]
     assert found == []
+
+
+def test_frozen_scanner_projects_stay_in_the_package() -> None:
+    missing = [name for name in FROZEN_SCANNER_PROJECTS if not (ROOT / name).is_file()]
+    moved = [name for name in FROZEN_SCANNER_PROJECTS if (ROOT / "scanners" / Path(name).relative_to("marestail")).is_file()]
+    assert missing + moved == []

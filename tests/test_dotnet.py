@@ -355,6 +355,35 @@ def build_reply(dll: Path, code: int = 0) -> Callable[[list[str]], tuple[int, st
     return reply
 
 
+def test_scanner_project_falls_back_to_the_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write(tmp_path / "scan", {dotnet.PROGRAM_CS: "class P {}"})
+    monkeypatch.setattr(dotnet, "SCAN_DIR", tmp_path / "scan")
+    assert dotnet.scanner_project() == dotnet.SCAN_PROJECT
+    assert dotnet.scanner_source() == tmp_path / "scan" / dotnet.PROGRAM_CS
+
+
+def test_colocated_project_and_source() -> None:
+    root = Path("/crate")
+    assert dotnet.colocated(root / "Program.cs", root / "Scan.csproj") is True
+    assert dotnet.colocated(root / "src" / "Program.cs", root / "Scan.csproj") is False
+
+
+def test_build_scanner_stages_a_split_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
+    write(tmp_path / "scan", {dotnet.PROGRAM_CS: "class P {}"})
+    write(tmp_path / "frozen", {dotnet.PROJECT_FILE: APP})
+    monkeypatch.setattr(dotnet, "SCAN_DIR", tmp_path / "scan")
+    monkeypatch.setattr(dotnet, "SCAN_PROJECT", tmp_path / "frozen" / dotnet.PROJECT_FILE)
+    monkeypatch.setattr(dotnet, "HOST", {"dotnet": True})
+    (tmp_path / "repo").mkdir()
+    ctx = context(tmp_path / "repo")
+    out = ctx.work / "cs-scan"
+    fake = fake_run(dotnet, build_reply(out / dotnet.SCAN_DLL))
+    assert dotnet.build_scanner(ctx) is None
+    staged = ctx.work / dotnet.STAGE
+    assert fake.calls[0][2] == str(staged / dotnet.PROJECT_FILE)
+    assert (staged / dotnet.PROGRAM_CS).read_text() == "class P {}"
+
+
 def test_build_scanner_builds_and_stamps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
     scan_dir = scanner_dir(tmp_path, monkeypatch)
     (tmp_path / "repo").mkdir()
