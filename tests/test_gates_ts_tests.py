@@ -24,7 +24,7 @@ def coverage_entry(statements: dict[str, int], branches: dict[str, list[int]]) -
 
 
 def write_coverage(root: Path, coverage: dict[str, Any]) -> None:
-    folder = root / ".marestail" / ts_tests.COVERAGE_DIR
+    folder = root / ".marestail" / _coverage.TS_COVERAGE_DIR
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "coverage-final.json").write_text(json.dumps(coverage))
 

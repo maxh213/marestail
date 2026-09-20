@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_tests
 from marestail.report import Result
@@ -78,7 +79,7 @@ def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     out_json = str(tmp_path / ".marestail" / "ex-coverage.json")
     assert fake.calls == [
         ["mix", "test", "--cover", "--export-coverage", "default"],
-        ["elixir", str(ex_tests.COVERAGE_SCRIPT), coverdata, out_json],
+        ["elixir", str(elixir.COVERAGE), coverdata, out_json],
     ]
     assert fake.options == [{"cwd": tmp_path, "timeout": 1800}, {"cwd": tmp_path, "timeout": 300}]
 

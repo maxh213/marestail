@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from marestail.gates import py_tests
+from marestail.gates import _coverage, py_tests
 from tests.conftest import make_context
 
 COVERAGE = {
@@ -81,9 +81,9 @@ def test_scoped_gaps(tmp_path: Path, fake_run: Any) -> None:
 
 def test_scoped_lines_resolve_against_python_root(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"python": {"root": "pkg"}}, scope_changed=True, changed={"pkg/m.py"}, changed_lines_map={"pkg/m.py": {5}})
-    assert py_tests.scoped_lines("m.py", ctx) == {5}
-    assert py_tests.scoped_lines("other.py", ctx) == set()
-    assert py_tests.scoped_lines("m.py", make_context(tmp_path)) is None
+    assert _coverage.scoped_lines("m.py", ctx) == {5}
+    assert _coverage.scoped_lines("other.py", ctx) == set()
+    assert _coverage.scoped_lines("m.py", make_context(tmp_path)) is None
 
 
 @pytest.mark.parametrize(

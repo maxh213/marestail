@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import ruby
-from marestail.gates import rb_crap
+from marestail.gates import _crap, rb_crap
 from tests.conftest import make_context
 
 SOURCE = "class User\n  def a\n    1\n  end\n\n  def b\n    2\n  end\nend\n"
@@ -178,9 +178,9 @@ def test_score_and_describe(tmp_path: Path) -> None:
     fn = {"file": str(tmp_path / "a.rb"), "line": 1, "name": "A#x", "complexity": 2}
     scored = rb_crap.score(fn, {"lines": [0]}, make_context(tmp_path))
     assert scored == {"file": "a.rb", "line": 1, "name": "A#x", "cc": 2, "cov": 0.0, "crap": 6.0}
-    assert rb_crap.describe(scored) == "a.rb:1 A#x crap=6.0 (cc=2, coverage=0%)"
+    assert _crap.describe(scored) == "a.rb:1 A#x crap=6.0 (cc=2, coverage=0%)"
 
 
 def test_above_sorts_worst_first() -> None:
     scored = [{"crap": 5.0}, {"crap": 4.0}, {"crap": 9.0}]
-    assert rb_crap.above(scored, 4.0) == [{"crap": 9.0}, {"crap": 5.0}]
+    assert _crap.above(scored, 4.0) == [{"crap": 9.0}, {"crap": 5.0}]

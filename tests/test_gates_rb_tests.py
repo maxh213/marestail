@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from marestail.gates import rb_tests
+from marestail.gates import _coverage, rb_tests
 from tests.conftest import make_context
 
 RSPEC_OK = "Randomized with seed 1\n\nFinished in 0.4 seconds\n12 examples, 0 failures\n"
@@ -150,8 +150,8 @@ def test_coverage_findings_skips_out_of_scope(tmp_path: Path) -> None:
 
 def test_relative_path(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
-    assert rb_tests.relative_path(str(tmp_path / "app" / "a.rb"), ctx) == "app/a.rb"
-    assert rb_tests.relative_path("/outside/a.rb", ctx) == "/outside/a.rb"
+    assert _coverage.relative_path(str(tmp_path / "app" / "a.rb"), ctx) == "app/a.rb"
+    assert _coverage.relative_path("/outside/a.rb", ctx) == "/outside/a.rb"
 
 
 @pytest.mark.parametrize(
