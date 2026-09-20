@@ -32,8 +32,8 @@ SKIP_DIRS = {
     "spec",
     "target",
 }
-TS_SCRIPT = Path(__file__).resolve().parent / "js" / "ts_depth.mjs"
-EX_SCRIPT = Path(__file__).resolve().parent / "ex" / "depth.exs"
+TS_SCRIPT = Path(__file__).resolve().parent.parent / "scanners" / "js" / "ts_depth.mjs"
+EX_SCRIPT = Path(__file__).resolve().parent.parent / "scanners" / "ex" / "depth.exs"
 SHALLOW_MIN_PUBLIC = 4
 SHALLOW_MAX_RATIO = 6.0
 LONG_FILE_LINES = 300

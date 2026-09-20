@@ -288,7 +288,7 @@ def test_elixir_failure_after_writing_the_report(tmp_path: Path, fake_run: Any) 
 
 def test_elixir_command(tmp_path: Path) -> None:
     out = tmp_path / "out.json"
-    script = str(Path(deadcode.__file__).resolve().parent.parent / "ex" / "deadcode.exs")
+    script = str(deadcode.EX_SCRIPT)
     base = ["mix", "run", "--no-start", script, "--out", str(out)]
     raw = {"elixir": {"preset": "phoenix", "deadcode_ignore_modules": ["A", "B"], "deadcode_ignore": ["x", "y"]}}
 

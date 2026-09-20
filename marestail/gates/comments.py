@@ -14,8 +14,8 @@ from marestail.context import Context, under_benchmarks
 from marestail.report import Result
 from marestail.shell import run
 
-SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_comments.mjs"
-EX_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "comments.exs"
+SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "js" / "ts_comments.mjs"
+EX_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "comments.exs"
 SKIP_DIRS = {
     "node_modules",
     ".venv",

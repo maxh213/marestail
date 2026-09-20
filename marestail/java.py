@@ -10,7 +10,7 @@ from typing import Any
 from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
-JVM_DIR = Path(__file__).resolve().parent / "jvm"
+JVM_DIR = Path(__file__).resolve().parent.parent / "scanners" / "jvm"
 SCAN_SOURCE = JVM_DIR / "Scan.java"
 TOOLS_POM = JVM_DIR / "tools" / "pom.xml"
 PMD_RULESET = JVM_DIR / "pmd-ruleset.xml"

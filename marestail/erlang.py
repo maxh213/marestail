@@ -8,7 +8,7 @@ from marestail.context import Context
 from marestail.shell import run, tail
 
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_DIR = Path(__file__).resolve().parent / "erl"
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scanners" / "erl"
 IMAGE = "erlang:27"
 INSTALL_HINT = f"install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull {IMAGE}`"
 UNAVAILABLE = f"erlang unavailable: {INSTALL_HINT}"

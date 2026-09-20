@@ -11,7 +11,7 @@ from marestail.report import Result
 from marestail.shell import run
 
 GATE = "ex.crap"
-SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "complexity.exs"
+SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "complexity.exs"
 
 
 def run_gate(ctx: Context) -> Result:

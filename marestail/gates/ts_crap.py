@@ -8,7 +8,7 @@ from marestail.gates.ts_tests import COVERAGE_DIR
 from marestail.report import Result
 from marestail.shell import run
 
-SCRIPT = Path(__file__).resolve().parent.parent / "js" / "ts_complexity.mjs"
+SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "js" / "ts_complexity.mjs"
 GATE = "ts.crap"
 
 

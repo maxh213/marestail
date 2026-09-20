@@ -10,7 +10,7 @@ from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
-SCAN_DIR = Path(__file__).resolve().parent / "cs" / "scan"
+SCAN_DIR = Path(__file__).resolve().parent.parent / "scanners" / "cs" / "scan"
 SCAN_DLL = "marestail-cs-scan.dll"
 SCAN_OUT = "cs-scan"
 IMAGE = "mcr.microsoft.com/dotnet/sdk:8.0"

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from coverage.files import GlobMatcher, prep_patterns
 
 from marestail.config import Config
 from marestail.context import Context
@@ -63,6 +64,26 @@ def make_context(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -
 FORBIDDEN_BINARIES = frozenset(
     {"docker", "claude", "grok", "kilo", "kimi", "cursor-agent", "agy", "dandelion", "sonar-scanner", "curl", "wget"}
 )
+TUI_OMIT = "tui"
+
+
+def cover_tui_sources(config: pytest.Config) -> None:
+    plugin = config.pluginmanager.getplugin("_cov")
+    controller = getattr(plugin, "cov_controller", None)
+    cov = getattr(controller, "cov", None)
+    inorout = getattr(cov, "_inorout", None)
+    if cov is None or inorout is None:
+        return
+    omit = [pattern for pattern in cov.config.run_omit if TUI_OMIT not in pattern.replace("\\", "/")]
+    if omit == list(cov.config.run_omit):
+        return
+    cov.config.run_omit = omit
+    inorout.omit = prep_patterns(omit)
+    inorout.omit_match = GlobMatcher(inorout.omit, "omit", "Omit", inorout._debug) if inorout.omit else None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    cover_tui_sources(config)
 
 
 class ForbiddenCallError(RuntimeError):

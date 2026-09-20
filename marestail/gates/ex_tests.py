@@ -9,7 +9,7 @@ from marestail.report import Result
 from marestail.shell import run, tail
 
 GATE = "ex.tests"
-COVERAGE_SCRIPT = Path(__file__).resolve().parent.parent / "ex" / "coverage.exs"
+COVERAGE_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "coverage.exs"
 COVERAGE_JSON = "ex-coverage.json"
 
 

@@ -14,6 +14,7 @@ from marestail.shell import run
 VULTURE_HEAD = re.compile(r":(\d+): (unused \w+|unreachable code) (.+)")
 VULTURE_CONFIDENCE = re.compile(r"\d+% confidence\)")
 PYTHON_KINDS = ["unused function", "unused method", "unused class", "unused import", "unused property", "unreachable code"]
+EX_SCRIPT = Path(__file__).resolve().parent.parent.parent / "scanners" / "ex" / "deadcode.exs"
 PYTHON_DECORATORS = [
     "@*.route",
     "@*.before_request",
@@ -265,8 +266,7 @@ def xref_args(ctx: Context, ebin: Path) -> list[str]:
 
 
 def elixir_command(ctx: Context, out: Path) -> list[str]:
-    script = Path(__file__).resolve().parent.parent / "ex" / "deadcode.exs"
-    command = ["mix", "run", "--no-start", str(script), "--out", str(out)]
+    command = ["mix", "run", "--no-start", str(EX_SCRIPT), "--out", str(out)]
     preset = ctx.elixir("preset")
     if preset:
         command += ["--preset", str(preset)]

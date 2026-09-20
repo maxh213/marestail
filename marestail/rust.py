@@ -10,7 +10,7 @@ from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 CARGO_TOML = "Cargo.toml"
-SCAN_DIR = Path(__file__).resolve().parent / "rs" / "scan"
+SCAN_DIR = Path(__file__).resolve().parent.parent / "scanners" / "rs" / "scan"
 SCAN_BIN = Path("rs-scan") / "release" / "marestail-rs-scan"
 SCAN_INPUTS = ("main.rs", CARGO_TOML, "Cargo.lock")
 SKIP_DIRS = {"target", ".marestail", ".git", "node_modules", "mutants.out", "mutants.out.old"}

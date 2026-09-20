@@ -5,7 +5,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.shell import run
 
-SCRIPT = Path(__file__).resolve().parent / "rb" / "scan.rb"
+SCRIPT = Path(__file__).resolve().parent.parent / "scanners" / "rb" / "scan.rb"
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "ruby:3.2-slim"
 SKIP_DIRS = {"vendor", "spec", "test", "tmp", "log", "node_modules", ".git", "coverage"}
