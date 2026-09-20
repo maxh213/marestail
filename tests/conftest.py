@@ -54,6 +54,10 @@ def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout
 
 
+def git_try(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+
 @pytest.fixture
 def git_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
@@ -80,7 +84,7 @@ FORBIDDEN_BINARIES = frozenset(
 
 
 def git_toplevel() -> Path | None:
-    completed = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    completed = git_try("rev-parse", "--show-toplevel")
     if completed.returncode != 0:
         return None
     return Path(completed.stdout.strip())

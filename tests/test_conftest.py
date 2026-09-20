@@ -1,4 +1,3 @@
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -8,6 +7,12 @@ import pytest
 from tests import conftest
 
 
+def test_git_try_show_toplevel() -> None:
+    completed = conftest.git_try("rev-parse", "--show-toplevel")
+    assert completed.returncode == 0
+    assert Path(completed.stdout.strip()).is_dir()
+
+
 def test_git_toplevel_is_this_repo() -> None:
     root = conftest.git_toplevel()
     assert root is not None
@@ -15,7 +20,7 @@ def test_git_toplevel_is_this_repo() -> None:
 
 
 def test_git_toplevel_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""))
+    monkeypatch.setattr(conftest, "git_try", lambda *_args: SimpleNamespace(returncode=1, stdout=""))
     assert conftest.git_toplevel() is None
 
 
