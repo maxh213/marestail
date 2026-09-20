@@ -94,3 +94,12 @@ def measure_one(fn: Callable[[], Any]) -> float:
         started = time.perf_counter()
         fn()
         return (time.perf_counter() - started) * 1000
+
+
+def missing(*_args: Any, **_kwargs: Any) -> tuple[()]:
+    return ()
+
+
+def measure_named(module: Any, name: str, *args: Any) -> list[float]:
+    fn = getattr(module, name, missing)
+    return measure(lambda: fn(*args) if callable(fn) else missing())

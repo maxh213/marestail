@@ -57,9 +57,6 @@ try:
     harness.emit("report.render", harness.measure(lambda: report.render(results)))
     harness.emit("report.to_json", harness.measure(lambda: report.to_json(results, "all", set())))
     harness.emit("marestail install", harness.measure(install_once))
-    if hasattr(py_crap, "coverage_omits"):
-        harness.emit("py_crap.coverage_omits", harness.measure(lambda: py_crap.coverage_omits(ctx)))
-    else:
-        harness.absent("py_crap.coverage_omits")
+    harness.emit("py_crap.coverage_omits", harness.measure_named(py_crap, "coverage_omits", ctx))
 finally:
     shutil.rmtree(grok_home, ignore_errors=True)
