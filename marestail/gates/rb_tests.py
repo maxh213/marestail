@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates._coverage import RB_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import relative_path
+from marestail.gates._coverage import RB_COVERAGE
+from marestail.gates._coverage import relative_path as relative_path
 from marestail.report import Result
 from marestail.ruby import bundle
 from marestail.shell import run, tail
 
+COVERAGE_JSON = RB_COVERAGE
 GATE = "rb.tests"
 RESULTSET = Path("coverage/.resultset.json")
 BRANCH_SPAN = re.compile(r"\[\s*:\w+\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*\]")

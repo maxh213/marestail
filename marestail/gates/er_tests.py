@@ -5,11 +5,12 @@ from typing import Any
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates._coverage import ER_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import coverage_findings
+from marestail.gates._coverage import ER_COVERAGE
+from marestail.gates._coverage import coverage_findings as coverage_findings
 from marestail.report import Result
 from marestail.shell import tail
 
+COVERAGE_JSON = ER_COVERAGE
 GATE = "er.tests"
 TESTS_PASSED = " tests passed"
 EBIN = "er-ebin"

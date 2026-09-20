@@ -4,11 +4,14 @@ import time
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates._coverage import TS_COVERAGE_DIR as COVERAGE_DIR
-from marestail.gates._coverage import in_scope_findings
-from marestail.javascript import labelled as relative_path
+from marestail.gates._coverage import TS_COVERAGE_DIR
+from marestail.gates._coverage import in_scope_findings as in_scope_findings
+from marestail.javascript import labelled
 from marestail.report import Result
 from marestail.shell import run, tail
+
+COVERAGE_DIR = TS_COVERAGE_DIR
+relative_path = labelled
 
 JEST_RESULTS = "ts-tests.json"
 UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)

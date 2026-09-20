@@ -3,10 +3,11 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
-from marestail.elixir import project_files as scoped_sources
+from marestail.elixir import project_files
 from marestail.report import Result
 from marestail.shell import run
 
+scoped_sources = project_files
 GATE = "ex.lint"
 MAX_LINES = 60
 FORMAT = ["mix", "format", "--check-formatted"]

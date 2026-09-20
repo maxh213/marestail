@@ -3,12 +3,14 @@ import time
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates._coverage import PY_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import scoped_lines
-from marestail.gates._crap import above, describe
+from marestail.gates._coverage import PY_COVERAGE
+from marestail.gates._coverage import scoped_lines as scoped_lines
+from marestail.gates._crap import above as above
+from marestail.gates._crap import describe as describe
 from marestail.report import Result
 from marestail.shell import run
 
+COVERAGE_JSON = PY_COVERAGE
 GATE = "py.crap"
 
 Block = dict[str, Any]

@@ -5,12 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates._coverage import RB_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import relative_path
-from marestail.gates._crap import above, describe
+from marestail.gates._coverage import RB_COVERAGE
+from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import above as above
+from marestail.gates._crap import describe as describe
 from marestail.report import Result
 from marestail.ruby import scan, scanned, sources
 
+COVERAGE_JSON = RB_COVERAGE
 GATE = "rb.crap"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
 OPENER = re.compile(r"^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b")

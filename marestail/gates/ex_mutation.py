@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any, cast
 
 from marestail.context import Context, MutationScope
-from marestail.elixir import project_files as scoped_sources
+from marestail.elixir import project_files
 from marestail.report import Result
 from marestail.shell import run, tail
 
+scoped_sources = project_files
 GATE = "ex.mutation"
 PASSING = {"killed", "invalid", "equivalent"}
 DISABLED_TIMEOUTS = {"0", "none", "false", "off"}

@@ -5,11 +5,13 @@ from typing import Any
 
 from marestail import elixir
 from marestail.context import Context
-from marestail.gates._coverage import EX_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import relative_path
-from marestail.gates._crap import crap_result, scored_functions
+from marestail.gates._coverage import EX_COVERAGE
+from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import crap_result as crap_result
+from marestail.gates._crap import scored_functions as scored_functions
 from marestail.report import Result
 
+COVERAGE_JSON = EX_COVERAGE
 GATE = "ex.crap"
 
 

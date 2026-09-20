@@ -4,12 +4,15 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
-from marestail.elixir import COVERAGE as COVERAGE_SCRIPT
-from marestail.gates._coverage import EX_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import coverage_findings, relative_path
+from marestail.elixir import COVERAGE
+from marestail.gates._coverage import EX_COVERAGE
+from marestail.gates._coverage import coverage_findings as coverage_findings
+from marestail.gates._coverage import relative_path as relative_path
 from marestail.report import Result
 from marestail.shell import run, tail
 
+COVERAGE_SCRIPT = COVERAGE
+COVERAGE_JSON = EX_COVERAGE
 GATE = "ex.tests"
 
 

@@ -3,11 +3,12 @@ import time
 from typing import Any
 
 from marestail.context import Context
-from marestail.gates._coverage import PY_COVERAGE as COVERAGE_JSON
-from marestail.gates._coverage import scoped_lines
+from marestail.gates._coverage import PY_COVERAGE
+from marestail.gates._coverage import scoped_lines as scoped_lines
 from marestail.report import Result
 from marestail.shell import run, tail
 
+COVERAGE_JSON = PY_COVERAGE
 GATE = "py.tests"
 COVERAGE_XML = "py-coverage.xml"
 
