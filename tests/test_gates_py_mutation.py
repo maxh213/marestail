@@ -30,7 +30,7 @@ def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
 
 def test_bad_setting_measures_elapsed(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_run(py_mutation)
-    monkeypatch.setattr(py_mutation.time, "time", Clock())
+    monkeypatch.setattr("marestail.gates.py_mutation.time.time", Clock())
     result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
     assert result.seconds == 0.25
 

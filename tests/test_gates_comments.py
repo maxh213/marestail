@@ -28,7 +28,7 @@ def test_clean_tree_passes(tmp_path: Path) -> None:
 
 def test_clean_tree_measures_elapsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write(tmp_path, "a.py", "x = 1\n")
-    monkeypatch.setattr(comments.time, "time", Clock())
+    monkeypatch.setattr("marestail.gates.comments.time.time", Clock())
     result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
     assert result.seconds == 0.25
 

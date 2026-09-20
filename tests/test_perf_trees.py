@@ -54,7 +54,7 @@ def test_close_removes_non_head_worktrees(tmp_path: Path, fake_run: Callable[...
     extra.mkdir()
     trees.write_trees(config, trees.Session("t1", [trees.Tree("head", "aaa", tmp_path)]))
     removed: list[tuple[Path, bool]] = []
-    monkeypatch.setattr(trees.shutil, "rmtree", lambda path, ignore_errors=False: removed.append((path, ignore_errors)))
+    monkeypatch.setattr("marestail.perf.trees.shutil.rmtree", lambda path, ignore_errors=False: removed.append((path, ignore_errors)))
     fake = fake_run(trees, [(0, ""), (0, "")])
     session = trees.Session("t1", [trees.Tree("head", "aaa", tmp_path), trees.Tree("baseline", "bbb", extra)])
     trees.close(config, session)

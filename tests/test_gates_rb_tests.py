@@ -48,7 +48,7 @@ def test_failing_tests(tmp_path: Path, fake_run: Any) -> None:
 
 
 def test_failing_tests_measure_elapsed(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rb_tests.time, "time", Clock())
+    monkeypatch.setattr("marestail.gates.rb_tests.time.time", Clock())
     result = run(make_context(tmp_path), fake_run, (1, "failed"))
     assert result.seconds == 0.25
 
