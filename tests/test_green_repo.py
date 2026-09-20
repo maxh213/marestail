@@ -65,6 +65,7 @@ DOCUMENTED = [
     "JAVA_HOME",
 ]
 SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/context.py"]
+SCANNER_SOURCE_SUFFIXES = {".java", ".cs", ".mjs", ".rb", ".rs", ".escript", ".exs"}
 
 
 def package_files() -> list[Path]:
@@ -315,3 +316,8 @@ def docstrings_in(path: Path) -> list[str]:
 
 def test_no_comments_or_docstrings_under_marestail() -> None:
     assert [found for path in package_files() for found in comments_in(path) + docstrings_in(path)] == []
+
+
+def test_non_python_scanner_sources_are_outside_the_package() -> None:
+    found = [path.relative_to(ROOT).as_posix() for path in (ROOT / "marestail").rglob("*") if path.suffix in SCANNER_SOURCE_SUFFIXES]
+    assert found == []
