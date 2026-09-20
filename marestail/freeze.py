@@ -132,10 +132,15 @@ def matches_any(path: str, patterns: list[str]) -> bool:
     return any(matches(path, pattern) for pattern in patterns)
 
 
+DOUBLE_STAR = "**/"
+DIR_SUFFIX = "/**"
+ANY_DIR = "*/"
+
+
 def matches(path: str, pattern: str) -> bool:
-    if pattern.startswith("**/"):
-        rest = pattern[3:]
-        return fnmatch(path, rest) or fnmatch(path, "*/" + rest)
-    if pattern.endswith("/**"):
-        return path.startswith(pattern[:-3] + "/")
+    if pattern.startswith(DOUBLE_STAR):
+        rest = pattern[len(DOUBLE_STAR) :]
+        return fnmatch(path, rest) or fnmatch(path, ANY_DIR + rest)
+    if pattern.endswith(DIR_SUFFIX):
+        return path.startswith(pattern[: -len(DIR_SUFFIX)] + "/")
     return fnmatch(path, pattern)

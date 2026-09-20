@@ -92,8 +92,8 @@ def traces(text: str) -> list[Trace]:
 
 
 def line_after(text: str, pos: int) -> int:
-    head, *tail = text[pos:].split("\n", 1)
-    return pos + len(head) + (0, 1)[bool(tail)]
+    end = line_end(text, pos)
+    return end + (end < len(text))
 
 
 def line_trace(text: str, start: int) -> tuple[list[Trace], int]:

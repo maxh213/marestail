@@ -23,6 +23,15 @@ run_gates_with_context = gates_module.run_gates_with_context
 run_one = gates_module.run_one
 
 HOOK_BLOCK_LIMIT = 5
+LOOP_START = 0
+COUNTER_TTL = 86400
+EMPTY = ""
+FOCUS_ENV = "MARESTAIL_FOCUS"
+SCOPE_ENV = "MARESTAIL_SCOPE"
+HARD_SCOPE = "hard"
+STOP_EVENT = "stop"
+COMPLETED = "completed"
+END_TURN = "end_turn"
 STORE_TRUE = "store_true"
 TREE = "--tree"
 TUI_APP = "marestail.tui.app"
@@ -211,11 +220,11 @@ def passed(results: list[Result]) -> bool:
 
 def hook_scope(config: config_module.Config) -> tuple[set[str], bool]:
     found = hook_focus(config)
-    for path in filter(None, os.environ.get("MARESTAIL_FOCUS", "").split(os.pathsep)):
+    for path in filter(None, os.environ.get(FOCUS_ENV, EMPTY).split(os.pathsep)):
         entry = locate_focus(config, path)
         if entry is not None:
             found.add(entry)
-    return found, os.environ.get("MARESTAIL_SCOPE") == "hard"
+    return found, os.environ.get(SCOPE_ENV) == HARD_SCOPE
 
 
 def scope_line(ctx: context_module.Context) -> str | None:
@@ -259,7 +268,7 @@ def claude_reply(message: str | None) -> int:
     return 2
 
 
-def hook_verdict(config: config_module.Config, session_id: str, loop_count: int = 0, finished: bool = True) -> str | None:
+def hook_verdict(config: config_module.Config, session_id: str, loop_count: int = LOOP_START, finished: bool = True) -> str | None:
     counter = config.work / f"hook-{session_id}.count"
     sweep_counters(config.work, keep=counter)
     blocked = blocked_count(counter)
@@ -289,7 +298,7 @@ def is_cursor_hook(payload: Payload) -> bool:
 
 
 def cursor_hook_command(payload: Payload) -> int:
-    if payload.get("hook_event_name") in (None, "", "stop"):
+    if payload.get("hook_event_name") in (None, EMPTY, STOP_EVENT):
         answer_cursor(payload)
     return 0
 
@@ -312,8 +321,8 @@ def cursor_session(payload: Payload) -> str:
 
 def cursor_verdict(config: config_module.Config, payload: Payload) -> str | None:
     session_id = cursor_session(payload)
-    loop_count = int(payload.get("loop_count") or 0)
-    finished = payload.get("status") in (None, "", "completed")
+    loop_count = int(payload.get("loop_count") or LOOP_START)
+    finished = payload.get("status") in (None, EMPTY, COMPLETED)
     previous = Path.cwd()
     try:
         os.chdir(config.root)
@@ -323,7 +332,7 @@ def cursor_verdict(config: config_module.Config, payload: Payload) -> str | None
 
 
 def grok_hook_command(payload: Payload) -> int:
-    if payload.get("reason") in (None, "", "end_turn"):
+    if payload.get("reason") in (None, EMPTY, END_TURN):
         answer_grok(payload)
     return 0
 
@@ -347,8 +356,8 @@ def grok_turn(config: config_module.Config, session_id: str, turn_id: str) -> No
 def grok_verdict(config: config_module.Config, session_id: str, turn_id: str) -> tuple[bool, str]:
     message = hook_verdict(config, session_id)
     allow = message is None
-    grok_remember_hook(config.work, session_id, turn_id, allow, message or "")
-    return allow, message or ""
+    grok_remember_hook(config.work, session_id, turn_id, allow, message or EMPTY)
+    return allow, message or EMPTY
 
 
 def grok_emit_hook(allow: bool, message: str) -> None:
@@ -379,8 +388,8 @@ def grok_remember_hook(work: Path, session_id: str, turn_id: str, allow: bool, m
 
 def sweep_counters(work: Path, keep: Path) -> None:
     for stale in work.glob("hook-*.count"):
-        if stale != keep and time.time() - stale.stat().st_mtime > 86400:
-            stale.unlink(missing_ok=True)
+        if stale != keep and time.time() - stale.stat().st_mtime > COUNTER_TTL:
+            stale.unlink()
 
 
 def run_command(args: argparse.Namespace) -> int:

@@ -445,6 +445,12 @@ def test_claude_root(repo: Path, payload: dict[str, Any], expected: str | None) 
     assert cli.claude_root(payload) == (expected or repo)
 
 
+def test_hook_constants() -> None:
+    assert (cli.LOOP_START, cli.COUNTER_TTL, cli.EMPTY) == (0, 86400, "")
+    assert (cli.FOCUS_ENV, cli.SCOPE_ENV, cli.HARD_SCOPE) == ("MARESTAIL_FOCUS", "MARESTAIL_SCOPE", "hard")
+    assert (cli.STOP_EVENT, cli.COMPLETED, cli.END_TURN) == ("stop", "completed", "end_turn")
+
+
 def test_hook_verdict_honours_loop_count_and_status(gates: Callable[..., Recorder], repo: Path) -> None:
     gates(FAIL)
     config = config_module.load(repo)
@@ -453,6 +459,28 @@ def test_hook_verdict_honours_loop_count_and_status(gates: Callable[..., Recorde
     assert not counter(repo, "b").exists()
     assert cli.hook_verdict(config, "c", loop_count=4) == "render ['tests'] None\nFix these before stopping.\n"
     assert counter(repo, "c").read_text() == "1"
+
+
+def test_hook_verdict_keeps_an_old_session_counter(gates: Callable[..., Recorder], repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    gates(FAIL)
+    path = counter(repo, "old")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("3")
+    os.utime(path, (1000, 1000))
+    monkeypatch.setattr(time, "time", lambda: 100000.0)
+    assert cli.hook_verdict(config_module.load(repo), "old") == "render ['tests'] None\nFix these before stopping.\n"
+    assert path.read_text() == "4"
+
+
+def test_hook_verdict_includes_the_scope_line(gates: Callable[..., Recorder], repo: Path) -> None:
+    gates(FAIL, scoped=True)
+    text = cli.hook_verdict(config_module.load(repo), "s")
+    assert text is not None
+    assert "changed" in text.split("\n", 1)[0]
+
+
+def test_hook_scope_without_environment(repo: Path) -> None:
+    assert cli.hook_scope(config_module.load(repo)) == (set(), False)
 
 
 def test_load_hook_config(repo: Path, tmp_path: Path) -> None:
@@ -508,6 +536,14 @@ def test_cursor_hook_allows(
     gates(PASS if "hook_event_name" in payload else FAIL)
     assert json.loads(cursor_hook(monkeypatch, capsys, {"cwd": str(repo), **payload})) == {}
     assert not counter(repo, "q").exists()
+
+
+def test_cursor_hook_treats_empty_event_as_stop(
+    gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repo: Path
+) -> None:
+    gates(FAIL)
+    output = cursor_hook(monkeypatch, capsys, {"cwd": str(repo), "hook_event_name": "", "session_id": "e", "status": ""})
+    assert json.loads(output) == {"followup_message": "render ['tests'] None\nFix these before stopping.\n"}
 
 
 @pytest.mark.parametrize("payload", [{"hook_event_name": "afterFileEdit"}, {"cwd": "/"}])
@@ -577,6 +613,14 @@ def test_grok_hook_without_turn_id_forgets(
     assert len(fake.calls) == 2
 
 
+def test_grok_hook_treats_empty_reason_as_end_turn(
+    gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], repo: Path
+) -> None:
+    gates(FAIL)
+    output = grok_hook(monkeypatch, capsys, {"cwd": str(repo), "sessionId": "e", "promptId": "p", "reason": ""})
+    assert json.loads(output)["decision"] == "block"
+
+
 @pytest.mark.parametrize("payload", [{"reason": "max_tokens"}, {"cwd": "/"}])
 def test_grok_hook_ignores(
     gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], payload: dict[str, Any]
@@ -612,13 +656,29 @@ def test_grok_replay_hook(tmp_path: Path, stamp: str | None, turn: str, expected
 
 
 def test_grok_remember_hook(tmp_path: Path) -> None:
-    work = tmp_path / "work"
+    work = tmp_path / "nested" / "work"
     cli.grok_remember_hook(work, "s", "", False, "x")
     assert not work.exists()
     cli.grok_remember_hook(work, "s", "t", False, "fix")
     assert (work / "hook-s.turn").read_text() == "t\nblock\nfix"
     cli.grok_remember_hook(work, "s", "u", True, "ignored")
     assert (work / "hook-s.turn").read_text() == "u\nallow\n"
+
+
+def test_grok_verdict_returns_empty_message_when_allowed(gates: Callable[..., Recorder], repo: Path) -> None:
+    gates(PASS)
+    allow, message = cli.grok_verdict(config_module.load(repo), "sess", "t")
+    assert (allow, message) == (True, "")
+    assert not (repo / ".marestail" / "hook-None.count").exists()
+
+
+def test_grok_verdict_uses_the_session_id(gates: Callable[..., Recorder], repo: Path) -> None:
+    gates(FAIL)
+    allow, message = cli.grok_verdict(config_module.load(repo), "sess", "t")
+    assert allow is False
+    assert message != ""
+    assert counter(repo, "sess").exists()
+    assert not (repo / ".marestail" / "hook-None.count").exists()
 
 
 def test_sweep_counters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

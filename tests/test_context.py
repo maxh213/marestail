@@ -18,6 +18,47 @@ def tree(root: Path, *paths: str) -> None:
         (root / path).write_text("one\ntwo\n")
 
 
+def test_focus_path_joins_relative_and_keeps_absolute(tmp_path: Path) -> None:
+    config = make_context(tmp_path).config
+    inner = tmp_path / "a.py"
+    inner.write_text("x")
+    assert context.focus_path(config, Path("a.py")) == inner
+    assert context.focus_path(config, inner) == inner
+
+
+def test_locate_focus_inside_and_outside(tmp_path: Path) -> None:
+    config = make_context(tmp_path).config
+    (tmp_path / "src").mkdir()
+    (tmp_path / "a.py").write_text("x")
+    assert context.locate_focus(config, "a.py") == "a.py"
+    assert context.locate_focus(config, str(tmp_path / "src")) == "src"
+    assert context.locate_focus(config, ".") == "."
+    assert context.locate_focus(config, "missing") is None
+    assert context.locate_focus(config, str(tmp_path.parent)) is None
+
+
+def test_branch_mutation_files_passes_the_repo_root(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Path, str]] = []
+
+    def fake_base_exists(root: Path, base: str) -> bool:
+        seen.append((root, base))
+        return False
+
+    monkeypatch.setattr(context, "base_exists", fake_base_exists)
+    ctx = make_context(git_repo, {"git": {"base": "main"}})
+    assert ctx.mutation_files("python", git_repo, (".py",)).mode == "full"
+    assert seen == [(git_repo, "main")]
+
+
+def test_branch_mutation_files_passes_the_base_to_changed_files(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Path, str]] = []
+    monkeypatch.setattr(context, "base_exists", lambda _root, _base: True)
+    monkeypatch.setattr(context, "changed_files", lambda root, base: seen.append((root, base)) or set())
+    ctx = make_context(git_repo, {"git": {"base": "main"}})
+    assert ctx.mutation_files("python", git_repo, (".py",)).mode == "skip"
+    assert seen == [(git_repo, "main")]
+
+
 def test_paths(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert (ctx.root, ctx.work) == (tmp_path, tmp_path / ".marestail")

@@ -233,14 +233,19 @@ def missing_focus(resolved: dict[str, str | None]) -> list[str]:
 
 
 def locate_focus(config: Config, path: str) -> str | None:
-    candidate = Path(path.strip())
-    full = candidate if candidate.is_absolute() else config.root / candidate
+    full = focus_path(config, Path(path.strip()))
     if not full.exists():
         return None
     try:
         return full.resolve().relative_to(config.root.resolve()).as_posix()
     except ValueError:
         return None
+
+
+def focus_path(config: Config, candidate: Path) -> Path:
+    if candidate.is_absolute():
+        return candidate
+    return config.root / candidate
 
 
 def hook_focus(config: Config) -> set[str]:

@@ -94,8 +94,16 @@ def test_put_and_clip() -> None:
     assert (0, 3, "z", 5) in win.cells
     assert clip_text(0, 0, "", 4, 10) is None
     assert offscreen(-1, 0, 4, 10) is True
+    assert offscreen(0, 0, 4, 10) is False
+    assert offscreen(3, 0, 4, 10) is False
+    assert offscreen(4, 0, 4, 10) is True
+    assert offscreen(0, 9, 4, 10) is False
+    assert offscreen(0, 10, 4, 10) is True
     assert shift_left(0, 2, "ab") == (0, 2, "ab")
     assert shift_left(0, -1, "ab") == (0, 0, "b")
+    assert shift_left(0, -2, "hello") == (0, 0, "llo")
+    assert panels.shift_neg(0, -2, "hello") == (0, 0, "llo")
+    assert panels.clipped(0, 8, "abcdef", 10) == (0, 8, "ab")
     assert panels.surely("x") == "x"
     assert panels.surely(0) == 0
     assert panels.skip() is None
@@ -108,6 +116,10 @@ def test_put_and_clip() -> None:
 def test_draw_box_and_helpers() -> None:
     win: Any = FakeWin()
     draw_box(win, Rect(0, 0, 1, 1), ROUND, 0)
+    assert win.cells == []
+    two: Any = FakeWin(5, 5)
+    draw_box(two, Rect(0, 0, 2, 2), ROUND, 0)
+    assert ROUND.tl in "".join(cell[2] for cell in two.cells)
     draw_box(win, Rect(0, 0, 3, 5), ROUND, 1)
     box: Any = FakeWin(10, 20)
     paint_box(box, Rect(1, 2, 4, 6), ROUND, 7)
@@ -297,6 +309,9 @@ def test_panel_helpers(tmp_path: Path) -> None:
     assert panels.blank_marquee("abc", 2, 0) == ""
     assert panels.just_text("abc", 2, 0) == "abc"
     assert panels.scrolled_text("abcdef", 3, 0) == "abc"
+    assert panels.scrolled_text("ab", 5, 0) == "ab"
+    assert panels.scrolled_text("abcdef", 3, 16) == "abc"
+    assert panels.scrolled_text("abcdef", 3, 13) == "bcd"
     assert panels.fit_or_scroll("ab", 5, 0) == "ab"
     assert panels.pick_marquee(0) is panels.blank_marquee
     assert panels.worker_tails(None) == []

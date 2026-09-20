@@ -18,6 +18,20 @@ def test_skipped() -> None:
     assert Result.skipped("py.tests", "no python") == Result("py.tests", True, "skipped: no python", [], 0.0)
 
 
+def test_result_field_names() -> None:
+    assert (report.GATE_FIELD, report.SECONDS_FIELD) == ("gate", "seconds")
+
+
+def test_result_rejects_a_missing_gate() -> None:
+    with pytest.raises(TypeError, match=r"^gate$"):
+        Result(None, True, "ok")
+
+
+def test_result_rejects_missing_seconds() -> None:
+    with pytest.raises(TypeError, match=r"^seconds$"):
+        Result("docs", True, "ok", [], None)
+
+
 def test_render_one_passing() -> None:
     result = Result("py.lint", True, "clean", ["a", "b"], 1.26)
     assert report.render_one(result) == "[ok  ] py.lint        clean  (1.3s)\n       a\n       b"

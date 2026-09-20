@@ -4,6 +4,9 @@ from marestail import audit
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 
+EMPTY = ""
+PARAGRAPH = "\n\n"
+
 ROLES_DIR = Path(__file__).resolve().parent.parent / "roles"
 WORKER_SCOPE = (
     "This run has a hard scope: {paths}. Make the task's change inside these paths. Outside them, make only the smallest "
@@ -39,11 +42,11 @@ def worker_prompt(
     task_name: str,
     report: Path,
     feedback: str,
-    label: str = "",
-    gate_flags: str = "",
+    label: str = EMPTY,
+    gate_flags: str = EMPTY,
     hard_focus: set[str] | None = None,
 ) -> str:
-    return "\n\n".join(
+    return PARAGRAPH.join(
         [
             role_text(worker.name),
             section(TASK, task.read_text()),
@@ -63,11 +66,11 @@ def judge_prompt(
     task_name: str,
     report: Path,
     gate_report: str,
-    trees: str = "",
-    feedback: str = "",
+    trees: str = EMPTY,
+    feedback: str = EMPTY,
     hard_focus: set[str] | None = None,
 ) -> str:
-    return "\n\n".join(
+    return PARAGRAPH.join(
         [
             role_text(judge.name),
             section(TASK, task.read_text()),
@@ -112,7 +115,7 @@ def spec_listing(config: Config, task_name: str) -> str:
 
 def spec_contents(config: Config, task_name: str) -> str:
     files = audit.feature_files(config, task_name) + qa_files(config, task_name)
-    return "\n\n".join(f"## {f.relative_to(config.root)}\n{f.read_text().strip()}" for f in files) or "none yet"
+    return PARAGRAPH.join(f"## {f.relative_to(config.root)}\n{f.read_text().strip()}" for f in files) or "none yet"
 
 
 def qa_files(config: Config, task_name: str) -> list[Path]:
@@ -122,7 +125,7 @@ def qa_files(config: Config, task_name: str) -> list[Path]:
 def handoffs(config: Config, task_name: str) -> str:
     files = audit.listing(config.work / "handoffs" / task_name, "*.md")
     if files:
-        return "\n\n".join(f"## {file.stem}\n{file.read_text().strip()}" for file in files)
+        return PARAGRAPH.join(f"## {file.stem}\n{file.read_text().strip()}" for file in files)
     return handoffs_from_history(config) or "none"
 
 
@@ -135,7 +138,7 @@ def handoffs_from_history(config: Config) -> str:
     return "\n".join(f"## {entry.strip()}" for entry in entries)
 
 
-def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = "", gate_flags: str = "") -> str:
+def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = EMPTY, gate_flags: str = EMPTY) -> str:
     steps = [
         *audit_step(config, worker, task_name),
         *gate_step(worker, gate_flags),
@@ -198,8 +201,8 @@ def bounce_choices(judge: Judge) -> str:
     )
 
 
-def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, note: Path, feedback: str = "") -> str:
-    return "\n\n".join(
+def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, note: Path, feedback: str = EMPTY) -> str:
+    return PARAGRAPH.join(
         [
             role_text("perf"),
             section(TASK, task.read_text()),

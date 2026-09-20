@@ -32,6 +32,10 @@ def test_matches(path: str, pattern: str, expected: bool) -> None:
     assert freeze.matches(path, pattern) is expected
 
 
+def test_glob_constants() -> None:
+    assert (freeze.DOUBLE_STAR, freeze.DIR_SUFFIX, freeze.ANY_DIR) == ("**/", "/**", "*/")
+
+
 def test_matches_any() -> None:
     assert freeze.matches_any("qa/x.md", ["features/**", "qa/**"]) is True
     assert freeze.matches_any("src/x.py", ["features/**", "qa/**"]) is False

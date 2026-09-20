@@ -3,6 +3,8 @@ import time
 from dataclasses import asdict, dataclass, field
 
 MAX_FINDINGS_SHOWN = 40
+GATE_FIELD = "gate"
+SECONDS_FIELD = "seconds"
 
 
 def elapsed(started: float) -> float:
@@ -16,6 +18,12 @@ class Result:
     summary: str
     findings: list[str] = field(default_factory=list)
     seconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.gate, str):
+            raise TypeError(GATE_FIELD)
+        if self.seconds is None:
+            raise TypeError(SECONDS_FIELD)
 
     @classmethod
     def skipped(cls, gate: str, why: str) -> "Result":

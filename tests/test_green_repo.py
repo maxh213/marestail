@@ -399,7 +399,28 @@ def test_mutmut_kills_mutants_on_a_tiny_package(tmp_path: Path) -> None:
     assert survivors == [], survivors
 
 
-PACKAGE_MUTANTS = ["marestail.report.*", "marestail.shell.*"]
+PACKAGE_MUTANTS = [
+    "marestail.audit.*",
+    "marestail.changes.*",
+    "marestail.cli.*",
+    "marestail.context.*",
+    "marestail.freeze.*",
+    "marestail.prompts.*",
+    "marestail.report.*",
+    "marestail.shell.*",
+]
+
+
+def package_mutant_patterns() -> list[str]:
+    patterns: list[str] = []
+    for path in (ROOT / "marestail").rglob("*.py"):
+        if "tui" in path.parts:
+            continue
+        parts = path.relative_to(ROOT).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        patterns.append(".".join(parts) + ".*")
+    return sorted(patterns)
 
 
 def test_this_package_kills_its_own_mutants() -> None:
@@ -410,9 +431,17 @@ def test_this_package_kills_its_own_mutants() -> None:
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=240,
+        timeout=600,
     )
     total, survivors = py_mutation.surviving(make_context(ROOT), PACKAGE_MUTANTS)
     assert total > 0, completed.stdout + completed.stderr
     assert [item for item in survivors if "not checked" in item] == []
     assert survivors == []
+
+
+def test_package_mutation_patterns_cover_every_non_tui_module() -> None:
+    patterns = package_mutant_patterns()
+    assert "marestail.audit.*" in patterns
+    assert "marestail.gates.rb_mutation.*" in patterns
+    assert [pattern for pattern in patterns if ".tui." in pattern] == []
+    assert set(PACKAGE_MUTANTS) <= set(patterns)

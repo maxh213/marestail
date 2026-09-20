@@ -43,6 +43,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     write(root / "qa" / "t.md", " procedure \n")
     write(root / "tasks" / "t.md", " Do the thing. \n")
     write(root / ".marestail" / "handoffs" / "t" / "01-specifier.md", " wrote spec \n")
+    write(root / ".marestail" / "handoffs" / "t" / "02-critic.md", " bounced \n")
     return root
 
 
@@ -52,6 +53,10 @@ def config(root: Path, raw: dict[str, Any] | None = None) -> Config:
 
 def report(root: Path, name: str) -> Path:
     return root / ".marestail" / "handoffs" / "t" / f"{name}.md"
+
+
+def test_empty_and_paragraph_constants() -> None:
+    assert (prompts.EMPTY, prompts.PARAGRAPH) == ("", "\n\n")
 
 
 def test_role_text_reads_the_role_file() -> None:
@@ -82,6 +87,7 @@ def test_worker_prompt(repo: Path) -> None:
         "# Task\nDo the thing.",
         "# Specification files\nfeatures/t.feature\nqa/t.md",
         "# Handoffs so far\n## 01-specifier\nwrote spec",
+        "## 02-critic\nbounced",
         "# Finishing\n1. "
         + audit.instructions(config(repo), "t")
         + "\n2. Run `marestail gate --tier fast --x` and keep working until it prints GATE PASSED."
@@ -142,6 +148,28 @@ def test_commit_opening() -> None:
     assert prompts.commit_opening("m") == "starting with `[m] ` and "
 
 
+def test_worker_prompt_defaults_omit_label_and_flags(repo: Path) -> None:
+    text = prompts.worker_prompt(
+        config(repo), cast(Worker, find("coder")), repo / "tasks" / "t.md", "t", report(repo, "03-coder"), "fix it"
+    )
+    assert "XXXX" not in text
+    assert "starting with" not in text
+    assert "marestail gate --tier fast`" in text
+
+
+def test_judge_prompt_defaults_omit_trees_and_feedback(repo: Path) -> None:
+    text = prompts.judge_prompt(config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "gate")
+    assert "XXXX" not in text
+    assert "# Trees" not in text
+    assert "# Why your verdict was rejected" not in text
+
+
+def test_finishing_without_a_label_has_no_stamp(repo: Path) -> None:
+    text = prompts.finishing(config(repo), Worker("w", None), "t", report(repo, "x"))
+    assert "starting with" not in text
+    assert "XXXX" not in text
+
+
 def test_judge_prompt_for_critic(repo: Path) -> None:
     text = prompts.judge_prompt(
         config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "", "", ""
@@ -152,6 +180,7 @@ def test_judge_prompt_for_critic(repo: Path) -> None:
             "# Task\nDo the thing.",
             "# Specification\n## features/t.feature\nScenario: one\n\n## qa/t.md\nprocedure",
             "# Handoffs so far\n## 01-specifier\nwrote spec",
+            "## 02-critic\nbounced",
             f"# Verdict\nWrite your verdict to {report(repo, '02-critic')} and nothing else. Do not edit any other file; "
             "the runner discards other edits.\n"
             + prompts.bounce_choices(cast(Judge, find("critic")))
@@ -172,6 +201,7 @@ def test_judge_prompt_for_perf_with_everything(repo: Path) -> None:
         "# Gate report\ngates",
         "# Trees\ntrees",
         "# Handoffs so far\n## 01-specifier\nwrote spec",
+        "## 02-critic\nbounced",
         "# Benches frozen\n" + prompts.BENCHES_FROZEN,
         "# Verdict\n" + prompts.verdict_instructions(report(repo, "p"), judge),
         "# Why your verdict was rejected\nbad",
@@ -242,6 +272,7 @@ def test_perf_author_prompt(repo: Path) -> None:
         "# Task\nDo the thing.",
         "# Specification\nfeatures/t.feature\nqa/t.md",
         "# Handoffs so far\n## 01-specifier\nwrote spec",
+        "## 02-critic\nbounced",
         "# Trees\ntrees",
         "# Authoring\n" + prompts.AUTHORING.format(note=note),
         "# Earlier feedback\nagain",
@@ -256,5 +287,6 @@ def test_perf_author_prompt_minimal(repo: Path) -> None:
         "# Task",
         "# Specification",
         "# Handoffs so far",
+        "## 02-critic",
         "# Authoring",
     ]

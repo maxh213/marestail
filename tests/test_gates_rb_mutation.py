@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import rb_mutation
-from tests.conftest import make_context
+from tests.conftest import gate_shape, make_context
 
 USER = "class User\n  module Named\n  end\nend\nclass Admin::Boss < User\n"
 INFO = ["bundle", "info", "mutant"]
@@ -51,9 +51,13 @@ def writes_session(root: Path, report: str, output: str = "") -> Callable[[list[
     return reply
 
 
+def test_mutation_default_is_enabled() -> None:
+    assert rb_mutation.MUTATION_DEFAULT is True
+
+
 def test_disabled(tmp_path: Path) -> None:
     result = rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation": False}}))
-    assert (result.gate, result.ok, result.summary) == ("rb.mutation", True, "skipped: disabled: [ruby] mutation = false")
+    assert gate_shape(result) == ("rb.mutation", True, "skipped: disabled: [ruby] mutation = false", [])
 
 
 def test_bad_scope_setting(tmp_path: Path) -> None:
@@ -64,7 +68,7 @@ def test_bad_scope_setting(tmp_path: Path) -> None:
 def test_nothing_changed(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_mutation)
     result = rb_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"spec/user_spec.rb"}))
-    assert (result.ok, result.summary) == (True, "skipped: no changed ruby sources")
+    assert gate_shape(result)[:3] == ("rb.mutation", True, "skipped: no changed ruby sources")
     assert fake.calls == []
 
 
@@ -78,7 +82,7 @@ def test_nothing_changed(tmp_path: Path, fake_run: Any) -> None:
 def test_bundle_problems(tmp_path: Path, fake_run: Any, code: int, summary: str, finding: str) -> None:
     fake = fake_run(rb_mutation, [(code, "")])
     result = rb_mutation.run_gate(scoped(tmp_path, {"ruby": {"exec": ["bin/bundle", "exec"]}}))
-    assert (result.ok, result.summary, result.findings) == (False, summary, [finding])
+    assert gate_shape(result) == ("rb.mutation", False, summary, [finding])
     assert fake.calls == [["bin/bundle", "info", "mutant"]]
     assert fake.options == [{"cwd": tmp_path, "timeout": 120}]
 

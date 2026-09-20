@@ -61,6 +61,9 @@ def test_line_after_skips_the_newline() -> None:
     assert audit.line_after("ab", 2) == 2
     assert audit.line_after("ab\ncd\nef", 0) == 3
     assert audit.line_after("ab\ncd\nef", 3) == 6
+    assert audit.line_after("ab\n", 0) == 3
+    assert audit.line_after("ab\n", 3) == 3
+    assert audit.line_after("", 0) == 0
 
 
 def test_traces_stop_when_the_cursor_does_not_advance(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,7 @@ from marestail.ruby import SKIP_DIRS, bundle, listify, relative
 from marestail.shell import run, tail
 
 GATE = "rb.mutation"
+MUTATION_DEFAULT = True
 RESULTS_DIR = Path(".mutant") / "results"
 DECLARATION = re.compile(r"^\s*(?:class|module)\s+([A-Z]\w*(?:::[A-Z]\w*)*)")
 MUTANT_KINDS = {"evil", "neutral", "noop"}
@@ -24,7 +25,7 @@ Failure = tuple[str, int, str, str]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.ruby("mutation", True) is False:
+    if ctx.ruby("mutation", MUTATION_DEFAULT) is False:
         return Result.skipped(GATE, "disabled: [ruby] mutation = false")
     scope = ctx.mutation_files("ruby", ctx.ruby_root(), (".rb",))
     if scope.mode == "error":
