@@ -37,12 +37,16 @@ def test_nothing_changed_skips(tmp_path: Path, fake_run: Any) -> None:
 
 def test_mutmut_failure(tmp_path: Path, fake_run: Any) -> None:
     (tmp_path / "mutants" / "stale").mkdir(parents=True)
+    (tmp_path / "keep").mkdir()
+    (tmp_path / "MUTANTS").mkdir()
     fake = fake_run(py_mutation, [(1, "boom\ncrashed")])
     result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 8}}))
     assert (result.ok, result.summary, result.findings) == (False, "mutmut failed", ["boom", "crashed"])
     assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "8"]]
     assert fake.options == [{"cwd": tmp_path, "timeout": 7200}]
     assert not (tmp_path / "mutants").exists()
+    assert (tmp_path / "keep").is_dir()
+    assert (tmp_path / "MUTANTS").is_dir()
 
 
 def test_no_mutants_generated(tmp_path: Path, fake_run: Any) -> None:

@@ -270,10 +270,11 @@ def test_dotnet_project_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def dotnet_calls(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[tuple[list[str], dict[str, Any]]]:
     calls: list[tuple[list[str], dict[str, Any]]] = []
+    pending = list(replies)
 
     def fake(ctx: Any, args: list[str], **options: Any) -> tuple[int, str]:
         calls.append((args, options))
-        return replies.pop(0)
+        return pending.pop(0)
 
     monkeypatch.setattr(dotnet, "dotnet", fake)
     return calls
@@ -393,7 +394,8 @@ def test_wait_for_analysis(
     monkeypatch.setattr(sonar, "POLL_LIMIT", 3)
     task_file = tmp_path / "report-task.txt"
     task_file.write_text("projectKey=p\nceTaskId=abc=1\nnoise\n")
-    client: Any = FakeClient(lambda path, params: {"task": {"status": statuses.pop(0)}})
+    pending = list(statuses)
+    client: Any = FakeClient(lambda path, params: {"task": {"status": pending.pop(0)}})
     assert sonar.wait_for_analysis(client, task_file) == expected
     assert sleeps == slept
     assert client.gets[0] == ("api/ce/task", {"id": "abc=1"})
@@ -441,6 +443,9 @@ def test_collect_unscoped() -> None:
         "sonar duplication 1.2% (need 0)",
     ]
     assert client.posts == [("api/issues/do_transition", {"issue": "I1", "transition": "reopen"})]
+    assert ("api/issues/search", {"componentKeys": KEY, "issueStatuses": "ACCEPTED,FALSE_POSITIVE", "ps": 500}) in client.gets
+    assert ("api/issues/search", {"componentKeys": KEY, "resolved": "false", "ps": 500}) in client.gets
+    assert ("api/hotspots/search", {"project": KEY, "status": "TO_REVIEW", "ps": 500}) in client.gets
     assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage,duplicated_lines_density"})
 
 

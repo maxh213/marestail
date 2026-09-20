@@ -47,6 +47,17 @@ class FakeCurses:
 def test_mono_and_glyphs() -> None:
     mono = theme.mono_theme()
     assert mono.colors is False
+    assert mono.heading == curses.A_BOLD
+    assert mono.worker == curses.A_NORMAL
+    assert mono.judge == curses.A_BOLD
+    assert mono.secondary == curses.A_DIM
+    assert mono.selected == curses.A_REVERSE | curses.A_BOLD
+    assert mono.border == curses.A_DIM
+    assert mono.border_focus == curses.A_BOLD
+    assert mono.done == curses.A_NORMAL
+    assert mono.bounced == curses.A_BOLD
+    assert mono.passed == curses.A_BOLD
+    assert mono.idle == curses.A_DIM
     assert theme.step_glyph("running", None) == theme.GLYPH_RUNNING
     assert theme.step_glyph("done", "BOUNCE") == theme.GLYPH_BOUNCED
     assert theme.step_glyph("done", "PASS") == theme.GLYPH_PASSED
@@ -66,11 +77,39 @@ def test_color_theme(monkeypatch: Any) -> None:
     monkeypatch.setattr(FakeCurses, "colors_on", True)
     monkeypatch.setattr(FakeCurses, "default_ok", True)
     monkeypatch.setattr(FakeCurses, "COLORS", 8)
+    FakeCurses.pairs.clear()
     colored = theme.color_theme()
     assert colored.colors is True
+    palette = theme.basic_palette()
+    bg = -1
+    assert FakeCurses.pairs == {
+        theme.PAIR_HEADING: (palette[0], bg),
+        theme.PAIR_WORKER: (palette[1], bg),
+        theme.PAIR_JUDGE: (palette[2], bg),
+        theme.PAIR_SECONDARY: (palette[3], bg),
+        theme.PAIR_SELECTED: (FakeCurses.COLOR_WHITE, palette[6]),
+        theme.PAIR_BORDER: (palette[4], bg),
+        theme.PAIR_BOUNCED: (palette[5], bg),
+    }
+    bold = FakeCurses.A_BOLD
+    dim = FakeCurses.A_DIM
+    pair = FakeCurses.color_pair
+    assert colored.heading == pair(theme.PAIR_HEADING) | bold
+    assert colored.worker == pair(theme.PAIR_WORKER)
+    assert colored.judge == pair(theme.PAIR_JUDGE)
+    assert colored.secondary == pair(theme.PAIR_SECONDARY) | dim
+    assert colored.selected == pair(theme.PAIR_SELECTED) | bold
+    assert colored.border == pair(theme.PAIR_BORDER) | dim
+    assert colored.border_focus == pair(theme.PAIR_JUDGE) | bold
+    assert colored.done == pair(theme.PAIR_WORKER)
+    assert colored.bounced == pair(theme.PAIR_BOUNCED)
+    assert colored.passed == pair(theme.PAIR_WORKER) | bold
+    assert colored.idle == pair(theme.PAIR_SECONDARY) | dim
     monkeypatch.setattr(FakeCurses, "COLORS", 256)
+    FakeCurses.pairs.clear()
     rich = theme.color_theme()
     assert rich.colors is True
+    assert FakeCurses.pairs[theme.PAIR_HEADING] == (theme.RICH_PALETTE[0], bg)
     assert theme.color_palette(True)[0] == 178
     assert theme.color_palette(False)[0] == FakeCurses.COLOR_YELLOW
 

@@ -381,6 +381,24 @@ def test_grok_rate_limited(code: int, output: str, expected: bool) -> None:
 
 
 @pytest.mark.parametrize(
+    ("data", "output", "expected"),
+    [
+        ({runner.MESSAGE: "rate limit"}, "clean", True),
+        ({"text": "usage limit"}, "clean", True),
+        ({"type": "overloaded"}, "clean", True),
+        ({"stopReason": "capacity"}, "clean", True),
+        ({}, "too many requests", True),
+        ({}, "HTTP 529", True),
+        ({}, "HTTP 503", True),
+        ({runner.MESSAGE: "fine"}, "clean", False),
+        ({}, "clean", False),
+    ],
+)
+def test_grok_limit_text(data: dict[str, str], output: str, expected: bool) -> None:
+    assert runner.grok_limit_text(data, output) is expected
+
+
+@pytest.mark.parametrize(
     ("output", "expected"),
     [
         ("tail\nend", "tail end"),

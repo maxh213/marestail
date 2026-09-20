@@ -397,3 +397,22 @@ def test_mutmut_kills_mutants_on_a_tiny_package(tmp_path: Path) -> None:
     total, survivors = py_mutation.surviving(make_context(tmp_path), [])
     assert total > 0, completed.stdout + completed.stderr
     assert survivors == [], survivors
+
+
+PACKAGE_MUTANTS = ["marestail.report.*", "marestail.shell.*"]
+
+
+def test_this_package_kills_its_own_mutants() -> None:
+    if restricted_path() or os.environ.get("MARESTAIL_HERMETIC") == "1":
+        pytest.skip("mutmut needs a writable tree and a normal pytest")
+    completed = subprocess.run(
+        [sys.executable, "-m", "mutmut", "run", *PACKAGE_MUTANTS, "--max-children", "1"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    total, survivors = py_mutation.surviving(make_context(ROOT), PACKAGE_MUTANTS)
+    assert total > 0, completed.stdout + completed.stderr
+    assert [item for item in survivors if "not checked" in item] == []
+    assert survivors == []

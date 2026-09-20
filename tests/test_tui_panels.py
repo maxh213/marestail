@@ -30,6 +30,7 @@ from marestail.tui.panels import (
     marquee,
     matching_repo,
     offscreen,
+    paint_box,
     paint_lines,
     put,
     selected_repo,
@@ -38,7 +39,7 @@ from marestail.tui.panels import (
     worker_rows,
     wrap_line,
 )
-from marestail.tui.theme import HEAVY, ROUND, mono_theme
+from marestail.tui.theme import GLYPH_FLOURISH, HEAVY, ROUND, mono_theme
 
 
 class FakeWin:
@@ -97,6 +98,16 @@ def test_draw_box_and_helpers() -> None:
     win: Any = FakeWin()
     draw_box(win, Rect(0, 0, 1, 1), ROUND, 0)
     draw_box(win, Rect(0, 0, 3, 5), ROUND, 1)
+    box: Any = FakeWin(10, 20)
+    paint_box(box, Rect(1, 2, 4, 6), ROUND, 7)
+    top = ROUND.tl + ROUND.top * 4 + ROUND.tr
+    bottom = ROUND.bl + ROUND.top * 4 + ROUND.br
+    assert box.cells[0] == (1, 2, top, 7)
+    assert (4, 2, bottom, 7) in box.cells
+    assert (2, 2, ROUND.side, 7) in box.cells
+    assert (2, 7, ROUND.side, 7) in box.cells
+    assert (3, 2, ROUND.side, 7) in box.cells
+    assert (3, 7, ROUND.side, 7) in box.cells
     assert clean(" a  b ") == "a b"
     assert marquee("ab", 0, 0) == ""
     assert marquee("ab", 5, 0) == "ab"
@@ -108,6 +119,26 @@ def test_draw_box_and_helpers() -> None:
     assert lines[0][1] is True
     assert clamp(5, 0, 3) == 3
     assert bed_span([2, 2], 0, 1) == 5
+
+
+def test_draw_bed_writes_title_and_task(tmp_path: Path) -> None:
+    win: Any = FakeWin(20, 40)
+    live = make_repo(tmp_path, alive=True)
+    live.name = "bed-" + "n" * 40
+    live.branch = "main"
+    live.head = "abc"
+    live.task = "task-one"
+    watch = state_of()
+    rect = Rect(2, 1, 8, 30)
+    draw_bed(win, rect, live, True, watch)
+    inner = 26
+    title_text = f" {live.name} {GLYPH_FLOURISH} {live.branch} @{live.head} "[:inner]
+    title = next(cell for cell in win.cells if cell[2] == title_text)
+    task = next(cell for cell in win.cells if "task: task-one" in cell[2])
+    assert title == (2, 3, title_text, watch.theme.heading)
+    assert task[:3] == (3, 3, "task: task-one")
+    assert task[3] == watch.theme.secondary
+    assert HEAVY.tl in "".join(cell[2] for cell in win.cells)
 
 
 def test_worker_rows_and_selection(tmp_path: Path) -> None:

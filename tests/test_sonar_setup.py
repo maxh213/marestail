@@ -134,7 +134,8 @@ def install_setup(monkeypatch: pytest.MonkeyPatch, installed: list[bool]) -> lis
         return password
 
     monkeypatch.setattr(setup, "admin_client", admin_client)
-    monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: installed.pop(0))
+    pending = list(installed)
+    monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: pending.pop(0))
     return calls
 
 

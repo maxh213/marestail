@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from operator import attrgetter
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from marestail.config import Config
 from marestail.context import Context, under_benchmarks
@@ -126,7 +126,7 @@ def python_pass_throughs(tree: ast.Module, label: str) -> list[str]:
     return [f"{label}:{fn.lineno} {fn.name} {FORWARDS}" for fn in functions(tree) if is_pass_through(fn)]
 
 
-def public_names(tree: ast.Module) -> list[str]:
+def public_names(tree: ast.Module) -> list[Any]:
     declared = explicit_all(tree)
     return module_names(tree) if declared is None else declared
 
@@ -147,7 +147,7 @@ def assigned_names(node: ast.Assign) -> list[str]:
     return [target.id for target in node.targets if isinstance(target, ast.Name)]
 
 
-def explicit_all(tree: ast.Module) -> list[str] | None:
+def explicit_all(tree: ast.Module) -> list[Any] | None:
     return next((literal_strings(node.value) for node in tree.body if declares_all(node) and listed(node.value)), None)
 
 
@@ -159,8 +159,8 @@ def listed(value: ast.expr) -> TypeGuard[ast.List | ast.Tuple]:
     return isinstance(value, (ast.List, ast.Tuple))
 
 
-def literal_strings(value: ast.List | ast.Tuple) -> list[str]:
-    return [cast(str, element.value) for element in value.elts if isinstance(element, ast.Constant)]
+def literal_strings(value: ast.List | ast.Tuple) -> list[Any]:
+    return [element.value for element in value.elts if isinstance(element, ast.Constant)]
 
 
 def functions(tree: ast.Module) -> list[Definition]:
@@ -338,7 +338,7 @@ def targeted_module(item: Item, label: str) -> Module:
 
 
 def scanned_items(data: object) -> list[Item]:
-    return cast(list[Item], data)
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
 
 
 def dotnet_modules(config: Config) -> list[Module]:

@@ -215,3 +215,32 @@ def test_build_uses_default_base(git_repo: Path) -> None:
     commit_all(git_repo)
     config = Config(root=git_repo, raw={})
     assert context.build(config, True) == Context(config=config, scope_changed=True)
+
+
+def test_diff_context_reads_configured_git_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    files: list[tuple[Path, str]] = []
+    lines: list[tuple[Path, str]] = []
+
+    def changed_files(root: Path, base: str) -> set[str]:
+        files.append((root, base))
+        return {"a.py"}
+
+    def changed_lines(root: Path, base: str) -> dict[str, set[int]]:
+        lines.append((root, base))
+        return {"a.py": {1}}
+
+    monkeypatch.setattr(context, "changed_files", changed_files)
+    monkeypatch.setattr(context, "changed_lines", changed_lines)
+    config = Config(root=tmp_path, raw={"git": {"base": "origin/work"}})
+    built = context.diff_context(config, True, {"src"})
+    assert files == [(tmp_path, "origin/work")]
+    assert lines == [(tmp_path, "origin/work")]
+    assert built == Context(config=config, scope_changed=True, changed={"a.py"}, focus={"src"}, changed_lines_map={"a.py": {1}})
+    unscoped = context.diff_context(config, False, {"src"})
+    assert unscoped == Context(config=config, focus={"src"})
+    assert files == [(tmp_path, "origin/work")]
+    bases: list[str] = []
+    monkeypatch.setattr(context, "changed_files", lambda root, base: bases.append(base) or set())
+    monkeypatch.setattr(context, "changed_lines", lambda root, base: {})
+    context.diff_context(Config(root=tmp_path, raw={}), True, set())
+    assert bases == [context.DEFAULT_BASE]

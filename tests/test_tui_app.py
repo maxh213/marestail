@@ -1,4 +1,5 @@
 import curses
+import locale
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +16,7 @@ class FakeScr:
         self.width = width
         self.keys: list[int] = []
         self.erased = 0
+        self.cells: list[tuple[int, int, str, int]] = []
 
     def timeout(self, _ms: int) -> None:
         return None
@@ -32,7 +34,7 @@ class FakeScr:
         return None
 
     def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
-        return None
+        self.cells.append((y, x, text, attr))
 
 
 def repo(root: Path, alive: bool = True) -> RepoState:
@@ -48,10 +50,23 @@ def reply(value: str | None) -> Any:
 
 
 def test_run_wraps(monkeypatch: Any) -> None:
-    monkeypatch.setattr("marestail.tui.app.locale.setlocale", lambda *args: None)
-    monkeypatch.setattr("marestail.tui.app.curses.wrapper", lambda fn, *args: fn(FakeScr(), *args) or 0)
-    monkeypatch.setattr(app, "_main", lambda *args: 0)
-    assert app.run([Path(".")]) == 0
+    seen: dict[str, Any] = {}
+
+    def setlocale(category: int, locale_name: str) -> None:
+        seen["locale"] = (category, locale_name)
+
+    def wrapper(fn: Any, *args: Any) -> int:
+        seen["fn"] = fn
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr("marestail.tui.app.locale.setlocale", setlocale)
+    monkeypatch.setattr("marestail.tui.app.curses.wrapper", wrapper)
+    roots = [Path(".")]
+    assert app.run(roots, 3.5, True) == 0
+    assert seen["locale"] == (locale.LC_ALL, "")
+    assert seen["fn"] is app._main
+    assert seen["args"] == (roots, 3.5, True)
 
 
 def test_session_keys(tmp_path: Path, monkeypatch: Any) -> None:
@@ -173,6 +188,39 @@ def test_refresh_and_draw(tmp_path: Path, monkeypatch: Any) -> None:
     app.draw_legend(scr, 24, 80, watch)
     assert "beds" in app.status_text(watch)
     assert "0 beds" in app.status_text(WatchState(fleet=None, theme=mono_theme(), tick=0))
+
+
+def cell_texts(screen: FakeScr) -> list[str]:
+    return [text for _, _, text, _ in screen.cells]
+
+
+def test_draw_header_and_legend_write_labels(tmp_path: Path) -> None:
+    watch = WatchState(fleet=Fleet(repos=[repo(tmp_path)], scanned_at=0), theme=mono_theme(), tick=0)
+    header = FakeScr(24, 80)
+    app.draw_header(as_window(header), 80, watch)
+    texts = cell_texts(header)
+    assert any("M A R E S T A I L" in text for text in texts)
+    assert any("beds" in text for text in texts)
+    banner = next(cell for cell in header.cells if "M A R E S T A I L" in cell[2])
+    assert banner[0] == 0
+    assert banner[1] == 0
+    assert banner[3] == watch.theme.heading
+    vine_cell = next(cell for cell in header.cells if cell[0] == 1)
+    assert vine_cell[1] == 0
+    assert len(vine_cell[2]) == 80
+    assert vine_cell[3] == watch.theme.border
+    legend = FakeScr(24, 80)
+    app.draw_legend(as_window(legend), 24, 80, watch)
+    written = cell_texts(legend)
+    assert " key " in written
+    assert all(any(glyph in text and meaning in text for text in written) for glyph, meaning in app.LEGEND)
+    key = next(cell for cell in legend.cells if cell[2] == " key ")
+    rows = [app.legend_row(item) for item in app.LEGEND]
+    inner = max(len(row) for row in [*rows, " key "])
+    top = max(1, (24 - len(rows) - 2) // 2)
+    left = max(0, (80 - inner - 2) // 2)
+    assert key[:3] == (top, left + 2, " key ")
+    assert key[3] == watch.theme.heading
 
 
 def test_maybe_refresh_skips(tmp_path: Path, monkeypatch: Any) -> None:

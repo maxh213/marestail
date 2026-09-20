@@ -1,3 +1,4 @@
+import argparse
 import io
 import json
 import os
@@ -636,3 +637,150 @@ def test_blocked_count(tmp_path: Path) -> None:
     assert cli.blocked_count(tmp_path / "missing") == 0
     (tmp_path / "c").write_text("3")
     assert cli.blocked_count(tmp_path / "c") == 3
+
+
+def subparser(name: str) -> argparse.ArgumentParser:
+    parser = cli.build_parser()
+    action = parser._subparsers._group_actions[0]
+    chosen: argparse.ArgumentParser = action.choices[name]
+    return chosen
+
+
+def nested_parser(parent: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    action = parent._subparsers._group_actions[0]
+    chosen: argparse.ArgumentParser = action.choices[name]
+    return chosen
+
+
+def option_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
+    return {flag: action.help for action in parser._actions for flag in action.option_strings}
+
+
+def choice_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
+    action = parser._subparsers._group_actions[0]
+    return {choice.dest: choice.help for choice in action._choices_actions}
+
+
+def test_root_parser_help_and_subcommands() -> None:
+    parser = cli.build_parser()
+    assert parser.prog == "marestail"
+    assert parser.description == "deterministic gates for coding agents"
+    action = parser._subparsers._group_actions[0]
+    assert action.dest == "command"
+    assert action.required is True
+    assert list(action.choices) == ["gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"]
+    help_by_name = choice_help(parser)
+    assert help_by_name["gate"] == "run the gates against the current repo"
+    assert help_by_name["run"] == "run the role pipeline on a task"
+    assert help_by_name["install"] == "install thin config into a target repo"
+    assert help_by_name["sonar"] == "manage the local SonarQube"
+    assert help_by_name["watch"] == "live TUI of every marestail pipeline on this machine"
+    assert help_by_name["perf"] == "take performance samples during a perf run"
+    assert help_by_name["route"] == "print the subscription to use now: runs dandelion route with the same arguments, e.g. --high"
+    assert help_by_name["graph"] == "print the module dependency graph"
+    assert help_by_name["depth"] == "print module interface width and depth"
+    assert nested_parser(parser, "route").add_help is False
+
+
+def test_gate_parser_defaults_and_help() -> None:
+    parser = subparser("gate")
+    args = parser.parse_args([])
+    assert (args.tier, args.scope, args.focus, args.only, args.json, args.hook) == ("fast", None, [], None, False, False)
+    helped = option_help(parser)
+    assert helped["--tier"] is None
+    assert helped["--scope"] == "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths"
+    assert helped["--focus"] == "add a file or directory to the gate scope (repeatable); implies --scope changed"
+    assert helped["--only"] == "comma separated gate names"
+    assert helped["--json"] is None
+    assert helped["--hook"] == "behave as a Claude Code Stop hook"
+    tier = next(action for action in parser._actions if "--tier" in action.option_strings)
+    assert list(tier.choices) == ["fast", "sonar", "full", "qa", "all"]
+    focus = next(action for action in parser._actions if "--focus" in action.option_strings)
+    assert focus.metavar == "PATH"
+
+
+def test_run_parser_defaults_and_help() -> None:
+    parser = subparser("run")
+    args = parser.parse_args(["tasks/x.md"])
+    assert args.task == "tasks/x.md"
+    assert (args.start, args.stop, args.auto, args.retries, args.effort, args.agent, args.model) == (None, None, False, 0, None, None, None)
+    helped = option_help(parser)
+    assert helped["--auto"] == "skip the approval pause after the critic"
+    assert helped["--scope"] == (
+        "changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, "
+        "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
+        "the smallest supporting edits"
+    )
+    assert next(action.dest for action in parser._actions if "--from" in action.option_strings) == "start"
+    assert next(action.dest for action in parser._actions if "--to" in action.option_strings) == "stop"
+    assert helped["--model"] == "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
+    assert helped["--retries"] == "attempts per role; 0 means unlimited (default)"
+    assert (
+        helped["--effort"]
+        == "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant); stamped on every commit"
+    )
+    assert helped["--agent"] == "agent backend (claude, agy, grok, cursor, kilo, or kimi)"
+    retries = next(action for action in parser._actions if "--retries" in action.option_strings)
+    assert (retries.metavar, retries.type) == ("N", int)
+    agent = next(action for action in parser._actions if "--agent" in action.option_strings)
+    assert list(agent.choices) == ["claude", "agy", "grok", "cursor", "kilo", "kimi"]
+
+
+def test_watch_install_sonar_defaults() -> None:
+    watch = subparser("watch").parse_args([])
+    assert (watch.paths, watch.refresh, watch.all) == ([], 2.0, False)
+    assert option_help(subparser("watch"))["--refresh"] == "seconds between redraws"
+    assert option_help(subparser("watch"))["--all"] == "show every repo with a .marestail directory, not just those with a running pipeline"
+    install_args = subparser("install").parse_args([])
+    assert (install_args.target, install_args.gitignore_generated) == (".", False)
+    assert option_help(subparser("install"))["--gitignore-generated"] == "add the files marestail generates to the target's .gitignore"
+    sonar = subparser("sonar")
+    action = next(item for item in sonar._actions if item.dest == "action")
+    assert list(action.choices) == ["up", "down", "setup"]
+
+
+def test_perf_parser_defaults_and_help() -> None:
+    perf = subparser("perf")
+    action = perf._subparsers._group_actions[0]
+    assert (action.dest, action.required) == ("perf_command", True)
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["perf"])
+    assert choice_help(perf) == {
+        "run": "take samples of one perf/bench_* script on one tree",
+        "db": "manage the local performance database",
+    }
+    run = nested_parser(perf, "run").parse_args(["script.py", "--tree", "head"])
+    assert (run.script, run.tree, run.samples, run.db) == ("script.py", "head", 1, False)
+    assert option_help(nested_parser(perf, "run"))["--db"] == "reset the tree's performance database before every sample"
+    database = nested_parser(perf, "db")
+    names = list(database._subparsers._group_actions[0].choices)
+    assert names == ["golden", "status", "url", "prune", "down"]
+    golden = nested_parser(database, "golden")
+    assert option_help(golden)["--wait"] == "block until the build finishes instead of detaching"
+    helped = choice_help(database)
+    assert helped["status"] == "print the golden status of every tree in the perf run"
+    assert helped["url"] == "print the database URL for one tree"
+    assert helped["prune"] == "delete this repo's goldens the current perf run does not need"
+    assert helped["down"] == "remove every performance database container, keeping the volume"
+    assert helped["golden"] == "build the seeded golden data directory for one tree"
+
+
+def require_tree(parser: argparse.ArgumentParser) -> None:
+    assert next(action.required for action in parser._actions if "--tree" in action.option_strings) is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(parser_args_without_tree(parser))
+
+
+def parser_args_without_tree(parser: argparse.ArgumentParser) -> list[str]:
+    return ["script.py"] if any(action.dest == "script" for action in parser._actions) else []
+
+
+def test_perf_tree_and_db_commands_are_required() -> None:
+    perf = subparser("perf")
+    require_tree(nested_parser(perf, "run"))
+    database = nested_parser(perf, "db")
+    assert database._subparsers._group_actions[0].required is True
+    with pytest.raises(SystemExit):
+        database.parse_args([])
+    require_tree(nested_parser(database, "golden"))
+    require_tree(nested_parser(database, "url"))

@@ -7,6 +7,20 @@ import pytest
 from tests import conftest
 
 
+def test_erlang_tests_keep_the_real_host_probe() -> None:
+    from tests import test_erlang
+
+    assert test_erlang.KEEP_ERLANG_HOST is True
+
+
+def test_fake_run_copies_reply_lists(tmp_path: Path) -> None:
+    replies = [(0, "a")]
+    fake = conftest.FakeRun(replies)
+    assert fake(["cmd"], tmp_path) == (0, "a")
+    assert replies == [(0, "a")]
+    assert fake(["cmd"], tmp_path) == (0, "")
+
+
 def test_git_try_show_toplevel() -> None:
     completed = conftest.git_try("rev-parse", "--show-toplevel")
     assert completed.returncode == 0

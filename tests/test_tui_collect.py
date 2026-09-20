@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -586,3 +587,50 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert collect.is_pipeline_row(tmp_path, (1, 0, 1, ["python", "cli.py", "run"])) is True
     assert collect.gate_candidates(["pytest"], ["pytest"])[-2] == "pytest"
     assert collect.stripped_out(type("Out", (), {"stdout": " ok \n"})()) == "ok"
+
+
+def test_run_git_invokes_git(tmp_path: Path, monkeypatch: Any) -> None:
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        seen.append((list(command), dict(options)))
+        return subprocess.CompletedProcess(command, 0, "main\n", "")
+
+    monkeypatch.setattr(collect.subprocess, "run", run)
+    out = collect.run_git(tmp_path, ["branch", "--show-current"])
+    assert out is not None
+    assert out.stdout == "main\n"
+    assert seen == [(["git", "-C", str(tmp_path), "branch", "--show-current"], {"capture_output": True, "text": True, "timeout": 10})]
+
+
+def test_run_git_swallows_oserror(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
+    assert collect.run_git(tmp_path, ["status"]) is None
+
+
+def test_run_ps_invokes_ps(monkeypatch: Any) -> None:
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        seen.append((list(command), dict(options)))
+        return subprocess.CompletedProcess(command, 0, "PID\n1 0 1 bash\n", "")
+
+    monkeypatch.setattr(collect.subprocess, "run", run)
+    assert collect.run_ps() == "PID\n1 0 1 bash\n"
+    assert seen == [(["ps", "-eo", "pid,ppid,etimes,args"], {"capture_output": True, "text": True, "timeout": 10})]
+
+
+def test_run_ps_swallows_oserror(monkeypatch: Any) -> None:
+    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
+    assert collect.run_ps() == ""
+
+
+def test_repo_shell_uses_git_line_args(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(collect, "latest_log", lambda root: tmp_path / "log")
+    monkeypatch.setattr(collect, "git_line", lambda root, args: " ".join(args))
+    monkeypatch.setattr(collect, "task_name", lambda root: "task")
+    monkeypatch.setattr(collect, "repo_steps", lambda path: [])
+    state = collect.repo_shell(tmp_path)
+    assert (state.name, state.root, state.task, state.log_path) == (tmp_path.name, tmp_path, "task", tmp_path / "log")
+    assert state.branch == "branch --show-current"
+    assert state.head == "log -1 --format=%h%x20%s"

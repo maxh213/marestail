@@ -7,14 +7,19 @@ import pytest
 from marestail import erlang
 from tests.conftest import FakeRun, make_context
 
+KEEP_ERLANG_HOST = True
+
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 
 
 @pytest.fixture(autouse=True)
-def fresh_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def fresh_cache(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(erlang, "host_checks", {})
     monkeypatch.setattr("marestail.erlang.os.getuid", lambda: 1000)
     monkeypatch.setattr("marestail.erlang.os.getgid", lambda: 100)
+    if "host_erlang" in request.node.name or "erlang_bin" in request.node.name:
+        return
+    monkeypatch.setattr(erlang, "host_erlang", lambda ctx: True)
 
 
 @pytest.mark.parametrize(
@@ -72,25 +77,25 @@ def test_erlang_bin_docker_inside_root(fake_run: Callable[..., FakeRun]) -> None
 
 
 def test_escript_runs_script_in_erlang_root(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(erlang, [(0, ""), (0, "done")])
+    fake = fake_run(erlang, [(0, "done")])
     ctx = make_context(tmp_path, {"erlang": {"root": "app"}})
     assert erlang.escript(ctx, "deps.escript", ["a.beam"]) == (0, "done")
-    assert fake.calls[1] == ["escript", str(erlang.SCRIPT_DIR / "deps.escript"), "a.beam"]
-    assert fake.options[1] == {"cwd": tmp_path / "app", "timeout": 600}
+    assert fake.calls == [["escript", str(erlang.SCRIPT_DIR / "deps.escript"), "a.beam"]]
+    assert fake.options == [{"cwd": tmp_path / "app", "timeout": 600}]
 
 
 def test_erlc_uses_given_cwd_and_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(erlang, [(0, ""), (1, "bad")])
+    fake = fake_run(erlang, [(1, "bad")])
     ctx = make_context(tmp_path)
     assert erlang.erlc(ctx, ["-o", "x"], tmp_path / "sub", 5) == (1, "bad")
-    assert fake.calls[1] == ["erlc", "-o", "x"]
-    assert fake.options[1] == {"cwd": tmp_path / "sub", "timeout": 5}
+    assert fake.calls == [["erlc", "-o", "x"]]
+    assert fake.options == [{"cwd": tmp_path / "sub", "timeout": 5}]
 
 
 def test_erlc_default_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(erlang, [(0, ""), (0, "")])
+    fake = fake_run(erlang, [(0, "")])
     erlang.erlc(make_context(tmp_path), [])
-    assert fake.options[1] == {"cwd": tmp_path, "timeout": 900}
+    assert fake.options == [{"cwd": tmp_path, "timeout": 900}]
 
 
 @pytest.mark.parametrize(
@@ -146,16 +151,27 @@ def test_fresh_dir(tmp_path: Path) -> None:
     assert list(target.iterdir()) == []
 
 
-def test_compile_with_tests_success(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    fake = fake_run(erlang, [(0, ""), (0, ""), (0, "")])
+def stub_erlc(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def erlc(ctx: object, args: list[str], cwd: Path | None = None, timeout: int = 900) -> tuple[int, str]:
+        calls.append(args)
+        _ = (ctx, cwd, timeout)
+        return replies.pop(0) if replies else (0, "")
+
+    monkeypatch.setattr(erlang, "erlc", erlc)
+    return calls
+
+
+def test_compile_with_tests_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ebin, test_ebin = tmp_path / "e", tmp_path / "t"
+    calls = stub_erlc(monkeypatch, [(0, ""), (0, "")])
     result = erlang.compile_with_tests(make_context(tmp_path), [Path("a.erl")], [Path("a_tests.erl")], ebin, test_ebin)
     assert result is None
-    assert fake.calls[1:] == [
-        ["erlc", "+debug_info", "-o", str(ebin), "a.erl"],
-        ["erlc", "-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(test_ebin), "a_tests.erl"],
+    assert calls == [
+        ["+debug_info", "-o", str(ebin), "a.erl"],
+        ["-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(test_ebin), "a_tests.erl"],
     ]
-    assert fake.options[2]["timeout"] == 900
     assert ebin.is_dir()
     assert test_ebin.is_dir()
 
@@ -163,15 +179,18 @@ def test_compile_with_tests_success(tmp_path: Path, fake_run: Callable[..., Fake
 @pytest.mark.parametrize(
     ("replies", "expected"),
     [
-        ([(0, ""), (127, "erlc: not found (x)")], (HINT, [HINT])),
-        ([(0, ""), (1, "src/a.erl:1: oops")], ("sources failed to compile", ["src/a.erl:1: oops"])),
-        ([(0, ""), (0, ""), (1, "test/a.erl:1: oops")], ("tests failed to compile", ["test/a.erl:1: oops"])),
+        ([(127, "erlc: not found (x)")], (HINT, [HINT])),
+        ([(1, "src/a.erl:1: oops")], ("sources failed to compile", ["src/a.erl:1: oops"])),
+        ([(0, ""), (1, "test/a.erl:1: oops")], ("tests failed to compile", ["test/a.erl:1: oops"])),
     ],
 )
 def test_compile_with_tests_failures(
-    tmp_path: Path, fake_run: Callable[..., FakeRun], replies: list[tuple[int, str]], expected: tuple[str, list[str]]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replies: list[tuple[int, str]],
+    expected: tuple[str, list[str]],
 ) -> None:
-    fake_run(erlang, replies)
+    stub_erlc(monkeypatch, list(replies))
     ctx = make_context(tmp_path)
     assert erlang.compile_with_tests(ctx, [Path("a.erl")], [Path("t.erl")], tmp_path / "e", tmp_path / "t") == expected
 

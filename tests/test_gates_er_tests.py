@@ -56,17 +56,21 @@ def test_fails_without_tests(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("replies", "summary", "findings"),
+    ("failed", "summary", "findings"),
     [
-        ([(127, "erlc: not found (x)")], HINT, [HINT]),
-        ([(1, "src/a.erl:1: syntax error\n")], "sources failed to compile", ["src/a.erl:1: syntax error"]),
-        ([(0, ""), (1, "test/a_tests.erl:2: bad")], "tests failed to compile", ["test/a_tests.erl:2: bad"]),
+        ((HINT, [HINT]), HINT, [HINT]),
+        (("sources failed to compile", ["src/a.erl:1: syntax error"]), "sources failed to compile", ["src/a.erl:1: syntax error"]),
+        (("tests failed to compile", ["test/a_tests.erl:2: bad"]), "tests failed to compile", ["test/a_tests.erl:2: bad"]),
     ],
 )
 def test_compile_failures(
-    tmp_path: Path, fake_run: Callable[..., FakeRun], replies: list[tuple[int, str]], summary: str, findings: list[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed: tuple[str, list[str]],
+    summary: str,
+    findings: list[str],
 ) -> None:
-    fake_run(erlang, replies)
+    monkeypatch.setattr(erlang, "compile_with_tests", lambda *args: failed)
     assert shape(er_tests.run_gate(project(tmp_path))) == ("er.tests", False, summary, findings)
 
 

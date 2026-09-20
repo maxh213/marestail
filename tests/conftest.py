@@ -28,7 +28,7 @@ MUTMUT_COPIES = (
 
 class FakeRun:
     def __init__(self, replies: list[Reply] | Callable[[list[str]], Reply]) -> None:
-        self.replies = replies
+        self.replies = list(replies) if isinstance(replies, list) else replies
         self.calls: list[list[str]] = []
         self.options: list[dict[str, Any]] = []
 
@@ -48,6 +48,14 @@ def fake_run(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeRun]:
         return fake
 
     return install
+
+
+@pytest.fixture(autouse=True)
+def isolate_erlang_host(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("marestail.erlang.host_checks", {})
+    if getattr(request.module, "KEEP_ERLANG_HOST", False):
+        return
+    monkeypatch.setattr("marestail.erlang.host_erlang", lambda _ctx: True)
 
 
 def git(root: Path, *args: str) -> str:

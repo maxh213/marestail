@@ -142,6 +142,20 @@ def test_explicit_all_absent() -> None:
     assert depth.explicit_all(parse("__all__ = []\n")) == []
 
 
+def test_literal_strings_keep_non_string_constants() -> None:
+    tree = parse("__all__ = ('a', 1, x)\n")
+    assign = next(node for node in tree.body if isinstance(node, ast.Assign))
+    assert depth.listed(assign.value)
+    assert depth.literal_strings(assign.value) == ["a", 1]
+
+
+def test_scanned_items_keeps_dicts_from_a_list() -> None:
+    payload = [{"file": "a.rs"}, "skip", {"file": "b.rs"}]
+    assert depth.scanned_items(payload) == [{"file": "a.rs"}, {"file": "b.rs"}]
+    assert depth.scanned_items({"file": "a.rs"}) == []
+    assert depth.scanned_items(None) == []
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
@@ -245,7 +259,17 @@ def test_ts_modules_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) ->
 
 
 def test_elixir_modules(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
-    write(tmp_path, {"app/lib/b.ex": "", "app/lib/a.ex": "", "app/test/t.ex": "", "app/lib/c.exs": ""})
+    write(
+        tmp_path,
+        {
+            "app/lib/b.ex": "",
+            "app/lib/a.ex": "",
+            "app/test/t.ex": "",
+            "app/lib/c.exs": "",
+            "decoy.ex": "",
+            "app/lib/z_test.exs": "",
+        },
+    )
     items = [
         {"file": str(tmp_path / "app/lib/a.ex"), "public": ["f"], "statements": 3, "pass_throughs": ["raw"]},
         {"file": str(tmp_path / "app/lib/b.ex")},
@@ -283,7 +307,7 @@ def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple
     monkeypatch.setattr(erlang, "source_files", source_files)
 
     def escript(ctx: Context, script: str, args: list[str]) -> tuple[int, str]:
-        calls.append((script, args))
+        calls.append((ctx, script, args))
         return reply
 
     monkeypatch.setattr(erlang, "escript", escript)
@@ -298,7 +322,7 @@ def test_erlang_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         Module("src/a.erl", ["f/1"], 2, ["src/a.erl:5 f/1 only forwards its arguments"]),
         Module("src/b.erl", [], 0, []),
     ]
-    assert calls == [Context(config=config), ("depth.escript", [str(tmp_path / "src/a.erl")])]
+    assert calls == [Context(config=config), (Context(config=config), "depth.escript", [str(tmp_path / "src/a.erl")])]
 
 
 def test_erlang_modules_empty_and_failing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,7 +346,7 @@ def fake_ruby(monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str]) -> list[A
 
 
 def test_ruby_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    write(tmp_path, {"app/lib/a.rb": "", "app/lib/a_spec.rb": "", "app/spec/b.rb": ""})
+    write(tmp_path, {"app/lib/a.rb": "", "app/lib/a_spec.rb": "", "app/spec/b.rb": "", "decoy.rb": ""})
     items = [{"file": str(tmp_path / "app/lib/a.rb"), "public": ["A#f"], "statements": 7, "pass_throughs": ["p"]}]
     calls = fake_ruby(monkeypatch, (0, json.dumps(items)))
     config = Config(root=tmp_path, raw={"ruby": {"root": "app"}})
