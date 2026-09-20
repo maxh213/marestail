@@ -453,13 +453,18 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     collect.add_child({}, (1, 0, 1, ["x"]))
     collect.add_live([], ["a"])
     collect.mark_running([step()], ["hello"])
-    collect.complete_if_found(None, collect.FINISH_RE.match("  x finished in 1.0 min: z"))
-    collect.append_step([], collect.STEP_RE.match("== coder (01-coder) attempt 1"))
-    collect.set_verdict([step()], collect.VERDICT_RE.match("  verdict PASS"))
+    finished = collect.FINISH_RE.match("  x finished in 1.0 min: z")
+    started = collect.STEP_RE.match("== coder (01-coder) attempt 1")
+    verdict = collect.VERDICT_RE.match("  verdict PASS")
+    quoted = collect.QUOTED_RE.search(" 'ok'")
+    assert finished is not None and started is not None and verdict is not None and quoted is not None
+    collect.complete_if_found(None, finished)
+    collect.append_step([], started)
+    collect.set_verdict([step()], verdict)
     assert collect.last_if_running([step()]) is not None
     assert collect.last_if_running([step("x", "done")]) is None
     assert collect.collapse_rest("a  b", None) == "a b"
-    assert collect.eval_quote("", collect.QUOTED_RE.search(" 'ok'")) == "ok"
+    assert collect.eval_quote("", quoted) == "ok"
     assert collect.worker_without_task(state, step(), None).result_path is None
     assert collect.min_process([Process(1, 9, "m", "claude")]).elapsed_s == 9
     assert collect.make_process(1, 2, ["claude"], "claude").backend == "claude"
@@ -491,7 +496,11 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert isinstance(collect.run_ps(), str)
     assert collect.blank("x") == ""
     assert collect.running_step([]) is None
-    assert collect.running_step([step()]).label == "01-coder"
+    running = collect.running_step([step()])
+    assert running is not None
+    assert running.label == "01-coder"
+    assert collect.surely("x") == "x"
+    assert collect.missing_block({}) is None
     assert collect.latest_runner_line(None) is None
     assert collect.has_text(("prompt", "x")) is True
     assert collect.has_text(("prompt", None)) is False

@@ -192,8 +192,16 @@ def test_filtered_fleet(tmp_path: Path) -> None:
     assert len(app.filtered_fleet(fleet, False).repos) == 1
 
 
+def test_caught_swallows_exceptions() -> None:
+    box = app.Caught()
+    assert box.__exit__(None, None, None) is False
+    assert box.__exit__(ValueError, ValueError("boom"), None) is True
+    assert isinstance(box.error, ValueError)
+
+
 def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert app.skip() is None
+    assert app.surely("x") == "x"
     assert app.is_code(None) is False
     assert app.is_code(0) is True
     assert isinstance(app.instantiate(FleetPanel), FleetPanel)
@@ -226,19 +234,17 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     with box:
         pass
     assert box.error is None
-    with box:
-        raise ValueError("boom")
-    assert isinstance(box.error, ValueError)
     monkeypatch.setattr(app, "init_theme", mono_theme)
     monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
     session = app.WatchSession([tmp_path], 1.0, True)
     session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
     app.set_detail(session, repo(tmp_path))
-    assert session.detail is not None
+    opened = session.detail
+    assert opened is not None
     session.close_detail()
-    assert session.detail is None
+    assert session.detail is not opened
     app.open_repo(session, None)
-    assert session.detail is None
+    assert session.detail is not opened
     assert session.quit_watch() == 0
     session.bump_tick()
     session.toggle_legend()

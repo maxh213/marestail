@@ -1,6 +1,7 @@
 import contextlib
 import curses
 from dataclasses import dataclass
+from typing import cast
 
 GLYPH_FLOURISH = "❧"
 GLYPH_RUNNING = "⚘"
@@ -142,7 +143,7 @@ def running_glyph(_verdict: str | None) -> str:
 
 
 def verdict_glyph(verdict: str | None) -> str:
-    return {"BOUNCE": GLYPH_BOUNCED, "PASS": GLYPH_PASSED}.get(verdict, GLYPH_DONE)
+    return {"BOUNCE": GLYPH_BOUNCED, "PASS": GLYPH_PASSED}.get(cast(str, verdict), GLYPH_DONE)
 
 
 def step_glyph(status: str, verdict: str | None) -> str:
@@ -155,7 +156,7 @@ def running_attr(theme: Theme, _verdict: str | None) -> int:
 
 
 def verdict_attr(theme: Theme, verdict: str | None) -> int:
-    return {"BOUNCE": theme.bounced, "PASS": theme.passed}.get(verdict, theme.done)
+    return {"BOUNCE": theme.bounced, "PASS": theme.passed}.get(cast(str, verdict), theme.done)
 
 
 def step_attr(theme: Theme, status: str, verdict: str | None) -> int:

@@ -38,7 +38,7 @@ from marestail.tui.panels import (
     worker_rows,
     wrap_line,
 )
-from marestail.tui.theme import ROUND, mono_theme
+from marestail.tui.theme import HEAVY, ROUND, mono_theme
 
 
 class FakeWin:
@@ -226,12 +226,14 @@ def test_conversation_panel(tmp_path: Path, monkeypatch: Any) -> None:
 def test_panel_helpers(tmp_path: Path) -> None:
     assert panels.skip() is None
     assert panels.none_of() is None
+    assert panels.surely("x") == "x"
+    assert panels.missing_fleet(0) is None
     assert panels.present(0) is True
     assert panels.present(None) is False
     assert panels.task_label(None) == "none"
     assert panels.task_label("t") == "t"
-    assert panels.selected_border(True) is panels.HEAVY
-    assert panels.selected_border(False) is panels.ROUND
+    assert panels.selected_border(True) is HEAVY
+    assert panels.selected_border(False) is ROUND
     theme = mono_theme()
     assert panels.selected_border_attr(theme, True) == theme.border_focus
     assert panels.selected_border_attr(theme, False) == theme.border
@@ -256,7 +258,8 @@ def test_panel_helpers(tmp_path: Path) -> None:
     assert panels.pick_marquee(0) is panels.blank_marquee
     assert panels.worker_tails(None) == []
     assert panels.blank_tail(Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None), 1, state_of()) == ""
-    assert panels.skip_gate_row(FakeWin(), 4, 0, 10, live, state_of()) == 4
+    gate_win: Any = FakeWin()
+    assert panels.skip_gate_row(gate_win, 4, 0, 10, live, state_of()) == 4
     assert panels.is_target(live, (0, live)) is True
     win: Any = FakeWin()
     panels.paint_dead(win, 0, 0, 10, live, False, state_of())

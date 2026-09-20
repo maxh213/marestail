@@ -5,9 +5,10 @@ import time
 from functools import partial
 from itertools import starmap
 from pathlib import Path
+from typing import Any, TypeGuard, cast
 
 from .collect import collect_fleet
-from .model import Fleet
+from .model import Fleet, RepoState
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
 from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
 
@@ -40,11 +41,15 @@ class Caught:
         return isinstance(exc, Exception)
 
 
-def skip(*_args: object, **_kwargs: object) -> None:
+def skip(*_args: object, **_kwargs: object) -> Any:
     return None
 
 
-def is_code(value: int | None) -> bool:
+def surely[T](value: T | None) -> T:
+    return cast(T, value)
+
+
+def is_code(value: int | None) -> TypeGuard[int]:
     return value is not None
 
 
@@ -96,14 +101,15 @@ class WatchSession:
         self.collected = now
 
     def sync_detail(self) -> None:
-        self.detail.sync(self.state.fleet)
+        surely(self.detail).sync(self.state.fleet)
 
     def handle_key(self, key: int) -> int | None:
-        chosen = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
-        return chosen(self, key)
+        chosen: Any = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
+        return cast(int | None, chosen(self, key))
 
     def handle_idle(self, key: int) -> int | None:
-        IDLE_ACTIONS.get(key, skip)(self)
+        action: Any = IDLE_ACTIONS.get(key, skip)
+        action(self)
         return None
 
     def bump_tick(self) -> None:
@@ -131,8 +137,8 @@ class WatchSession:
         self.detail = None
 
     def handle_panel(self, key: int) -> int | None:
-        chosen = PANEL_ACTIONS.get(self.panels[self.active].on_key(key, self.state), skip)
-        return chosen(self)
+        chosen: Any = PANEL_ACTIONS.get(cast(str, self.panels[self.active].on_key(key, self.state)), skip)
+        return cast(int | None, chosen(self))
 
     def quit_watch(self) -> int:
         return 0
@@ -157,15 +163,16 @@ def detail_backs(detail: ConversationPanel | None, key: int, state: WatchState) 
 
 
 def key_action(detail: ConversationPanel | None, key: int, state: WatchState) -> str | None:
-    return getattr(detail, "on_key", skip)(key, state)
+    action: Any = getattr(detail, "on_key", skip)
+    return cast(str | None, action(key, state))
 
 
-def open_repo(session: WatchSession, repo: object) -> None:
+def open_repo(session: WatchSession, repo: RepoState | None) -> None:
     chosen = (skip, set_detail)[repo is not None]
-    chosen(session, repo)
+    chosen(session, surely(repo))
 
 
-def set_detail(session: WatchSession, repo: object) -> None:
+def set_detail(session: WatchSession, repo: RepoState) -> None:
     session.detail = ConversationPanel(repo)
 
 
@@ -201,7 +208,7 @@ def keep_all_repos(_fleet: Fleet) -> None:
     return None
 
 
-def repo_alive(repo: object) -> bool:
+def repo_alive(repo: RepoState) -> bool:
     return repo.alive
 
 
@@ -244,7 +251,8 @@ def draw_frame(
 ) -> None:
     draw_header(stdscr, width, state)
     draw_footer(stdscr, height, width, detail, state)
-    (panel, detail)[detail is not None].render(stdscr, Rect(2, 0, height - 3, width), True, state)
+    shown: Panel = (panel, surely(detail))[detail is not None]
+    shown.render(stdscr, Rect(2, 0, height - 3, width), True, state)
     chosen = (skip, draw_legend)[legend]
     chosen(stdscr, height, width, state)
 
@@ -285,7 +293,8 @@ def draw_footer(win: curses.window, height: int, width: int, detail: Conversatio
 
 
 def put_error(win: curses.window, height: int, width: int, state: WatchState) -> None:
-    put(win, height - 1, width - len(state.error) - 1, state.error, state.theme.bounced)
+    error = surely(state.error)
+    put(win, height - 1, width - len(error) - 1, error, state.theme.bounced)
 
 
 def fleet_hints(_detail: ConversationPanel | None) -> str:
@@ -298,7 +307,7 @@ def detail_hints(detail: ConversationPanel) -> str:
 
 def footer_hints(detail: ConversationPanel | None) -> str:
     chosen = (fleet_hints, detail_hints)[detail is not None]
-    return chosen(detail)
+    return chosen(surely(detail))
 
 
 IDLE_ACTIONS = {-1: WatchSession.bump_tick, ord("?"): WatchSession.toggle_legend}
