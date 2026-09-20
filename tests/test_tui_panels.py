@@ -79,7 +79,7 @@ def state_of(fleet: Fleet | None = None) -> WatchState:
 
 
 def test_put_and_clip() -> None:
-    win = FakeWin(4, 10)
+    win: Any = FakeWin(4, 10)
     put(win, -1, 0, "x")
     put(win, 0, 20, "x")
     put(win, 0, -2, "hello")
@@ -93,7 +93,7 @@ def test_put_and_clip() -> None:
 
 
 def test_draw_box_and_helpers() -> None:
-    win = FakeWin()
+    win: Any = FakeWin()
     draw_box(win, Rect(0, 0, 1, 1), ROUND, 0)
     draw_box(win, Rect(0, 0, 3, 5), ROUND, 1)
     assert clean(" a  b ") == "a b"
@@ -130,22 +130,26 @@ def test_worker_rows_and_selection(tmp_path: Path) -> None:
     assert tail_lines_of(busy) == []
     busy.tail_lines = ["a", "b", "c", "d"]
     assert len(tail_lines_of(busy)) == 3
-    busy.worker.tail_lines = ["from-worker"]
+    worker = busy.worker
+    assert worker is not None
+    worker.tail_lines = ["from-worker"]
     busy.tail_lines = ["from-repo"]
     assert tail_lines_of(busy) == ["from-worker"]
-    busy.worker.tail_lines = []
+    worker.tail_lines = []
     assert tail_lines_of(busy) == ["from-repo"]
     process = Process(1, 3, "m", "claude")
     busy.worker = Worker(step=step(), process=process, result_path=None, prompt_path=None, handoff_path=None)
-    assert fmt_elapsed(busy.worker).endswith("s")
-    busy.worker.process = None
-    assert fmt_elapsed(busy.worker) == "1m"
-    busy.worker.step.minutes = None
-    assert fmt_elapsed(busy.worker) == "--"
+    bound = busy.worker
+    assert bound is not None
+    assert fmt_elapsed(bound).endswith("s")
+    bound.process = None
+    assert fmt_elapsed(bound) == "1m"
+    bound.step.minutes = None
+    assert fmt_elapsed(bound) == "--"
 
 
 def test_draw_rows(tmp_path: Path) -> None:
-    win = FakeWin()
+    win: Any = FakeWin()
     watch = state_of()
     idle = make_repo(tmp_path, alive=False)
     draw_idle_row(win, 0, 0, 20, idle, False, watch)
@@ -167,7 +171,7 @@ def test_draw_rows(tmp_path: Path) -> None:
 
 def test_fleet_panel(tmp_path: Path) -> None:
     panel = FleetPanel()
-    win = FakeWin()
+    win: Any = FakeWin()
     empty = state_of()
     panel.render(win, Rect(0, 0, 10, 40), True, empty)
     fleet = Fleet(repos=[make_repo(tmp_path / "a"), make_repo(tmp_path / "b")], scanned_at=0)
@@ -180,7 +184,6 @@ def test_fleet_panel(tmp_path: Path) -> None:
     assert fleet_action(10, 0) == "handled"
     assert panel.on_key(ord("q"), watch) == "quit"
     assert panel.on_key(ord("x"), watch) is None
-    panel.render = panel.render  # keep attribute used
 
 
 def test_conversation_panel(tmp_path: Path, monkeypatch: Any) -> None:
@@ -190,7 +193,7 @@ def test_conversation_panel(tmp_path: Path, monkeypatch: Any) -> None:
     assert "01-coder" in panel.heading()
     panel.repo.worker = None
     assert "live" in panel.heading()
-    win = FakeWin()
+    win: Any = FakeWin()
     watch = state_of(Fleet(repos=[current], scanned_at=0))
     panel.render(win, Rect(0, 0, 8, 40), True, watch)
     panel.render(win, Rect(0, 0, 8, 40), True, watch)

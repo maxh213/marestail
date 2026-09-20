@@ -1,6 +1,7 @@
 import curses
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from marestail.tui import app
 from marestail.tui.model import Fleet, RepoState
@@ -38,9 +39,17 @@ def repo(root: Path, alive: bool = True) -> RepoState:
     return RepoState(name=root.name, root=root, branch="main", head="a", task="t", log_path=None, alive=alive)
 
 
+def as_window(fake: FakeScr) -> curses.window:
+    return cast(curses.window, fake)
+
+
+def reply(value: str | None) -> Any:
+    return lambda key, state: value
+
+
 def test_run_wraps(monkeypatch: Any) -> None:
-    monkeypatch.setattr(app.locale, "setlocale", lambda *args: None)
-    monkeypatch.setattr(app.curses, "wrapper", lambda fn, *args: fn(FakeScr(), *args) or 0)
+    monkeypatch.setattr("marestail.tui.app.locale.setlocale", lambda *args: None)
+    monkeypatch.setattr("marestail.tui.app.curses.wrapper", lambda fn, *args: fn(FakeScr(), *args) or 0)
     monkeypatch.setattr(app, "_main", lambda *args: 0)
     assert app.run([Path(".")]) == 0
 
@@ -49,12 +58,12 @@ def test_session_keys(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(app, "init_theme", mono_theme)
     monkeypatch.setattr(app, "hide_cursor", lambda: None)
     monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
-    monkeypatch.setattr(app.curses, "doupdate", lambda: None)
+    monkeypatch.setattr("marestail.tui.app.curses.doupdate", lambda: None)
     session = app.WatchSession([tmp_path], 0.0, True)
     session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
     scr = FakeScr()
     scr.keys = [-1]
-    assert session.tick(scr) is None
+    assert session.tick(as_window(scr)) is None
     assert session.state.tick == 1
     assert session.handle_key(curses.KEY_RESIZE) is None
     assert session.handle_key(ord("?")) is None
@@ -62,22 +71,47 @@ def test_session_keys(tmp_path: Path, monkeypatch: Any) -> None:
     assert session.handle_key(ord("\t")) is None
     assert session.handle_key(ord("r")) is None
     assert session.collected == 0.0
+
+
+def test_session_panel_actions(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 0.0, True)
+    session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
     session.detail = ConversationPanel(repo(tmp_path))
-    session.detail.on_key = lambda key, state: "handled"
+    monkeypatch.setattr(session.detail, "on_key", reply("handled"))
     assert session.handle_detail(ord("j")) is None
     assert session.detail is not None
+    session.detail = None
+    monkeypatch.setattr(session.panels[0], "on_key", reply(None))
+    assert session.handle_panel(ord("z")) is None
+
+
+def test_handle_key_forwards_to_detail(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 0.0, True)
+    session.detail = ConversationPanel(repo(tmp_path))
+    monkeypatch.setattr(session.detail, "on_key", reply("handled"))
     assert session.handle_key(ord("j")) is None
     assert session.detail is not None
-    session.detail = None
-    session.panels[0].on_key = lambda key, state: None
-    assert session.handle_panel(ord("z")) is None
-    session.panels[0].on_key = lambda key, state: "quit"
+
+
+def test_session_quit_open_and_back(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 0.0, True)
+    session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
+    monkeypatch.setattr(session.panels[0], "on_key", reply("quit"))
     assert session.handle_key(ord("x")) == 0
-    session.panels[0].on_key = lambda key, state: "open"
+    session = app.WatchSession([tmp_path], 0.0, True)
+    session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
+    monkeypatch.setattr(session.panels[0], "on_key", reply("open"))
     assert session.handle_key(ord("x")) is None
-    assert session.detail is not None
-    session.detail.on_key = lambda key, state: "back"
-    assert session.handle_key(ord("q")) is None
+    detail = session.detail
+    assert detail is not None
+    monkeypatch.setattr(detail, "on_key", reply("back"))
+    session.handle_detail(ord("q"))
     assert session.detail is None
     session.open_detail()
     session.state.fleet = Fleet(repos=[], scanned_at=0)
@@ -93,22 +127,22 @@ def test_main_returns_on_quit(tmp_path: Path, monkeypatch: Any) -> None:
     scr = FakeScr()
     calls = {"n": 0}
 
-    def tick(self: app.WatchSession, stdscr: FakeScr) -> int | None:
+    def tick(self: app.WatchSession, stdscr: curses.window) -> int | None:
         calls["n"] += 1
         return 0 if calls["n"] > 1 else None
 
     monkeypatch.setattr(app.WatchSession, "tick", tick)
-    assert app._main(scr, [tmp_path], 1.0, False) == 0
+    assert app._main(as_window(scr), [tmp_path], 1.0, False) == 0
 
 
 def test_hide_cursor(monkeypatch: Any) -> None:
-    monkeypatch.setattr(app.curses, "curs_set", lambda n: None)
+    monkeypatch.setattr("marestail.tui.app.curses.curs_set", lambda n: None)
     app.hide_cursor()
 
     def boom(n: int) -> None:
         raise curses.error("no")
 
-    monkeypatch.setattr(app.curses, "curs_set", boom)
+    monkeypatch.setattr("marestail.tui.app.curses.curs_set", boom)
     app.hide_cursor()
 
 
@@ -123,10 +157,10 @@ def test_refresh_and_draw(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(app, "collect_fleet", lambda roots: (_ for _ in ()).throw(RuntimeError("boom")))
     app.refresh_fleet([tmp_path], watch, True)
     assert watch.error is not None
-    scr = FakeScr(10, 10)
-    monkeypatch.setattr(app.curses, "doupdate", lambda: None)
-    app.draw(scr, FleetPanel(), None, watch, False)
-    scr = FakeScr(24, 80)
+    small = as_window(FakeScr(10, 10))
+    monkeypatch.setattr("marestail.tui.app.curses.doupdate", lambda: None)
+    app.draw(small, FleetPanel(), None, watch, False)
+    scr = as_window(FakeScr(24, 80))
     app.draw(scr, FleetPanel(), None, watch, True)
     detail = ConversationPanel(repo(tmp_path))
     app.draw(scr, FleetPanel(), detail, watch, False)
@@ -144,7 +178,7 @@ def test_refresh_and_draw(tmp_path: Path, monkeypatch: Any) -> None:
 def test_maybe_refresh_skips(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(app, "init_theme", mono_theme)
     session = app.WatchSession([tmp_path], 100.0, True)
-    session.collected = app.time.monotonic()
+    session.collected = time.monotonic()
     session.maybe_refresh()
     session.refresh = 0.0
     session.detail = ConversationPanel(repo(tmp_path))
