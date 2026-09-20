@@ -1,4 +1,6 @@
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -13,7 +15,7 @@ def test_git_toplevel_is_this_repo() -> None:
 
 
 def test_git_toplevel_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(conftest.subprocess, "run", lambda *args, **kwargs: type("R", (), {"returncode": 1, "stdout": ""})())
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""))
     assert conftest.git_toplevel() is None
 
 
