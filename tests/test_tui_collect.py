@@ -596,7 +596,7 @@ def test_run_git_invokes_git(tmp_path: Path, monkeypatch: Any) -> None:
         seen.append((list(command), dict(options)))
         return subprocess.CompletedProcess(command, 0, "main\n", "")
 
-    monkeypatch.setattr(collect.subprocess, "run", run)
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", run)
     out = collect.run_git(tmp_path, ["branch", "--show-current"])
     assert out is not None
     assert out.stdout == "main\n"
@@ -604,7 +604,7 @@ def test_run_git_invokes_git(tmp_path: Path, monkeypatch: Any) -> None:
 
 
 def test_run_git_swallows_oserror(tmp_path: Path, monkeypatch: Any) -> None:
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
     assert collect.run_git(tmp_path, ["status"]) is None
 
 
@@ -615,13 +615,13 @@ def test_run_ps_invokes_ps(monkeypatch: Any) -> None:
         seen.append((list(command), dict(options)))
         return subprocess.CompletedProcess(command, 0, "PID\n1 0 1 bash\n", "")
 
-    monkeypatch.setattr(collect.subprocess, "run", run)
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", run)
     assert collect.run_ps() == "PID\n1 0 1 bash\n"
     assert seen == [(["ps", "-eo", "pid,ppid,etimes,args"], {"capture_output": True, "text": True, "timeout": 10})]
 
 
 def test_run_ps_swallows_oserror(monkeypatch: Any) -> None:
-    monkeypatch.setattr(collect.subprocess, "run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
+    monkeypatch.setattr("marestail.tui.collect.subprocess.run", lambda *args, **options: (_ for _ in ()).throw(OSError("no")))
     assert collect.run_ps() == ""
 
 

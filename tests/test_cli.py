@@ -639,16 +639,20 @@ def test_blocked_count(tmp_path: Path) -> None:
     assert cli.blocked_count(tmp_path / "c") == 3
 
 
+def subparsers_action(parser: argparse.ArgumentParser) -> Any:
+    group = parser._subparsers
+    assert group is not None
+    action: Any = group._group_actions[0]
+    return action
+
+
 def subparser(name: str) -> argparse.ArgumentParser:
-    parser = cli.build_parser()
-    action = parser._subparsers._group_actions[0]
-    chosen: argparse.ArgumentParser = action.choices[name]
+    chosen: argparse.ArgumentParser = subparsers_action(cli.build_parser()).choices[name]
     return chosen
 
 
 def nested_parser(parent: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
-    action = parent._subparsers._group_actions[0]
-    chosen: argparse.ArgumentParser = action.choices[name]
+    chosen: argparse.ArgumentParser = subparsers_action(parent).choices[name]
     return chosen
 
 
@@ -657,15 +661,14 @@ def option_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
 
 
 def choice_help(parser: argparse.ArgumentParser) -> dict[str, str | None]:
-    action = parser._subparsers._group_actions[0]
-    return {choice.dest: choice.help for choice in action._choices_actions}
+    return {choice.dest: choice.help for choice in subparsers_action(parser)._choices_actions}
 
 
 def test_root_parser_help_and_subcommands() -> None:
     parser = cli.build_parser()
     assert parser.prog == "marestail"
     assert parser.description == "deterministic gates for coding agents"
-    action = parser._subparsers._group_actions[0]
+    action = subparsers_action(parser)
     assert action.dest == "command"
     assert action.required is True
     assert list(action.choices) == ["gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"]
@@ -694,7 +697,7 @@ def test_gate_parser_defaults_and_help() -> None:
     assert helped["--json"] is None
     assert helped["--hook"] == "behave as a Claude Code Stop hook"
     tier = next(action for action in parser._actions if "--tier" in action.option_strings)
-    assert list(tier.choices) == ["fast", "sonar", "full", "qa", "all"]
+    assert list(tier.choices or []) == ["fast", "sonar", "full", "qa", "all"]
     focus = next(action for action in parser._actions if "--focus" in action.option_strings)
     assert focus.metavar == "PATH"
 
@@ -723,7 +726,7 @@ def test_run_parser_defaults_and_help() -> None:
     retries = next(action for action in parser._actions if "--retries" in action.option_strings)
     assert (retries.metavar, retries.type) == ("N", int)
     agent = next(action for action in parser._actions if "--agent" in action.option_strings)
-    assert list(agent.choices) == ["claude", "agy", "grok", "cursor", "kilo", "kimi"]
+    assert list(agent.choices or []) == ["claude", "agy", "grok", "cursor", "kilo", "kimi"]
 
 
 def test_watch_install_sonar_defaults() -> None:
@@ -736,12 +739,12 @@ def test_watch_install_sonar_defaults() -> None:
     assert option_help(subparser("install"))["--gitignore-generated"] == "add the files marestail generates to the target's .gitignore"
     sonar = subparser("sonar")
     action = next(item for item in sonar._actions if item.dest == "action")
-    assert list(action.choices) == ["up", "down", "setup"]
+    assert list(action.choices or []) == ["up", "down", "setup"]
 
 
 def test_perf_parser_defaults_and_help() -> None:
     perf = subparser("perf")
-    action = perf._subparsers._group_actions[0]
+    action = subparsers_action(perf)
     assert (action.dest, action.required) == ("perf_command", True)
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["perf"])
@@ -753,7 +756,7 @@ def test_perf_parser_defaults_and_help() -> None:
     assert (run.script, run.tree, run.samples, run.db) == ("script.py", "head", 1, False)
     assert option_help(nested_parser(perf, "run"))["--db"] == "reset the tree's performance database before every sample"
     database = nested_parser(perf, "db")
-    names = list(database._subparsers._group_actions[0].choices)
+    names = list(subparsers_action(database).choices)
     assert names == ["golden", "status", "url", "prune", "down"]
     golden = nested_parser(database, "golden")
     assert option_help(golden)["--wait"] == "block until the build finishes instead of detaching"
@@ -779,7 +782,7 @@ def test_perf_tree_and_db_commands_are_required() -> None:
     perf = subparser("perf")
     require_tree(nested_parser(perf, "run"))
     database = nested_parser(perf, "db")
-    assert database._subparsers._group_actions[0].required is True
+    assert subparsers_action(database).required is True
     with pytest.raises(SystemExit):
         database.parse_args([])
     require_tree(nested_parser(database, "golden"))

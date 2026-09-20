@@ -240,7 +240,12 @@ def test_diff_context_reads_configured_git_base(monkeypatch: pytest.MonkeyPatch,
     assert unscoped == Context(config=config, focus={"src"})
     assert files == [(tmp_path, "origin/work")]
     bases: list[str] = []
-    monkeypatch.setattr(context, "changed_files", lambda root, base: bases.append(base) or set())
+
+    def record_base(root: Path, base: str) -> set[str]:
+        bases.append(base)
+        return set()
+
+    monkeypatch.setattr(context, "changed_files", record_base)
     monkeypatch.setattr(context, "changed_lines", lambda root, base: {})
     context.diff_context(Config(root=tmp_path, raw={}), True, set())
     assert bases == [context.DEFAULT_BASE]
