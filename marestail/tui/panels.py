@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, TypeGuard, cast
 
 from .collect import conversation_for, fmt_seconds
 from .model import Fleet, Process, RepoState, Step, Worker
@@ -70,8 +70,8 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely(value: Any) -> Any:
-    return value
+def surely[T](value: T | None) -> T:
+    return cast(T, value)
 
 
 def clamp(value: int, low: int, high: int) -> int:
