@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, TypedDict, TypeGuard
 
 from .collect import conversation_for, fmt_seconds
 from .model import Fleet, Process, RepoState, Step, Worker
@@ -45,7 +45,12 @@ def as_false(flag: bool) -> bool:
     return {False: False}[flag]
 
 
-WRAP_FLAGS = {"replace_whitespace": as_false(KEEP_WS), "drop_whitespace": as_false(KEEP_WS)}
+class WrapKwargs(TypedDict):
+    replace_whitespace: bool
+    drop_whitespace: bool
+
+
+WRAP_FLAGS: WrapKwargs = {"replace_whitespace": as_false(KEEP_WS), "drop_whitespace": as_false(KEEP_WS)}
 
 
 @dataclass(frozen=True)
@@ -77,19 +82,23 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
+def is_str(value: str | None) -> TypeGuard[str]:
+    return value is not None
+
+
 def surely(value: Any) -> Any:
     return value
 
 
 def first_text(*parts: str | None) -> str:
-    return next(filter(present, parts), "")
+    return next(filter(is_str, parts), "")
 
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
-def int_attr(attr: object) -> int:
+def int_attr(attr: int) -> int:
     return {False: attr}[type(attr) is not int]
 
 

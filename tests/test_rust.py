@@ -161,7 +161,7 @@ def test_cargo_requires_timeout(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(0, "")])
     ctx = make_context(tmp_path)
     with pytest.raises(TypeError):
-        rust.cargo(ctx, ["test"])
+        rust.cargo(ctx, ["test"])  # type: ignore[call-arg]
 
 
 def test_crates_finds_manifests(tmp_path: Path) -> None:

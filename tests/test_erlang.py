@@ -219,7 +219,7 @@ def test_escript_requires_timeout(tmp_path: Path, fake_run: Callable[..., FakeRu
     fake_run(erlang, [(0, "")])
     ctx = make_context(tmp_path)
     with pytest.raises(TypeError):
-        erlang.escript(ctx, "deps.escript", [])
+        erlang.escript(ctx, "deps.escript", [])  # type: ignore[call-arg]
 
 
 def stub_erlc(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[list[str]]:

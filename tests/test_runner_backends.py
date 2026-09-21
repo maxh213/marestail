@@ -363,7 +363,7 @@ def test_error_typed_reads_type_and_role() -> None:
 
 
 def test_kimi_usage_keeps_the_previous_cost() -> None:
-    events = [{runner.TOTAL_COST: 1.5, runner.NUM_TURNS: 2}, {"text": "later"}]
+    events: list[dict[str, Any]] = [{runner.TOTAL_COST: 1.5, runner.NUM_TURNS: 2}, {"text": "later"}]
     assert runner.kimi_usage(events) == (2, None, 1.5)
 
 

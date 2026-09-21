@@ -115,7 +115,7 @@ def test_put_and_clip() -> None:
     assert panels.surely(0) == 0
     assert panels.surely(None) is None
     with pytest.raises(KeyError):
-        panels.int_attr(None)
+        panels.int_attr(None)  # type: ignore[arg-type]
     assert panels.int_attr(5) == 5
     assert panels.first_text("", "later") == ""
     assert panels.first_text(None, "later") == "later"
@@ -123,6 +123,8 @@ def test_put_and_clip() -> None:
     assert panels.none_of("a") is None
     assert panels.present("a") is True
     assert panels.present(None) is False
+    assert panels.is_str("a") is True
+    assert panels.is_str(None) is False
     assert panels.keep_pos(1, 2, "t") == (1, 2, "t")
 
 

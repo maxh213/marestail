@@ -62,12 +62,20 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
+def is_str(value: str | None) -> TypeGuard[str]:
+    return value is not None
+
+
+def is_path(value: Path | None) -> TypeGuard[Path]:
+    return value is not None
+
+
 def surely(value: Any) -> Any:
     return value
 
 
 def first_text(*parts: str | None) -> str:
-    return next(filter(present, parts), "")
+    return next(filter(is_str, parts), "")
 
 
 def empty_list(*_args: object) -> list[Any]:
@@ -490,7 +498,7 @@ def work_home() -> Path:
 
 def claude_homes() -> list[Path]:
     homes: tuple[Path | None, ...] = (Path.home() / CLAUDE_HOME, work_home(), expanded_env(CLAUDE_CONFIG_ENV))
-    return list(filter(present, homes))
+    return list(filter(is_path, homes))
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
