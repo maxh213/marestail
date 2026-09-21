@@ -291,7 +291,7 @@ def paint_bed_frame(win: curses.window, rect: Rect, repo: RepoState, selected: b
 
 
 def put_tail(win: curses.window, row: int, x: int, inner: int, state: WatchState, offset: int, line: str) -> None:
-    put(win, row + offset, x, line[: inner], state.theme.secondary)
+    put(win, row + offset, x, line[:inner], state.theme.secondary)
 
 
 def paint_tails(win: curses.window, row: int, x: int, inner: int, repo: RepoState, state: WatchState) -> None:

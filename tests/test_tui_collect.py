@@ -997,7 +997,12 @@ def test_matching_agent_filters_under(tmp_path: Path, monkeypatch: Any) -> None:
     outside = Process(2, 1, "m", "claude")
     monkeypatch.setattr(collect, "agents_of", lambda rows: [inside, outside])
     seen: list[Path] = []
-    monkeypatch.setattr(collect, "agent_under", lambda real, process: seen.append(real) is None and process is inside)
+
+    def agent_under(real: Path, process: Process) -> bool:
+        seen.append(real)
+        return process is inside
+
+    monkeypatch.setattr(collect, "agent_under", agent_under)
     found = collect.matching_agent([], tmp_path)
     assert found is inside
     assert seen == [tmp_path, tmp_path]
