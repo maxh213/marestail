@@ -514,10 +514,23 @@ def test_sonar_constants() -> None:
 
 @pytest.mark.parametrize(
     ("line", "expected"),
-    [("a=b", 1), ("a:b", 1), ("ab", -1), ("a=b:c", 1), (":x", 0), ("=x", 0)],
+    [("a=b", 1), ("a:b", 1), ("ab", -1), ("a=b:c", 1), (":x", 0), ("=x", 0), ("a=b=c", 1), ("a:b:c", 1)],
 )
 def test_separator_index(line: str, expected: int) -> None:
     assert sonar.separator_index(line) == expected
+
+
+def test_summarize_rejects_a_missing_status(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^status$"):
+        sonar.summarize(ctx, [], None)  # type: ignore[arg-type]
+
+
+def test_collect_rejects_a_missing_key(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    client = object()
+    with pytest.raises(TypeError, match=r"^key$"):
+        sonar.collect(ctx, client, None)  # type: ignore[arg-type]
 
 
 def test_issue_and_component_paths() -> None:

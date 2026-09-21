@@ -356,6 +356,17 @@ def test_kimi_summary(output: str, expected: str) -> None:
     assert runner.kimi_summary(output) == expected
 
 
+def test_error_typed_reads_type_and_role() -> None:
+    assert runner.error_typed({"type": "error"}) is True
+    assert runner.error_typed({"role": "error"}) is True
+    assert runner.error_typed({}) is False
+
+
+def test_kimi_usage_keeps_the_previous_cost() -> None:
+    events = [{runner.TOTAL_COST: 1.5, runner.NUM_TURNS: 2}, {"text": "later"}]
+    assert runner.kimi_usage(events) == (2, None, 1.5)
+
+
 @pytest.mark.parametrize(
     ("output", "expected"),
     [

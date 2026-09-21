@@ -42,6 +42,8 @@ class Recorder:
         self.calls: list[tuple[Any, ...]] = []
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if args and args[0] is None:
+            raise TypeError("arg")
         self.calls.append(args + tuple(kwargs.items()))
         return self.replies.pop(0) if len(self.replies) > 1 else (self.replies[0] if self.replies else None)
 

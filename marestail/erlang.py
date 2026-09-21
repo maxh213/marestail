@@ -52,19 +52,25 @@ def docker_bin(ctx: Context, cwd: Path, program: str) -> list[str]:
     return [*command, "-w", str(cwd), str(ctx.erlang("image", IMAGE)), program]
 
 
+def require_timeout(timeout: int) -> int:
+    if type(timeout) is not int:
+        raise TypeError("timeout")
+    return timeout
+
+
 def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
     ctx = live(ctx)
     cwd = cwd or ctx.erlang_root()
-    return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=timeout)
+    return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=require_timeout(timeout))
 
 
-def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
+def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
     ctx = live(ctx)
-    return tool(ctx, "escript", [str(SCRIPT_DIR / script), *args], cwd, timeout)
+    return tool(ctx, "escript", [str(SCRIPT_DIR / script), *args], cwd, timeout=timeout)
 
 
-def erlc(ctx: Context, args: list[str], cwd: Path | None = None, timeout: int = ERLC_TIMEOUT) -> tuple[int, str]:
-    return tool(ctx, "erlc", args, cwd, timeout)
+def erlc(ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
+    return tool(ctx, "erlc", args, cwd, timeout=timeout)
 
 
 def hint(code: int, output: str) -> str | None:
@@ -100,11 +106,13 @@ def trouble(code: int, output: str, message: str, lines: list[str] | None = None
 
 
 def compile_with_tests(ctx: Context, sources: list[Path], tests: list[Path], ebin: Path, test_ebin: Path) -> tuple[str, list[str]] | None:
-    code, output = erlc(ctx, ["+debug_info", "-o", str(fresh_dir(ebin)), *map(str, sources)])
+    code, output = erlc(ctx, ["+debug_info", "-o", str(fresh_dir(ebin)), *map(str, sources)], timeout=ERLC_TIMEOUT)
     failed = trouble(code, output, "sources failed to compile")
     if failed:
         return failed
-    code, output = erlc(ctx, ["-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(fresh_dir(test_ebin)), *map(str, tests)])
+    code, output = erlc(
+        ctx, ["-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(fresh_dir(test_ebin)), *map(str, tests)], timeout=ERLC_TIMEOUT
+    )
     return ("tests failed to compile", tail(output)) if code != 0 else None
 
 

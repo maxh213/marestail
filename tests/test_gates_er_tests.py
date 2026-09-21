@@ -182,3 +182,9 @@ def test_gated_missing() -> None:
 )
 def test_passed_count_digits(line: str, expected: str) -> None:
     assert er_tests.passed_count(line) == expected
+
+
+def test_tests_passed_requires_the_phrase() -> None:
+    assert er_tests.tests_passed("nothing") == ""
+    assert er_tests.tests_passed("5 passed") == ""
+    assert er_tests.tests_passed("12 tests passed") == "12"

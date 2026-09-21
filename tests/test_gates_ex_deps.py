@@ -97,3 +97,15 @@ def test_parse_cycles(output: str, expected: list[list[str]]) -> None:
 @pytest.mark.parametrize(("line", "expected"), [("", False), ("   ", False), ("Cycle x", True), ("  lib/a.ex", True), ("other", False)])
 def test_cycle_line(line: str, expected: bool) -> None:
     assert ex_deps.cycle_line(line) is expected
+
+
+def test_repo_path_uses_the_elixir_root(tmp_path: Path) -> None:
+    nested = tmp_path / "app"
+    nested.mkdir()
+    ctx = make_context(tmp_path, {"elixir": {"root": "app"}})
+    assert ex_deps.repo_path("lib/a.ex", ctx, nested) == "app/lib/a.ex"
+    assert ex_deps.repo_path("lib/a.ex", ctx, tmp_path) == "lib/a.ex"
+
+
+def test_xref_timeout() -> None:
+    assert ex_deps.XREF_TIMEOUT == 600

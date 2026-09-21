@@ -180,8 +180,8 @@ def erlang_body(ctx: Context, files: list[Path]) -> str:
     from marestail import erlang
 
     ebin = erlang.fresh_dir(ctx.work / "er-graph-ebin")
-    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, files)])
+    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, files)], timeout=erlang.ERLC_TIMEOUT)
     if code != 0:
         return output.strip()[-ERLANG_TAIL:]
-    code, output = erlang.escript(ctx, "deps.escript", sorted(str(beam) for beam in ebin.glob("*.beam")))
+    code, output = erlang.escript(ctx, "deps.escript", sorted(str(beam) for beam in ebin.glob("*.beam")), timeout=erlang.TOOL_TIMEOUT)
     return output.strip()[-ERLANG_TAIL:] if code != 0 else edge_lines(json.loads(output), "fun")

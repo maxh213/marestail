@@ -9,14 +9,21 @@ from marestail.report import Result, elapsed
 GATE = "rs.lint"
 CLIPPY_ARGS = ["-D", "warnings", "-D", "clippy::pedantic"]
 MAX_LINES = 60
+CLIPPY_TIMEOUT = 1800
+FORMAT_TIMEOUT = 300
+OUTPUT_TAIL = 300
+CLIPPY = "clippy"
+RS = ".rs"
+CARGO_TOML = "Cargo.toml"
+RUST_SUFFIXES = (RS, CARGO_TOML)
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     if nothing_changed(ctx):
         return Result.skipped(GATE, "no changed rust files")
-    code, output = rust.cargo(ctx, clippy_command(ctx), timeout=1800)
-    problem = rust.missing(code, output, "clippy")
+    code, output = rust.cargo(ctx, clippy_command(ctx), timeout=CLIPPY_TIMEOUT)
+    problem = rust.missing(code, output, CLIPPY)
     if problem:
         return Result(GATE, False, "clippy missing", [problem], elapsed(started))
     findings = clippy_or_failure(code, output, ctx) + format_findings(ctx)
@@ -25,7 +32,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def nothing_changed(ctx: Context) -> bool:
-    return ctx.scope_changed and not ctx.changed_under(ctx.rust_root(), (".rs", "Cargo.toml"))
+    return ctx.scope_changed and not ctx.changed_under(ctx.rust_root(), RUST_SUFFIXES)
 
 
 def clippy_command(ctx: Context) -> list[str]:
@@ -35,7 +42,7 @@ def clippy_command(ctx: Context) -> list[str]:
 def clippy_or_failure(code: int, output: str, ctx: Context) -> list[str]:
     findings = clippy_findings(output, ctx)
     if code != 0 and not findings:
-        return [f"cargo clippy failed: {output.strip()[-300:]}"]
+        return [f"cargo clippy failed: {output.strip()[-OUTPUT_TAIL:]}"]
     return findings
 
 
@@ -60,14 +67,19 @@ def json_record(line: str) -> dict[str, Any]:
 
 def compiler_message(line: str) -> dict[str, Any] | None:
     record = json_record(line)
-    message: dict[str, Any] | None = record.get("message") if record.get("reason") == "compiler-message" else None
-    if not message or message.get("level") not in ("warning", "error"):
+    if record.get("reason") != "compiler-message":
+        return None
+    message = record.get("message")
+    if not isinstance(message, dict) or message.get("level") not in ("warning", "error"):
         return None
     return message
 
 
 def primary_span(message: dict[str, Any]) -> dict[str, Any] | None:
-    return next((span for span in message.get("spans", []) if span.get("is_primary")), None)
+    spans = message.get("spans")
+    if not isinstance(spans, list):
+        spans = []
+    return next((span for span in spans if span.get("is_primary")), None)
 
 
 def rule_of(message: dict[str, Any]) -> str:
@@ -97,13 +109,13 @@ def formatted_paths(output: str) -> list[str]:
 
 
 def format_findings(ctx: Context) -> list[str]:
-    code, output = rust.cargo(ctx, ["fmt", "--check", "--message-format", "short"], timeout=300)
-    problem = rust.missing(code, output, "clippy")
+    code, output = rust.cargo(ctx, ["fmt", "--check", "--message-format", "short"], timeout=FORMAT_TIMEOUT)
+    problem = rust.missing(code, output, CLIPPY)
     if problem:
         return [problem]
     paths = formatted_paths(output)
     if code != 0 and not paths:
-        return [f"cargo fmt --check failed: {output.strip()[-300:]}"]
+        return [f"cargo fmt --check failed: {output.strip()[-OUTPUT_TAIL:]}"]
     return unformatted(paths, ctx)
 
 

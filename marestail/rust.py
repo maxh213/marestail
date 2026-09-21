@@ -41,7 +41,9 @@ def listify(value: Any) -> list[str]:
 def configured_list(value: Any) -> list[str]:
     if value is None:
         raise TypeError("list")
-    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
+    if type(value) is list:
+        return [str(part) for part in value]
+    return [str(value)]
 
 
 def rel(ctx: Context, path: str | Path) -> str:
@@ -72,8 +74,14 @@ def cargo_bin(ctx: Context) -> list[str]:
     return listify(ctx.rust("cargo", "cargo"))
 
 
-def cargo(ctx: Context, args: list[str], timeout: int = 1800, cwd: Path | None = None) -> tuple[int, str]:
-    return run([*cargo_bin(ctx), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=timeout)
+def require_timeout(timeout: int) -> int:
+    if type(timeout) is not int:
+        raise TypeError("timeout")
+    return timeout
+
+
+def cargo(ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
+    return run([*cargo_bin(ctx), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=require_timeout(timeout))
 
 
 def missing(code: int, output: str, tool: str) -> str | None:

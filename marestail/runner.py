@@ -125,6 +125,10 @@ CONTENT = "content"
 COST_USD = "costUSD"
 RESULT = "result"
 MESSAGE = "message"
+ROLE_KEY = "role"
+STOP_REASON = "stopReason"
+RESPONSE = "response"
+GROK_LIMIT_KEYS = (MESSAGE, TEXT, TYPE_KEY, STOP_REASON)
 STATUS_COMMAND = [GIT, "status", "--porcelain", "--untracked-files=all"]
 INPUT_OUTPUT_TOKENS = ("inputTokens", "outputTokens")
 KIMI_TOKENS = ("input_tokens", "output_tokens")
@@ -1452,7 +1456,7 @@ def kimi_texts(events: list[Event]) -> list[str]:
 
 
 def error_typed(event: Event) -> bool:
-    return ERROR in str(event.get("type") or "") or ERROR in str(event.get("role") or "")
+    return ERROR in mapping_text(event, TYPE_KEY) or ERROR in mapping_text(event, ROLE_KEY)
 
 
 def error_event_text(event: Event) -> str | None:
@@ -1499,8 +1503,10 @@ def kimi_tokens(usage: Event, tokens: Any) -> Any:
 def kimi_usage(events: list[Event]) -> tuple[Any, Any, Any]:
     turns = tokens = cost = None
     for event in events:
-        turns = event.get(NUM_TURNS, turns)
-        cost = event.get(TOTAL_COST, cost)
+        if NUM_TURNS in event:
+            turns = event[NUM_TURNS]
+        if TOTAL_COST in event:
+            cost = event[TOTAL_COST]
         tokens = kimi_tokens(event_dict(event, USAGE), tokens)
     return turns, tokens, cost
 
@@ -1529,7 +1535,7 @@ def grok_failed(data: Event, code: int) -> bool:
 
 
 def grok_limit_text(data: Event, output: str) -> bool:
-    blob = SPACE.join(str(data.get(key, "")) for key in (MESSAGE, "text", "type", "stopReason"))
+    blob = SPACE.join(mapping_text(data, key) for key in GROK_LIMIT_KEYS)
     return bool(GROK_LIMIT_PATTERN.search(blob) or GROK_LIMIT_PATTERN.search(output))
 
 
@@ -1588,12 +1594,12 @@ def rate_limited(code: int, output: str) -> bool:
     except json.JSONDecodeError:
         return limited_output(code, output)
     if "is_error" in data:
-        return bool(data.get("is_error")) and bool(LIMIT_PATTERN.search(str(data.get(RESULT, ""))))
+        return bool(data.get("is_error")) and bool(LIMIT_PATTERN.search(mapping_text(data, RESULT)))
     return response_limited(data, code)
 
 
 def response_limited(data: Any, code: int) -> bool:
-    error_text = str(data.get("response", "")) or str(data.get(ERROR, ""))
+    error_text = mapping_text(data, RESPONSE) or mapping_text(data, ERROR)
     failed = data.get("status") == "ERROR" or code != 0
     return failed and bool(LIMIT_PATTERN.search(error_text))
 

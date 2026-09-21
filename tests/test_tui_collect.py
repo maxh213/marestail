@@ -830,6 +830,13 @@ def test_newest_log_uses_name_key(tmp_path: Path) -> None:
     newer.write_text("b")
     assert collect.newest_log([older, newer]) == newer
     assert collect.newest_log([newer, older]) == newer
+    first = tmp_path / "z" / "a.log"
+    second = tmp_path / "a" / "z.log"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("a")
+    second.write_text("z")
+    assert collect.newest_log([first, second]) == second
 
 
 def test_new_step_fields() -> None:

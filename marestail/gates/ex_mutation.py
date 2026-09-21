@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from marestail.context import Context, MutationScope
 from marestail.elixir import project_files
@@ -13,12 +13,18 @@ GATE = "ex.mutation"
 PASSING = {"killed", "invalid", "equivalent"}
 DISABLED_TIMEOUTS = {"0", "none", "false", "off"}
 MUEX_DEPENDENCY = 'add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'
+EX = ".ex"
+EXS = ".exs"
+ELIXIR_SUFFIXES = (EX, EXS)
+MUTATIONS_KEY = "mutations"
+MUTATOR_KEY = "mutator"
+DOT = "."
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.elixir_root()
-    scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
+    scope = ctx.mutation_files("elixir", root, ELIXIR_SUFFIXES)
     if scope.mode == "error":
         return Result(GATE, False, scope.note, [], elapsed(started))
     files = scoped_sources(ctx, root, scope.files or [])
@@ -35,11 +41,19 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
     missing = muex_missing(root)
     if missing:
         return Result(GATE, False, *missing, elapsed(started))
-    _, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=cast(int, mutation_timeout(ctx)))
+    _, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     report = read_report(output)
     if isinstance(report, str):
         return Result(GATE, False, report, tail(output), elapsed(started))
-    return report_result(ctx, scope, report.get("mutations", []), output, started)
+    return report_result(ctx, scope, mutation_list(report), output, started)
+
+
+def mutation_list(report: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        found = report[MUTATIONS_KEY]
+    except KeyError:
+        return []
+    return list(found)
 
 
 def muex_missing(root: Path) -> tuple[str, list[str]] | None:
@@ -103,7 +117,7 @@ def command(ctx: Context, files: list[str]) -> list[str]:
 
 def switches(ctx: Context) -> list[str]:
     flags = []
-    if not ctx.elixir("muex_filter", False):
+    if not bool(ctx.elixir("muex_filter", False)):
         flags.append("--no-filter")
     if not ctx.elixir("muex_optimize", True):
         flags.append("--no-optimize")
@@ -124,8 +138,12 @@ def mirror_option(mirror: Any) -> list[str]:
 def describe(ctx: Context, mutation: dict[str, Any]) -> str:
     location = mutation.get("location", {})
     file = ctx.elixir_root().joinpath(location.get("file", "?")).resolve()
-    mutator = str(mutation.get("mutator", "")).rsplit(".", 1)[-1]
+    mutator = mutator_name(str(mutation.get(MUTATOR_KEY, "")))
     return f"{label(ctx, file)}:{location.get('line', 0)} {mutator} {mutation.get('status')}: {str(mutation.get('description', ''))[:80]}"
+
+
+def mutator_name(text: str) -> str:
+    return text[text.rfind(DOT) + 1 :]
 
 
 def label(ctx: Context, file: Path) -> str:

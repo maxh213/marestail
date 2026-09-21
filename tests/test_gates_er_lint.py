@@ -113,3 +113,18 @@ def test_lint_findings_unscoped(tmp_path: Path) -> None:
 def test_erlc_findings_parse(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, output: str, expected: list[str]) -> None:
     monkeypatch.setattr(erlang, "rel", lambda ctx, path: path)
     assert er_lint.erlc_findings(output, make_context(tmp_path)) == expected
+
+
+def test_failed_findings_ignore_output_when_code_is_zero() -> None:
+    assert er_lint.failed_findings(0, ["src/a.erl:1 unused"]) == []
+    assert er_lint.failed_findings(1, ["src/a.erl:1 unused"]) == ["src/a.erl:1 unused"]
+
+
+def test_batch_findings_clean_code_drops_parsed_lines(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    assert er_lint.batch_findings(0, "src/a.erl:1: unused", ctx) == []
+
+
+def test_erlang_suffixes_stay_lowercase() -> None:
+    assert er_lint.ERLANG_SUFFIXES == (".erl", ".hrl")
+    assert er_lint.LINT_TIMEOUT == 900

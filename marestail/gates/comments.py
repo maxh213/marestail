@@ -167,7 +167,7 @@ def erlang_findings(ctx: Context) -> list[str]:
         return []
     from marestail import erlang
 
-    code, output = erlang.escript(ctx, "comments.escript", list(map(str, paths)))
+    code, output = erlang.escript(ctx, "comments.escript", list(map(str, paths)), timeout=erlang.TOOL_TIMEOUT)
     problem = erlang.hint(code, output) if code != 0 else None
     return [problem] if problem else scanned(ctx, code, output, "erlang comment scanner failed")
 

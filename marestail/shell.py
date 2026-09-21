@@ -22,7 +22,7 @@ def run(
     command: list[str],
     cwd: Path,
     env: dict[str, str] | None = None,
-    timeout: int = 3600,
+    timeout: int | None = 3600,
     stdin: str | None = None,
 ) -> tuple[int, str]:
     check_run(command, cwd)

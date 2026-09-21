@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .collect import conversation_for, fmt_seconds
 from .model import Fleet, Process, RepoState, Step, Worker
@@ -41,6 +41,13 @@ RUNNER_PREFIX = "runner: "
 KEEP_WS = False
 
 
+def as_false(flag: bool) -> bool:
+    return {False: False}[flag]
+
+
+WRAP_FLAGS = {"replace_whitespace": as_false(KEEP_WS), "drop_whitespace": as_false(KEEP_WS)}
+
+
 @dataclass(frozen=True)
 class Rect:
     y: int
@@ -70,20 +77,24 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
+def surely(value: Any) -> Any:
+    return value
 
 
 def first_text(*parts: str | None) -> str:
-    return cast(str, next(filter(present, parts), ""))
+    return next(filter(present, parts), "")
 
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+def int_attr(attr: object) -> int:
+    return {False: attr}[type(attr) is not int]
+
+
 def put(win: curses.window, y: int, x: int, text: str, attr: int = 0) -> None:
-    apply_clip(win, clip_text(y, x, text, *win.getmaxyx()), attr)
+    apply_clip(win, clip_text(y, x, text, *win.getmaxyx()), int_attr(attr))
 
 
 def apply_clip(win: curses.window, clipped: tuple[int, int, str] | None, attr: int) -> None:
@@ -407,14 +418,8 @@ def draw_strip(win: curses.window, y: int, x: int, width: int, steps: list[Step]
     list(map(partial(put_step, win, y, x, state), filter(partial(in_strip, width), enumerate(steps[-STRIP_STEPS:]))))
 
 
-def as_false(flag: bool) -> bool:
-    return {False: False}[flag]
-
-
 def wrap_line(raw: str, width: int) -> list[str]:
-    return next(
-        filter(None, (textwrap.wrap(raw, max(1, width), replace_whitespace=as_false(KEEP_WS), drop_whitespace=as_false(KEEP_WS)), [""]))
-    )
+    return next(filter(None, (textwrap.wrap(raw, max(1, width), **WRAP_FLAGS), [""])))
 
 
 def plain_line(text: str) -> tuple[str, bool]:

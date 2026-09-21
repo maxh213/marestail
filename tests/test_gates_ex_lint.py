@@ -65,6 +65,7 @@ def test_scoped_clean(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     result = ex_lint.run_gate(ctx)
     assert shape(result)[:3] == ("ex.lint", False, "4 problems in scope")
     assert fake.calls[0] == ["mix", "format", "--check-formatted", "lib/a.ex", "test/a_test.exs"]
+    assert [options["timeout"] for options in fake.options] == [300, 600]
 
 
 def test_scoped_findings(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
@@ -115,3 +116,13 @@ def test_scoped_sources(tmp_path: Path) -> None:
 
 def test_relevant() -> None:
     assert ex_lint.relevant("==> app\n\n  \nkeep\n  also\n") == ["keep", "  also"]
+
+
+def test_problems_ignore_output_when_code_is_zero() -> None:
+    assert ex_lint.problems("format", (0, "lib/a.ex is not formatted")) == []
+    assert ex_lint.problems("format", (1, "lib/a.ex is not formatted")) == ["format: lib/a.ex is not formatted"]
+
+
+def test_lint_timeouts() -> None:
+    assert ex_lint.FORMAT_TIMEOUT == 300
+    assert ex_lint.COMPILE_TIMEOUT == 600

@@ -194,13 +194,13 @@ class FakeErlang:
         self.replies = {"erlc": erlc, "escript": escript}
         self.calls: list[tuple[Context, str, list[str]]] = []
 
-    def erlc(self, ctx: Context, args: list[str]) -> tuple[int, str]:
+    def erlc(self, ctx: Context, args: list[str], **_options: object) -> tuple[int, str]:
         self.calls.append((ctx, "erlc", args))
         (Path(args[2]) / "b.beam").write_text("")
         (Path(args[2]) / "a.beam").write_text("")
         return self.replies["erlc"]
 
-    def escript(self, ctx: Context, script: str, args: list[str]) -> tuple[int, str]:
+    def escript(self, ctx: Context, script: str, args: list[str], **_options: object) -> tuple[int, str]:
         self.calls.append((ctx, script, args))
         return self.replies["escript"]
 

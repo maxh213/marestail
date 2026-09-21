@@ -64,6 +64,7 @@ def test_output_tail() -> None:
     assert java.EMPTY == ""
     assert java.local_tag("{ns}name") == "name"
     assert java.local_tag("plain") == "plain"
+    assert java.local_tag("{a}b}c") == "b}c"
     assert java.trim_slash("/gen/") == "gen"
     assert java.trim_slash("gen") == "gen"
     assert java.configured_list(["a", 1]) == ["a", "1"]

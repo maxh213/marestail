@@ -136,6 +136,17 @@ def test_mirror_option(mirror: Any, expected: list[str]) -> None:
     assert ex_mutation.mirror_option(mirror) == expected
 
 
+def test_mutator_name_keeps_the_last_segment() -> None:
+    assert ex_mutation.mutator_name("Muex.Mutator.Arithmetic") == "Arithmetic"
+    assert ex_mutation.mutator_name("Comparison") == "Comparison"
+    assert ex_mutation.ELIXIR_SUFFIXES == (".ex", ".exs")
+
+
+def test_mutation_list_missing_key_is_empty() -> None:
+    assert ex_mutation.mutation_list({}) == []
+    assert ex_mutation.mutation_list({"mutations": [{"status": "killed"}]}) == [{"status": "killed"}]
+
+
 def test_status_reads_lowercase() -> None:
     assert ex_mutation.status({"status": "KiLLed"}) == "killed"
     assert ex_mutation.status({}) == ""

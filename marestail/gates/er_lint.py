@@ -8,6 +8,10 @@ from marestail.report import Result, elapsed
 
 GATE = "er.lint"
 MAX_LINES = 60
+ERL = ".erl"
+HRL = ".hrl"
+ERLANG_SUFFIXES = (ERL, HRL)
+LINT_TIMEOUT = 900
 ERLC_LOCATION = re.compile(r"\.[eh]rl:(\d+):(?:\d+:)?")
 STRONG_WARNINGS = [
     "+warn_export_all",
@@ -32,7 +36,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def unchanged(ctx: Context) -> bool:
-    return ctx.scoped and not ctx.changed_under(ctx.erlang_root(), (".erl", ".hrl"))
+    return ctx.scoped and not ctx.changed_under(ctx.erlang_root(), ERLANG_SUFFIXES)
 
 
 def compile_batches(sources: list[Path], tests: list[Path], ebin: Path) -> list[list[str]]:
@@ -47,7 +51,7 @@ def compile_batches(sources: list[Path], tests: list[Path], ebin: Path) -> list[
 def lint(ctx: Context, batches: list[list[str]], started: float) -> Result:
     findings: list[str] = []
     for args in batches:
-        code, output = erlang.erlc(ctx, args, timeout=900)
+        code, output = erlang.erlc(ctx, args, timeout=LINT_TIMEOUT)
         problem = erlang.hint(code, output)
         if problem:
             return Result(GATE, False, problem, [problem], elapsed(started))
@@ -57,7 +61,11 @@ def lint(ctx: Context, batches: list[list[str]], started: float) -> Result:
 
 
 def batch_findings(code: int, output: str, ctx: Context) -> list[str]:
-    return lint_findings(output, ctx) if code != 0 else []
+    return failed_findings(code, lint_findings(output, ctx))
+
+
+def failed_findings(code: int, findings: list[str]) -> list[str]:
+    return [] if code == 0 else findings
 
 
 def lint_findings(output: str, ctx: Context) -> list[str]:

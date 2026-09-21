@@ -79,7 +79,7 @@ def test_erlang_bin_docker_inside_root(fake_run: Callable[..., FakeRun]) -> None
 def test_escript_runs_script_in_erlang_root(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, [(0, "done")])
     ctx = make_context(tmp_path, {"erlang": {"root": "app"}})
-    assert erlang.escript(ctx, "deps.escript", ["a.beam"]) == (0, "done")
+    assert erlang.escript(ctx, "deps.escript", ["a.beam"], timeout=erlang.TOOL_TIMEOUT) == (0, "done")
     assert fake.calls == [["escript", str(erlang.SCRIPT_DIR / "deps.escript"), "a.beam"]]
     assert fake.options == [{"cwd": tmp_path / "app", "timeout": 600}]
 
@@ -87,14 +87,14 @@ def test_escript_runs_script_in_erlang_root(tmp_path: Path, fake_run: Callable[.
 def test_erlc_uses_given_cwd_and_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, [(1, "bad")])
     ctx = make_context(tmp_path)
-    assert erlang.erlc(ctx, ["-o", "x"], tmp_path / "sub", 5) == (1, "bad")
+    assert erlang.erlc(ctx, ["-o", "x"], tmp_path / "sub", timeout=5) == (1, "bad")
     assert fake.calls == [["erlc", "-o", "x"]]
     assert fake.options == [{"cwd": tmp_path / "sub", "timeout": 5}]
 
 
 def test_erlc_default_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, [(0, "")])
-    erlang.erlc(make_context(tmp_path), [])
+    erlang.erlc(make_context(tmp_path), [], timeout=erlang.ERLC_TIMEOUT)
     assert fake.options == [{"cwd": tmp_path, "timeout": 900}]
 
 
@@ -198,7 +198,7 @@ def test_escript_uses_an_explicit_cwd(tmp_path: Path, fake_run: Callable[..., Fa
     ctx = make_context(tmp_path, {"erlang": {"root": "app"}})
     other = tmp_path / "other"
     other.mkdir()
-    erlang.escript(ctx, "deps.escript", [], cwd=other)
+    erlang.escript(ctx, "deps.escript", [], cwd=other, timeout=erlang.TOOL_TIMEOUT)
     assert fake.options == [{"cwd": other, "timeout": erlang.TOOL_TIMEOUT}]
 
 
@@ -207,6 +207,19 @@ def test_erlang_constants() -> None:
     assert erlang.ERLC_TIMEOUT == 900
     assert erlang.PATH_SEP == ":"
     assert erlang.EMPTY == ""
+
+
+def test_require_timeout_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^timeout$"):
+        erlang.require_timeout(None)  # type: ignore[arg-type]
+    assert erlang.require_timeout(600) == 600
+
+
+def test_escript_requires_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake_run(erlang, [(0, "")])
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError):
+        erlang.escript(ctx, "deps.escript", [])
 
 
 def stub_erlc(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[list[str]]:

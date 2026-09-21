@@ -60,7 +60,7 @@ def test_cargo_runs_in_rust_root(tmp_path: Path, fake_run: Any, monkeypatch: pyt
     monkeypatch.setattr(shutil, "which", which_from({}))
     fake = fake_run(rust, [(0, "ok"), (1, "bad")])
     ctx = make_context(tmp_path, {"rust": {"root": "crate", "cargo": ["cross", "+nightly"], "llvm_cov": "/c"}})
-    assert rust.cargo(ctx, ["test"]) == (0, "ok")
+    assert rust.cargo(ctx, ["test"], timeout=1800) == (0, "ok")
     assert rust.cargo(ctx, ["fmt"], timeout=5, cwd=tmp_path) == (1, "bad")
     assert fake.calls == [["cross", "+nightly", "test"], ["cross", "+nightly", "fmt"]]
     assert fake.options == [
@@ -146,9 +146,22 @@ def test_excluded(tmp_path: Path, root: str, relative: str, expected: bool) -> N
 def test_configured_list() -> None:
     assert rust.configured_list([]) == []
     assert rust.configured_list(["a", 2]) == ["a", "2"]
-    assert rust.configured_list("x") == ["x"]
+    assert rust.configured_list("ab") == ["ab"]
     with pytest.raises(TypeError, match=r"^list$"):
         rust.configured_list(None)
+
+
+def test_require_timeout_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^timeout$"):
+        rust.require_timeout(None)  # type: ignore[arg-type]
+    assert rust.require_timeout(1800) == 1800
+
+
+def test_cargo_requires_timeout(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rust, [(0, "")])
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError):
+        rust.cargo(ctx, ["test"])
 
 
 def test_crates_finds_manifests(tmp_path: Path) -> None:

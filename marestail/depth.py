@@ -306,7 +306,7 @@ def erlang_modules(config: Config) -> list[Module]:
     files = erlang.source_files(ctx)
     if not files:
         return []
-    code, output = erlang.escript(ctx, "depth.escript", list(map(str, files)))
+    code, output = erlang.escript(ctx, "depth.escript", list(map(str, files)), timeout=erlang.TOOL_TIMEOUT)
     if code != 0:
         return []
     return [erlang_module(item, config.root) for item in json.loads(output)]

@@ -6,6 +6,9 @@ from marestail.shell import run
 
 GATE = "py.lint"
 MAX_LINES = 60
+RUFF = "ruff"
+FORMAT = "format"
+MYPY = "mypy"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -35,9 +38,9 @@ def commands(ctx: Context) -> list[tuple[str, list[str]]]:
     targets = python_targets(ctx)
     excluded = benchmark_exclusion(ctx)
     return [
-        ("ruff", [ctx.python_bin("ruff"), "check", "--output-format", "concise", *excluded, *targets]),
-        ("format", [ctx.python_bin("ruff"), "format", "--check", *excluded, *targets]),
-        ("mypy", [ctx.python_bin("mypy"), "--no-error-summary", "--no-pretty", *mypy_targets(ctx)]),
+        (RUFF, [ctx.python_bin(RUFF), "check", "--output-format", "concise", *excluded, *targets]),
+        (FORMAT, [ctx.python_bin(RUFF), FORMAT, "--check", *excluded, *targets]),
+        (MYPY, [ctx.python_bin(MYPY), "--no-error-summary", "--no-pretty", *mypy_targets(ctx)]),
     ]
 
 

@@ -12,6 +12,8 @@ GATE = "ex.lint"
 MAX_LINES = 60
 FORMAT = ["mix", "format", "--check-formatted"]
 COMPILE = ["mix", "compile", "--warnings-as-errors"]
+FORMAT_TIMEOUT = 300
+COMPILE_TIMEOUT = 600
 
 
 def run_gate(ctx: Context) -> Result:
@@ -19,23 +21,27 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.elixir_root()
     if ctx.scoped:
         return scoped_run(ctx, root, started)
-    findings = problems("format", run(FORMAT, cwd=root, timeout=300))
-    findings += problems("compile", run(COMPILE, cwd=root, timeout=600))
+    findings = problems("format", run(FORMAT, cwd=root, timeout=FORMAT_TIMEOUT))
+    findings += problems("compile", run(COMPILE, cwd=root, timeout=COMPILE_TIMEOUT))
     summary = f"{len(findings)} problems" if findings else "mix format, compile clean"
     return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
 def problems(label: str, outcome: tuple[int, str]) -> list[str]:
     code, output = outcome
-    return [f"{label}: {line}" for line in relevant(output)] if code != 0 else []
+    return labeled_lines(label, output) if code else []
+
+
+def labeled_lines(label: str, output: str) -> list[str]:
+    return [f"{label}: {line}" for line in relevant(output)]
 
 
 def scoped_run(ctx: Context, root: Path, started: float) -> Result:
     files = scoped_sources(ctx, root, ctx.changed_under(root, (".ex", ".exs")))
     if not files:
         return Result.skipped(GATE, "no elixir files in scope")
-    findings = problems("format", run([*FORMAT, *files], cwd=root, timeout=300))
-    compile_code, compile_out = run(COMPILE, cwd=root, timeout=600)
+    findings = problems("format", run([*FORMAT, *files], cwd=root, timeout=FORMAT_TIMEOUT))
+    compile_code, compile_out = run(COMPILE, cwd=root, timeout=COMPILE_TIMEOUT)
     if compile_code != 0:
         findings.extend(compile_findings(compile_out, files))
     findings = findings[:MAX_LINES]

@@ -10,6 +10,8 @@ from marestail.report import Result, elapsed
 
 GATE = "er.deps"
 MAX_LINES = 60
+COMPILE_TIMEOUT = 900
+SCAN_TIMEOUT = 600
 
 
 def run_gate(ctx: Context) -> Result:
@@ -18,11 +20,11 @@ def run_gate(ctx: Context) -> Result:
     if not sources:
         return Result.skipped(GATE, erlang.NO_SOURCES)
     ebin = erlang.fresh_dir(ctx.work / "er-deps-ebin")
-    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=900)
+    code, output = erlang.erlc(ctx, ["+debug_info", "-o", str(ebin), *map(str, sources)], timeout=COMPILE_TIMEOUT)
     failed = erlang.trouble(code, output, "sources failed to compile")
     if failed:
         return Result(GATE, False, *failed, elapsed(started))
-    code, output = erlang.escript(ctx, "deps.escript", beam_paths(ebin), timeout=600)
+    code, output = erlang.escript(ctx, "deps.escript", beam_paths(ebin), timeout=SCAN_TIMEOUT)
     if code != 0:
         return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], elapsed(started))
     return cycles_result(ctx, project_edges(json.loads(output), module_paths(ctx, sources)), started)

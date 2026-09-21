@@ -19,6 +19,15 @@ def test_nothing_declared_skips(tmp_path: Path) -> None:
     assert (result.ok, result.summary) == (True, "skipped: nothing declares the interpreter that ships")
 
 
+def test_matching_pyproject_claim_is_silent(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mypy]\npython_version = "3.12"\n')
+    result = py_runtime.run_gate(make_context(tmp_path))
+    assert result.ok
+    assert result.findings == []
+
+
 def test_clean_run(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     result = py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "python 3.12"}}))
@@ -34,7 +43,7 @@ def test_scoped_summary_carries_global_note(tmp_path: Path) -> None:
 def test_disagreements_and_parse_errors(tmp_path: Path) -> None:
     (tmp_path / "Dockerfile").write_text("FROM node:20 AS web\nFROM python:3.11-slim\nfrom busybox\n")
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nrequires-python = ">=3.12"\n[tool.ruff]\ntarget-version = "py313"\n[tool.mypy]\npython_version = "3.11"\n'
+        '[project]\nrequires-python = ">=3.12"\n[tool.ruff]\ntarget-version = "py313"\n[tool.mypy]\npython_version = "3.10"\n'
     )
     (tmp_path / "tool.py").write_text("#!/usr/bin/env python3.10\nx = 1\n")
     (tmp_path / "new.py").write_text("type Alias = int\n")
@@ -42,10 +51,11 @@ def test_disagreements_and_parse_errors(tmp_path: Path) -> None:
     assert result.findings == [
         "pyproject.toml [project] requires-python says Python 3.12 but Dockerfile ships 3.11",
         "pyproject.toml [tool.ruff] target-version says Python 3.13 but Dockerfile ships 3.11",
+        "pyproject.toml [tool.mypy] python_version says Python 3.10 but Dockerfile ships 3.11",
         "tool.py shebang says Python 3.10 but Dockerfile ships 3.11",
         "new.py:1 will not parse on Python 3.11: Type statement is only supported in Python 3.12 and greater",
     ]
-    assert (result.ok, result.summary) == (False, "4 findings against 3.11 from Dockerfile")
+    assert (result.ok, result.summary) == (False, "5 findings against 3.11 from Dockerfile")
 
 
 def test_future_interpreter(tmp_path: Path) -> None:
@@ -100,7 +110,35 @@ def test_sources_skip_tooling_folders(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("text", "expected"),
-    [(">=3.11", (3, 11)), ("v.3.12.1", (3, 12)), ("3.x.4.5", (4, 5)), ("3.", None), (chr(0x06F1) + "." + chr(0x06F2), (1, 2))],
+    [
+        (">=3.11", (3, 11)),
+        (">=12.34", (12, 34)),
+        ("v.3.12.1", (3, 12)),
+        ("3.x.4.5", (4, 5)),
+        ("3.", None),
+        (chr(0x06F1) + "." + chr(0x06F2), (1, 2)),
+    ],
 )
 def test_floor_version(text: str, expected: tuple[int, int] | None) -> None:
     assert py_runtime.floor_version(text) == expected
+
+
+def test_first_line_stops_at_the_first_newline() -> None:
+    assert py_runtime.first_line("a\nb\nc") == "a"
+    assert py_runtime.first_line("only") == "only"
+
+
+def test_highest_understood_uses_the_minor_version() -> None:
+    assert py_runtime.highest_understood() == (sys.version_info.major, sys.version_info.minor)
+
+
+def test_floor_claim_rejects_a_missing_where() -> None:
+    with pytest.raises(TypeError, match=r"^where$"):
+        py_runtime.floor_claim(None, "3.12")  # type: ignore[arg-type]
+
+
+def test_shebang_reads_only_the_first_line(tmp_path: Path) -> None:
+    (tmp_path / "tool.py").write_text("#!/usr/bin/env python3.10\n# python3.11 later\nx = 1\n")
+    (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
+    claimed = py_runtime.shebang_claims(make_context(tmp_path))
+    assert claimed == [("tool.py shebang", (3, 10))]

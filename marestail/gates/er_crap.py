@@ -15,6 +15,9 @@ from marestail.report import Result, elapsed
 
 COVERAGE_JSON = ER_COVERAGE
 GATE = "er.crap"
+REPLACE = "replace"
+COMPLEXITY_TIMEOUT = 600
+ENDS_ERROR = "ends"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -26,7 +29,7 @@ def run_gate(ctx: Context) -> Result:
     files = files_in_scope(coverage, ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")
-    code, output = erlang.escript(ctx, "complexity.escript", list(map(str, files)), timeout=600)
+    code, output = erlang.escript(ctx, "complexity.escript", list(map(str, files)), timeout=COMPLEXITY_TIMEOUT)
     failed = erlang.trouble(code, output, "complexity script failed", output.splitlines()[-10:])
     if failed:
         return Result(GATE, False, *failed, elapsed(started))
@@ -61,9 +64,15 @@ def function_ends(functions: list[dict[str, Any]]) -> dict[tuple[str, int], int]
 
 def file_ends(file: str, lines: list[int]) -> dict[tuple[str, int], int]:
     ordered = sorted(lines)
-    total = len(Path(file).read_text(errors="replace").splitlines())
+    total = len(Path(file).read_text(errors=REPLACE).splitlines())
     bounds = [line - 1 for line in ordered[1:]] + [total]
-    return {(file, start): end for start, end in zip(ordered, bounds, strict=True)}
+    return paired_ends(file, ordered, bounds)
+
+
+def paired_ends(file: str, starts: list[int], ends: list[int]) -> dict[tuple[str, int], int]:
+    if len(starts) != len(ends):
+        raise ValueError(ENDS_ERROR)
+    return {(file, starts[index]): ends[index] for index in range(len(starts))}
 
 
 def touches_hunk(fn: dict[str, Any], ends: dict[tuple[str, int], int], ctx: Context) -> bool:

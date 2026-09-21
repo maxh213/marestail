@@ -79,5 +79,6 @@ def test_project_files(tmp_path: Path) -> None:
 
 
 def test_deadcode_command_rejects_a_missing_out(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
     with pytest.raises(TypeError, match=r"^path$"):
-        elixir.deadcode_command(make_context(tmp_path), None)  # type: ignore[arg-type]
+        elixir.deadcode_command(ctx, None)  # type: ignore[arg-type]

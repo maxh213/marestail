@@ -105,3 +105,14 @@ def test_capped_at_max_lines(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(0, output), (0, "")])
     result = rs_lint.run_gate(make_context(tmp_path))
     assert (result.summary, len(result.findings)) == ("70 problems", 60)
+
+
+def test_primary_span_without_a_list() -> None:
+    assert rs_lint.primary_span({}) is None
+    assert rs_lint.primary_span({"spans": None}) is None
+    assert rs_lint.primary_span({"spans": [{"is_primary": True, "file_name": "a.rs"}]}) == {"is_primary": True, "file_name": "a.rs"}
+
+
+def test_compiler_message_rejects_a_non_dict_message() -> None:
+    assert rs_lint.compiler_message(json.dumps({"reason": "compiler-message", "message": "nope"})) is None
+    assert rs_lint.compiler_message(json.dumps({"reason": "build-finished"})) is None

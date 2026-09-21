@@ -6,12 +6,13 @@ from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
 GATE = "ex.deps"
+XREF_TIMEOUT = 600
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.elixir_root()
-    code, output = run(["mix", "xref", "graph", "--format", "cycles", "--fail-above", "0"], cwd=root, timeout=600)
+    code, output = run(["mix", "xref", "graph", "--format", "cycles", "--fail-above", "0"], cwd=root, timeout=XREF_TIMEOUT)
     if code == 0:
         return Result(GATE, True, "dependency graph acyclic", [], elapsed(started))
     if not ctx.scoped:
@@ -74,6 +75,4 @@ def in_scope_cycle(cycle: list[str], ctx: Context, root: Path) -> bool:
 
 def repo_path(file: str, ctx: Context, root: Path) -> str:
     prefix = root.relative_to(ctx.root)
-    if str(prefix) == ".":
-        return file
-    return str(prefix / file)
+    return file if not prefix.parts else str(prefix / file)

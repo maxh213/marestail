@@ -5,6 +5,7 @@ import time
 import tomllib
 from itertools import takewhile
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context, under_benchmarks
 from marestail.report import Result, elapsed
@@ -14,6 +15,18 @@ FROM_LINE = re.compile(r"^\s*FROM\s+(\S+)", re.MULTILINE | re.IGNORECASE)
 IMAGE_VERSION = re.compile(r"python[:\-]?(\d+)\.(\d+)")
 SHEBANG = re.compile(r"^#!.*?python(\d+)\.(\d+)")
 RUFF_TARGET = re.compile(r"^py(\d)(\d+)$")
+NEWLINE = "\n"
+MISSING = -1
+PROJECT = "project"
+REQUIRES_PYTHON = "requires-python"
+TOOL = "tool"
+RUFF = "ruff"
+TARGET_VERSION = "target-version"
+MYPY = "mypy"
+PYTHON_VERSION = "python_version"
+REQUIRES_LABEL = "pyproject.toml [project] requires-python"
+RUFF_LABEL = "pyproject.toml [tool.ruff] target-version"
+MYPY_LABEL = "pyproject.toml [tool.mypy] python_version"
 SKIP_DIRS = {"node_modules", ".venv", "venv", "mutants", "dist", "build", ".git", "__pycache__", ".marestail"}
 
 Version = tuple[int, int]
@@ -79,7 +92,8 @@ def floor_version(text: str) -> Version | None:
 
 
 def digit_pair(before: str, after: str) -> Version | None:
-    major, minor = leading_digits(before[::-1])[::-1], leading_digits(after)
+    major = "".join(reversed(leading_digits("".join(reversed(before)))))
+    minor = leading_digits(after)
     return (int(major), int(minor)) if major and minor else None
 
 
@@ -105,19 +119,25 @@ def pyproject_claims(ctx: Context) -> list[tuple[str, Version]]:
         return []
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
-    tools = raw.get("tool", {})
+    tools = table(raw.get(TOOL))
     return [
         claim
         for claim in (
-            floor_claim("pyproject.toml [project] requires-python", raw.get("project", {}).get("requires-python")),
-            ruff_claim(tools.get("ruff", {}).get("target-version")),
-            floor_claim("pyproject.toml [tool.mypy] python_version", tools.get("mypy", {}).get("python_version")),
+            floor_claim(REQUIRES_LABEL, table(raw.get(PROJECT)).get(REQUIRES_PYTHON)),
+            ruff_claim(table(tools.get(RUFF)).get(TARGET_VERSION)),
+            floor_claim(MYPY_LABEL, table(tools.get(MYPY)).get(PYTHON_VERSION)),
         )
         if claim is not None
     ]
 
 
+def table(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def floor_claim(where: str, stated: object) -> tuple[str, Version] | None:
+    if type(where) is not str:
+        raise TypeError("where")
     if not isinstance(stated, str):
         return None
     found = floor_version(stated)
@@ -134,7 +154,7 @@ def ruff_claim(stated: object) -> tuple[str, Version] | None:
 def shebang_claims(ctx: Context) -> list[tuple[str, Version]]:
     claimed = []
     for path in sources(ctx, ctx.python_root()):
-        found = SHEBANG.match(path.read_text().partition("\n")[0])
+        found = SHEBANG.match(first_line(path.read_text()))
         if found:
             claimed.append((f"{path.relative_to(ctx.root)} shebang", version_of(found)))
     return claimed
@@ -159,13 +179,19 @@ def parse_findings(ctx: Context, root: Path, shipped: Version) -> list[str]:
     return findings
 
 
+def first_line(text: str) -> str:
+    end = text.find(NEWLINE)
+    return text if end == MISSING else text[:end]
+
+
 def highest_understood() -> Version:
-    return sys.version_info[0], sys.version_info[1]
+    info = sys.version_info
+    return info.major, info.minor
 
 
 def parse_error(path: Path, shipped: Version) -> str | None:
     try:
         ast.parse(path.read_text(), filename=str(path), feature_version=shipped)
     except SyntaxError as error:
-        return f"{path}:{error.lineno} will not parse on Python {name(shipped)}: {error.msg}"
+        return f"{error.filename}:{error.lineno} will not parse on Python {name(shipped)}: {error.msg}"
     return None

@@ -71,6 +71,22 @@ def test_surely_keeps_missing_values() -> None:
     assert app.is_code(None) is False
 
 
+def test_run_session_repeats_a_finite_number_of_ticks(monkeypatch: Any) -> None:
+    seen: list[int] = []
+
+    def fake_repeat(item: object, times: int) -> list[object]:
+        seen.append(times)
+        return [item]
+
+    class Session:
+        def tick(self, stdscr: object) -> None:
+            return None
+
+    monkeypatch.setattr(app, "repeat", fake_repeat)
+    assert app.run_session(Session(), object()) == 0  # type: ignore[arg-type]
+    assert seen == [app.SESSION_TICKS]
+
+
 def test_run_wraps(monkeypatch: Any) -> None:
     seen: dict[str, Any] = {}
 

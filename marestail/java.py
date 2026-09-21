@@ -142,8 +142,8 @@ def pom_properties(properties: ET.Element) -> dict[str, str]:
 
 
 def local_tag(tag: str) -> str:
-    index = tag.find(NS_CLOSE)
-    return tag if index == MISSING else tag[index + 1 :]
+    prefix, sep, name = tag.partition(NS_CLOSE)
+    return name if sep else prefix
 
 
 def resolve_property(values: dict[str, str], key: str) -> str:

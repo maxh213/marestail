@@ -150,3 +150,17 @@ def test_crap_result_orders_by_score() -> None:
     result = _crap.crap_result("g", scored, 4.0, 0.0)
     expected = ["b:2 y crap=9.5 (cc=9, coverage=25%)", "a:1 x crap=5.0 (cc=5, coverage=100%)"]
     assert shape(result) == ("g", False, "3 functions, 2 above CRAP 4", expected)
+
+
+def test_paired_ends_rejects_mismatched_lengths() -> None:
+    with pytest.raises(ValueError, match=r"^ends$"):
+        er_crap.paired_ends("a.erl", [1], [2, 3])
+
+
+def test_paired_ends_keeps_matching_bounds() -> None:
+    assert er_crap.paired_ends("a.erl", [1, 4], [3, 9]) == {("a.erl", 1): 3, ("a.erl", 4): 9}
+
+
+def test_complexity_timeout_is_600() -> None:
+    assert er_crap.COMPLEXITY_TIMEOUT == 600
+    assert er_crap.REPLACE == "replace"

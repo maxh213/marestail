@@ -9,7 +9,7 @@ from collections.abc import Callable
 from functools import partial
 from itertools import chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
@@ -62,12 +62,12 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
+def surely(value: Any) -> Any:
+    return value
 
 
 def first_text(*parts: str | None) -> str:
-    return cast(str, next(filter(present, parts), ""))
+    return next(filter(present, parts), "")
 
 
 def empty_list(*_args: object) -> list[Any]:
@@ -292,7 +292,7 @@ def log_name(path: Path) -> str:
 
 
 def newest_log(logs: list[Path]) -> Path:
-    return max(logs, key=log_name)
+    return sorted(logs, key=log_name)[-1]
 
 
 def latest_log(root: Path) -> Path | None:
@@ -490,7 +490,7 @@ def work_home() -> Path:
 
 def claude_homes() -> list[Path]:
     homes: tuple[Path | None, ...] = (Path.home() / CLAUDE_HOME, work_home(), expanded_env(CLAUDE_CONFIG_ENV))
-    return list(cast(list[Path], filter(None, homes)))
+    return list(filter(present, homes))
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
@@ -510,7 +510,7 @@ def is_jsonl(path: Path) -> bool:
 
 
 def newest_fresh(logs: list[Path]) -> Path | None:
-    newest = max(logs, key=dir_mtime)
+    newest = sorted(logs, key=dir_mtime)[-1]
     return (newest, None)[time.time() - dir_mtime(newest) > TAIL_STALE_S]
 
 
@@ -555,13 +555,13 @@ def assistant_dict(data: object) -> TypeGuard[dict[str, object]]:
     return False not in (isinstance(data, dict), getattr(data, "get", none_of)("type") == "assistant")
 
 
-def first_from(data: dict[str, object]) -> str | None:
+def first_from(data: Any) -> str | None:
     return first_block(message_content(data.get("message")))
 
 
 def assistant_block(data: object) -> str | None:
     chosen = (none_of, first_from)[assistant_dict(data)]
-    return chosen(cast(dict[str, object], data))
+    return chosen(data)
 
 
 def format_entry(line: str) -> str | None:
@@ -574,7 +574,7 @@ def parsed_json(line: str) -> object:
     return None
 
 
-def dict_content(message: dict[str, object]) -> list[object]:
+def dict_content(message: Any) -> list[object]:
     return list_or_empty(message.get("content"))
 
 
@@ -589,7 +589,7 @@ def is_dict(block: object) -> TypeGuard[dict[str, object]]:
 
 def message_content(message: object) -> list[object]:
     chosen = (empty_list, dict_content)[isinstance(message, dict)]
-    return chosen(cast(dict[str, object], message))
+    return chosen(message)
 
 
 def first_block(content: list[object]) -> str | None:
@@ -609,7 +609,7 @@ def prefix_text(prefix: str, text: str) -> str | None:
 
 
 def or_blank(value: object) -> str:
-    return cast(str, {True: ""}.get(not value, value))
+    return str({True: "", False: value}[not bool(value)])
 
 
 def nonempty(text: str) -> str | None:
@@ -662,13 +662,13 @@ def field_text(value: dict[str, object], key: str) -> str:
     return collapse(str(value[key]))[:TAIL_CHARS]
 
 
-def dict_fields(value: dict[str, object]) -> list[str]:
+def dict_fields(value: Any) -> list[str]:
     return list(map(partial(field_text, value), filter(partial(has_field, value), FIELD_KEYS)))
 
 
 def tool_fields(value: object) -> list[str]:
     chosen = (empty_list, dict_fields)[isinstance(value, dict)]
-    return chosen(cast(dict[str, object], value))
+    return chosen(value)
 
 
 def stripped_str(value: object) -> bool:
@@ -777,7 +777,7 @@ def first_of(item: tuple[int, str]) -> int:
 
 
 def gate_text(found: list[tuple[int, str]]) -> str:
-    elapsed, label = max(found, key=first_of)
+    elapsed, label = sorted(found, key=first_of)[-1]
     return f"{label} {fmt_seconds(elapsed)}"
 
 
@@ -1137,17 +1137,17 @@ def result_text(path: Path | None) -> str | None:
     return decoded_if(read_text(path))
 
 
-def dict_result(data: dict[str, object]) -> object:
+def dict_result(data: Any) -> object:
     return data.get("result")
 
 
 def result_field(data: object) -> object:
     chosen = (none_of, dict_result)[isinstance(data, dict)]
-    return chosen(cast(dict[str, object], data))
+    return chosen(data)
 
 
 def str_or_raw(result: object, raw: str) -> str:
-    return cast(str, (raw, result)[isinstance(result, str)])
+    return str((raw, result)[isinstance(result, str)])
 
 
 def decoded_result(raw: str) -> str:

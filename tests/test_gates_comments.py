@@ -25,7 +25,7 @@ class ErlangScript:
         self.hint = hint
         self.calls: list[tuple[str, list[str]]] = []
 
-    def __call__(self, ctx: object, script: str, args: list[str]) -> tuple[int, str]:
+    def __call__(self, ctx: object, script: str, args: list[str], **_options: object) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
         self.calls.append((script, args))
@@ -359,7 +359,7 @@ def test_erlang_findings_scans_hrl(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     source = write(tmp_path, "include/a.hrl", "% c\n")
     calls: list[list[str]] = []
 
-    def escript(ctx: object, script: str, args: list[str]) -> tuple[int, str]:
+    def escript(ctx: object, script: str, args: list[str], **_options: object) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
         calls.append(args)

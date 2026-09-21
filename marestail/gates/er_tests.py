@@ -13,6 +13,7 @@ from marestail.shell import tail
 COVERAGE_JSON = ER_COVERAGE
 GATE = "er.tests"
 TESTS_PASSED = " tests passed"
+EMPTY = ""
 EBIN = "er-ebin"
 TEST_EBIN = "er-test-ebin"
 EUNIT_FAILURES = {1: "tests failed"}
@@ -65,7 +66,8 @@ def passed_count(line: str) -> str:
 
 
 def tests_passed(line: str) -> str:
-    return next(filter(None, map(trailing_digits, line.split(TESTS_PASSED)[:-1])), "")
+    chunks = line.split(TESTS_PASSED)[:-1]
+    return next(filter(None, map(trailing_digits, chunks)), EMPTY)
 
 
 def trailing_digits(text: str) -> str:

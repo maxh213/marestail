@@ -39,6 +39,16 @@ PATH_KEY = "path"
 KEY = "key"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
+KEY_ERROR = "key"
+STATUS_ERROR = "status"
+
+
+def require_key(key: str) -> str:
+    if type(key) is not str:
+        raise TypeError(KEY_ERROR)
+    return key
+
+
 DOTNET_EXCLUSIONS = [
     "**/node_modules/**",
     "**/.next/**",
@@ -90,6 +100,7 @@ def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
 
 
 def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
+    key = require_key(key)
     if ctx.config.section("dotnet") is not None:
         code, output = dotnet_scan(ctx, creds, key)
         return code, output, ctx.root / DOTNET_REPORT_TASK
@@ -98,6 +109,8 @@ def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
 
 
 def summarize(ctx: Context, findings: list[str], status: str) -> str:
+    if type(status) is not str:
+        raise TypeError(STATUS_ERROR)
     base = "sonar clean" if not findings else f"{len(findings)} sonar findings"
     if not ctx.scoped:
         return base
@@ -203,10 +216,12 @@ def property_entry(line: str) -> tuple[str, str] | None:
 
 
 def separator_index(line: str) -> int:
-    return min((index for index in (line.find(EQUALS), line.find(COLON)) if index >= 0), default=-1)
+    marks = [index for index in (line.find(EQUALS), line.find(COLON)) if index >= 0]
+    return min(marks) if marks else -1
 
 
 def dotnet_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str]:
+    key = require_key(key)
     if (ctx.root / PROPERTIES_FILE).exists():
         return 1, PROPERTIES_CONFLICT
     product, _, error = dotnet.projects(ctx)
@@ -220,9 +235,12 @@ def dotnet_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str]:
     return dotnet.dotnet(ctx, [str(script)], cwd=ctx.root, timeout=1800, network=True, extra={"SONAR_TOKEN": creds["token"]}, program="sh")
 
 
+INSTALLED = (0, EMPTY)
+
+
 def install_scanner(ctx: Context, tools: Path) -> tuple[int, str]:
     if (tools / DOTNET_SCANNER).exists():
-        return 0, ""
+        return INSTALLED
     code, output = dotnet.dotnet(
         ctx,
         ["tool", "install", DOTNET_SCANNER, "--version", DOTNET_SCANNER_VERSION, "--tool-path", str(tools)],
@@ -346,6 +364,7 @@ LANGUAGE_CHECKS = (
 
 
 def language_findings(ctx: Context, client: Client, key: str) -> list[str]:
+    key = require_key(key)
     findings: list[str] = []
     for check in LANGUAGE_CHECKS:
         if ctx.config.section(check.section) is not None:
@@ -397,6 +416,7 @@ def report_pairs(text: str) -> dict[str, str]:
 
 
 def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
+    key = require_key(key)
     status = gate_status(client, key)
     findings = reopened(ctx, client, key)
     if not ctx.scoped and status != "OK":

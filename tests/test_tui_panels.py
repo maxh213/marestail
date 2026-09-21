@@ -113,6 +113,10 @@ def test_put_and_clip() -> None:
     assert panels.clipped(0, 8, "abcdef", 10) == (0, 8, "ab")
     assert panels.surely("x") == "x"
     assert panels.surely(0) == 0
+    assert panels.surely(None) is None
+    with pytest.raises(KeyError):
+        panels.int_attr(None)
+    assert panels.int_attr(5) == 5
     assert panels.first_text("", "later") == ""
     assert panels.first_text(None, "later") == "later"
     assert panels.skip() is None

@@ -314,7 +314,7 @@ def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple
 
     monkeypatch.setattr(erlang, "source_files", source_files)
 
-    def escript(ctx: Context, script: str, args: list[str]) -> tuple[int, str]:
+    def escript(ctx: Context, script: str, args: list[str], **_options: object) -> tuple[int, str]:
         calls.append((ctx, script, args))
         return reply
 

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from marestail import erlang
-from marestail.context import Context
+from marestail.context import Context, MutationScope
 from marestail.gates import er_mutation
 from marestail.report import Result
 from tests.conftest import FakeRun, gate_shape, make_context
@@ -216,3 +216,60 @@ def test_mutate_files(tmp_path: Path) -> None:
     assert er_mutation.mutate_files(ctx, sources, None) == sources
     assert er_mutation.mutate_files(ctx, sources, ["src/b.erl", "src/c.erl"]) == [tmp_path / "src/b.erl"]
     assert er_mutation.mutate_files(ctx, sources, []) == []
+
+
+def test_loaded_mutants_missing_key_is_empty(tmp_path: Path) -> None:
+    manifest = tmp_path / "mutants.json"
+    manifest.write_text("{}")
+    assert er_mutation.loaded_mutants(manifest) == []
+
+
+def test_loaded_mutants_rejects_a_null_list(tmp_path: Path) -> None:
+    manifest = tmp_path / "mutants.json"
+    manifest.write_text('{"mutants": null}')
+    with pytest.raises(TypeError):
+        er_mutation.loaded_mutants(manifest)
+
+
+def test_mutant_status_defaults_to_not_checked() -> None:
+    assert er_mutation.mutant_status({}) == "not checked"
+    assert er_mutation.mutant_status({"status": "killed"}) == "killed"
+
+
+def test_notes_join_and_remaining_floor() -> None:
+    assert er_mutation.NOTES_JOIN == "; "
+    assert er_mutation.REMAINING_FLOOR == 120
+    assert er_mutation.FULL_MODE == "full"
+    assert er_mutation.REPORT_INDENT == 2
+
+
+def test_remove_ebin_is_idempotent(tmp_path: Path) -> None:
+    ebin = tmp_path / "ebin"
+    ebin.mkdir()
+    er_mutation.remove_ebin(ebin)
+    assert not ebin.exists()
+    er_mutation.remove_ebin(ebin)
+
+
+def test_check_mutant_runs_when_remaining_is_the_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    job = er_mutation.Job(
+        make_context(tmp_path),
+        0.0,
+        MutationScope("full"),
+        [],
+        [],
+    )
+    job.scratch = tmp_path
+    mutant = {"id": 1, "file": str(tmp_path / "a.erl"), "mutant": str(tmp_path / "a.erl"), "status": "pending"}
+    (tmp_path / "a.erl").write_text("")
+    seen: list[int] = []
+
+    def run_mutant(_job: object, _mutant: dict[str, object], timeout: int) -> None:
+        seen.append(timeout)
+        _mutant["status"] = "killed"
+
+    monkeypatch.setattr(er_mutation, "run_mutant", run_mutant)
+    monkeypatch.setattr(er_mutation.Job, "elapsed", lambda self: er_mutation.BUDGET_SECONDS - 120)
+    er_mutation.check_mutant(job, mutant, 60)
+    assert seen == [60]
+    assert mutant["status"] == "killed"
