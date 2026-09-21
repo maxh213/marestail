@@ -1,6 +1,7 @@
 import argparse
 import ast
 import importlib
+import inspect
 import io
 import json
 import os
@@ -10,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tokenize
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -344,6 +346,71 @@ def test_the_docker_script_still_finds_every_package_name_it_uses() -> None:
     assert missing == []
     assert {name for name, _ in uses} == set(script_module_aliases(source).values())
     assert ("marestail.perf.db", "golden_meta") in uses
+
+
+CallShape = tuple[str, str, int, tuple[str, ...]]
+SHAPE_ARGUMENT = object()
+
+
+def call_keywords(node: ast.Call) -> tuple[str, ...]:
+    return tuple(str(word.arg) for word in node.keywords)
+
+
+def alias_calls(node: ast.Call, aliases: dict[str, str]) -> list[CallShape]:
+    if not isinstance(node.func, ast.Attribute):
+        return []
+    return [(name, attr, len(node.args), call_keywords(node)) for name, attr in alias_attributes(node.func, aliases)]
+
+
+def script_call_shapes(source: str) -> list[CallShape]:
+    aliases = script_module_aliases(source)
+    found: set[CallShape] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            found.update(alias_calls(node, aliases))
+    return sorted(found)
+
+
+def accepts(target: Callable[..., object], count: int, keywords: tuple[str, ...]) -> bool:
+    try:
+        inspect.signature(target).bind(*[SHAPE_ARGUMENT] * count, **dict.fromkeys(keywords, SHAPE_ARGUMENT))
+    except TypeError:
+        return False
+    return True
+
+
+def unaccepted(shapes: list[CallShape]) -> list[str]:
+    return [
+        f"{name}.{attr}"
+        for name, attr, count, keywords in shapes
+        if not accepts(getattr(importlib.import_module(name), attr), count, keywords)
+    ]
+
+
+def test_the_docker_script_calls_every_package_function_with_a_shape_it_accepts() -> None:
+    shapes = script_call_shapes((ROOT / "tools" / DOCKER_SCRIPT).read_text())
+    assert unaccepted(shapes) == []
+    assert ("marestail.perf.db", "build_database", 6, ()) in shapes
+    assert ("marestail.perf.samples", "run_command", 4, ()) in shapes
+
+
+def test_script_call_shapes_records_the_arity_and_keywords_of_each_call() -> None:
+    source = "from marestail.perf import db as perf_db; perf_db.prune(one, two, keep=3); perf_db.build(one)"
+    extra = "; other.prune(one); plain(one); perf_db.build"
+    shapes = script_call_shapes(source + extra)
+    assert shapes == [("marestail.perf.db", "build", 1, ()), ("marestail.perf.db", "prune", 2, ("keep",))]
+
+
+def test_accepts_only_the_shapes_the_signature_can_bind() -> None:
+    def take_two(left: int, right: int, *, note: str = "") -> int:
+        return left + right + len(note)
+
+    assert accepts(take_two, 2, ()) is True
+    assert accepts(take_two, 2, ("note",)) is True
+    assert accepts(take_two, 3, ()) is False
+    assert accepts(take_two, 1, ()) is False
+    assert accepts(take_two, 2, ("missing",)) is False
+    assert unaccepted([("json", "loads", 9, ())]) == ["json.loads"]
 
 
 def test_import_from_nodes_names_each_from_import_with_its_aliases() -> None:
