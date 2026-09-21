@@ -48,7 +48,7 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return value
+    return cast(T, value)
 
 
 def empty_list(*_args: object) -> list[Any]:

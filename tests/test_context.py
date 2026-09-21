@@ -52,8 +52,13 @@ def test_branch_mutation_files_passes_the_repo_root(git_repo: Path, monkeypatch:
 
 def test_branch_mutation_files_passes_the_base_to_changed_files(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[Path, str]] = []
+
+    def fake_changed_files(root: Path, base: str) -> set[str]:
+        seen.append((root, base))
+        return set()
+
     monkeypatch.setattr(context, "base_exists", lambda _root, _base: True)
-    monkeypatch.setattr(context, "changed_files", lambda root, base: seen.append((root, base)) or set())
+    monkeypatch.setattr(context, "changed_files", fake_changed_files)
     ctx = make_context(git_repo, {"git": {"base": "main"}})
     assert ctx.mutation_files("python", git_repo, (".py",)).mode == "skip"
     assert seen == [(git_repo, "main")]

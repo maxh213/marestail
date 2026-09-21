@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any
 
 import pytest
 
@@ -23,13 +24,15 @@ def test_result_field_names() -> None:
 
 
 def test_result_rejects_a_missing_gate() -> None:
+    missing: Any = None
     with pytest.raises(TypeError, match=r"^gate$"):
-        Result(None, True, "ok")
+        Result(missing, True, "ok")
 
 
 def test_result_rejects_missing_seconds() -> None:
+    missing: Any = None
     with pytest.raises(TypeError, match=r"^seconds$"):
-        Result("docs", True, "ok", [], None)
+        Result("docs", True, "ok", [], missing)
 
 
 def test_render_one_passing() -> None:
