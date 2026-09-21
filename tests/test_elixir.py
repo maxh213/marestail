@@ -26,8 +26,15 @@ def test_scan(tmp_path: Path, fake_run: Any) -> None:
 
 def test_scan_custom_cwd(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(elixir, [(1, "nope")])
-    assert elixir.scan(make_context(tmp_path), "comments", ["a.ex"], cwd=tmp_path) == (1, "nope")
+    ctx = make_context(tmp_path, {"elixir": {"root": "app"}})
+    assert elixir.scan(ctx, "comments", ["a.ex"], cwd=tmp_path) == (1, "nope")
     assert fake.options == [{"cwd": tmp_path, "timeout": 3600}]
+
+
+def test_scan_rejects_missing_context(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(elixir, [(0, "")])
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        elixir.scan(None, "comments", ["a.ex"], cwd=tmp_path)  # type: ignore[arg-type]
 
 
 def test_elixir_constants() -> None:

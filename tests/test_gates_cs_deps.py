@@ -62,15 +62,24 @@ def fresh_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dotnet, "PROJECTS", {})
 
 
-def install(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) -> list[tuple[str, list[Path]]]:
-    calls: list[tuple[str, list[Path]]] = []
+class FakeScan:
+    def __init__(self, reply: tuple[Any, str | None]) -> None:
+        self.reply = reply
+        self.calls: list[tuple[str, list[Path]]] = []
+        self.contexts: list[Any] = []
 
-    def scan(ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
-        calls.append((mode, paths))
-        return reply
+    def __call__(self, ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
+        if ctx is None:
+            raise TypeError("ctx")
+        self.contexts.append(ctx)
+        self.calls.append((mode, paths))
+        return self.reply
 
-    monkeypatch.setattr(dotnet, "scan", scan)
-    return calls
+
+def install(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) -> FakeScan:
+    fake = FakeScan(reply)
+    monkeypatch.setattr(dotnet, "scan", fake)
+    return fake
 
 
 def test_needs_layers_file(tmp_path: Path) -> None:
@@ -87,9 +96,11 @@ def test_skips_without_sources(tmp_path: Path) -> None:
 
 
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = install(monkeypatch, (None, "C# scanner failed (deps): x"))
-    assert view(cs_deps.run_gate(project(tmp_path))) == ("cs.deps", False, "C# scanner failed (deps): x", [])
-    assert calls == [("deps", [tmp_path / "cs" / "Domain" / "Order.cs"])]
+    fake = install(monkeypatch, (None, "C# scanner failed (deps): x"))
+    ctx = project(tmp_path)
+    assert view(cs_deps.run_gate(ctx)) == ("cs.deps", False, "C# scanner failed (deps): x", [])
+    assert fake.calls == [("deps", [tmp_path / "cs" / "Domain" / "Order.cs"])]
+    assert fake.contexts == [ctx]
 
 
 def test_reports_layer_breaks_and_cycles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,6 +128,15 @@ def test_caps_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.findings[-1] == "cs/Domain/A.cs:60 Domain must not depend on Web (Thing)"
 
 
+def test_edge_and_using_breaks_without_optional_keys() -> None:
+    layer = {"from": "Domain"}
+    edge = {"from": "cs/Domain/A.cs", "to": "cs/Web/B.cs", "line": 1, "symbol": "X"}
+    record = {"path": "cs/Domain/A.cs", "usings": [{"name": "Y", "line": 2}]}
+    assert cs_deps.edge_breaks("cs/", layer, edge) == []
+    assert cs_deps.using_breaks(layer, record) == []
+    assert cs_deps.EMPTY_BANS == []
+
+
 def test_layer_findings_at_repo_root(tmp_path: Path) -> None:
     data = {"edges": [edge("Domain/A.cs", "Web/B.cs", 3)], "files": [{"path": "Web/B.cs", "usings": [{"name": "X", "line": 1}]}]}
     assert cs_deps.layer_findings(make_context(tmp_path), LAYERS["layers"], data) == ["Domain/A.cs:3 Domain must not depend on Web (Thing)"]
@@ -138,9 +158,27 @@ def test_cycle_findings() -> None:
 def test_drain_gives_up_when_work_never_clears(monkeypatch: pytest.MonkeyPatch) -> None:
     tarjan = _cycles.Tarjan({"a": set(), "b": set()})
     tarjan.work = [("a", iter([]))]
-    monkeypatch.setattr(tarjan, "finish", lambda _node: None)
+    calls: list[str] = []
+    monkeypatch.setattr(tarjan, "finish", lambda node: calls.append(node))
     tarjan.drain()
     assert tarjan.work[0][0] == "a"
+    assert len(calls) == _cycles.drain_budget(2)
+
+
+def test_drain_budget_is_size_squared_plus_one() -> None:
+    assert _cycles.drain_budget(0) == 1
+    assert _cycles.drain_budget(1) == 2
+    assert _cycles.drain_budget(2) == 5
+    assert _cycles.drain_budget(3) == 10
+
+
+def test_trim_slashes_only_strips_slashes() -> None:
+    assert _cycles.trim_slashes("srcX/") == "srcX"
+    assert _cycles.trim_slashes("srcX") == "srcX"
+    assert _cycles.trim_slashes("a///") == "a"
+    assert _cycles.trim_slashes("") == ""
+    assert cs_deps.under("srcX/file", "srcX") is True
+    assert cs_deps.under("srcX", "srcX") is True
 
 
 def test_strongly_connected() -> None:

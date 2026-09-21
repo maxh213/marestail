@@ -524,6 +524,11 @@ def fresh_scanner(ctx: Any) -> None:
     write(ctx.work / "cs-scan", {dotnet.SCAN_DLL: "dll", "stamp": dotnet.scanner_digest()})
 
 
+def test_scan_rejects_missing_context() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        dotnet.scan(None, "deps", [])  # type: ignore[arg-type]
+
+
 def test_scan_returns_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
     scanner_dir(tmp_path, monkeypatch)
     ctx = context(tmp_path)

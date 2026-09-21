@@ -1,10 +1,18 @@
 from collections.abc import Iterator
 from typing import Any
 
+SLASH = "/"
+
+
+def trim_slashes(folder: str) -> str:
+    while folder.endswith(SLASH):
+        folder = folder[:-1]
+    return folder
+
 
 def under(path: str, folder: str) -> bool:
-    folder = folder.rstrip("/")
-    return path == folder or path.startswith(folder + "/")
+    folder = trim_slashes(folder)
+    return path == folder or path.startswith(folder + SLASH)
 
 
 def cycle_findings(edges: list[dict[str, Any]]) -> list[str]:
@@ -47,9 +55,12 @@ class Tarjan:
         self.work.append((node, iter(sorted(self.graph[node]))))
 
     def drain(self) -> None:
-        for _ in range(len(self.graph) * len(self.graph) + 1):
-            if not self.work:
-                break
+        steps = 0
+        limit = drain_budget(len(self.graph))
+        while self.work:
+            steps += 1
+            if steps > limit:
+                return
             node, children = self.work[-1]
             child = next(children, None)
             if child is None:
@@ -77,6 +88,10 @@ class Tarjan:
         del self.stack[at:]
         if len(component) > 1:
             self.components.append(component)
+
+
+def drain_budget(size: int) -> int:
+    return size * size + 1
 
 
 def strongly_connected(graph: dict[str, set[str]]) -> list[set[str]]:

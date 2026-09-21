@@ -24,8 +24,6 @@ def repo(root: Path, **fields: Any) -> RepoState:
 
 
 def test_surely_keeps_missing_values() -> None:
-    assert collect.surely("x") == "x"
-    assert collect.surely(None) is None
     assert collect.present(0) is True
     assert collect.present(None) is False
 
@@ -527,7 +525,6 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     running = collect.running_step([step()])
     assert running is not None
     assert running.label == "01-coder"
-    assert collect.surely("x") == "x"
     assert collect.missing_block({}) is None
     assert collect.latest_runner_line(None) is None
     assert collect.has_text(("prompt", "x")) is True

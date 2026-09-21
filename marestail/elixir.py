@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context
+from marestail.context import CTX_ERROR, Context
 from marestail.shell import run
 
 SCANNERS = Path(__file__).resolve().parent / "ex"
@@ -22,7 +22,10 @@ def script(mode: str) -> Path:
 
 
 def scan(ctx: Context, mode: str, args: Sequence[Any], cwd: Path | None = None, timeout: int = 3600) -> tuple[int, str]:
-    return run(["elixir", str(script(mode)), *map(str, args)], cwd=cwd or ctx.elixir_root(), timeout=timeout)
+    if type(ctx) is not Context:
+        raise TypeError(CTX_ERROR)
+    working = ctx.elixir_root() if cwd is None else cwd
+    return run(["elixir", str(script(mode)), *map(str, args)], cwd=working, timeout=timeout)
 
 
 def deadcode_command(ctx: Context, out: Path) -> list[str]:

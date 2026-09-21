@@ -4,6 +4,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.context import Context
+from marestail.gates._cycles import trim_slashes
 from marestail.report import Result, elapsed
 
 GATE = "rs.deps"
@@ -46,7 +47,7 @@ def layer_message(edge: Edge) -> str:
 
 
 def under(path: str, prefix: str) -> bool:
-    prefix = prefix.rstrip("/")
+    prefix = trim_slashes(prefix)
     return path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + ".")
 
 

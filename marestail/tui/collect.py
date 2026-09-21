@@ -62,9 +62,6 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
-
 
 def empty_list(*_args: object) -> list[Any]:
     return []
@@ -116,7 +113,7 @@ def collect_repo(root: Path) -> RepoState:
 
 def repo_steps(log_path: Path | None) -> list[Step]:
     chosen = (empty_list, parse_log)[log_path is not None]
-    return chosen(surely(log_path))
+    return chosen(log_path)
 
 
 def repo_shell(root: Path) -> RepoState:
@@ -160,7 +157,7 @@ def set_worker(state: RepoState, running: Step, rows: list[ProcRow], real: Path)
 def bind_running(state: RepoState, rows: list[ProcRow], real: Path) -> None:
     running = running_step(state.steps)
     chosen = (skip, set_worker)[running is not None]
-    chosen(state, surely(running), rows, real)
+    chosen(state, running, rows, real)
 
 
 def last_if_running(steps: list[Step]) -> Step | None:
@@ -173,7 +170,7 @@ def running_step(steps: list[Step]) -> Step | None:
 
 
 def copy_tails(state: RepoState) -> None:
-    surely(state.worker).tail_lines = state.tail_lines
+    state.worker.tail_lines = state.tail_lines
 
 
 def set_runner(state: RepoState) -> None:
@@ -211,7 +208,7 @@ def latest_runner_line(log_path: Path | None) -> str | None:
 
 def nonempty_lines(log_path: Path | None) -> list[str]:
     chosen = (empty_list, stripped_lines)[log_path is not None]
-    return chosen(surely(log_path))
+    return chosen(log_path)
 
 
 def read_ignore(log_path: Path) -> list[str]:
@@ -252,7 +249,7 @@ def worker_texts(worker: Worker) -> list[tuple[str, str]]:
 
 def worker_sections(worker: Worker | None) -> list[tuple[str, str]]:
     chosen = (empty_list, worker_texts)[worker is not None]
-    return chosen(surely(worker))
+    return chosen(worker)
 
 
 def has_text(pair: tuple[str, str | None]) -> TypeGuard[tuple[str, str]]:
@@ -335,7 +332,7 @@ def append_step(steps: list[Step], matched: re.Match[str]) -> None:
 
 def stored_start(steps: list[Step], matched: re.Match[str] | None) -> bool:
     chosen = (skip, append_step)[matched is not None]
-    chosen(steps, surely(matched))
+    chosen(steps, matched)
     return matched is not None
 
 
@@ -357,7 +354,7 @@ def new_step(matched: re.Match[str]) -> Step:
 
 def stored_finish(steps: list[Step], matched: re.Match[str] | None) -> bool:
     chosen = (skip, finish_step)[matched is not None]
-    chosen(steps, surely(matched))
+    chosen(steps, matched)
     return matched is not None
 
 
@@ -371,7 +368,7 @@ def set_verdict(steps: list[Step], matched: re.Match[str]) -> None:
 
 def apply_verdict(steps: list[Step], matched: re.Match[str] | None) -> None:
     chosen = (skip, set_verdict)[False not in (matched is not None, bool(steps))]
-    chosen(steps, surely(matched))
+    chosen(steps, matched)
 
 
 def accept_verdict(steps: list[Step], line: str) -> None:
@@ -412,7 +409,7 @@ def complete_step(step: Step, matched: re.Match[str]) -> None:
 
 def complete_if_found(step: Step | None, matched: re.Match[str]) -> None:
     chosen = (skip, complete_step)[step is not None]
-    chosen(surely(step), matched)
+    chosen(step, matched)
 
 
 def finish_step(steps: list[Step], matched: re.Match[str]) -> None:
@@ -439,7 +436,7 @@ def eval_quote(_rest: str, matched: re.Match[str]) -> str:
 
 def quoted_or_plain(rest: str, matched: re.Match[str] | None) -> str:
     chosen = (collapse_rest, eval_quote)[matched is not None]
-    return chosen(rest, surely(matched))
+    return chosen(rest, matched)
 
 
 def summary_of(rest: str) -> str:
@@ -460,7 +457,7 @@ def empty_at(_path: Path | None, _max_lines: int, _window: int) -> list[str]:
 
 def formatted_if(path: Path | None, max_lines: int, window: int) -> list[str]:
     chosen = (empty_at, formatted_tail)[path is not None]
-    return chosen(surely(path), max_lines, window)
+    return chosen(path, max_lines, window)
 
 
 def transcript_conversation(root: Path, max_lines: int = CONV_MAX_LINES, window: int = CONV_BYTES) -> list[str]:
@@ -540,7 +537,7 @@ def split_tail(size: int, raw: bytes, window: int) -> list[str]:
 def decode_tail(pair: tuple[int, bytes | None], window: int) -> list[str]:
     size, raw = pair
     chosen = (empty_lines, split_tail)[raw is not None]
-    return chosen(size, surely(raw), window)
+    return chosen(size, raw, window)
 
 
 def transcript_lines(path: Path, window: int = TAIL_BYTES) -> list[str]:
@@ -677,7 +674,7 @@ def worker_without_task(state: RepoState, step: Step, process: Process | None) -
 
 def worker_with_task(state: RepoState, step: Step, process: Process | None) -> Worker:
     base = work_path(state.root)
-    task = surely(state.task)
+    task = state.task
     return Worker(
         step=step,
         process=process,
@@ -831,7 +828,7 @@ def descendant_gates(
 def gate_hit(row: tuple[int, list[str]]) -> list[tuple[int, str]]:
     elapsed, tokens = row
     label = classify_gate(tokens)
-    return ([], [(elapsed, surely(label))])[label is not None]
+    return ([], [(elapsed, label)])[label is not None]
 
 
 def classified(tokens: list[str], names: list[str]) -> str | None:
@@ -874,7 +871,7 @@ def named_one(names: list[str], tool: str) -> str | None:
 
 def mix_from(mix: str | None) -> str | None:
     chosen = (none_of, mix_kind)[mix is not None]
-    return chosen(surely(mix))
+    return chosen(mix)
 
 
 def mix_gate(tokens: list[str]) -> str | None:
@@ -1036,7 +1033,7 @@ def hours_fmt(seconds: int) -> str:
 
 
 def fmt_seconds(seconds: int) -> str:
-    return surely(next(filter(present, (secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds)))))
+    return next(filter(present, (secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds))))
 
 
 def make_process(pid: int, elapsed: int, tokens: list[str], backend: str) -> Process:
@@ -1045,7 +1042,7 @@ def make_process(pid: int, elapsed: int, tokens: list[str], backend: str) -> Pro
 
 def process_of(pid: int, elapsed: int, tokens: list[str], backend: str | None) -> Process | None:
     chosen = (none_of, make_process)[backend is not None]
-    return chosen(pid, elapsed, tokens, surely(backend))
+    return chosen(pid, elapsed, tokens, backend)
 
 
 def agent_process(pid: int, elapsed: int, tokens: list[str]) -> Process | None:
@@ -1081,7 +1078,7 @@ def path_under(cwd: Path, root: Path) -> bool:
 
 def under_root(cwd: Path | None, root: Path) -> bool:
     chosen = (false_of, path_under)[cwd is not None]
-    return chosen(surely(cwd), root)
+    return chosen(cwd, root)
 
 
 def real_path(root: Path) -> Path:
@@ -1106,7 +1103,7 @@ def stripped_out(out: subprocess.CompletedProcess[str]) -> str:
 
 def git_stdout(out: subprocess.CompletedProcess[str] | None) -> str:
     chosen = (blank, stripped_out)[ok_git(out)]
-    return chosen(surely(out))
+    return chosen(out)
 
 
 def git_line(root: Path, args: list[str]) -> str:
@@ -1121,12 +1118,12 @@ def load_text(path: Path) -> str | None:
 
 def read_text(path: Path | None) -> str | None:
     chosen = (none_of, load_text)[path is not None]
-    return chosen(surely(path))
+    return chosen(path)
 
 
 def decoded_if(raw: str | None) -> str | None:
     chosen = (none_of, decoded_result)[raw is not None]
-    return chosen(surely(raw))
+    return chosen(raw)
 
 
 def result_text(path: Path | None) -> str | None:

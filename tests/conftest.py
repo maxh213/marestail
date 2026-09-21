@@ -52,15 +52,30 @@ class FakeRun:
         self.options: list[dict[str, Any]] = []
 
     def __call__(self, command: list[str], cwd: Path, **options: Any) -> Reply:
-        if cwd is None:
-            raise TypeError("cwd")
-        if options.get("timeout") is None and "timeout" in options:
-            raise TypeError("timeout")
+        check_fake_run(command, cwd, options)
         self.calls.append(list(command))
         self.options.append({"cwd": cwd, **options})
         if callable(self.replies):
             return self.replies(list(command))
         return self.replies.pop(0) if self.replies else (0, "")
+
+
+def reject_none(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def wrapped(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+        if ctx is None:
+            raise TypeError("ctx")
+        return fn(ctx, *args, **kwargs)
+
+    return wrapped
+
+
+def check_fake_run(command: list[str], cwd: Path, options: dict[str, Any]) -> None:
+    if cwd is None:
+        raise TypeError("cwd")
+    if any(part is None for part in command):
+        raise TypeError("command")
+    if options.get("timeout") is None and "timeout" in options:
+        raise TypeError("timeout")
 
 
 @pytest.fixture

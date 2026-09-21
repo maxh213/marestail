@@ -819,6 +819,55 @@ def test_parse_verdict(tmp_path: Path, text: str | None, extra: str, expected: A
     assert runner.parse_verdict(report, extra) == expected
 
 
+def test_judge_session_passes_config_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    report = tmp_path / "01-critic.md"
+    report.write_text("x")
+    session = Session(task="t")
+    section = patch(monkeypatch, perf_trees, "prompt_section", "TREES")
+    prompt = patch(monkeypatch, prompts, "judge_prompt", "PROMPT")
+    patch(monkeypatch, runner, "head", "abc")
+    invoke = patch(monkeypatch, runner, "invoke")
+    discard = patch(monkeypatch, runner, "discard_edits")
+    assert runner.judge_session(state, CRITIC, report, "gate", session, "fb") == "abc"
+    assert section.calls == [(state.config, session)]
+    assert prompt.calls[0][6] == "TREES"
+    assert invoke.calls == [(state, "01-critic", "PROMPT")]
+    assert discard.calls[0][0] is state.config
+
+
+def test_judge_session_without_trees_uses_empty_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    report = tmp_path / "01-critic.md"
+    report.write_text("x")
+    section = patch(monkeypatch, perf_trees, "prompt_section", "TREES")
+    prompt = patch(monkeypatch, prompts, "judge_prompt", "PROMPT")
+    patch(monkeypatch, runner, "head", "abc")
+    patch(monkeypatch, runner, "invoke")
+    patch(monkeypatch, runner, "discard_edits")
+    runner.judge_session(state, CRITIC, report, "gate", None, "fb")
+    assert section.calls == []
+    assert prompt.calls[0][6] == runner.EMPTY
+
+
+def test_parse_verdict_without_extra_reads_the_report(tmp_path: Path) -> None:
+    report = tmp_path / "r.md"
+    report.write_text("VERDICT: PASS")
+    assert runner.parse_verdict(report) == ("PASS", None)
+    assert runner.EMPTY == ""
+    assert runner.NEWLINE == "\n"
+    assert runner.GIT == "git"
+    assert runner.DIFF == "diff"
+    assert runner.HEAD_REF == "HEAD"
+
+
+def test_read_or_empty_missing_is_blank(tmp_path: Path) -> None:
+    assert runner.read_or_empty(tmp_path / "missing.md") == ""
+    path = tmp_path / "a.md"
+    path.write_text("hi")
+    assert runner.read_or_empty(path) == "hi"
+
+
 @pytest.fixture
 def invoke_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(runner, "LIMIT_WAIT_SECONDS", 120)
@@ -828,6 +877,13 @@ def invoke_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "sleep": patch(monkeypatch, time, "sleep"),
         "backend": patch(monkeypatch, runner, "run_backend", (0, '{"total_cost_usd": 0.5, "num_turns": 2, "result": "ok"}')),
     }
+
+
+def test_invoke_reuses_an_existing_folder(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:
+    state = make_state(tmp_path)
+    state.folder.mkdir(parents=True, exist_ok=True)
+    runner.invoke(state, "01-critic", "the prompt")
+    assert (state.folder / "01-critic.prompt.md").read_text() == "the prompt"
 
 
 def test_invoke_success(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:

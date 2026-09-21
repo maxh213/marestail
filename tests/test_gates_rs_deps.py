@@ -88,6 +88,7 @@ def test_under() -> None:
     assert rs_deps.under("src/db/x.rs", "src/db")
     assert rs_deps.under("src/db.rs", "src/db")
     assert not rs_deps.under("src/dbx.rs", "src/db")
+    assert rs_deps.under("srcX/file", "srcX")
 
 
 def test_load_layers(tmp_path: Path) -> None:

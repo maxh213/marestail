@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from marestail.context import Context, under_benchmarks
+from marestail.context import Context, live, under_benchmarks
 from marestail.report import Result, elapsed
 
 SKIP_DIRS = {
@@ -35,6 +35,15 @@ SKIP_DIRS = {
     "target",
 }
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+ELIXIR_SUFFIXES = (".ex", ".exs")
+ERLANG_SUFFIXES = (".erl", ".hrl")
+RUBY_SUFFIXES = (".rb", ".rake")
+RUST_SUFFIXES = (".rs",)
+JAVA_SUFFIXES = (".java",)
+PYTHON_SUFFIXES = (".py",)
+MARKUP_SUFFIXES = (".html", ".jinja", ".j2", ".css")
+COMMENTS_MODE = "comments"
+EMPTY_JSON = "[]"
 MARKUP = re.compile(r"<!--|\{#")
 UNTOKENIZABLE = (0, "could not tokenize")
 
@@ -71,7 +80,7 @@ def failed(label: str, output: str) -> str:
 
 
 def python_findings(ctx: Context) -> list[str]:
-    return [finding for path in files(ctx, (".py",)) for finding in python_file_findings(path, ctx)]
+    return [finding for path in files(ctx, PYTHON_SUFFIXES) for finding in python_file_findings(path, ctx)]
 
 
 def python_file_findings(path: Path, ctx: Context) -> list[str]:
@@ -100,7 +109,18 @@ def docstrings(text: str) -> list[int]:
     tree = parsed(text)
     if tree is None:
         return []
-    return [node.body[0].lineno for node in documentable(tree) if ast.get_docstring(node, clean=False) is not None]
+    return [node.body[0].lineno for node in documentable(tree) if has_docstring(node)]
+
+
+def has_docstring(node: ast.AST) -> bool:
+    body = getattr(node, "body", None)
+    if not body:
+        return False
+    first = body[0]
+    if not isinstance(first, ast.Expr):
+        return False
+    value = first.value
+    return isinstance(value, ast.Constant) and isinstance(value.value, str)
 
 
 def parsed(text: str) -> ast.Module | None:
@@ -114,10 +134,10 @@ def documentable(tree: ast.Module) -> list[ast.Module | ast.FunctionDef | ast.As
     return [tree, *[node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]]
 
 
-def scanned(ctx: Context, code: int, output: str, failure: str, fallback: str = "") -> list[str]:
+def scanned(ctx: Context, code: int, output: str, failure: str) -> list[str]:
     if code != 0:
         return [failed(failure, output)]
-    return [comment(Path(c["file"]).relative_to(ctx.root), c["line"], c["text"]) for c in json.loads(output or fallback)]
+    return [comment(Path(c["file"]).relative_to(ctx.root), c["line"], c["text"]) for c in json.loads(output)]
 
 
 def ts_findings(ctx: Context) -> list[str]:
@@ -127,22 +147,22 @@ def ts_findings(ctx: Context) -> list[str]:
     paths = files(ctx, TS_SUFFIXES)
     if ts_root is None or not paths:
         return []
-    code, output = javascript.scan(ctx, "comments", paths, cwd=ctx.root)
+    code, output = javascript.scan(ctx, COMMENTS_MODE, paths, cwd=ctx.root)
     return scanned(ctx, code, output, "comment scanner failed")
 
 
 def elixir_findings(ctx: Context) -> list[str]:
     from marestail import elixir
 
-    paths = files(ctx, (".ex", ".exs"))
+    paths = files(ctx, ELIXIR_SUFFIXES)
     if not paths:
         return []
-    code, output = elixir.scan(ctx, "comments", paths, cwd=ctx.root)
+    code, output = elixir.scan(ctx, COMMENTS_MODE, paths, cwd=ctx.root)
     return scanned(ctx, code, output, "elixir comment scanner failed")
 
 
 def erlang_findings(ctx: Context) -> list[str]:
-    paths = files(ctx, (".erl", ".hrl"))
+    paths = files(ctx, ERLANG_SUFFIXES)
     if not paths:
         return []
     from marestail import erlang
@@ -155,19 +175,28 @@ def erlang_findings(ctx: Context) -> list[str]:
 def ruby_findings(ctx: Context) -> list[str]:
     if ctx.config.section("ruby") is None:
         return []
-    paths = files(ctx, (".rb", ".rake"))
+    paths = files(ctx, RUBY_SUFFIXES)
     if not paths:
         return []
     from marestail.ruby import scan
 
-    code, output = scan(ctx, "comments", paths)
-    return scanned(ctx, code, output, "ruby comment scanner failed", "[]")
+    code, output = scan(ctx, COMMENTS_MODE, paths)
+    return scanned(ctx, code, ruby_payload(code, output), "ruby comment scanner failed")
+
+
+def ruby_payload(code: int, output: str) -> str:
+    if output:
+        return output
+    if code == 0:
+        return EMPTY_JSON
+    return output
 
 
 def structured(ctx: Context, module: ModuleType, paths: list[Path], failure: str, relabel: Callable[[Any], str] = str) -> list[str]:
+    ctx = live(ctx)
     if not paths:
         return []
-    data, error = module.scan(ctx, "comments", paths)
+    data, error = module.scan(ctx, COMMENTS_MODE, paths)
     if error:
         return [f"{failure}: {error}"]
     return [comment(relabel(c["file"]), c["line"], c["text"]) for c in data]
@@ -186,7 +215,7 @@ def rust_findings(ctx: Context) -> list[str]:
         return []
     from marestail import rust
 
-    return structured(ctx, rust, files(ctx, (".rs",)), "rust comment scanner failed", partial(rust.rel, ctx))
+    return structured(ctx, rust, files(ctx, RUST_SUFFIXES), "rust comment scanner failed", partial(rust.rel, ctx))
 
 
 def java_findings(ctx: Context) -> list[str]:
@@ -194,11 +223,11 @@ def java_findings(ctx: Context) -> list[str]:
         return []
     from marestail import java
 
-    return structured(ctx, java, files(ctx, (".java",)), "java comment scanner failed")
+    return structured(ctx, java, files(ctx, JAVA_SUFFIXES), "java comment scanner failed")
 
 
 def markup_findings(ctx: Context) -> list[str]:
-    return [finding for path in files(ctx, (".html", ".jinja", ".j2", ".css")) for finding in markup_file_findings(path, ctx)]
+    return [finding for path in files(ctx, MARKUP_SUFFIXES) for finding in markup_file_findings(path, ctx)]
 
 
 def markup_file_findings(path: Path, ctx: Context) -> list[str]:

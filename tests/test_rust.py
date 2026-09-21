@@ -277,6 +277,11 @@ def test_scan_without_paths(tmp_path: Path, fake_run: Any) -> None:
     assert fake.calls == []
 
 
+def test_scan_rejects_missing_context() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        rust.scan(None, "deps", [])  # type: ignore[arg-type]
+
+
 def test_scan_reports_build_error(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(127, "")])
     assert rust.scan(make_context(tmp_path), "deps", [tmp_path / "a.rs"]) == (None, f"cargo is not installed: {rust.INSTALL['cargo']}")

@@ -386,6 +386,11 @@ def test_scan_nothing(tmp_path: Path, fake_run: Any, mode: str, empty: Any) -> N
     assert fake.calls == []
 
 
+def test_scan_rejects_missing_context(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        java.scan(None, "lint", [])  # type: ignore[arg-type]
+
+
 def test_scan_runs_scanner(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JAVA_HOME", "/jdk")
     ready_scanner(tmp_path)

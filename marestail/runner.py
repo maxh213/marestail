@@ -25,7 +25,7 @@ from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
 from marestail.report import Result, elapsed, render
-from marestail.shell import clean, run
+from marestail.shell import clean, ensure_dir, run
 
 PASS = "PASS"
 BOUNCE = "BOUNCE"
@@ -78,12 +78,23 @@ USAGE = "usage"
 CACHED = "--cached"
 NAME_ONLY = "--name-only"
 CHECKOUT = "checkout"
+GIT = "git"
+DIFF = "diff"
+LS_TREE = "ls-tree"
+LS_FILES = "ls-files"
+LOG = "log"
+ADD = "add"
+RM = "rm"
+CLEAN = "clean"
+EMPTY = ""
+NEWLINE = "\n"
+HEAD_REF = "HEAD"
 TOKENS = "tokens"
 CONTENT = "content"
 COST_USD = "costUSD"
 RESULT = "result"
 MESSAGE = "message"
-STATUS_COMMAND = ["git", "status", "--porcelain", "--untracked-files=all"]
+STATUS_COMMAND = [GIT, "status", "--porcelain", "--untracked-files=all"]
 INPUT_OUTPUT_TOKENS = ("inputTokens", "outputTokens")
 KIMI_TOKENS = ("input_tokens", "output_tokens")
 AUTHOR_AGAIN = "You asked for an authoring round; benches are editable again in the authoring phase."
@@ -138,7 +149,7 @@ class Run:
         return self.config.work / "handoffs" / self.task_name
 
     def next_report(self, role: str) -> Path:
-        self.handoffs.mkdir(parents=True, exist_ok=True)
+        ensure_dir(self.handoffs)
         existing = list(self.handoffs.glob("*.md"))
         return self.handoffs / f"{len(existing) + 1:02d}-{role}.md"
 
@@ -441,7 +452,7 @@ def judge_attempt(
 
 
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
-    trees = perf_trees.prompt_section(state.config, session) if session else ""
+    trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
     prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus)
     before = head(state.config)
     invoke(state, report.stem, prompt)
@@ -454,7 +465,7 @@ def judge_writes(judge: Judge) -> tuple[str, ...]:
 
 
 def read_or_empty(path: Path) -> str:
-    return path.read_text() if path.exists() else ""
+    return path.read_text() if path.exists() else EMPTY
 
 
 def session_output(state: Run, report: Path) -> str:
@@ -462,7 +473,7 @@ def session_output(state: Run, report: Path) -> str:
 
 
 def asked_to_author(report: Path, blob: str) -> bool:
-    combined = read_or_empty(report) + "\n" + blob
+    combined = read_or_empty(report) + NEWLINE + blob
     return bool(re.search(r"^\s*VERDICT:\s*AUTHOR\b", combined, re.IGNORECASE | re.MULTILINE))
 
 
@@ -557,9 +568,9 @@ def fingerprints(config: Config, benches: list[str]) -> dict[str, str]:
 
 
 def record_staged(config: Config, message: str, role: str, label: str) -> None:
-    _, staged = run(["git", "diff", CACHED, NAME_ONLY], cwd=config.root)
+    _, staged = run([GIT, DIFF, CACHED, NAME_ONLY], cwd=config.root)
     if staged.strip():
-        run(["git", COMMIT, "-q", "-m", stamped(f"{message}\n\nBy {role}.", label)], cwd=config.root)
+        run([GIT, COMMIT, "-q", "-m", stamped(f"{message}\n\nBy {role}.", label)], cwd=config.root)
 
 
 def fill_samples(state: Run, session: perf_trees.Session) -> None:
@@ -642,8 +653,8 @@ def gate_for(state: Run, tier: str | None) -> tuple[str, bool]:
     return render(results), all(result.ok for result in results)
 
 
-def parse_verdict(report: Path, extra: str = "") -> tuple[str, str | None] | None:
-    blob = read_or_empty(report) + "\n" + extra
+def parse_verdict(report: Path, extra: str = EMPTY) -> tuple[str, str | None] | None:
+    blob = read_or_empty(report) + NEWLINE + extra
     match = re.search(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", blob, re.IGNORECASE)
     if not match:
         return None
@@ -674,7 +685,7 @@ def dirty_problems(dirty: list[str]) -> list[str]:
 
 
 def frozen_problems(state: Run, worker: Worker, report: Path, before: str, dirty: list[str]) -> list[str]:
-    touched = changed_paths(state.config, ["git", "diff", NAME_ONLY, f"{before}..HEAD"]) + dirty
+    touched = changed_paths(state.config, [GIT, DIFF, NAME_ONLY, f"{before}..{HEAD_REF}"]) + dirty
     frozen = frozen_changes(state.config, worker, before, touched)
     if frozen and not dirty:
         return reject_config_change(state, worker, report, before, frozen)
@@ -701,7 +712,7 @@ def gate_problems(state: Run, worker: Worker) -> list[str]:
 
 
 def file_diff(config: Config, before: str, path: str) -> str:
-    _, output = run(["git", "diff", before, "--", path], cwd=config.root)
+    _, output = run([GIT, DIFF, before, "--", path], cwd=config.root)
     return output
 
 
@@ -709,7 +720,7 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     config = state.config
     justification = config_change_section(report)
     label = agent_label(state)
-    _, diff = run(["git", "diff", f"{before}..HEAD", "--", *frozen], cwd=config.root)
+    _, diff = run([GIT, DIFF, f"{before}..{HEAD_REF}", "--", *frozen], cwd=config.root)
     if justification is None:
         revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}\n\nBy runner.", label))
         return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
@@ -737,9 +748,9 @@ def config_change_section(report: Path) -> str | None:
 
 
 def revert(config: Config, before: str, paths: list[str], message: str) -> None:
-    run(["git", CHECKOUT, before, "--", *paths], cwd=config.root)
-    run(["git", "add", "-A", "--", *paths], cwd=config.root)
-    run(["git", COMMIT, "-q", "-m", message], cwd=config.root)
+    run([GIT, CHECKOUT, before, "--", *paths], cwd=config.root)
+    run([GIT, ADD, "-A", "--", *paths], cwd=config.root)
+    run([GIT, COMMIT, "-q", "-m", message], cwd=config.root)
 
 
 def proposals_summary(state: Run) -> str:
@@ -777,18 +788,18 @@ def discard_edits(config: Config, keep: Path, writes: tuple[str, ...] = ()) -> N
     if writes:
         restore_paths(config, stray)
         return
-    run(["git", CHECKOUT, "--", "."], cwd=config.root)
-    run(["git", "clean", "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
+    run([GIT, CHECKOUT, "--", "."], cwd=config.root)
+    run([GIT, CLEAN, "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
 
 
 def restore_paths(config: Config, paths: list[str]) -> None:
-    _, listed = run(["git", "ls-tree", "-r", NAME_ONLY, "HEAD", "--", *paths], cwd=config.root)
+    _, listed = run([GIT, LS_TREE, "-r", NAME_ONLY, HEAD_REF, "--", *paths], cwd=config.root)
     tracked = sorted(set(listed.splitlines()) & set(paths))
     untracked = sorted(set(paths) - set(tracked))
     if tracked:
-        run(["git", CHECKOUT, "HEAD", "--", *tracked], cwd=config.root)
+        run([GIT, CHECKOUT, HEAD_REF, "--", *tracked], cwd=config.root)
     if untracked:
-        run(["git", "rm", "-q", CACHED, UNMATCHED, "--", *untracked], cwd=config.root)
+        run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *untracked], cwd=config.root)
     for path in untracked:
         (config.root / path).unlink(missing_ok=True)
 
@@ -802,7 +813,7 @@ def stage_writes(config: Config, writes: tuple[str, ...]) -> None:
         return
     kept = written_paths(config, writes)
     if kept:
-        run(["git", "add", "-A", "--", *kept], cwd=config.root)
+        run([GIT, ADD, "-A", "--", *kept], cwd=config.root)
 
 
 def added_paths(then: str, now: str) -> list[str]:
@@ -811,13 +822,13 @@ def added_paths(then: str, now: str) -> list[str]:
 
 
 def newly_tracked_ignored(config: Config, before: str) -> list[str]:
-    _, then = run(["git", "ls-tree", "-r", NAME_ONLY, before], cwd=config.root)
-    _, now = run(["git", "ls-files"], cwd=config.root)
+    _, then = run([GIT, LS_TREE, "-r", NAME_ONLY, before], cwd=config.root)
+    _, now = run([GIT, LS_FILES], cwd=config.root)
     return [path for path in added_paths(then, now) if ignored_path(config, path)]
 
 
 def ignored_path(config: Config, path: str) -> bool:
-    code, _ = run(["git", "check-ignore", "-q", "--no-index", "--", path], cwd=config.root)
+    code, _ = run([GIT, "check-ignore", "-q", "--no-index", "--", path], cwd=config.root)
     return code == 0
 
 
@@ -835,15 +846,15 @@ def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
 
 def untrack_ignored(config: Config, before: str, paths: list[str]) -> None:
     print(f"   dropping gitignored files: {', '.join(paths[:10])}")
-    run(["git", "rm", "-q", CACHED, UNMATCHED, "--", *paths], cwd=config.root)
+    run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *paths], cwd=config.root)
     if head(config) != before:
-        run(["git", COMMIT, "--amend", ALLOW_EMPTY, "-q", "--no-edit"], cwd=config.root)
+        run([GIT, COMMIT, "--amend", ALLOW_EMPTY, "-q", "--no-edit"], cwd=config.root)
 
 
 def restore_files(config: Config, saved: dict[str, bytes]) -> None:
     for path, data in saved.items():
         dest = config.root / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(dest.parent)
         dest.write_bytes(data)
 
 
@@ -853,9 +864,9 @@ def fold_handoff(config: Config, role: str, report: Path, before: str, label: st
         record_commit(config, f"{role} handoff", body, role, label)
         return
     stamp_history(config, before, label, used)
-    _, original = run(["git", "log", "-1", "--format=%B"], cwd=config.root)
+    _, original = run([GIT, LOG, "-1", "--format=%B"], cwd=config.root)
     message = stamped(strip_byline(original, role), label, used) + f"\n\n{body}\n\nBy {role}."
-    run(["git", COMMIT, "--amend", ALLOW_EMPTY, "-q", "-m", message], cwd=config.root)
+    run([GIT, COMMIT, "--amend", ALLOW_EMPTY, "-q", "-m", message], cwd=config.root)
 
 
 def strip_byline(message: str, role: str) -> str:
@@ -867,7 +878,7 @@ def strip_byline(message: str, role: str) -> str:
 
 def record_commit(config: Config, subject: str, body: str, role: str, label: str) -> None:
     message = stamped(f"{subject}\n\n{body.strip()}\n\nBy {role}.", label)
-    run(["git", COMMIT, ALLOW_EMPTY, "-q", "-m", message], cwd=config.root)
+    run([GIT, COMMIT, ALLOW_EMPTY, "-q", "-m", message], cwd=config.root)
 
 
 def stamped(message: str, label: str, used: set[str] | None = None) -> str:
@@ -887,7 +898,7 @@ def stamp_history(config: Config, before: str, label: str, used: set[str] | None
     parent = before
     for sha in commits:
         parent = restamp(config, sha, parent, label, used)
-    run(["git", "reset", "--hard", "-q", parent], cwd=config.root)
+    run([GIT, "reset", "--hard", "-q", parent], cwd=config.root)
 
 
 def restampable(config: Config, before: str, label: str, commits: list[str]) -> bool:
@@ -895,34 +906,34 @@ def restampable(config: Config, before: str, label: str, commits: list[str]) -> 
 
 
 def rev_list(config: Config, before: str, options: list[str]) -> list[str]:
-    _, output = run(["git", "rev-list", "--reverse", *options, f"{before}..HEAD"], cwd=config.root)
+    _, output = run([GIT, "rev-list", "--reverse", *options, f"{before}..{HEAD_REF}"], cwd=config.root)
     return output.split()
 
 
 def restamp(config: Config, sha: str, parent: str, label: str, used: set[str] | None = None) -> str:
-    _, details = run(["git", "log", "-1", "--format=%an%n%ae%n%aI%n%B", sha], cwd=config.root)
+    _, details = run([GIT, LOG, "-1", "--format=%an%n%ae%n%aI%n%B", sha], cwd=config.root)
     name, email, date, message = details.split("\n", 3)
     author = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date}
     tree = f"{sha}^{{tree}}"
-    _, created = run(["git", "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label, used)], cwd=config.root, env=author)
+    _, created = run([GIT, "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label, used)], cwd=config.root, env=author)
     return created.split()[0]
 
 
 def archive_handoffs(state: Run) -> None:
     destination = state.folder / f"handoffs-{time.strftime('%Y%m%dT%H%M%S')}"
     if state.handoffs.exists():
-        state.folder.mkdir(parents=True, exist_ok=True)
+        ensure_dir(state.folder)
         shutil.move(str(state.handoffs), str(destination))
     perf_trees.archive_start(state.config, state.task_name, destination if destination.exists() else None)
 
 
 def head(config: Config) -> str:
-    _, output = run(["git", "rev-parse", "HEAD"], cwd=config.root)
+    _, output = run([GIT, "rev-parse", HEAD_REF], cwd=config.root)
     return output.strip()
 
 
 def invoke(state: Run, label: str, prompt: str) -> None:
-    state.folder.mkdir(parents=True, exist_ok=True)
+    ensure_dir(state.folder)
     prompt_file = state.folder / f"{label}.prompt.md"
     prompt_file.write_text(prompt)
     for _ in range(LIMIT_WAITS):

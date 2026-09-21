@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from marestail.context import Context, under_benchmarks
+from marestail.context import Context, live, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
@@ -213,6 +213,7 @@ def is_test(ctx: Context, path: Path) -> bool:
 
 
 def files(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     return sorted(path for path in ctx.dotnet_root().rglob("*.cs") if not generated(ctx, path))
 
 
@@ -221,6 +222,7 @@ def sources(ctx: Context) -> list[Path]:
 
 
 def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
+    ctx = live(ctx)
     if not ctx.scoped:
         return paths
     return [path for path in paths if ctx.in_scope(rel(ctx, path))]
@@ -334,6 +336,7 @@ def build_scanner(ctx: Context) -> str | None:
 
 
 def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
+    ctx = live(ctx)
     error = build_scanner(ctx)
     if error:
         return None, error

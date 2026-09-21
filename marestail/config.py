@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 FILENAME = "marestail.toml"
+NAME_ERROR = "name"
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,8 @@ class Config:
         return value if isinstance(value, dict) else None
 
     def get(self, section: str, key: str, default: Any = None) -> Any:
+        if type(section) is not str or type(key) is not str:
+            raise TypeError(NAME_ERROR)
         found = self.section(section)
         return default if found is None else found.get(key, default)
 

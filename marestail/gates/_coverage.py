@@ -8,6 +8,7 @@ TS_COVERAGE_DIR = "ts-coverage"
 EX_COVERAGE = "ex-coverage.json"
 RB_COVERAGE = "rb-coverage.json"
 ER_COVERAGE = "er-coverage.json"
+COLON = ":"
 
 
 def relative_path(file_str: str, ctx: Context) -> str:
@@ -18,8 +19,15 @@ def relative_path(file_str: str, ctx: Context) -> str:
         return file_str
 
 
+def finding_file(finding: str) -> str:
+    index = finding.find(COLON)
+    if index < 0:
+        return finding
+    return finding[:index]
+
+
 def in_scope_findings(findings: list[str], ctx: Context) -> list[str]:
-    return [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
+    return [finding for finding in findings if ctx.in_scope(finding_file(finding))]
 
 
 def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, under_benchmarks
+from marestail.context import Context, live, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
@@ -244,6 +244,7 @@ def empty_scan(mode: str) -> list[Any] | dict[str, Any]:
 
 
 def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
+    ctx = live(ctx)
     if not paths:
         return empty_scan(mode), None
     error = build_scanner(ctx)

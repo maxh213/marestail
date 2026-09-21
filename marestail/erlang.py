@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context
+from marestail.context import CTX_ERROR, Context, live
 from marestail.shell import run, tail
 
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
@@ -58,6 +58,7 @@ def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, t
 
 
 def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
+    ctx = live(ctx)
     return tool(ctx, "escript", [str(SCRIPT_DIR / script), *args], cwd, timeout)
 
 
@@ -66,11 +67,17 @@ def erlc(ctx: Context, args: list[str], cwd: Path | None = None, timeout: int = 
 
 
 def hint(code: int, output: str) -> str | None:
+    require_hint(code, output)
     if unavailable(code, output):
         return UNAVAILABLE
     if "unable to find image" in output.lower():
         return f"docker image missing: docker pull {IMAGE}"
     return None
+
+
+def require_hint(code: int, output: str) -> None:
+    if code is None or output is None:
+        raise TypeError(CTX_ERROR)
 
 
 def unavailable(code: int, output: str) -> bool:

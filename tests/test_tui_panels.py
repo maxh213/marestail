@@ -108,8 +108,6 @@ def test_put_and_clip() -> None:
     assert shift_left(0, -2, "hello") == (0, 0, "llo")
     assert panels.shift_neg(0, -2, "hello") == (0, 0, "llo")
     assert panels.clipped(0, 8, "abcdef", 10) == (0, 8, "ab")
-    assert panels.surely("x") == "x"
-    assert panels.surely(0) == 0
     assert panels.skip() is None
     assert panels.none_of("a") is None
     assert panels.present("a") is True
@@ -284,8 +282,6 @@ def test_conversation_panel(tmp_path: Path, monkeypatch: Any) -> None:
 def test_panel_helpers(tmp_path: Path) -> None:
     assert panels.skip() is None
     assert panels.none_of() is None
-    assert panels.surely("x") == "x"
-    assert panels.surely(None) is None
     assert panels.missing_fleet(0) is None
     assert panels.present(0) is True
     assert panels.present(None) is False

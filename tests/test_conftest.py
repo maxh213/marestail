@@ -51,6 +51,12 @@ def test_fake_run_rejects_a_missing_cwd(tmp_path: Path) -> None:
         fake(["cmd"], None)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match=r"^timeout$"):
         fake(["cmd"], tmp_path, timeout=None)
+    with pytest.raises(TypeError, match=r"^command$"):
+        fake(["cmd", None], tmp_path)  # type: ignore[list-item]
+    conftest.check_fake_run(["cmd"], tmp_path, {})
+    assert conftest.reject_none(lambda ctx: ctx)("x") == "x"
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        conftest.reject_none(lambda ctx: ctx)(None)
 
 
 def test_git_try_show_toplevel() -> None:

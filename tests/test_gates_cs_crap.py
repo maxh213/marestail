@@ -50,6 +50,8 @@ class FakeScan:
         self.contexts: list[Any] = []
 
     def __call__(self, ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
+        if ctx is None:
+            raise TypeError("ctx")
         self.contexts.append(ctx)
         self.calls.append((mode, paths))
         return self.reply
@@ -156,3 +158,23 @@ def test_offenders_sorted_by_crap() -> None:
 def test_describe() -> None:
     finding = {"file": "A.cs", "line": 7, "name": "Run", "crap": 12.345, "cc": 3, "cov": 0.256}
     assert cs_crap.describe(finding) == "A.cs:7 Run crap=12.3 (cc=3, coverage=26%)"
+
+
+def test_missed_branches_include_start_and_end() -> None:
+    file_cov = {"missing_branches": [[3, 1], [5, 0], [6, 1]]}
+    assert cs_crap.missed_branches(file_cov, 3, 5) == 2
+    assert cs_crap.missed_branches({"missing_branches": []}, 3, 5) == 0
+
+
+def test_score_missing_file_uses_empty_coverage(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"dotnet": {}})
+    scored = cs_crap.score(ctx, member("Gone", 1, 2, 2, file="Missing.cs"), {"files": {}})
+    assert scored["cov"] == 0.0
+    assert scored["crap"] == 2**2 * (1 - 0.0) ** 3 + 2
+
+
+def test_default_crap_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, ([member("Low", 3, 5, 2)], None))
+    ctx = project(tmp_path)
+    ctx.config.raw["dotnet"] = {}
+    assert view(cs_crap.run_gate(ctx)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])

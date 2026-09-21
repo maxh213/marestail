@@ -5,6 +5,7 @@ from typing import Any
 
 from marestail import java
 from marestail.context import Context
+from marestail.gates._coverage import finding_file
 from marestail.gates._cycles import cycle_findings, under
 from marestail.report import Result, elapsed
 
@@ -40,7 +41,7 @@ def verdict(findings: list[str], started: float) -> Result:
 def scoped_findings(ctx: Context, findings: list[str]) -> list[str]:
     if not ctx.scoped:
         return findings
-    return [f for f in findings if ctx.in_scope(f.split(":", 1)[0])]
+    return [f for f in findings if ctx.in_scope(finding_file(f))]
 
 
 def layer_findings(ctx: Context, layers: list[dict[str, Any]], data: dict[str, Any]) -> list[str]:

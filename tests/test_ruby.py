@@ -32,6 +32,12 @@ def test_scan_without_files_skips_ruby(tmp_path: Path, fake_run: Any) -> None:
     assert fake.calls == []
 
 
+def test_scan_rejects_missing_context(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ruby)
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        ruby.scan(None, "deps", [tmp_path / "a.rb"])  # type: ignore[arg-type]
+
+
 def test_scan_uses_configured_ruby(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ruby, [(0, '[{"name": "a"}]')])
     ctx = make_context(tmp_path, {"ruby": {"ruby": "/opt/ruby"}})

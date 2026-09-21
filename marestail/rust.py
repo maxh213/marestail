@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, under_benchmarks
+from marestail.context import Context, live, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
@@ -45,6 +45,7 @@ def configured_list(value: Any) -> list[str]:
 
 
 def rel(ctx: Context, path: str | Path) -> str:
+    ctx = live(ctx)
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = ctx.rust_root() / candidate
@@ -200,6 +201,7 @@ def run_scanner(ctx: Context, mode: str, args: list[str]) -> tuple[list[Any] | N
 def scan(
     ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None, uses: list[Path] | None = None
 ) -> tuple[list[Any] | None, str | None]:
+    ctx = live(ctx)
     if not paths:
         return [], None
     error = build_scanner(ctx)

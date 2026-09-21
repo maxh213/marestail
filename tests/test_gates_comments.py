@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.gates import comments
-from tests.conftest import Clock, gate_shape, make_context
+from tests.conftest import Clock, gate_shape, make_context, reject_none
 
 EVERYWHERE = {"comments": {"paths": ["."]}}
 
@@ -16,6 +16,25 @@ def write(root: Path, relative: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path
+
+
+class ErlangScript:
+    def __init__(self, source: Path, reply: tuple[int, str], hint: str | None) -> None:
+        self.source = source
+        self.reply = reply
+        self.hint = hint
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def __call__(self, ctx: object, script: str, args: list[str]) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
+        self.calls.append((script, args))
+        return self.reply[0], self.reply[1].replace("FILE", str(self.source))
+
+    def hinted(self, code: object, output: object) -> str | None:
+        if code is None or output is None:
+            raise TypeError("hint")
+        return self.hint
 
 
 def test_clean_tree_passes(tmp_path: Path) -> None:
@@ -179,17 +198,11 @@ def test_erlang_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], hint: str | None, expected: list[str]
 ) -> None:
     source = write(tmp_path, "src/a.erl", "% c\n")
-    calls: list[tuple[str, list[str]]] = []
-
-    def escript(ctx: object, script: str, args: list[str]) -> tuple[int, str]:
-        calls.append((script, args))
-        return reply[0], reply[1].replace("FILE", str(source))
-
-    monkeypatch.setattr(erlang, "escript", escript)
-    monkeypatch.setattr(erlang, "hint", lambda code, output: hint)
-
+    script = ErlangScript(source, reply, hint)
+    monkeypatch.setattr(erlang, "escript", script)
+    monkeypatch.setattr(erlang, "hint", script.hinted)
     assert comments.erlang_findings(make_context(tmp_path, EVERYWHERE)) == expected
-    assert calls == [("comments.escript", [str(source)])]
+    assert script.calls == [("comments.escript", [str(source)])]
 
 
 def test_erlang_findings_without_files(tmp_path: Path) -> None:
@@ -213,7 +226,7 @@ def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: t
         calls.append((mode, paths))
         return reply[0], reply[1].replace("FILE", str(source))
 
-    monkeypatch.setattr(ruby, "scan", scan)
+    monkeypatch.setattr(ruby, "scan", reject_none(scan))
 
     assert comments.ruby_findings(make_context(tmp_path, {**EVERYWHERE, "ruby": {}})) == expected
     assert calls == [("comments", [source])]
@@ -228,19 +241,17 @@ def test_ruby_findings_need_a_section_and_files(tmp_path: Path) -> None:
 
 def test_dotnet_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths = [tmp_path / "A.cs"]
-    monkeypatch.setattr(dotnet, "files", lambda ctx: paths)
-    monkeypatch.setattr(dotnet, "in_scope", lambda ctx, found: found)
-    monkeypatch.setattr(dotnet, "scan", lambda ctx, mode, found: ([{"file": "A.cs", "line": 7, "text": "// c"}], None))
-
+    monkeypatch.setattr(dotnet, "files", reject_none(lambda ctx: paths))
+    monkeypatch.setattr(dotnet, "in_scope", reject_none(lambda ctx, found: found))
+    monkeypatch.setattr(dotnet, "scan", reject_none(lambda ctx, mode, found: ([{"file": "A.cs", "line": 7, "text": "// c"}], None)))
     assert comments.dotnet_findings(make_context(tmp_path, {"dotnet": {}})) == ["A.cs:7 comment: // c"]
 
 
 @pytest.mark.parametrize(("paths", "expected"), [([], []), ([Path("A.cs")], ["C# comment scanner failed: broken"])])
 def test_dotnet_findings_edges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, paths: list[Path], expected: list[str]) -> None:
-    monkeypatch.setattr(dotnet, "files", lambda ctx: paths)
-    monkeypatch.setattr(dotnet, "in_scope", lambda ctx, found: found)
-    monkeypatch.setattr(dotnet, "scan", lambda ctx, mode, found: (None, "broken"))
-
+    monkeypatch.setattr(dotnet, "files", reject_none(lambda ctx: paths))
+    monkeypatch.setattr(dotnet, "in_scope", reject_none(lambda ctx, found: found))
+    monkeypatch.setattr(dotnet, "scan", reject_none(lambda ctx, mode, found: (None, "broken")))
     assert comments.dotnet_findings(make_context(tmp_path, {"dotnet": {}})) == expected
 
 
@@ -258,15 +269,16 @@ def test_rust_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append((mode, paths))
         return [{"file": "/abs/lib.rs", "line": 2, "text": "// c"}], None
 
-    monkeypatch.setattr(rust, "scan", scan)
-    monkeypatch.setattr(rust, "rel", lambda ctx, file: f"rel:{file}")
+    monkeypatch.setattr(rust, "scan", reject_none(scan))
+
+    monkeypatch.setattr(rust, "rel", reject_none(lambda ctx, file: f"rel:{file}"))
 
     assert comments.rust_findings(make_context(tmp_path, {**EVERYWHERE, "rust": {}})) == ["rel:/abs/lib.rs:2 comment: // c"]
     assert calls == [("comments", [source])]
 
 
 def test_rust_findings_edges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rust, "scan", lambda ctx, mode, paths: ([], "no cargo"))
+    monkeypatch.setattr(rust, "scan", reject_none(lambda ctx, mode, paths: ([], "no cargo")))
     ctx = make_context(tmp_path, {**EVERYWHERE, "rust": {}})
 
     assert comments.rust_findings(ctx) == []
@@ -277,7 +289,8 @@ def test_rust_findings_edges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 def test_java_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write(tmp_path, "A.java", "// c\n")
     replies = [([{"file": "A.java", "line": 1, "text": "// c"}], None), (None, "no jdk")]
-    monkeypatch.setattr(java, "scan", lambda ctx, mode, paths: replies.pop(0))
+
+    monkeypatch.setattr(java, "scan", reject_none(lambda ctx, mode, paths: replies.pop(0)))
     ctx = make_context(tmp_path, {**EVERYWHERE, "java": {}})
 
     assert comments.java_findings(ctx) == ["A.java:1 comment: // c"]
@@ -289,9 +302,101 @@ def test_markup_findings(tmp_path: Path) -> None:
     write(tmp_path, "b.css", "p {}\n/* c */\n")
     write(tmp_path, "c.j2", "<!-- " + "z" * 100 + "\n")
     write(tmp_path, "d.txt", "<!-- ignored -->\n")
+    write(tmp_path, "e.jinja", "{# jinja #}\n")
 
     assert comments.markup_findings(make_context(tmp_path, EVERYWHERE)) == [
         "a.html:2 comment: {# note #}",
         "b.css:2 comment: /* c */",
         "c.j2:1 comment: <!-- " + "z" * 75,
+        "e.jinja:1 comment: {# jinja #}",
     ]
+
+
+def test_suffix_constants() -> None:
+    assert comments.ELIXIR_SUFFIXES == (".ex", ".exs")
+    assert comments.ERLANG_SUFFIXES == (".erl", ".hrl")
+    assert comments.RUBY_SUFFIXES == (".rb", ".rake")
+    assert comments.RUST_SUFFIXES == (".rs",)
+    assert comments.JAVA_SUFFIXES == (".java",)
+    assert comments.PYTHON_SUFFIXES == (".py",)
+    assert comments.MARKUP_SUFFIXES == (".html", ".jinja", ".j2", ".css")
+    assert comments.COMMENTS_MODE == "comments"
+    assert comments.EMPTY_JSON == "[]"
+
+
+def test_has_docstring_shapes() -> None:
+    assert comments.has_docstring(comments.parsed('"""m"""\n')) is True
+    assert comments.has_docstring(comments.parsed("x = 1\n")) is False
+    assert comments.has_docstring(comments.parsed("")) is False
+    assert comments.has_docstring(comments.parsed("class A:\n    pass\n")) is False
+    assert comments.has_docstring(comments.parsed("1\n")) is False
+    assert comments.has_docstring(comments.parsed("def f(:\n")) is False
+
+
+def test_ruby_payload() -> None:
+    assert comments.ruby_payload(0, "") == comments.EMPTY_JSON
+    assert comments.ruby_payload(0, "[]") == "[]"
+    assert comments.ruby_payload(1, "") == ""
+    assert comments.ruby_payload(1, "oops") == "oops"
+
+
+def test_elixir_findings_uses_repo_root_as_cwd(tmp_path: Path, fake_run: Any) -> None:
+    write(tmp_path, "lib/a.ex", "# x\n")
+    fake = fake_run(elixir, [(0, "[]")])
+    comments.elixir_findings(make_context(tmp_path, {**EVERYWHERE, "elixir": {"root": "app"}}))
+    assert fake.options[0]["cwd"] == tmp_path
+
+
+def test_elixir_findings_scans_exs(tmp_path: Path, fake_run: Any) -> None:
+    source = write(tmp_path, "mix.exs", "# x\n")
+    fake = fake_run(elixir, [(0, json.dumps([{"file": str(source), "line": 1, "text": "# x"}]))])
+    assert comments.elixir_findings(make_context(tmp_path, EVERYWHERE)) == ["mix.exs:1 comment: # x"]
+    assert fake.calls[0][-1] == str(source)
+
+
+def test_erlang_findings_scans_hrl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = write(tmp_path, "include/a.hrl", "% c\n")
+    calls: list[list[str]] = []
+
+    def escript(ctx: object, script: str, args: list[str]) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
+        calls.append(args)
+        return 0, json.dumps([{"file": str(source), "line": 1, "text": "% c"}])
+
+    monkeypatch.setattr(erlang, "escript", escript)
+    monkeypatch.setattr(erlang, "hint", lambda code, output: None)
+    assert comments.erlang_findings(make_context(tmp_path, EVERYWHERE)) == ["include/a.hrl:1 comment: % c"]
+    assert calls == [[str(source)]]
+
+
+def test_ruby_findings_scans_rake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = write(tmp_path, "Rakefile.rake", "# r\n")
+
+    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
+        assert mode == comments.COMMENTS_MODE
+        return 0, json.dumps([{"file": str(source), "line": 1, "text": "# r"}])
+
+    monkeypatch.setattr(ruby, "scan", scan)
+    assert comments.ruby_findings(make_context(tmp_path, {**EVERYWHERE, "ruby": {}})) == ["Rakefile.rake:1 comment: # r"]
+
+
+def test_structured_scan_receives_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write(tmp_path, "A.cs", "// c\n")
+    seen: list[object] = []
+
+    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[list[dict[str, Any]], None]:
+        if ctx is None:
+            raise TypeError("ctx")
+        seen.append(ctx)
+        assert mode == comments.COMMENTS_MODE
+        return [{"file": "A.cs", "line": 1, "text": "// c"}], None
+
+    monkeypatch.setattr(dotnet, "files", lambda ctx: [tmp_path / "A.cs"])
+    monkeypatch.setattr(dotnet, "in_scope", lambda ctx, found: found)
+    monkeypatch.setattr(dotnet, "scan", scan)
+    ctx = make_context(tmp_path, {"dotnet": {}})
+    assert comments.dotnet_findings(ctx) == ["A.cs:1 comment: // c"]
+    assert seen == [ctx]

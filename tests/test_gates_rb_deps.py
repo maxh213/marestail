@@ -97,3 +97,11 @@ def test_relative(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert rb_deps.relative(str(tmp_path / "a" / "b.rb"), ctx) == "a/b.rb"
     assert rb_deps.relative("/other/b.rb", ctx) == "/other/b.rb"
+
+
+def test_in_layer_and_forbidden_trim_slashes() -> None:
+    assert rb_deps.in_layer("srcX/a.rb", "srcX") is True
+    assert rb_deps.in_layer("srcX/a.rb", "srcX/") is True
+    assert rb_deps.forbidden("srcX/a.rb", ["srcX"]) is True
+    assert rb_deps.forbidden("srcX/a.rb", ["srcX/"]) is True
+    assert rb_deps.forbidden("other.rb", ["srcX"]) is False

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context
+from marestail.context import CTX_ERROR, Context
 from marestail.shell import run
 
 SCRIPT = Path(__file__).resolve().parent / "rb" / "scan.rb"
@@ -27,6 +27,8 @@ def bundle(ctx: Context, *args: str) -> list[str]:
 
 
 def scan(ctx: Context, mode: str, files: list[Path], extra: list[str] | None = None) -> tuple[int, str]:
+    if type(ctx) is not Context:
+        raise TypeError(CTX_ERROR)
     if not files:
         return 0, "[]"
     command = [*ruby_bin(ctx), str(SCRIPT), mode, *(extra or []), *map(str, files)]

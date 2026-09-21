@@ -116,6 +116,14 @@ def test_hint(code: int, output: str, expected: str | None) -> None:
     assert erlang.hint(code, output) == expected
 
 
+def test_require_hint_rejects_missing_values() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        erlang.require_hint(None, "x")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        erlang.require_hint(1, None)  # type: ignore[arg-type]
+    erlang.require_hint(0, "")
+
+
 @pytest.mark.parametrize(
     ("code", "output", "lines", "expected"),
     [

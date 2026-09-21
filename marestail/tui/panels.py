@@ -69,9 +69,6 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
-
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
@@ -83,7 +80,7 @@ def put(win: curses.window, y: int, x: int, text: str, attr: int = 0) -> None:
 
 def apply_clip(win: curses.window, clipped: tuple[int, int, str] | None, attr: int) -> None:
     chosen = (skip, write_clipped)[clipped is not None]
-    chosen(win, surely(clipped), attr)
+    chosen(win, clipped, attr)
 
 
 def write_clipped(win: curses.window, clipped: tuple[int, int, str], attr: int) -> None:
@@ -186,7 +183,7 @@ def seconds_of(process: Process) -> str:
 
 def fmt_from_process(process: Process | None) -> str | None:
     chosen = (seconds_of, none_of)[process is None]
-    return chosen(surely(process))
+    return chosen(process)
 
 
 def format_minutes(minutes: float) -> str:
@@ -195,11 +192,11 @@ def format_minutes(minutes: float) -> str:
 
 def minutes_label(minutes: float | None) -> str | None:
     chosen = (none_of, format_minutes)[minutes is not None]
-    return chosen(surely(minutes))
+    return chosen(minutes)
 
 
 def fmt_elapsed(worker: Worker) -> str:
-    return surely(next(filter(present, (fmt_from_process(worker.process), minutes_label(worker.step.minutes), "--"))))
+    return next(filter(present, (fmt_from_process(worker.process), minutes_label(worker.step.minutes), "--")))
 
 
 def is_worker_row(repo: RepoState) -> bool:
@@ -316,7 +313,7 @@ def draw_worker_row(win: curses.window, y: int, x: int, width: int, repo: RepoSt
 
 
 def draw_busy_from_repo(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
-    draw_busy_row(win, y, x, width, surely(repo.worker), selected, state)
+    draw_busy_row(win, y, x, width, repo.worker, selected, state)
 
 
 def paint_dead(win: curses.window, y: int, x: int, _width: int, _repo: RepoState, _selected: bool, state: WatchState) -> None:
@@ -351,16 +348,16 @@ def runner_text(activity: str) -> str:
 
 def gate_label_text(activity: str | None) -> str | None:
     chosen = (none_of, in_gate_text)[activity is not None]
-    return chosen(surely(activity))
+    return chosen(activity)
 
 
 def runner_label_text(activity: str | None) -> str | None:
     chosen = (none_of, runner_text)[bool(activity)]
-    return chosen(surely(activity))
+    return chosen(activity)
 
 
 def alive_label(repo: RepoState) -> str:
-    return surely(next(filter(present, (gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), BETWEEN_STEPS))))
+    return next(filter(present, (gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), BETWEEN_STEPS)))
 
 
 def marquee_summary(worker: Worker, width: int, state: WatchState) -> str:
@@ -459,7 +456,7 @@ def zero_index(_fleet: Fleet | None, _current: RepoState | None) -> int:
 
 def index_or_zero(fleet: Fleet | None, current: RepoState | None) -> int:
     chosen = {True: bed_index}.get(fleet is not None, zero_index)
-    return chosen(surely(fleet), current)
+    return chosen(fleet, current)
 
 
 def add_gap(height: int) -> int:
@@ -573,7 +570,7 @@ def paint_lines(win: curses.window, rect: Rect, rows: list[tuple[str, bool]], st
 
 def apply_repo(panel: "ConversationPanel", repo: RepoState | None) -> None:
     chosen = (skip, ConversationPanel.take_repo)[repo is not None]
-    chosen(panel, surely(repo))
+    chosen(panel, repo)
 
 
 def live_heading(repo: RepoState) -> str:
@@ -581,7 +578,7 @@ def live_heading(repo: RepoState) -> str:
 
 
 def worker_heading(repo: RepoState) -> str:
-    worker = surely(repo.worker)
+    worker = repo.worker
     return f"{GLYPH_SECTION} {worker.step.label} · {worker.step.role}"
 
 
@@ -600,7 +597,7 @@ def end_key(panel: "ConversationPanel", _key: int) -> str:
 
 def apply_scroll(panel: "ConversationPanel", handler: Callable[["ConversationPanel"], None] | None) -> str | None:
     chosen = (skip, run_scroll)[handler is not None]
-    return chosen(panel, surely(handler))
+    return chosen(panel, handler)
 
 
 def run_scroll(panel: "ConversationPanel", handler: Callable[["ConversationPanel"], None]) -> str:

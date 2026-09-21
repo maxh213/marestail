@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from marestail.shell import ensure_dir
+
 PERFORMANCE = "PERFORMANCE.md"
 CONFIG = "marestail.toml"
 HOOKS = "hooks"
@@ -103,7 +105,7 @@ def read_template(name: str) -> dict[str, Any]:
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
@@ -188,7 +190,7 @@ def folder_lines(path: str, meta: Any) -> list[str]:
 def save_trusted_folders(store: Path, key: str, folders: dict[str, Any]) -> None:
     lines = [line for path, meta in folders.items() for line in folder_lines(path, meta)]
     try:
-        store.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(store.parent)
         store.write_text("\n".join(lines))
         store.chmod(0o600)
     except OSError as error:

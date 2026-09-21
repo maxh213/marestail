@@ -8,6 +8,7 @@ from types import ModuleType
 from typing import Any
 
 from marestail.context import Context
+from marestail.gates._coverage import finding_file
 from marestail.report import Result, elapsed
 from marestail.shell import run
 
@@ -38,7 +39,7 @@ def run_gate(ctx: Context) -> Result:
 
 
 def collected(ctx: Context) -> list[str]:
-    return [finding for scanner in SCANNERS for finding in scanner(ctx) if ctx.in_scope(finding.split(":")[0])]
+    return [finding for scanner in SCANNERS for finding in scanner(ctx) if ctx.in_scope(finding_file(finding))]
 
 
 def failed(label: str, output: str) -> str:

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
+from marestail.gates._cycles import trim_slashes
 from marestail.report import Result, elapsed
 from marestail.ruby import scan, scanned, sources
 
@@ -50,11 +51,11 @@ def breaks(src: str, dst: str, layer: dict[str, Any]) -> bool:
 
 
 def in_layer(src: str, layer: str) -> bool:
-    return src.startswith(layer.rstrip("/") + "/") or src.startswith(layer)
+    return src.startswith(trim_slashes(layer) + "/") or src.startswith(layer)
 
 
 def forbidden(dst: str, bans: list[str]) -> bool:
-    return any(dst.startswith(ban.rstrip("/") + "/") or dst == ban for ban in bans)
+    return any(dst.startswith(trim_slashes(ban) + "/") or dst == ban for ban in bans)
 
 
 def load_layers(ctx: Context) -> list[dict[str, Any]]:

@@ -65,8 +65,6 @@ def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
 
 
 def test_surely_keeps_missing_values() -> None:
-    assert app.surely("x") == "x"
-    assert app.surely(None) is None
     assert app.is_code(3) is True
     assert app.is_code(None) is False
 
@@ -277,7 +275,6 @@ def test_caught_swallows_exceptions() -> None:
 
 def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert app.skip() is None
-    assert app.surely("x") == "x"
     assert app.is_code(None) is False
     assert app.is_code(0) is True
     assert isinstance(app.instantiate(FleetPanel), FleetPanel)
@@ -672,6 +669,28 @@ def test_legend_put_and_draw_legend_geometry(tmp_path: Path) -> None:
     key = next(cell for cell in legend.cells if cell[2] == app.KEY_LABEL)
     assert key == (top, left + 2, app.KEY_LABEL, watch.theme.heading)
     assert any(cell[3] == watch.theme.border_focus for cell in legend.cells)
+
+
+def test_draw_legend_box_on_odd_width(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    boxes: list[Rect] = []
+    original = app.draw_box
+
+    def capture(win: Any, rect: Rect, *args: Any) -> None:
+        boxes.append(rect)
+        original(win, rect, *args)
+
+    monkeypatch.setattr(app, "draw_box", capture)
+    legend = FakeScr(24, 81)
+    app.draw_legend(as_window(legend), 24, 81, watch)
+    rows = list(map(app.legend_row, app.LEGEND))
+    inner = 41
+    assert max(map(len, [*rows, app.KEY_LABEL])) == inner
+    assert boxes[0].y == 7
+    assert boxes[0].x == 19
+    assert boxes[0].h == 10
+    assert boxes[0].w == 43
+    assert max(0, (81 - inner - 3) // 2) != 19
 
 
 def test_header_status_attr(tmp_path: Path, monkeypatch: Any) -> None:

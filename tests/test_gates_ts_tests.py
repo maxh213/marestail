@@ -251,3 +251,10 @@ def test_in_scope_findings(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, scope_changed=True, changed={"a.ts"})
 
     assert _coverage.in_scope_findings(["a.ts:1 x: y", "b.ts:2 a.ts:1"], ctx) == ["a.ts:1 x: y"]
+
+
+def test_finding_file_splits_on_the_first_colon() -> None:
+    assert _coverage.finding_file("a.ts:1 x: y") == "a.ts"
+    assert _coverage.finding_file("no-colon") == "no-colon"
+    assert _coverage.finding_file(":leading") == ""
+    assert _coverage.COLON == ":"

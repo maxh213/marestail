@@ -5,6 +5,7 @@ from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
+from marestail.gates._coverage import finding_file as finding_file
 from marestail.gates._cycles import cycle_findings as cycle_findings
 from marestail.gates._cycles import dependency_graph as dependency_graph
 from marestail.gates._cycles import strongly_connected as strongly_connected
@@ -14,6 +15,7 @@ from marestail.report import Result, elapsed
 GATE = "cs.deps"
 LAYERS_FILE = ".dotnet-layers.json"
 MAX_LINES = 60
+EMPTY_BANS: list[str] = []
 
 
 def run_gate(ctx: Context) -> Result:
@@ -37,7 +39,7 @@ def run_gate(ctx: Context) -> Result:
 def scoped(ctx: Context, findings: list[str]) -> list[str]:
     if not ctx.scoped:
         return findings
-    return [f for f in findings if ctx.in_scope(f.split(":", 1)[0])]
+    return [f for f in findings if ctx.in_scope(finding_file(f))]
 
 
 def summary(findings: list[str]) -> str:
@@ -60,7 +62,7 @@ def edge_findings(prefix: str, layers: list[dict[str, Any]], edges: list[dict[st
 def edge_breaks(prefix: str, layer: dict[str, Any], edge: dict[str, Any]) -> list[str]:
     return [
         f"{edge['from']}:{edge['line']} {layer['from']} must not depend on {ban} ({edge['symbol']})"
-        for ban in layer.get("forbid", [])
+        for ban in layer.get("forbid", EMPTY_BANS)
         if under(edge["to"], prefix + ban)
     ]
 
@@ -73,6 +75,6 @@ def using_breaks(layer: dict[str, Any], record: dict[str, Any]) -> list[str]:
     return [
         f"{record['path']}:{using['line']} {layer['from']} must not depend on {using['name']} (matches {pattern})"
         for using in record["usings"]
-        for pattern in layer.get("forbid_external", [])
+        for pattern in layer.get("forbid_external", EMPTY_BANS)
         if fnmatch.fnmatch(using["name"], pattern)
     ]
