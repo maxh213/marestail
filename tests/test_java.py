@@ -62,6 +62,18 @@ def test_output_tail() -> None:
     assert java.OUTPUT_TAIL == 300
     assert java.NS_CLOSE == "}"
     assert java.EMPTY == ""
+    assert java.local_tag("{ns}name") == "name"
+    assert java.local_tag("plain") == "plain"
+    assert java.trim_slash("/gen/") == "gen"
+    assert java.trim_slash("gen") == "gen"
+    assert java.configured_list(["a", 1]) == ["a", "1"]
+    assert java.SLASH == "/"
+    assert java.MISSING == -1
+
+
+def test_configured_list_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        java.configured_list(None)
 
 
 def test_pom_properties_strips_namespace() -> None:
@@ -190,6 +202,8 @@ def test_release_configured_or_missing_pom(tmp_path: Path) -> None:
 )
 def test_resolve_property(values: dict[str, str], expected: str) -> None:
     assert java.resolve_property(values, "k") == expected
+    assert java.lookup({}, "k") == ""
+    assert java.lookup({"k": "21"}, "k") == "21"
 
 
 @pytest.mark.parametrize(

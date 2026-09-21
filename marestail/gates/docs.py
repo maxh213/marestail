@@ -26,6 +26,7 @@ DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
 GONE = {"retired", "removed", "gone"}
 SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs", ".java")
 SKIP_DIRS = {"node_modules", ".venv", "mutants", "dist", ".git", "tests", "test", "__pycache__", ".marestail", "target"}
+NEWLINE = "\n"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -66,8 +67,12 @@ def found(ctx: Context, patterns: list[str]) -> dict[str, str]:
         text = path.read_text()
         for pattern in patterns:
             for match in re.finditer(pattern, text):
-                hits.setdefault(match.group(1), f"{path.relative_to(ctx.root)}:{text.count(chr(10), 0, match.start()) + 1}")
+                hits.setdefault(match.group(1), f"{path.relative_to(ctx.root)}:{line_at(text, match.start())}")
     return hits
+
+
+def line_at(text: str, at: int) -> int:
+    return text[:at].count(NEWLINE) + 1
 
 
 def route_findings(ctx: Context) -> list[str]:

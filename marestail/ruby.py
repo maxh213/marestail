@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from marestail.context import CTX_ERROR, Context
+from marestail.context import CTX_ERROR, Context, live
 from marestail.shell import run
 
 SCRIPT = Path(__file__).resolve().parent / "rb" / "scan.rb"
@@ -77,6 +77,7 @@ def kept_source(ctx: Context, path: Path) -> bool:
 
 
 def sources(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     root = ctx.ruby_root()
     folders = ctx.ruby(SOURCES_KEY, DEFAULT_FOLDERS)
     return sorted(path for folder in folders for path in (root / folder).rglob("*.rb") if kept_source(ctx, path))

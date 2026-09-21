@@ -147,10 +147,18 @@ def merge_grok_hook(path: Path) -> None:
     merge_template_hook(path, read_template("grok-hooks.json"), HOOKS)
 
 
+def mapping_default(data: dict[str, Any], key: str, default: Any) -> Any:
+    if type(key) is not str:
+        raise TypeError("key")
+    if key not in data:
+        return default
+    return data[key]
+
+
 def merge_cursor_hook(path: Path) -> None:
     settings = read_json(path, {"version": 1, HOOKS: {}})
     template = read_template("cursor-hooks.json")
-    settings.setdefault(VERSION, template.get(VERSION, VERSION_DEFAULT))
+    settings.setdefault(VERSION, mapping_default(template, VERSION, VERSION_DEFAULT))
     add_template_stops(settings, template, HOOKS, "stop")
     write_json(path, settings)
 
@@ -161,8 +169,12 @@ def trust_grok_folder(root: Path) -> None:
     folders = trusted_folders(store)
     if is_trusted(folders.get(key)):
         return
-    folders[key] = {TRUSTED: True, DECIDED: int(time.time())}
+    folders[key] = trust_entry()
     save_trusted_folders(store, key, folders)
+
+
+def trust_entry() -> dict[str, Any]:
+    return {TRUSTED: True, DECIDED: int(time.time())}
 
 
 def grok_home() -> Path:

@@ -93,6 +93,33 @@ EMPTY = ""
 NEWLINE = "\n"
 RENAME_MARK = " -> "
 HEAD_REF = "HEAD"
+ALL_FILES = "-A"
+QUIET = "-q"
+RECURSIVE = "-r"
+DOUBLE_DASH = "--"
+CHECK_IGNORE = "check-ignore"
+NO_INDEX = "--no-index"
+COMMIT_TREE = "commit-tree"
+PARENT_FLAG = "-p"
+MESSAGE_FLAG = "-m"
+HEADING_MARK = "\n## "
+AUTHOR_NAME = "GIT_AUTHOR_NAME"
+AUTHOR_EMAIL = "GIT_AUTHOR_EMAIL"
+AUTHOR_DATE = "GIT_AUTHOR_DATE"
+SPLIT_FIELDS = 3
+MINUTES = 60
+LIST_SHOW = 10
+COMMA_JOIN = ", "
+PROPOSAL_GLOB = "*-proposal.md"
+STATUS_WIDTH = 2
+SPACE_AT = 2
+MISSING = -1
+LAST = -1
+PART = "part"
+TEXT = "text"
+TYPE_KEY = "type"
+EMPTY_STDOUT = ""
+KEY_ERROR = "key"
 TOKENS = "tokens"
 CONTENT = "content"
 COST_USD = "costUSD"
@@ -377,14 +404,15 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     need(state, Run)
     need(worker, Worker)
     before = head(state.config)
-    previous, repeats = EMPTY, 0
+    streak: list[str] = []
     for attempt in attempts(state.retries):
         problems = worker_attempt(state, worker, feedback, attempt, before)
         if not problems:
             return True
         print(problems)
-        feedback, repeats, previous = problems, repeat_count(previous, problems, repeats), problems
-        if repeats >= WORKER_REPEAT_LIMIT:
+        feedback = problems
+        streak = next_streak(streak, problems)
+        if len(streak) >= WORKER_REPEAT_LIMIT:
             print(
                 f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human"
             )
@@ -407,8 +435,9 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
     return problems
 
 
-def repeat_count(previous: str, problems: str, repeats: int) -> int:
-    return repeats + 1 if problem_shape(previous) == problem_shape(problems) else 1
+def next_streak(streak: list[str], problems: str) -> list[str]:
+    matched = bool(streak) and problem_shape(streak[LAST]) == problem_shape(problems)
+    return {True: [*streak, problems], False: [problems]}[matched]
 
 
 def problem_shape(problems: str) -> str:
@@ -442,13 +471,17 @@ def judged(state: Run, judge: Judge, gate: tuple[str, bool], progress: JudgeProg
     return outcome
 
 
+def has_author_round(left: int) -> bool:
+    return left > 0
+
+
 def prepare_perf(state: Run, judge: Judge, gate_ok: bool, session: perf_trees.Session | None, progress: JudgeProgress) -> None:
     need(state, Run)
     need(judge, Judge)
     need(progress, JudgeProgress)
     if not gate_ok or session is None:
         return
-    if progress.author_left > 0:
+    if has_author_round(progress.author_left):
         progress.feedback = author_phase(state, judge, session, progress.feedback)
     fill_samples(state, session)
 
@@ -765,7 +798,7 @@ def gate_problems(state: Run, worker: Worker) -> list[str]:
 
 
 def file_diff(config: Config, before: str, path: str) -> str:
-    _, output = run([GIT, DIFF, before, "--", path], cwd=config.root)
+    _, output = run([GIT, DIFF, before, DOUBLE_DASH, path], cwd=config.root)
     return output
 
 
@@ -777,7 +810,7 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     if justification is None:
         revert(config, before, frozen, stamped(f"Revert change to frozen files by {report.stem}\n\nBy runner.", label))
         return [f"{path} is frozen for {worker.name}; reverted. Work within the current configuration." for path in frozen]
-    body = f"Proposed by {report.stem}: {', '.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n"
+    body = f"Proposed by {report.stem}: {COMMA_JOIN.join(frozen)}\n\n{justification}\n\n```diff\n{diff.strip()}\n```\n"
     revert(
         config,
         before,
@@ -787,23 +820,19 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     proposal = state.next_report("proposal")
     proposal.write_text(body)
     return [
-        f"{', '.join(frozen)}: frozen, reverted. Your reason was recorded as {proposal.relative_to(config.root)} "
+        f"{COMMA_JOIN.join(frozen)}: frozen, reverted. Your reason was recorded as {proposal.relative_to(config.root)} "
         "for a human to consider after the run. Find a way within the current configuration."
     ]
 
 
 def after_marker(text: str, marker: str) -> str:
     index = text.find(marker)
-    if index < 0:
-        return text
-    return text[index + len(marker) :]
+    return {True: text, False: text[index + len(marker) :]}[index == MISSING]
 
 
 def until_heading(section: str) -> str:
-    index = section.find("\n## ")
-    if index < 0:
-        return section.strip()
-    return section[:index].strip()
+    index = section.find(HEADING_MARK)
+    return {True: section, False: section[:index]}[index == MISSING].strip()
 
 
 def config_change_section(report: Path) -> str | None:
@@ -814,13 +843,13 @@ def config_change_section(report: Path) -> str | None:
 
 
 def revert(config: Config, before: str, paths: list[str], message: str) -> None:
-    run([GIT, CHECKOUT, before, "--", *paths], cwd=config.root)
-    run([GIT, ADD, "-A", "--", *paths], cwd=config.root)
-    run([GIT, COMMIT, "-q", "-m", message], cwd=config.root)
+    run([GIT, CHECKOUT, before, DOUBLE_DASH, *paths], cwd=config.root)
+    run([GIT, ADD, ALL_FILES, DOUBLE_DASH, *paths], cwd=config.root)
+    run([GIT, COMMIT, QUIET, MESSAGE_FLAG, message], cwd=config.root)
 
 
 def proposals_summary(state: Run) -> str:
-    files = sorted(state.handoffs.glob("*-proposal.md")) if state.handoffs.exists() else []
+    files = sorted(state.handoffs.glob(PROPOSAL_GLOB))
     if not files:
         return ""
     body = "\n\n".join(f"### {f.stem}\n{f.read_text().strip()}" for f in files)
@@ -828,7 +857,8 @@ def proposals_summary(state: Run) -> str:
 
 
 def porcelain_path(line: str) -> str:
-    return line[3:] if line[:2].strip() and line[2:3] == " " else line
+    marked = bool(line[:STATUS_WIDTH].strip()) and line[SPACE_AT : SPACE_AT + 1] == SPACE
+    return {True: line[STATUS_WIDTH + 1 :], False: line}[marked]
 
 
 def outside_work(path: str) -> bool:
@@ -843,9 +873,7 @@ def changed_paths(config: Config, command: list[str]) -> list[str]:
 
 def renamed_path(path: str) -> str:
     index = path.find(RENAME_MARK)
-    if index < 0:
-        return path.strip()
-    return path[index + len(RENAME_MARK) :].strip()
+    return {True: path, False: path[index + len(RENAME_MARK) :]}[index == MISSING].strip()
 
 
 def stray_edits(config: Config, keep_relative: str, writes: tuple[str, ...]) -> list[str]:
@@ -857,23 +885,23 @@ def discard_edits(config: Config, keep: Path, writes: tuple[str, ...] = ()) -> N
     stray = stray_edits(config, keep_relative, writes)
     if not stray:
         return
-    print(f"   discarding edits a judge made: {', '.join(stray[:10])}")
+    print(f"   discarding edits a judge made: {COMMA_JOIN.join(stray[:LIST_SHOW])}")
     if writes:
         restore_paths(config, stray)
         return
-    run([GIT, CHECKOUT, "--", "."], cwd=config.root)
+    run([GIT, CHECKOUT, DOUBLE_DASH, "."], cwd=config.root)
     run([GIT, CLEAN, "-fdq", "-e", keep_relative, "-e", ".marestail/"], cwd=config.root)
 
 
 def restore_paths(config: Config, paths: list[str]) -> None:
     need(config, Config)
-    _, listed = run([GIT, LS_TREE, "-r", NAME_ONLY, HEAD_REF, "--", *paths], cwd=config.root)
+    _, listed = run([GIT, LS_TREE, RECURSIVE, NAME_ONLY, HEAD_REF, DOUBLE_DASH, *paths], cwd=config.root)
     tracked = sorted(set(listed.splitlines()) & set(paths))
     untracked = sorted(set(paths) - set(tracked))
     if tracked:
-        run([GIT, CHECKOUT, HEAD_REF, "--", *tracked], cwd=config.root)
+        run([GIT, CHECKOUT, HEAD_REF, DOUBLE_DASH, *tracked], cwd=config.root)
     if untracked:
-        run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *untracked], cwd=config.root)
+        run([GIT, RM, QUIET, CACHED, UNMATCHED, DOUBLE_DASH, *untracked], cwd=config.root)
     for path in untracked:
         (config.root / path).unlink(missing_ok=MISSING_OK)
 
@@ -887,7 +915,7 @@ def stage_writes(config: Config, writes: tuple[str, ...]) -> None:
         return
     kept = written_paths(config, writes)
     if kept:
-        run([GIT, ADD, "-A", "--", *kept], cwd=config.root)
+        run([GIT, ADD, ALL_FILES, DOUBLE_DASH, *kept], cwd=config.root)
 
 
 def added_paths(then: str, now: str) -> list[str]:
@@ -896,13 +924,13 @@ def added_paths(then: str, now: str) -> list[str]:
 
 
 def newly_tracked_ignored(config: Config, before: str) -> list[str]:
-    _, then = run([GIT, LS_TREE, "-r", NAME_ONLY, before], cwd=config.root)
+    _, then = run([GIT, LS_TREE, RECURSIVE, NAME_ONLY, before], cwd=config.root)
     _, now = run([GIT, LS_FILES], cwd=config.root)
     return [path for path in added_paths(then, now) if ignored_path(config, path)]
 
 
 def ignored_path(config: Config, path: str) -> bool:
-    code, _ = run([GIT, "check-ignore", "-q", "--no-index", "--", path], cwd=config.root)
+    code, _ = run([GIT, CHECK_IGNORE, QUIET, NO_INDEX, DOUBLE_DASH, path], cwd=config.root)
     return code == 0
 
 
@@ -923,8 +951,8 @@ def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
 def untrack_ignored(config: Config, before: str, paths: list[str]) -> None:
     need(config, Config)
     need(before, str)
-    print(f"   dropping gitignored files: {', '.join(paths[:10])}")
-    run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *paths], cwd=config.root)
+    print(f"   dropping gitignored files: {COMMA_JOIN.join(paths[:LIST_SHOW])}")
+    run([GIT, RM, QUIET, CACHED, UNMATCHED, DOUBLE_DASH, *paths], cwd=config.root)
     if head(config) != before:
         run([GIT, COMMIT, "--amend", ALLOW_EMPTY, "-q", "--no-edit"], cwd=config.root)
 
@@ -950,7 +978,7 @@ def fold_handoff(config: Config, role: str, report: Path, before: str, label: st
 def strip_byline(message: str, role: str) -> str:
     lines = message.rstrip().splitlines()
     if lines and lines[-1].strip() == f"By {role}.":
-        lines = lines[:-1]
+        lines = lines[:LAST]
     return "\n".join(lines).rstrip()
 
 
@@ -990,10 +1018,14 @@ def rev_list(config: Config, before: str, options: list[str]) -> list[str]:
 
 def restamp(config: Config, sha: str, parent: str, label: str, used: set[str] | None = None) -> str:
     _, details = run([GIT, LOG, "-1", "--format=%an%n%ae%n%aI%n%B", sha], cwd=config.root)
-    name, email, date, message = details.split("\n", 3)
-    author = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date}
+    name, email, date, message = details.split(NEWLINE, SPLIT_FIELDS)
+    author = {AUTHOR_NAME: name, AUTHOR_EMAIL: email, AUTHOR_DATE: date}
     tree = f"{sha}^{{tree}}"
-    _, created = run([GIT, "commit-tree", tree, "-p", parent, "-m", stamped(message.strip(), label, used)], cwd=config.root, env=author)
+    _, created = run(
+        [GIT, COMMIT_TREE, tree, PARENT_FLAG, parent, MESSAGE_FLAG, stamped(message.strip(), label, used)],
+        cwd=config.root,
+        env=author,
+    )
     return created.split()[0]
 
 
@@ -1047,7 +1079,7 @@ def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
         return True
     limited, describe = outcome_readers(backend)
     if not limited(code, output):
-        print(f"   {label} finished in {(elapsed(started)) / 60:.1f} min: {describe(output)}")
+        print(f"   {label} finished in {(elapsed(started)) / MINUTES:.1f} min: {describe(output)}")
         return True
     wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
     return False
@@ -1189,7 +1221,8 @@ def session_result(spawned: Spawned, text_of: Callable[[subprocess.CompletedProc
 
 
 def stdout_or_stderr(completed: subprocess.CompletedProcess[str]) -> str:
-    return completed.stderr if completed.returncode != 0 and not (completed.stdout or "").strip() else completed.stdout
+    blank = not (completed.stdout or EMPTY_STDOUT).strip()
+    return completed.stderr if completed.returncode != 0 and blank else completed.stdout
 
 
 def stdout_and_stderr(completed: subprocess.CompletedProcess[str]) -> str:
@@ -1259,6 +1292,10 @@ def json_object(text: str) -> Event | None:
         data, _ = json.JSONDecoder().raw_decode(text[start:])
     except json.JSONDecodeError:
         return None
+    return object_or_none(data)
+
+
+def object_or_none(data: object) -> Event | None:
     return data if isinstance(data, dict) else None
 
 
@@ -1272,6 +1309,8 @@ kimi_events = json_events
 
 
 def event_dict(event: Event, key: str) -> Event:
+    if type(key) is not str:
+        raise TypeError(KEY_ERROR)
     value = event.get(key)
     return value if isinstance(value, dict) else {}
 
@@ -1317,9 +1356,17 @@ def kilo_rate_limited(code: int, output: str) -> bool:
 
 
 def kilo_text(event: Event) -> str:
-    if event.get("type") != "text":
+    if event.get(TYPE_KEY) != TEXT:
         return ""
-    return str(event_dict(event, "part").get("text") or event.get("text") or "").strip()
+    return str(mapping_text(event_dict(event, PART), TEXT) or mapping_text(event, TEXT) or EMPTY).strip()
+
+
+def mapping_text(data: Event, key: str) -> str:
+    if type(key) is not str:
+        raise TypeError(KEY_ERROR)
+    if key not in data:
+        return EMPTY
+    return str(data[key])
 
 
 def kilo_texts(events: list[Event]) -> list[str]:
@@ -1579,8 +1626,10 @@ def summary(output: str) -> str:
     except json.JSONDecodeError:
         return output_tail(output)
     if TOTAL_COST in data:
-        cost = data.get(TOTAL_COST, 0)
-        return f"turns={data.get('num_turns')} api-equivalent=${cost:.2f} {str(data.get('result', ''))[:SUMMARY_WIDTH]!r}"
+        cost = data[TOTAL_COST]
+        turns = data.get(NUM_TURNS)
+        text = mapping_text(data, RESULT)[:SUMMARY_WIDTH]
+        return f"turns={turns} api-equivalent=${cost:.2f} {text!r}"
     usage = event_dict(data, USAGE)
     if is_result(data, usage):
         return result_summary(data, usage)
@@ -1590,7 +1639,7 @@ def summary(output: str) -> str:
 def approve(state: Run) -> bool:
     reports = sorted(state.handoffs.glob("*.md"))
     if reports:
-        print("\n" + reports[-1].read_text())
+        print("\n" + reports[LAST].read_text())
     if not sys.stdin.isatty():
         print("non-interactive: continuing without approval (use --to critic to stop here)")
         return True

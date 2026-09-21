@@ -18,6 +18,8 @@ SENTRY = re.compile(r'<PackageReference\s+Include="Sentry', re.IGNORECASE)
 SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerator>"
 INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
 SLASH = "/"
+FILES = "files"
+PATH_ERROR = "path"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -25,10 +27,11 @@ def run_gate(ctx: Context) -> Result:
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
         return Result(GATE, False, found, [], elapsed(started))
-    blocked = precondition(ctx, *found, started)
+    product, tests = found
+    blocked = precondition(ctx, product, tests, started)
     if blocked is not None:
         return blocked
-    return scoped_run(ctx, found, started)
+    return scoped_run(ctx, (product, tests), started)
 
 
 def precondition(ctx: Context, product: Path, tests: Path, started: float) -> Result | None:
@@ -69,7 +72,8 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
     refused = restore_failure(ctx, started)
     if refused is not None:
         return refused
-    code, output = dotnet.dotnet(ctx, command(ctx, pair[0], pair[1], out, targets), timeout=7200)
+    product, tests = pair
+    code, output = dotnet.dotnet(ctx, command(ctx, product, tests, out, targets), timeout=7200)
     report = out / REPORT
     if not report.exists():
         return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), elapsed(started))
@@ -85,14 +89,32 @@ def restore_failure(ctx: Context, started: float) -> Result | None:
     return Result(GATE, False, message, tail(output), elapsed(started))
 
 
+def mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
+    if key not in data:
+        return {}
+    value = data[key]
+    return value if isinstance(value, dict) else {}
+
+
 def load_mutants(ctx: Context, report: Path) -> list[tuple[str, dict[str, Any]]]:
-    files = json.loads(report.read_text()).get("files", {})
+    files = mapping(json.loads(report.read_text()), FILES)
     return [
         (dotnet.rel(ctx, file), mutant)
         for file, data in files.items()
-        for mutant in data.get("mutants", [])
+        for mutant in mutants_of(data)
         if not dotnet.mutation_excluded(ctx, dotnet.rel(ctx, file))
     ]
+
+
+def mutants_of(data: dict[str, Any]) -> list[dict[str, Any]]:
+    value = listed_mutants(data)
+    return value if isinstance(value, list) else []
+
+
+def listed_mutants(data: dict[str, Any]) -> Any:
+    if "mutants" not in data:
+        return []
+    return data["mutants"]
 
 
 def verdict(mutants: list[tuple[str, dict[str, Any]]], output: str, note: str, started: float) -> Result:
@@ -121,6 +143,7 @@ def missing(output: str, code: int) -> str:
 
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
+    product, tests, out = required_path(product), required_path(tests), required_path(out)
     prefix = dotnet.rel(ctx, ctx.dotnet_root()) + "/"
     excludes = [f"!**/{trim_slash_pattern(pattern, prefix)}" for pattern in dotnet.mutation_patterns(ctx)]
     includes = ["**/" + name.removeprefix(prefix) for name in targets]
@@ -140,6 +163,12 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "progress",
         *mutate(excludes + includes),
     ]
+
+
+def required_path(path: Path) -> Path:
+    if not isinstance(path, Path):
+        raise TypeError(PATH_ERROR)
+    return path
 
 
 def trim_slash_pattern(pattern: str, prefix: str) -> str:

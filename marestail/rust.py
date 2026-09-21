@@ -93,6 +93,7 @@ def rust_files(ctx: Context, root: Path, pattern: str) -> set[Path]:
 
 
 def sources(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     root = ctx.rust_root()
     found: set[Path] = set()
     for pattern in listify(ctx.rust("sources", ["src"])):
@@ -109,6 +110,7 @@ def crate_uses(ctx: Context, crate: Path) -> set[Path]:
 
 
 def use_files(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     found: set[Path] = set()
     for crate in crates(ctx):
         found.update(crate_uses(ctx, crate))

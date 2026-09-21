@@ -349,6 +349,8 @@ def test_local_name_and_nested_trx() -> None:
     assert cs_tests.local_name("t:Counters") == "Counters"
     assert cs_tests.local_name("a:b:c") == "c"
     assert cs_tests.local_name("plain") == "plain"
+    assert cs_tests.local_name(":name") == "name"
+    assert cs_tests.MISSING == -1
     assert cs_tests.nested_trx(True, "body") == ".//body"
     assert cs_tests.nested_trx(False, "body") == "body"
     assert cs_tests.trx_path("t:ResultSummary/t:Counters") == "{*}ResultSummary/{*}Counters"

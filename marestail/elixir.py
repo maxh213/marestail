@@ -15,6 +15,7 @@ SCRIPTS = {"comments": COMMENTS, "complexity": COMPLEXITY, "deadcode": DEADCODE,
 EMPTY: list[str] = []
 IGNORE_MODULES = "--ignore-modules"
 IGNORE = "--ignore"
+PATH_ERROR = "path"
 
 
 def script(mode: str) -> Path:
@@ -29,6 +30,8 @@ def scan(ctx: Context, mode: str, args: Sequence[Any], cwd: Path | None = None, 
 
 
 def deadcode_command(ctx: Context, out: Path) -> list[str]:
+    if not isinstance(out, Path):
+        raise TypeError(PATH_ERROR)
     command = ["mix", "run", "--no-start", str(DEADCODE), "--out", str(out)]
     return command + deadcode_flags(ctx)
 

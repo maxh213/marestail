@@ -76,3 +76,8 @@ def test_project_files(tmp_path: Path) -> None:
     assert elixir.project_files(ctx, tmp_path, ["app/lib/a.ex", "lib/a.ex"]) == ["app/lib/a.ex"]
     assert elixir.strip_prefix("lib/a.ex", Path(".")) == Path("lib/a.ex")
     assert elixir.strip_prefix("app/lib/a.ex", Path("other")) == Path("app/lib/a.ex")
+
+
+def test_deadcode_command_rejects_a_missing_out(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^path$"):
+        elixir.deadcode_command(make_context(tmp_path), None)  # type: ignore[arg-type]

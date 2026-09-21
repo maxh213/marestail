@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import Context, live, under_benchmarks
-from marestail.shell import run
+from marestail.shell import ensure_dir, run
 
 PACKAGE = Path(__file__).resolve().parent
 JVM_DIR = PACKAGE / "jvm"
@@ -28,11 +28,20 @@ STAMP = "stamp"
 NS_CLOSE = "}"
 EMPTY = ""
 OUTPUT_TAIL = 300
+MISSING = -1
+EMPTY_PATTERNS: list[str] = []
+SLASH = "/"
 
 
 def listify(value: Any) -> list[str]:
     if value is None:
         return []
+    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
+
+
+def configured_list(value: Any) -> list[str]:
+    if value is None:
+        raise TypeError("list")
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
@@ -129,14 +138,25 @@ def pom_release(path: Path) -> str | None:
 
 
 def pom_properties(properties: ET.Element) -> dict[str, str]:
-    return {element.tag.split(NS_CLOSE, 1)[-1]: (element.text or EMPTY).strip() for element in properties}
+    return {local_tag(element.tag): (element.text or EMPTY).strip() for element in properties}
+
+
+def local_tag(tag: str) -> str:
+    index = tag.find(NS_CLOSE)
+    return tag if index == MISSING else tag[index + 1 :]
 
 
 def resolve_property(values: dict[str, str], key: str) -> str:
-    value = values.get(key, "")
+    value = lookup(values, key)
     if value.startswith("${") and value.endswith("}"):
-        return values.get(value[2:-1], "")
+        return lookup(values, value[2:-1])
     return value
+
+
+def lookup(values: dict[str, str], key: str) -> str:
+    if key not in values:
+        return EMPTY
+    return values[key]
 
 
 def skipped(ctx: Context, path: Path) -> bool:
@@ -162,6 +182,7 @@ def java_files_in(ctx: Context, folder: Path) -> list[Path]:
 
 
 def sources(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     return collect(ctx, source_roots(ctx))
 
 
@@ -196,7 +217,15 @@ def locate(ctx: Context, package: str, file_name: str, folders: list[Path] | Non
 
 def excluded(ctx: Context, relative: str, key: str) -> bool:
     prefix = root_prefix(ctx)
-    return any(matches(relative, prefix + pattern.strip("/")) for pattern in listify(ctx.java(key, [])))
+    return any(matches(relative, prefix + trim_slash(pattern)) for pattern in configured_list(ctx.java(key, EMPTY_PATTERNS)))
+
+
+def trim_slash(pattern: str) -> str:
+    while pattern.startswith(SLASH):
+        pattern = pattern[1:]
+    while pattern.endswith(SLASH):
+        pattern = pattern[:-1]
+    return pattern
 
 
 def matches(relative: str, pattern: str) -> bool:
@@ -231,7 +260,7 @@ def build_scanner(ctx: Context) -> str | None:
     if (out / "Scan.class").exists() and stamp_matches(out / STAMP, digest):
         return None
     shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True)
+    ensure_dir(out)
     code, output = run([tool(ctx, "javac"), "--release", SCAN_RELEASE, "-d", str(out), str(SCAN_SOURCE)], cwd=ctx.root, timeout=300)
     error = jdk_failure(code, output, out / "Scan.class", "javac", f"java scanner build failed (needs JDK {SCAN_RELEASE}+)")
     if error is None:
@@ -280,7 +309,7 @@ def pmd_classpath(ctx: Context) -> tuple[str | None, str | None]:
     digest = digest_of(TOOLS_POM)
     if out.exists() and stamp_matches(stamp, digest):
         return out.read_text().strip(), None
-    folder.mkdir(parents=True, exist_ok=True)
+    ensure_dir(folder)
     out.unlink(missing_ok=True)
     code, output = mvn(ctx, [BUILD_CLASSPATH, f"-Dmdep.outputFile={out}"], pom=TOOLS_POM)
     error = maven_failure(code, output, out, "maven could not fetch PMD")

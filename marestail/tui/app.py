@@ -56,7 +56,7 @@ def skip(*_args: object, **_kwargs: object) -> Any:
 
 
 def surely[T](value: T | None) -> T:
-    return cast(T, value)
+    return (value,)[0]
 
 
 def is_code(value: int | None) -> TypeGuard[int]:

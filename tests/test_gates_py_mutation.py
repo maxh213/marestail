@@ -117,3 +117,15 @@ def test_mutant_patterns(tmp_path: Path) -> None:
 )
 def test_nothing_to_mutate(scope: MutationScope, patterns: list[str], expected: bool) -> None:
     assert py_mutation.nothing_to_mutate(scope, patterns) is expected
+
+
+def test_exit_codes_without_the_key(tmp_path: Path) -> None:
+    meta = tmp_path / "x.py.meta"
+    meta.write_text("{}")
+    assert py_mutation.exit_codes(meta) == {}
+    meta.write_text('{"exit_code_by_key": {"a": 1}}')
+    assert py_mutation.exit_codes(meta) == {"a": 1}
+    meta.write_text('{"exit_code_by_key": []}')
+    assert py_mutation.exit_codes(meta) == {}
+    assert py_mutation.codes_field({}) == {}
+    assert py_mutation.codes_field({"exit_code_by_key": {"a": 1}}) == {"a": 1}

@@ -256,3 +256,13 @@ def test_project_findings_returns_the_no_sarif_result(tmp_path: Path, monkeypatc
     result = cs_lint.project_findings(ctx, tmp_path / "App" / "App.csproj", [], started)
     assert isinstance(result, Result)
     assert result.ok is False
+
+
+def test_path_of_finding_keeps_a_leading_colon() -> None:
+    assert cs_lint.path_of_finding(":10") == ""
+    assert cs_lint.MISSING == -1
+
+
+def test_required_path_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^project$"):
+        cs_lint.required_path(None)  # type: ignore[arg-type]

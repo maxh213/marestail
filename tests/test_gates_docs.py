@@ -163,3 +163,10 @@ def test_full_gate_orders_routes_env_then_paths(tmp_path: Path) -> None:
         "src/app.py:2 environment variable NEW_VAR is not documented",
         "README.md:3 mentions src/none.py, which does not exist",
     ]
+
+
+def test_line_at_counts_newlines_in_the_prefix() -> None:
+    assert docs.line_at("a\nb\nc", 0) == 1
+    assert docs.line_at("a\nb\nc", 2) == 2
+    assert docs.line_at("a\nb\nc", 4) == 3
+    assert docs.NEWLINE == "\n"

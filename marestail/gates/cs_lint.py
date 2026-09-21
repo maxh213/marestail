@@ -16,6 +16,8 @@ ANALYSIS_LEVEL = "8.0"
 LEVELS = {"error", "warning"}
 COLON = ":"
 SARIF_VERSION = "2.1"
+MISSING = -1
+PROJECT_ERROR = "project"
 SUPPRESSION = re.compile(r"#pragma\s+warning\s+disable|\[\s*SuppressMessage")
 
 
@@ -26,7 +28,8 @@ def run_gate(ctx: Context) -> Result:
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
         return Result(GATE, False, found, [], elapsed(started))
-    return analyse(ctx, found, started)
+    product, tests = found
+    return analyse(ctx, (product, tests), started)
 
 
 def analyse(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
@@ -45,7 +48,7 @@ def project_findings(ctx: Context, project: Path, findings: list[str], started: 
     code, output = dotnet.dotnet(ctx, build_args(project, sarif), timeout=900)
     if not sarif.exists():
         return no_sarif(ctx, project, (code, output), started)
-    return findings + sarif_findings(ctx, sarif, project)
+    return findings + sarif_findings(ctx, sarif, required_path(project))
 
 
 def no_sarif(ctx: Context, project: Path, outcome: tuple[int, str], started: float) -> Result:
@@ -92,6 +95,7 @@ def mapping_text(data: dict[str, Any], key: str) -> str:
 
 
 def sarif_findings(ctx: Context, sarif: Path, project: Path) -> list[str]:
+    project = required_path(project)
     data = json.loads(sarif.read_text())
     version = mapping_text(data, "version")
     if not version.startswith(SARIF_VERSION):
@@ -113,11 +117,15 @@ def reportable(result: dict[str, Any], where: str, ctx: Context) -> bool:
     return result.get("level", "warning") in LEVELS and file_in_scope(where, ctx)
 
 
+def required_path(project: Path) -> Path:
+    if not isinstance(project, Path):
+        raise TypeError(PROJECT_ERROR)
+    return project
+
+
 def path_of_finding(where: str) -> str:
     index = where.rfind(COLON)
-    if index < 0:
-        return where
-    return where[:index]
+    return {True: where, False: where[:index]}[index == MISSING]
 
 
 def file_in_scope(where: str, ctx: Context) -> bool:

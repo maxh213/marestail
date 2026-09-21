@@ -423,6 +423,7 @@ def test_renamed_path_keeps_plain_and_splits_on_arrow() -> None:
     assert runner.renamed_path("src/a.py") == "src/a.py"
     assert runner.renamed_path("old.py -> new.py") == "new.py"
     assert runner.renamed_path("a -> b -> c") == "b -> c"
+    assert runner.renamed_path(" -> dest") == "dest"
 
 
 def test_after_marker_and_until_heading() -> None:
@@ -430,6 +431,10 @@ def test_after_marker_and_until_heading() -> None:
     assert runner.after_marker("nope", runner.CONFIG_CHANGE) == "nope"
     assert runner.until_heading("body\n## Next\nrest") == "body"
     assert runner.until_heading("only") == "only"
+    assert runner.until_heading("\n## First\nrest") == ""
+    assert runner.until_heading("a\n## One\nmid\n## Two\nend") == "a"
+    assert runner.HEADING_MARK == "\n## "
+    assert runner.MISSING == -1
 
 
 @pytest.mark.parametrize(
@@ -438,11 +443,6 @@ def test_after_marker_and_until_heading() -> None:
 )
 def test_problem_shape(problems: str, shape: str) -> None:
     assert runner.problem_shape(problems) == shape
-
-
-@pytest.mark.parametrize(("previous", "problems", "repeats", "expected"), [("1 x", "2 x", 1, 2), ("1 x", "1 y", 2, 1)])
-def test_repeat_count(previous: str, problems: str, repeats: int, expected: int) -> None:
-    assert runner.repeat_count(previous, problems, repeats) == expected
 
 
 @pytest.fixture
@@ -481,6 +481,7 @@ def test_run_worker_succeeds_after_feedback(
     assert worker_env["drop"].calls == [(state.config, "before")]
     assert worker_env["fold"].calls == [(state.config, "coder", reports[1], "before", "m e", {"x"})]
     assert worker_env["restore"].calls == [(state.config, {"a.log": b"x"})]
+    assert worker_env["head"].calls == [(state.config,)]
     assert capsys.readouterr().out == "== coder (01-coder) attempt 1\nmissing handoff\n== coder (01-coder) attempt 2\n"
 
 
@@ -591,6 +592,30 @@ def test_prepare_perf_skips_authoring_without_rounds(tmp_path: Path, monkeypatch
     assert author.calls == []
     assert fill.calls == [(state, session)]
     assert progress.feedback == "kept"
+
+
+def test_prepare_perf_authors_when_one_round_is_left(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    author = patch(monkeypatch, runner, "author_phase", "authored")
+    fill = patch(monkeypatch, runner, "fill_samples")
+    progress = JudgeProgress(feedback="old", author_left=1)
+    session = Session(task="task")
+    state = make_state(tmp_path)
+    runner.prepare_perf(state, PERF, True, session, progress)
+    assert author.calls == [(state, PERF, session, "old")]
+    assert fill.calls == [(state, session)]
+    assert progress.feedback == "authored"
+
+
+def test_has_author_round_is_true_for_one_left() -> None:
+    assert runner.has_author_round(1) is True
+    assert runner.has_author_round(0) is False
+
+
+def test_next_streak_starts_and_grows() -> None:
+    first = runner.next_streak([], "3 errors")
+    assert first == ["3 errors"]
+    assert runner.next_streak(first, "4 errors") == ["3 errors", "4 errors"]
+    assert runner.next_streak(first, "other") == ["other"]
 
 
 def test_judged_after_last_authoring_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1012,6 +1037,7 @@ def test_approve_non_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     state = make_state(tmp_path)
     assert runner.approve(state) is True
     state.next_report("specifier").write_text("first")
+    state.next_report("coder").write_text("middle")
     state.next_report("critic").write_text("last")
     assert runner.approve(state) is True
     note = "non-interactive: continuing without approval (use --to critic to stop here)\n"

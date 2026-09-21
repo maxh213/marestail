@@ -72,8 +72,9 @@ def test_reject_none_keeps_a_value() -> None:
 
 
 def test_reject_none_rejects_none() -> None:
+    reject_ctx = conftest.reject_none(lambda ctx: ctx)
     with pytest.raises(TypeError, match=r"^ctx$"):
-        conftest.reject_none(lambda ctx: ctx)(None)
+        reject_ctx(None)
 
 
 def test_git_try_show_toplevel() -> None:

@@ -133,7 +133,7 @@ def attribute_findings(ctx: Context) -> list[str]:
 
 def write_runsettings(ctx: Context, product: Path, tests: Path) -> Path:
     root = ctx.dotnet_root().resolve()
-    excludes = [f"{root}/{trim_glob(pattern)}" for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", []))]
+    excludes = [f"{root}/{trim_glob(pattern)}" for pattern in dotnet.configured_list(ctx.dotnet("coverage_exclude", dotnet.EMPTY))]
     if tests.parent != product.parent:
         excludes.append(f"{tests.parent.resolve()}/**/*.cs")
     include = str(tests.resolve() == product.resolve()).lower()
@@ -169,11 +169,12 @@ def text_of(result: ET.Element, tag: str) -> str:
     return (element.text or "").strip() if element is not None else ""
 
 
+MISSING = -1
+
+
 def local_name(part: str) -> str:
     index = part.rfind(":")
-    if index < 0:
-        return part
-    return part[index + 1 :]
+    return {True: part, False: part[index + 1 :]}[index == MISSING]
 
 
 def trx_path(path: str) -> str:

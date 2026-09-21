@@ -151,6 +151,21 @@ def test_merge_cursor_hook_adds_version_after_existing_keys(tmp_path: Path) -> N
     assert read_json(path) == {"hooks": {"stop": [{"command": "x"}, CURSOR_GATE]}, "version": 1}
 
 
+def test_mapping_default_uses_the_fallback() -> None:
+    assert install.mapping_default({}, "version", 1) == 1
+    assert install.mapping_default({"version": 2}, "version", 1) == 2
+
+
+def test_mapping_default_rejects_a_missing_key_name() -> None:
+    with pytest.raises(TypeError, match=r"^key$"):
+        install.mapping_default({}, None, 1)  # type: ignore[arg-type]
+
+
+def test_trust_entry_marks_the_folder_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "time", lambda: 9.7)
+    assert install.trust_entry() == {install.TRUSTED: True, install.DECIDED: 9}
+
+
 def test_install_constants() -> None:
     assert install.VERSION == "version"
     assert install.TRUSTED == "trusted"

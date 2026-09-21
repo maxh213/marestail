@@ -2,6 +2,7 @@ import json
 import shutil
 import time
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context, MutationScope, is_benchmark
 from marestail.report import Result, elapsed
@@ -98,8 +99,14 @@ def mutant_statuses(folder: Path, prefixes: tuple[str, ...]) -> list[tuple[str, 
 
 
 def exit_codes(meta: Path) -> dict[str, int | None]:
-    codes: dict[str, int | None] = json.loads(meta.read_text()).get("exit_code_by_key", {})
-    return codes
+    codes = codes_field(json.loads(meta.read_text()))
+    return codes if isinstance(codes, dict) else {}
+
+
+def codes_field(data: dict[str, Any]) -> Any:
+    if "exit_code_by_key" not in data:
+        return {}
+    return data["exit_code_by_key"]
 
 
 def selected(name: str, prefixes: tuple[str, ...]) -> bool:

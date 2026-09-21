@@ -209,7 +209,13 @@ def test_stamped(message: str, label: str, used: set[str] | None, expected: str)
 
 @pytest.mark.parametrize(
     ("message", "expected"),
-    [("a\n\nBy coder.\n", "a"), ("a\nBy other.", "a\nBy other."), ("", ""), ("By coder.", "")],
+    [
+        ("a\n\nBy coder.\n", "a"),
+        ("a\nb\nBy coder.", "a\nb"),
+        ("a\nBy other.", "a\nBy other."),
+        ("", ""),
+        ("By coder.", ""),
+    ],
 )
 def test_strip_byline(message: str, expected: str) -> None:
     assert runner.strip_byline(message, "coder") == expected
@@ -457,6 +463,42 @@ def test_archive_handoffs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert archived == [(state.config, "task", None), (state.config, "task", destination)]
     assert (destination / "01-coder.md").read_text() == "h"
     assert not state.handoffs.exists()
+
+
+def test_restamp_splits_on_newlines_and_sets_author_env(tmp_path: Path, fake_run: Any) -> None:
+    details = "Test User\ntest@example.com\n2020-01-01T00:00:00Z\nsubject line\n\nbody\n"
+    fake = fake_run(runner, [(0, details), (0, "newsha\n")])
+    sha = runner.restamp(Config(root=tmp_path, raw={}), "oldsha", "parent", "lab")
+    assert sha == "newsha"
+    assert fake.calls[0] == [runner.GIT, runner.LOG, "-1", "--format=%an%n%ae%n%aI%n%B", "oldsha"]
+    assert fake.options[1]["env"] == {
+        runner.AUTHOR_NAME: "Test User",
+        runner.AUTHOR_EMAIL: "test@example.com",
+        runner.AUTHOR_DATE: "2020-01-01T00:00:00Z",
+    }
+    assert fake.calls[1][:6] == [runner.GIT, runner.COMMIT_TREE, "oldsha^{tree}", runner.PARENT_FLAG, "parent", runner.MESSAGE_FLAG]
+
+
+def test_git_flag_constants() -> None:
+    assert runner.ALL_FILES == "-A"
+    assert runner.QUIET == "-q"
+    assert runner.RECURSIVE == "-r"
+    assert runner.DOUBLE_DASH == "--"
+    assert runner.CHECK_IGNORE == "check-ignore"
+    assert runner.NO_INDEX == "--no-index"
+    assert runner.COMMIT_TREE == "commit-tree"
+    assert runner.PARENT_FLAG == "-p"
+    assert runner.MESSAGE_FLAG == "-m"
+    assert runner.AUTHOR_NAME == "GIT_AUTHOR_NAME"
+    assert runner.AUTHOR_EMAIL == "GIT_AUTHOR_EMAIL"
+    assert runner.AUTHOR_DATE == "GIT_AUTHOR_DATE"
+    assert runner.SPLIT_FIELDS == 3
+    assert runner.MINUTES == 60
+    assert runner.LIST_SHOW == 10
+    assert runner.COMMA_JOIN == ", "
+    assert runner.LAST == -1
+    assert runner.STATUS_WIDTH == 2
+    assert runner.SPACE_AT == 2
 
 
 def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

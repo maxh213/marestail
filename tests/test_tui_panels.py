@@ -106,12 +106,15 @@ def test_put_and_clip() -> None:
     assert offscreen(0, 9, 4, 10) is False
     assert offscreen(0, 10, 4, 10) is True
     assert shift_left(0, 2, "ab") == (0, 2, "ab")
+    assert shift_left(0, 0, "ab") == (0, 0, "ab")
     assert shift_left(0, -1, "ab") == (0, 0, "b")
     assert shift_left(0, -2, "hello") == (0, 0, "llo")
     assert panels.shift_neg(0, -2, "hello") == (0, 0, "llo")
     assert panels.clipped(0, 8, "abcdef", 10) == (0, 8, "ab")
     assert panels.surely("x") == "x"
     assert panels.surely(0) == 0
+    assert panels.first_text("", "later") == ""
+    assert panels.first_text(None, "later") == "later"
     assert panels.skip() is None
     assert panels.none_of("a") is None
     assert panels.present("a") is True

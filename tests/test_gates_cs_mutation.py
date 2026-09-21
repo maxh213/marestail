@@ -165,6 +165,7 @@ def test_reports_surviving_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         ],
     )
     assert fake.calls[1][0][-2:] == ["-m", "!**/App/Gen"]
+    assert fake.calls[1][0][3:7] == ["--test-project", str(tmp_path / "AppTests" / "AppTests.csproj"), "--project", "App.csproj"]
 
 
 def test_scoped_run_targets_changed_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,3 +232,48 @@ def test_precondition_reads_invalid_utf8(tmp_path: Path) -> None:
     assert cs_mutation.precondition(ctx, product, tests, 0.0) is None
     long = {"status": "Timeout", "mutatorName": "String", "replacement": "x" * 80, "location": {"start": {"line": 3}}}
     assert cs_mutation.describe("A.cs", long) == "A.cs:3 String Timeout: " + "x" * 60
+
+
+def test_mapping_uses_an_empty_dict_when_the_key_is_missing() -> None:
+    assert cs_mutation.mapping({}, cs_mutation.FILES) == {}
+    assert cs_mutation.mapping({"files": {"a": {}}}, cs_mutation.FILES) == {"a": {}}
+    assert cs_mutation.mapping({"files": []}, cs_mutation.FILES) == {}
+    assert cs_mutation.FILES == "files"
+
+
+def test_mutants_of_missing_and_non_list() -> None:
+    assert cs_mutation.mutants_of({}) == []
+    assert cs_mutation.mutants_of({"mutants": [{"status": "Killed"}]}) == [{"status": "Killed"}]
+    assert cs_mutation.mutants_of({"mutants": {}}) == []
+    assert cs_mutation.listed_mutants({}) == []
+    assert cs_mutation.listed_mutants({"mutants": [1]}) == [1]
+
+
+def test_load_mutants_without_files_key(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text("{}")
+    ctx = project(tmp_path)
+    assert cs_mutation.load_mutants(ctx, report) == []
+
+
+def test_command_rejects_a_missing_product(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^path$"):
+        cs_mutation.command(ctx, None, tmp_path / "T.csproj", tmp_path / "out", [])  # type: ignore[arg-type]
+
+
+def test_command_rejects_a_missing_tests_project(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^path$"):
+        cs_mutation.command(ctx, tmp_path / "A.csproj", None, tmp_path / "out", [])  # type: ignore[arg-type]
+
+
+def test_command_rejects_a_missing_output_dir(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^path$"):
+        cs_mutation.command(ctx, tmp_path / "A.csproj", tmp_path / "T.csproj", None, [])  # type: ignore[arg-type]
+
+
+def test_required_path_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^path$"):
+        cs_mutation.required_path(None)  # type: ignore[arg-type]

@@ -203,10 +203,12 @@ def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: t
     calls: list[tuple[str, list[Path]]] = []
 
     def scan(ctx: object, mode: str, found: list[Path]) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         calls.append((mode, found))
         return reply
 
-    monkeypatch.setattr(ruby, "sources", lambda ctx: files)
+    monkeypatch.setattr(ruby, "sources", reject_none(lambda ctx: files))
     monkeypatch.setattr(ruby, "scan", scan)
 
     assert deadcode.ruby_findings(make_context(tmp_path, {"ruby": {}})) == expected
@@ -214,7 +216,7 @@ def test_ruby_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: t
 
 
 def test_ruby_findings_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ruby, "sources", lambda ctx: [])
+    monkeypatch.setattr(ruby, "sources", reject_none(lambda ctx: []))
 
     assert deadcode.ruby_findings(make_context(tmp_path, {"ruby": {}})) == []
 
@@ -248,10 +250,12 @@ def test_structured_scanners(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mo
     calls: list[tuple[str, list[Path]]] = []
 
     def scan(ctx: object, mode: str, found: list[Path]) -> tuple[Any, Any]:
+        if ctx is None:
+            raise TypeError("ctx")
         calls.append((mode, found))
         return replies.pop(0)
 
-    monkeypatch.setattr(module, "sources", lambda ctx: files)
+    monkeypatch.setattr(module, "sources", reject_none(lambda ctx: files))
     monkeypatch.setattr(module, "scan", scan)
     scanner = getattr(deadcode, f"{section}_findings")
     ctx = make_context(tmp_path, {section: {}})
@@ -263,8 +267,8 @@ def test_structured_scanners(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mo
 
 @pytest.mark.parametrize("module", [dotnet, java, rust])
 def test_structured_scanners_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: Any) -> None:
-    monkeypatch.setattr(module, "sources", lambda ctx: [])
-    monkeypatch.setattr(rust, "use_files", lambda ctx: [])
+    monkeypatch.setattr(module, "sources", reject_none(lambda ctx: []))
+    monkeypatch.setattr(rust, "use_files", reject_none(lambda ctx: []))
     name = module.__name__.split(".")[-1]
 
     assert getattr(deadcode, f"{name}_findings")(make_context(tmp_path, {name: {}})) == []
@@ -279,10 +283,10 @@ def test_rust_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append((mode, found, uses))
         return replies.pop(0)
 
-    monkeypatch.setattr(rust, "sources", lambda ctx: files)
-    monkeypatch.setattr(rust, "use_files", lambda ctx: uses)
-    monkeypatch.setattr(rust, "rel", lambda ctx, file: f"rel:{file}")
-    monkeypatch.setattr(rust, "scan", scan)
+    monkeypatch.setattr(rust, "sources", reject_none(lambda ctx: files))
+    monkeypatch.setattr(rust, "use_files", reject_none(lambda ctx: uses))
+    monkeypatch.setattr(rust, "rel", reject_none(lambda ctx, file: f"rel:{file}"))
+    monkeypatch.setattr(rust, "scan", reject_none(scan))
     ctx = make_context(tmp_path, {"rust": {}})
 
     assert deadcode.rust_findings(ctx) == ["rel:/abs/lib.rs:5 unused method 'Go'"]

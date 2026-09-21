@@ -476,6 +476,42 @@ def test_summary(output: str, expected: str) -> None:
     assert runner.summary(output) == expected
 
 
+def test_summary_without_a_result_key() -> None:
+    assert runner.summary('{"total_cost_usd": 2}') == "turns=None api-equivalent=$2.00 ''"
+
+
+def test_kilo_text_reads_part_then_text() -> None:
+    assert runner.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
+    assert runner.kilo_text({"type": "text", "text": "plain"}) == "plain"
+    assert runner.kilo_text({"type": "other", "text": "nope"}) == ""
+    assert runner.TYPE_KEY == "type"
+    assert runner.TEXT == "text"
+    assert runner.PART == "part"
+
+
+def test_mapping_text_rejects_a_missing_key_name() -> None:
+    with pytest.raises(TypeError, match=r"^key$"):
+        runner.mapping_text({"text": "x"}, None)  # type: ignore[arg-type]
+
+
+def test_event_dict_rejects_a_missing_key_name() -> None:
+    with pytest.raises(TypeError, match=r"^key$"):
+        runner.event_dict({"part": {}}, None)  # type: ignore[arg-type]
+
+
+def test_object_or_none_keeps_objects() -> None:
+    assert runner.object_or_none({"a": 1}) == {"a": 1}
+    assert runner.object_or_none([1]) is None
+    assert runner.json_object("[1, 2]") is None
+
+
+def test_stdout_or_stderr_uses_stderr_when_stdout_is_blank() -> None:
+    failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="  ", stderr="err")
+    assert runner.stdout_or_stderr(failed) == "err"
+    ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="out", stderr="err")
+    assert runner.stdout_or_stderr(ok) == "out"
+
+
 def test_turns_summary_prefers_result_over_response() -> None:
     data = {runner.NUM_TURNS: 2, runner.RESULT: "hello", "response": "other"}
     text = runner.turns_summary(data, {})
