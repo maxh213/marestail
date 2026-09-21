@@ -65,6 +65,8 @@ def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
 
 
 def test_surely_keeps_missing_values() -> None:
+    assert app.surely("x") == "x"
+    assert app.surely(None) is None
     assert app.is_code(3) is True
     assert app.is_code(None) is False
 
@@ -275,6 +277,7 @@ def test_caught_swallows_exceptions() -> None:
 
 def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert app.skip() is None
+    assert app.surely("x") == "x"
     assert app.is_code(None) is False
     assert app.is_code(0) is True
     assert isinstance(app.instantiate(FleetPanel), FleetPanel)

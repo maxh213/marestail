@@ -55,6 +55,9 @@ def skip(*_args: object, **_kwargs: object) -> Any:
     return None
 
 
+def surely[T](value: T | None) -> T:
+    return cast(T, value)
+
 
 def is_code(value: int | None) -> TypeGuard[int]:
     return value is not None
@@ -108,7 +111,7 @@ class WatchSession:
         self.collected = now
 
     def sync_detail(self) -> None:
-        self.detail.sync(self.state.fleet)
+        surely(self.detail).sync(self.state.fleet)
 
     def handle_key(self, key: int) -> int | None:
         chosen: Any = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
@@ -179,7 +182,7 @@ def key_action(detail: ConversationPanel | None, key: int, state: WatchState) ->
 
 def open_repo(session: WatchSession, repo: RepoState | None) -> None:
     chosen = (skip, set_detail)[repo is not None]
-    chosen(session, repo)
+    chosen(session, surely(repo))
 
 
 def set_detail(session: WatchSession, repo: RepoState) -> None:
@@ -261,7 +264,7 @@ def draw_frame(
 ) -> None:
     draw_header(stdscr, width, state)
     draw_footer(stdscr, height, width, detail, state)
-    shown: Panel = (panel, detail)[detail is not None]
+    shown: Panel = (panel, surely(detail))[detail is not None]
     shown.render(stdscr, Rect(2, 0, height - 3, width), True, state)
     chosen = (skip, draw_legend)[legend]
     chosen(stdscr, height, width, state)
@@ -303,7 +306,7 @@ def draw_footer(win: curses.window, height: int, width: int, detail: Conversatio
 
 
 def put_error(win: curses.window, height: int, width: int, state: WatchState) -> None:
-    error = state.error
+    error = surely(state.error)
     put(win, height - 1, width - len(error) - 1, error, state.theme.bounced)
 
 
@@ -317,7 +320,7 @@ def detail_hints(detail: ConversationPanel) -> str:
 
 def footer_hints(detail: ConversationPanel | None) -> str:
     chosen = (fleet_hints, detail_hints)[detail is not None]
-    return chosen(detail)
+    return chosen(surely(detail))
 
 
 IDLE_ACTIONS = {-1: WatchSession.bump_tick, ord("?"): WatchSession.toggle_legend}
