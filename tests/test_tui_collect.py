@@ -1117,11 +1117,13 @@ def test_ok_git_missing_returncode() -> None:
         pass
 
     assert collect.ok_git(Bare()) is False
+    assert collect.missing_status(Bare()) == 1
 
     class Zero:
         returncode = 0
 
     assert collect.ok_git(Zero()) is True
+    assert collect.git_status(Zero()) == 0
 
 
 def test_str_or_raw_and_result_field() -> None:

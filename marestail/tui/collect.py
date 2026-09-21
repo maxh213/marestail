@@ -1125,7 +1125,8 @@ def missing_status(_out: object) -> int:
 
 
 def git_status(out: object) -> int:
-    return int(getattr(out, "returncode"))
+    completed: Any = out
+    return int(completed.returncode)
 
 
 def stripped_out(out: subprocess.CompletedProcess[str]) -> str:
