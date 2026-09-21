@@ -278,10 +278,11 @@ def test_scanner_exclusions(tmp_path: Path, text: str, expected: str) -> None:
 
 def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
     root = Path(__file__).resolve().parent.parent
-    parts = sonar.scanner_exclusions(make_context(root)).split(",")
+    ctx = make_context(root)
+    declared = [*sonar.project_exclusions(ctx), "perf/**"]
+    parts = sonar.scanner_exclusions(ctx).split(",")
     assert "perf/**" in parts
-    assert "marestail/tui/**" not in parts
-    assert "marestail/**/*.java" not in parts
+    assert [part for part in parts if part not in declared] == []
 
 
 def test_properties_parsing() -> None:
