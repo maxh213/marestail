@@ -276,13 +276,17 @@ def test_scanner_exclusions(tmp_path: Path, text: str, expected: str) -> None:
     assert sonar.scanner_exclusions(make_context(tmp_path)) == expected
 
 
+def declared_exclusions(text: str) -> list[str]:
+    prefix = "sonar.exclusions="
+    line = next(line for line in text.splitlines() if line.startswith(prefix))
+    return [pattern.strip() for pattern in line[len(prefix) :].split(",")]
+
+
 def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
     root = Path(__file__).resolve().parent.parent
-    ctx = make_context(root)
-    declared = [*sonar.project_exclusions(ctx), "perf/**"]
-    parts = sonar.scanner_exclusions(ctx).split(",")
-    assert "perf/**" in parts
-    assert [part for part in parts if part not in declared] == []
+    declared = declared_exclusions((root / "sonar-project.properties").read_text())
+    assert "perf/**" in declared
+    assert sonar.scanner_exclusions(make_context(root)).split(",") == declared
 
 
 def test_properties_parsing() -> None:
