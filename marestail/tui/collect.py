@@ -1040,7 +1040,7 @@ def hours_fmt(seconds: int) -> str:
 
 
 def fmt_seconds(seconds: int) -> str:
-    return first_text(secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds))
+    return str(first_text(secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds)))
 
 
 def make_process(pid: int, elapsed: int, tokens: list[str], backend: str) -> Process:
