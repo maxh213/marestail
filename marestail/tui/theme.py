@@ -1,7 +1,6 @@
 import contextlib
 import curses
 from dataclasses import dataclass
-from typing import cast
 
 GLYPH_FLOURISH = "❧"
 GLYPH_RUNNING = "⚘"
@@ -15,6 +14,8 @@ JUDGE_ROLES = frozenset({"critic", "practices", "perf", "hardener"})
 STATUS_RUNNING = "running"
 VERDICT_BOUNCE = "BOUNCE"
 VERDICT_PASS = "PASS"
+MISSING = ""
+VERDICT_GLYPHS = {VERDICT_BOUNCE: GLYPH_BOUNCED, VERDICT_PASS: GLYPH_PASSED}
 
 PAIR_HEADING = 1
 PAIR_WORKER = 2
@@ -145,8 +146,12 @@ def running_glyph(_verdict: str | None) -> str:
     return GLYPH_RUNNING
 
 
+def named_or_missing(verdict: str | None) -> str:
+    return (MISSING, str(verdict))[verdict is not None]
+
+
 def verdict_glyph(verdict: str | None) -> str:
-    return {VERDICT_BOUNCE: GLYPH_BOUNCED, VERDICT_PASS: GLYPH_PASSED}.get(cast(str, verdict), GLYPH_DONE)
+    return VERDICT_GLYPHS.get(named_or_missing(verdict), GLYPH_DONE)
 
 
 def step_glyph(status: str, verdict: str | None) -> str:
@@ -159,7 +164,7 @@ def running_attr(theme: Theme, _verdict: str | None) -> int:
 
 
 def verdict_attr(theme: Theme, verdict: str | None) -> int:
-    return {VERDICT_BOUNCE: theme.bounced, VERDICT_PASS: theme.passed}.get(cast(str, verdict), theme.done)
+    return {VERDICT_BOUNCE: theme.bounced, VERDICT_PASS: theme.passed}.get(named_or_missing(verdict), theme.done)
 
 
 def step_attr(theme: Theme, status: str, verdict: str | None) -> int:

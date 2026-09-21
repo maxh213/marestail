@@ -23,8 +23,8 @@ from marestail.report import Result
 from marestail.sonar import setup
 from tests.conftest import make_context
 
-PASS = Result("lint", True, "clean")
-FAIL = Result("tests", False, "2 failing")
+PASS = Result("lint", True, "clean", [], 0.0)
+FAIL = Result("tests", False, "2 failing", [], 0.0)
 Gates = tuple[list[Result], Context]
 
 
@@ -284,15 +284,25 @@ def registry(monkeypatch: pytest.MonkeyPatch, repo: Path) -> Recorder:
     selected = [fake_gate("lint", None, PASS), fake_gate("py", "python", FAIL), fake_gate("ts", "ts", FAIL)]
     select = Recorder(selected)
     monkeypatch.setattr(gates_module, "select", select)
-    monkeypatch.setattr(context_module, "build", lambda config, changed, focus, hard: make_context(config.root, focus=focus, hard=hard))
+    monkeypatch.setattr(
+        context_module,
+        "build",
+        lambda config, changed, focus, hard: make_context(config.root, scope_changed=changed, focus=focus, hard=hard),
+    )
     return select
 
 
 def test_run_gates_with_context(registry: Recorder, repo: Path) -> None:
     results, ctx = gates_module.run_gates_with_context("full", True, {"lint"}, {"src"})
     assert (results, ctx.root, ctx.focus, ctx.hard) == ([PASS, FAIL], repo, {"src"}, False)
+    assert ctx.scope_changed is True
     assert registry.calls == [("full", {"lint"})]
     assert os.environ["MARESTAIL_GATE_ACTIVE"] == "true"
+
+
+def test_run_gates_with_context_keeps_scope_without_focus(registry: Recorder, repo: Path) -> None:
+    _, ctx = gates_module.run_gates_with_context("full", True, {"lint"}, None)
+    assert ctx.scope_changed is True
 
 
 def test_run_gates_hard_adds_configured_focus(registry: Recorder, capsys: pytest.CaptureFixture[str]) -> None:

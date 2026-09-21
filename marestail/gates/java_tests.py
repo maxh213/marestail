@@ -25,7 +25,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [])
+        return Result(GATE, False, error, [], 0.0)
     build = java.build_dir(ctx)
     reports, site = build / "surefire-reports", build / "site" / "jacoco"
     code, output = run_maven(ctx, reports, site)

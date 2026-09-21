@@ -1,4 +1,3 @@
-import inspect
 import json
 import os
 import subprocess
@@ -254,6 +253,18 @@ def test_agent_process_and_fmt() -> None:
     assert collect.fmt_seconds(10) == "10s"
     assert collect.fmt_seconds(120) == "2m"
     assert collect.fmt_seconds(3661) == "1h01m"
+
+
+def test_git_line_passes_the_root(tmp_path: Path, monkeypatch: Any) -> None:
+    seen: list[tuple[Path, list[str]]] = []
+
+    def run_git(root: Path, args: list[str]) -> object:
+        seen.append((root, args))
+        return type("Out", (), {"returncode": 0, "stdout": "ok\n"})()
+
+    monkeypatch.setattr(collect, "run_git", run_git)
+    assert collect.git_line(tmp_path, ["status"]) == "ok"
+    assert seen == [(tmp_path, ["status"])]
 
 
 def test_git_line_and_paths(tmp_path: Path, monkeypatch: Any) -> None:
@@ -674,9 +685,20 @@ def test_collect_constants() -> None:
     assert collect.RESULT_SUFFIX == ".json"
     assert collect.HANDOFF_SUFFIX == ".md"
     assert collect.CONV_MAX_LINES == 200
-    signature = inspect.signature(collect.transcript_conversation)
-    assert signature.parameters["max_lines"].default == collect.CONV_MAX_LINES
-    assert signature.parameters["window"].default == collect.CONV_BYTES
+    assert collect.CONV_BYTES == 262144
+
+
+def test_transcript_conversation_uses_default_window(tmp_path: Path, monkeypatch: Any) -> None:
+    seen: list[tuple[Path | None, int, int]] = []
+
+    def formatted_if(path: Path | None, max_lines: int, window: int) -> list[str]:
+        seen.append((path, max_lines, window))
+        return []
+
+    monkeypatch.setattr(collect, "live_transcript", lambda root: None)
+    monkeypatch.setattr(collect, "formatted_if", formatted_if)
+    assert collect.transcript_conversation(tmp_path) == []
+    assert seen == [(None, collect.CONV_MAX_LINES, collect.CONV_BYTES)]
 
 
 def test_self_repo_empty_and_list_dirs_files(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed Java files")
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [])
+        return Result(GATE, False, error, [], 0.0)
     files = java.files(ctx)
     if not files:
         return Result.skipped(GATE, "no Java sources")

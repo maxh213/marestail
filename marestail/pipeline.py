@@ -47,7 +47,24 @@ def find(name: str) -> Step:
     raise SystemExit(f"unknown role {name}; choose from {', '.join(names())}")
 
 
+def started(taking: bool, step: Step, start: str | None) -> bool:
+    return taking or step.name == start
+
+
+def taken(taking: bool, step: Step) -> list[Step]:
+    return [step] if taking else []
+
+
+def stop_here(taking: bool, step: Step, stop: str | None) -> bool:
+    return taking and stop is not None and step.name == stop
+
+
 def window(start: str | None, stop: str | None) -> list[Step]:
-    first = names().index(start) if start else 0
-    last = names().index(stop) if stop else len(PIPELINE) - 1
-    return PIPELINE[first : last + 1]
+    taking = start is None
+    chosen: list[Step] = []
+    for step in PIPELINE:
+        taking = started(taking, step, start)
+        chosen.extend(taken(taking, step))
+        if stop_here(taking, step, stop):
+            break
+    return chosen

@@ -79,7 +79,7 @@ def test_select_only() -> None:
 
 
 def noop(ctx: object) -> Result:
-    return Result("x", True, "")
+    return Result("x", True, "", [], 0.0)
 
 
 @pytest.mark.parametrize(
@@ -91,7 +91,51 @@ def test_wanted_gate(tier: str, only: set[str] | None, expected: bool) -> None:
 
 
 def test_gate_runner_signature(tmp_path: Path) -> None:
-    assert Gate("a", "fast", None, noop).run(make_context(tmp_path)) == Result("x", True, "")
+    assert Gate("a", "fast", None, noop).run(make_context(tmp_path)) == Result("x", True, "", [], 0.0)
+
+
+def test_gate_focus_soft_skips_hooks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gates, "resolve_focus", lambda config, focus: set(focus))
+    hooks: list[int] = []
+
+    def hook(_config: object) -> set[str]:
+        hooks.append(1)
+        return {"hook"}
+
+    monkeypatch.setattr(gates, "hook_focus", hook)
+    config = make_context(tmp_path).config
+    assert gates.gate_focus(config, {"a"}, False) == {"a"}
+    assert hooks == []
+    assert gates.gate_focus(config, {"a"}, True) == {"a", "hook"}
+    assert hooks == [1]
+
+
+def test_run_gates_with_context_runs_gates_with_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "marestail.toml").write_text("[python]\n")
+    monkeypatch.chdir(tmp_path)
+    seen: list[object] = []
+
+    def run_one(_gate: object, ctx: object) -> Result:
+        seen.append(ctx)
+        return Result("g", True, "ok", [], 0.0)
+
+    monkeypatch.setattr(gates, "run_one", run_one)
+    monkeypatch.setattr(gates, "configured_gates", lambda *args: [Gate("g", "fast", None, noop)])
+    _, ctx = gates.run_gates_with_context("fast", False, None)
+    assert seen == [ctx]
+
+
+def test_run_one_passes_the_context(tmp_path: Path) -> None:
+    seen: list[object] = []
+
+    def run(ctx: object) -> Result:
+        seen.append(ctx)
+        return Result("x", True, "ok", [], 0.25)
+
+    ctx = make_context(tmp_path)
+    result = gates.run_one(Gate("x", "fast", None, run), ctx)
+    assert seen == [ctx]
+    assert (result.gate, result.ok, result.summary) == ("x", True, "ok")
 
 
 def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
@@ -105,7 +149,7 @@ def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...
         hard: bool = False,
     ) -> tuple[list[Result], str]:
         seen.append((tier, scope_changed, only, focus, hard))
-        return [Result("g", True, "ok")], "ctx"
+        return [Result("g", True, "ok", [], 0.0)], "ctx"
 
     monkeypatch.setattr(gates, "run_gates_with_context", fake)
     return seen
@@ -113,11 +157,11 @@ def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...
 
 def test_run_gates_forwards_every_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = capture_run_gates(monkeypatch)
-    assert gates.run_gates("full", True, {"docs"}, {"src"}, True) == [Result("g", True, "ok")]
+    assert gates.run_gates("full", True, {"docs"}, {"src"}, True) == [Result("g", True, "ok", [], 0.0)]
     assert seen == [("full", True, {"docs"}, {"src"}, True)]
 
 
 def test_run_gates_defaults_are_unfocused_and_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = capture_run_gates(monkeypatch)
-    assert gates.run_gates("fast", False, None) == [Result("g", True, "ok")]
+    assert gates.run_gates("fast", False, None) == [Result("g", True, "ok", [], 0.0)]
     assert seen == [("fast", False, None, None, False)]

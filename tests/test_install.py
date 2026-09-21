@@ -165,9 +165,12 @@ def test_mapping_and_listed() -> None:
     assert install.mapping({}, "hooks") == {}
     assert install.listed({"stop": [1]}, "stop") == [1]
     assert install.listed({}, "stop") == []
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^map$"):
         install.mapping({"hooks": 1}, "hooks")
-    with pytest.raises(TypeError):
+
+
+def test_listed_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
         install.listed({"stop": 1}, "stop")
 
 

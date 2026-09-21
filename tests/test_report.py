@@ -35,34 +35,46 @@ def test_result_rejects_missing_seconds() -> None:
         Result("docs", True, "ok", [], missing)
 
 
+def test_result_rejects_omitted_seconds() -> None:
+    with pytest.raises(TypeError, match=r"^seconds$"):
+        Result("docs", True, "ok")
+
+
+def test_render_one_rejects_missing_seconds() -> None:
+    result = Result("docs", True, "ok", [], 0.0)
+    result.seconds = None
+    with pytest.raises(TypeError, match=r"^seconds$"):
+        report.result_seconds(result)
+
+
 def test_render_one_passing() -> None:
     result = Result("py.lint", True, "clean", ["a", "b"], 1.26)
     assert report.render_one(result) == "[ok  ] py.lint        clean  (1.3s)\n       a\n       b"
 
 
 def test_render_one_truncates_findings() -> None:
-    result = Result("docs", False, "bad", [f"f{n}" for n in range(42)])
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(42)], 0.0)
     lines = report.render_one(result).splitlines()
     assert lines[0] == "[FAIL] docs           bad  (0.0s)"
     assert (len(lines), lines[40], lines[41]) == (42, "       f39", "       ... 2 more")
 
 
 def test_render_one_exactly_max_findings() -> None:
-    result = Result("docs", False, "bad", [f"f{n}" for n in range(40)])
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(40)], 0.0)
     assert report.render_one(result).splitlines()[-1] == "       f39"
 
 
 def test_render_one_hides_a_single_extra_finding() -> None:
-    result = Result("docs", False, "bad", [f"f{n}" for n in range(41)])
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(41)], 0.0)
     assert report.render_one(result).splitlines()[-1] == "       ... 1 more"
 
 
 def test_render_passed_without_scope() -> None:
-    assert report.render([Result("a", True, "fine")]) == "[ok  ] a              fine  (0.0s)\n\nGATE PASSED"
+    assert report.render([Result("a", True, "fine", [], 0.0)]) == "[ok  ] a              fine  (0.0s)\n\nGATE PASSED"
 
 
 def test_render_failed_with_scope() -> None:
-    results = [Result("a", False, "x"), Result("b", True, "y"), Result("c", False, "z")]
+    results = [Result("a", False, "x", [], 0.0), Result("b", True, "y", [], 0.0), Result("c", False, "z", [], 0.0)]
     text = report.render(results, "changed")
     assert text.splitlines()[:2] == ["scope: changed", ""]
     assert text.splitlines()[-2:] == ["", "GATE FAILED: a, c"]
@@ -73,8 +85,8 @@ def test_render_empty() -> None:
 
 
 def test_verdict() -> None:
-    assert report.verdict([Result("a", True, "")]) == "GATE PASSED"
-    assert report.verdict([Result("a", False, ""), Result("b", False, "")]) == "GATE FAILED: a, b"
+    assert report.verdict([Result("a", True, "", [], 0.0)]) == "GATE PASSED"
+    assert report.verdict([Result("a", False, "", [], 0.0), Result("b", False, "", [], 0.0)]) == "GATE FAILED: a, b"
 
 
 def test_to_json() -> None:

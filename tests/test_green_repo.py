@@ -132,13 +132,13 @@ def test_hard_scope_line_names_the_focus(tmp_path: Path) -> None:
 
 
 def test_scope_all_prints_no_scope_line(tmp_path: Path) -> None:
-    rendered = report.render([Result("docs", True, "docs match the code")], cli.scope_line(make_context(tmp_path)))
+    rendered = report.render([Result("docs", True, "docs match the code", [], 0.0)], cli.scope_line(make_context(tmp_path)))
     assert not any(line.startswith("scope:") for line in rendered.splitlines())
     assert rendered.splitlines()[-1] == "GATE PASSED"
 
 
 def test_gate_json_keeps_scope_focus_and_results() -> None:
-    payload = report.to_json([Result("py.tests", True, "1 passed")], "all", set())
+    payload = report.to_json([Result("py.tests", True, "1 passed", [], 0.0)], "all", set())
     assert list(json.loads(payload)) == ["scope", "focus", "results"]
     assert '"gate": "py.tests"' in payload
 
@@ -399,44 +399,30 @@ def test_mutmut_kills_mutants_on_a_tiny_package(tmp_path: Path) -> None:
     assert survivors == [], survivors
 
 
-PACKAGE_MUTANTS = [
-    "marestail.audit.*",
-    "marestail.changes.*",
-    "marestail.cli.*",
-    "marestail.context.*",
-    "marestail.depth.*",
-    "marestail.dotnet.*",
-    "marestail.elixir.*",
-    "marestail.erlang.*",
-    "marestail.freeze.*",
-    "marestail.graph.*",
-    "marestail.prompts.*",
-    "marestail.report.*",
-    "marestail.shell.*",
-]
-
-
 def package_mutant_patterns() -> list[str]:
     patterns: list[str] = []
     for path in (ROOT / "marestail").rglob("*.py"):
-        if "tui" in path.parts:
-            continue
         parts = path.relative_to(ROOT).with_suffix("").parts
         if parts[-1] == "__init__":
             parts = parts[:-1]
         patterns.append(".".join(parts) + ".*")
-    return sorted(patterns)
+    return sorted(set(patterns))
+
+
+PACKAGE_MUTANTS = package_mutant_patterns()
 
 
 def test_this_package_kills_its_own_mutants() -> None:
     if restricted_path() or os.environ.get("MARESTAIL_HERMETIC") == "1":
         pytest.skip("mutmut needs a writable tree and a normal pytest")
+    if os.environ.get("MARESTAIL_GATE_ACTIVE") == "true":
+        pytest.skip("py.mutation runs the full package")
     completed = subprocess.run(
         [sys.executable, "-m", "mutmut", "run", *PACKAGE_MUTANTS, "--max-children", "4"],
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=1800,
+        timeout=7200,
     )
     total, survivors = py_mutation.surviving(make_context(ROOT), PACKAGE_MUTANTS)
     assert total > 0, completed.stdout + completed.stderr
@@ -444,9 +430,16 @@ def test_this_package_kills_its_own_mutants() -> None:
     assert survivors == []
 
 
-def test_package_mutation_patterns_cover_every_non_tui_module() -> None:
+def test_package_mutation_patterns_cover_every_module() -> None:
     patterns = package_mutant_patterns()
     assert "marestail.audit.*" in patterns
     assert "marestail.gates.rb_mutation.*" in patterns
-    assert [pattern for pattern in patterns if ".tui." in pattern] == []
-    assert set(PACKAGE_MUTANTS) <= set(patterns)
+    assert "marestail.runner.*" in patterns
+    assert "marestail.install.*" in patterns
+    assert "marestail.java.*" in patterns
+    assert "marestail.ruby.*" in patterns
+    assert "marestail.rust.*" in patterns
+    assert "marestail.javascript.*" in patterns
+    assert "marestail.perf.db.*" in patterns
+    assert "marestail.tui.app.*" in patterns
+    assert patterns == PACKAGE_MUTANTS

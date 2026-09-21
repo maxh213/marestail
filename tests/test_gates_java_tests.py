@@ -10,7 +10,7 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_tests
-from marestail.report import Result
+from marestail.report import Result, result_seconds
 from tests.conftest import make_context
 
 APP = "src/main/java/app/App.java"
@@ -89,7 +89,7 @@ def project(root: Path) -> None:
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result.seconds
+    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
 
 
 def fake_mvn(monkeypatch: pytest.MonkeyPatch, suites: list[str], jacoco: str | None, reply: tuple[int, str] = (0, "")) -> list[Any]:

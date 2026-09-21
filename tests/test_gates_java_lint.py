@@ -10,7 +10,7 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_lint
-from marestail.report import Result
+from marestail.report import Result, result_seconds
 from tests.conftest import make_context
 
 APP = "src/main/java/app/App.java"
@@ -44,7 +44,7 @@ def project(root: Path) -> Context:
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result.seconds
+    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
 
 
 class Seams:

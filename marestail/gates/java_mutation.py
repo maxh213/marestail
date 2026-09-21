@@ -31,7 +31,7 @@ def run_gate(ctx: Context) -> Result:
 def pom_problem(ctx: Context) -> Result | None:
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [])
+        return Result(GATE, False, error, [], 0.0)
     if PITEST.split(":")[1] not in java.pom(ctx).read_text(errors="replace"):
         return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"], 0.0)
     return None

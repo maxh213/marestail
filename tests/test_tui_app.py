@@ -1,5 +1,4 @@
 import curses
-import inspect
 import locale
 import time
 from pathlib import Path
@@ -86,13 +85,12 @@ def test_run_wraps(monkeypatch: Any) -> None:
     monkeypatch.setattr("marestail.tui.app.locale.setlocale", setlocale)
     monkeypatch.setattr("marestail.tui.app.curses.wrapper", wrapper)
     roots = [Path(".")]
-    assert app.run(roots, 3.5, True) == 0
+    assert app.run(roots) == 0
     assert seen["locale"] == (locale.LC_ALL, "")
     assert seen["fn"] is app._main
+    assert seen["args"] == (roots, 2.0, False)
+    assert app.run(roots, 3.5, True) == 0
     assert seen["args"] == (roots, 3.5, True)
-    signature = inspect.signature(app.run)
-    assert signature.parameters["refresh"].default == 2.0
-    assert signature.parameters["show_all"].default is False
 
 
 def test_session_keys(tmp_path: Path, monkeypatch: Any) -> None:
@@ -545,6 +543,14 @@ def test_refresh_fleet_clamps_selected(tmp_path: Path, monkeypatch: Any) -> None
     monkeypatch.setattr(app, "collect_fleet", lambda roots: Fleet(repos=[live], scanned_at=0))
     app.refresh_fleet([tmp_path], watch, True)
     assert watch.selected == 0
+    rows = [repo(tmp_path / f"r{index}") for index in range(3)]
+    watch.selected = 2
+    monkeypatch.setattr(app, "collect_fleet", lambda roots: Fleet(repos=rows, scanned_at=0))
+    app.refresh_fleet([tmp_path], watch, True)
+    assert watch.selected == 2
+    watch.selected = 9
+    app.refresh_fleet([tmp_path], watch, True)
+    assert watch.selected == 2
 
 
 def test_refresh_fleet_passes_roots(tmp_path: Path, monkeypatch: Any) -> None:
@@ -623,6 +629,10 @@ def test_draw_too_small_cell(tmp_path: Path) -> None:
     assert narrow.cells[0][1] == 0
     assert narrow.cells[0][2] == notice[:4]
     assert narrow.cells[0][3] == watch.theme.heading
+    wide = FakeScr(10, 40)
+    app.draw_too_small(as_window(wide), FleetPanel(), None, watch, False, 10, 40)
+    assert wide.cells[0][1] == max(0, (40 - len(notice)) // 2)
+    assert type(wide.cells[0][1]) is int
 
 
 def test_draw_frame_rect_and_detail(tmp_path: Path, monkeypatch: Any) -> None:

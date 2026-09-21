@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet
 from marestail.gates import cs_crap
-from marestail.report import Result
+from marestail.report import Result, result_seconds
 from tests.conftest import gate_shape, make_context
 
 COVERAGE = {
@@ -77,7 +77,7 @@ def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     ctx = project(tmp_path)
     result = cs_crap.run_gate(ctx)
     assert view(result) == ("cs.crap", False, "C# scanner failed (complexity): boom", [])
-    assert result.seconds < 1_000_000
+    assert result_seconds(result) < 1_000_000
     assert fake.calls == [("complexity", [tmp_path / "App" / "A.cs", tmp_path / "App" / "B.cs"])]
     assert fake.contexts == [ctx]
 

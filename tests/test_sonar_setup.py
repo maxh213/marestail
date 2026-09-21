@@ -95,7 +95,23 @@ def test_wait_until_up(monkeypatch: pytest.MonkeyPatch) -> None:
     setup.wait_until_up("http://x")
     assert slept == [5, 5]
     assert setup.ATTEMPTS == 120
-    assert setup.wait_until_up.__defaults__ == (setup.ATTEMPTS,)
+
+
+def test_wait_until_up_uses_the_attempts_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+    slept: list[float] = []
+
+    def status(url: str) -> str:
+        urls.append(url)
+        return "DOWN"
+
+    monkeypatch.setattr(setup, "status", status)
+    monkeypatch.setattr(time, "sleep", slept.append)
+    with pytest.raises(SystemExit, match=r"^sonarqube did not come up$"):
+        setup.wait_until_up("http://x")
+    assert urls == ["http://x"] * setup.ATTEMPTS
+    assert slept == [5] * setup.ATTEMPTS
+    assert setup.ATTEMPTS == 120
 
 
 def test_wait_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:

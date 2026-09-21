@@ -412,28 +412,40 @@ def gate_status(client: Client, key: str) -> str:
     return status
 
 
+def after_colon(text: str) -> str:
+    return text.split(COLON, 1)[-1]
+
+
+def mapping_list(holder: dict[str, Any], key: str) -> list[Any]:
+    value = holder.get(key)
+    return [] if value is None else list(value)
+
+
+def line_of(item: dict[str, Any]) -> object:
+    return item.get(LINE, 0)
+
+
 def issue_path(component: dict[str, Any]) -> str:
-    path: str = component.get(COMPONENT, EMPTY).split(COLON, 1)[-1]
-    return path
+    return after_colon(component.get(COMPONENT, EMPTY))
 
 
 def reopened(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, issueStatuses="ACCEPTED,FALSE_POSITIVE", ps=PAGE)
-    in_scope = [issue for issue in data.get("issues", []) if ctx.in_scope(issue_path(issue))]
+    in_scope = [issue for issue in mapping_list(data, "issues") if ctx.in_scope(issue_path(issue))]
     return [reopen(client, issue) for issue in in_scope]
 
 
 def reopen(client: Client, issue: dict[str, Any]) -> str:
     client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
-    where = f"{issue_path(issue)}:{issue.get(LINE, 0)}"
+    where = f"{issue_path(issue)}:{line_of(issue)}"
     return f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties"
 
 
 def issues(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, resolved="false", ps=PAGE)
     return [
-        f"{issue_path(issue)}:{issue.get(LINE, 0)} {issue['severity']} {issue['rule']}: {issue['message']}"
-        for issue in data.get("issues", [])
+        f"{issue_path(issue)}:{line_of(issue)} {issue['severity']} {issue['rule']}: {issue['message']}"
+        for issue in mapping_list(data, "issues")
         if ctx.in_scope(issue_path(issue))
     ]
 
@@ -441,8 +453,8 @@ def issues(ctx: Context, client: Client, key: str) -> list[str]:
 def hotspots(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/hotspots/search", project=key, status="TO_REVIEW", ps=PAGE)
     return [
-        f"{issue_path(hotspot)}:{hotspot.get(LINE, 0)} hotspot: {hotspot['message']}"
-        for hotspot in data.get("hotspots", [])
+        f"{issue_path(hotspot)}:{line_of(hotspot)} hotspot: {hotspot['message']}"
+        for hotspot in mapping_list(data, "hotspots")
         if ctx.in_scope(issue_path(hotspot))
     ]
 
@@ -455,7 +467,7 @@ def measures(ctx: Context, client: Client, key: str) -> list[str]:
 
 
 def metric_values(holder: dict[str, Any]) -> dict[str, float]:
-    return {m["metric"]: float(m.get("value", 0)) for m in holder.get("measures", [])}
+    return {m["metric"]: float(m.get("value", 0)) for m in mapping_list(holder, "measures")}
 
 
 def measure_findings(values: dict[str, float]) -> list[str]:
@@ -474,7 +486,7 @@ def duplication(density: float) -> str:
 def scoped_duplication(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/measures/component_tree", component=key, metricKeys=DUPLICATION, qualifiers="FIL", ps=PAGE)
     findings = []
-    for component in data.get("components", []):
+    for component in mapping_list(data, "components"):
         path = component_path(component)
         density = metric_values(component).get(DUPLICATION, 0.0)
         if ctx.in_scope(path) and density > 0.0:
@@ -483,5 +495,5 @@ def scoped_duplication(ctx: Context, client: Client, key: str) -> list[str]:
 
 
 def component_path(component: dict[str, Any]) -> str:
-    path: str = component.get(PATH_KEY) or component.get(KEY, EMPTY).split(COLON, 1)[-1]
+    path: str = component.get(PATH_KEY) or after_colon(component.get(KEY, EMPTY))
     return path

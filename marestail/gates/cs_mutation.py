@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
-        return Result(GATE, False, found, [])
+        return Result(GATE, False, found, [], 0.0)
     blocked = precondition(ctx, *found)
     if blocked is not None:
         return blocked

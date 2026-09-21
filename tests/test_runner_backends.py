@@ -166,6 +166,14 @@ def install_subprocess(monkeypatch: pytest.MonkeyPatch, result: Any) -> FakeSubp
     return fake
 
 
+def test_grok_run_timeout_shows_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    state = make_state()
+    prompt = Path("/work/p.md")
+    shown = runner.SPACE.join(runner.grok_command(state, prompt))
+    assert runner.grok_run(state, prompt) == (124, f"{shown}: timed out after 14400s")
+
+
 def test_grok_run_passes_env_and_empty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (0, "\x1b[1mout\r\n", "err"))
     state = make_state(root=Path("/repo"))
@@ -468,6 +476,16 @@ def test_summary(output: str, expected: str) -> None:
     assert runner.summary(output) == expected
 
 
+def test_turns_summary_prefers_result_over_response() -> None:
+    data = {runner.NUM_TURNS: 2, runner.RESULT: "hello", "response": "other"}
+    text = runner.turns_summary(data, {})
+    assert "hello" in text
+    assert "other" not in text
+    assert runner.RESULT == "result"
+    assert runner.NUM_TURNS == "num_turns"
+    assert runner.SUMMARY_WIDTH == 120
+
+
 @pytest.mark.parametrize(
     ("backend", "readers"),
     [
@@ -483,15 +501,31 @@ def test_outcome_readers(backend: str, readers: tuple[Any, Any]) -> None:
 
 
 def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
-    monkeypatch.setattr(runner, "grok_run", lambda state, path: (1, f"grok {path}"))
-    monkeypatch.setattr(runner, "kilo_run", lambda state, prompt: (2, f"kilo {prompt}"))
-    monkeypatch.setattr(runner, "kimi_run", lambda state, path: (3, f"kimi {path}"))
+    seen: list[tuple[str, object, object]] = []
+
+    def grok_run(state: object, path: object) -> tuple[int, str]:
+        seen.append(("grok", state, path))
+        return 1, f"grok {path}"
+
+    def kilo_run(state: object, prompt: object) -> tuple[int, str]:
+        seen.append(("kilo", state, prompt))
+        return 2, f"kilo {prompt}"
+
+    def kimi_run(state: object, path: object) -> tuple[int, str]:
+        seen.append(("kimi", state, path))
+        return 3, f"kimi {path}"
+
+    monkeypatch.setattr(runner, "grok_run", grok_run)
+    monkeypatch.setattr(runner, "kilo_run", kilo_run)
+    monkeypatch.setattr(runner, "kimi_run", kimi_run)
     fake = fake_run(runner, [(4, "claude out")])
     state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
-    assert runner.run_backend(state, "grok", "p", Path("/f")) == (1, "grok /f")
-    assert runner.run_backend(state, "kilo", "p", Path("/f")) == (2, "kilo p")
-    assert runner.run_backend(state, "kimi", "p", Path("/f")) == (3, "kimi /f")
-    assert runner.run_backend(state, "claude", "p", Path("/f")) == (4, "claude out")
+    prompt = Path("/f")
+    assert runner.run_backend(state, "grok", "p", prompt) == (1, "grok /f")
+    assert runner.run_backend(state, "kilo", "p", prompt) == (2, "kilo p")
+    assert runner.run_backend(state, "kimi", "p", prompt) == (3, "kimi /f")
+    assert runner.run_backend(state, "claude", "p", prompt) == (4, "claude out")
+    assert seen == [("grok", state, prompt), ("kilo", state, "p"), ("kimi", state, prompt)]
     assert fake.calls == [[*CLAUDE_BASE, "--model", "m"]]
     assert fake.options == [
         {"cwd": Path("/repo"), "stdin": "p", "timeout": 14400, "env": {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "K": "v"}}

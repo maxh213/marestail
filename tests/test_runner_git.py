@@ -347,7 +347,7 @@ def fail_gates(monkeypatch: pytest.MonkeyPatch, ok: bool) -> list[tuple[Any, ...
 
     def gates(*args: Any) -> list[Result]:
         calls.append(args)
-        return [Result(gate="lint", ok=ok, summary="summary")]
+        return [Result(gate="lint", ok=ok, summary="summary", seconds=0.0)]
 
     monkeypatch.setattr(runner, "run_gates", gates)
     return calls
@@ -372,7 +372,7 @@ def test_verify_worker_collects_problems(repo: Path, monkeypatch: pytest.MonkeyP
     write(repo, "marestail.toml", "[b]\n")
     missing = state.handoffs / "01-coder.md"
     problems = runner.verify_worker(state, Worker("coder", "fast", audit=True), missing, before)
-    gate = render([Result(gate="lint", ok=False, summary="summary")])
+    gate = render([Result(gate="lint", ok=False, summary="summary", seconds=0.0)])
     assert problems == "\n\n".join(
         [
             "missing handoff .marestail/handoffs/task/01-coder.md",
@@ -425,7 +425,7 @@ def test_gate_for(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fail_gates(monkeypatch, False)
     state = make_state(tmp_path)
     assert runner.gate_for(state, None) == ("", True)
-    assert runner.gate_for(state, "full") == (render([Result(gate="lint", ok=False, summary="summary")]), False)
+    assert runner.gate_for(state, "full") == (render([Result(gate="lint", ok=False, summary="summary", seconds=0.0)]), False)
     fail_gates(monkeypatch, True)
     assert runner.gate_for(state, "full")[1] is True
 
@@ -437,8 +437,19 @@ def test_archive_handoffs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     state = make_state(tmp_path)
     runner.archive_handoffs(state)
     state.next_report("coder").write_text("h")
+    assert not state.folder.exists()
     runner.archive_handoffs(state)
     destination = state.folder / "handoffs-stamp%Y%m%dT%H%M%S"
     assert archived == [(state.config, "task", None), (state.config, "task", destination)]
     assert (destination / "01-coder.md").read_text() == "h"
     assert not state.handoffs.exists()
+
+
+def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(perf_trees, "archive_start", lambda *args: None)
+    monkeypatch.setattr(time, "strftime", lambda fmt: "now")
+    state = make_state(tmp_path)
+    state.folder.mkdir(parents=True)
+    state.next_report("coder").write_text("h")
+    runner.archive_handoffs(state)
+    assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "h"

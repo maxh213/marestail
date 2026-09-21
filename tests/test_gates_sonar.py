@@ -473,6 +473,12 @@ def test_scoped_duplication_uses_key_when_path_missing() -> None:
     assert sonar.scoped_duplication(ctx, client, KEY) == ["src/a.py:1 sonar duplication 2.0% (need 0)"]
 
 
+def test_scoped_duplication_without_components() -> None:
+    client: Any = FakeClient(lambda path, params: {})
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
+    assert sonar.scoped_duplication(ctx, client, KEY) == []
+
+
 @pytest.mark.parametrize(
     ("values", "expected"),
     [
@@ -516,7 +522,20 @@ def test_separator_index(line: str, expected: int) -> None:
 
 def test_issue_and_component_paths() -> None:
     assert sonar.issue_path({"component": "proj:src/A.cs"}) == "src/A.cs"
+    assert sonar.issue_path({"component": "proj:src:A.cs"}) == "src:A.cs"
     assert sonar.issue_path({}) == ""
     assert sonar.component_path({"path": "src/A.cs"}) == "src/A.cs"
     assert sonar.component_path({"key": "proj:src/B.cs"}) == "src/B.cs"
+    assert sonar.component_path({"key": "proj:src:B.cs"}) == "src:B.cs"
     assert sonar.component_path({}) == ""
+    assert sonar.after_colon("proj:src:A.cs") == "src:A.cs"
+    assert sonar.after_colon("leaf") == "leaf"
+    assert sonar.COLON == ":"
+    assert sonar.mapping_list({}, "issues") == []
+    assert sonar.mapping_list({"issues": [{"k": 1}]}, "issues") == [{"k": 1}]
+    assert sonar.line_of({"line": 7}) == 7
+    assert sonar.line_of({}) == 0
+    assert sonar.LINE == "line"
+    client: Any = FakeClient(lambda path, params: {})
+    issue = {"key": "I1", "component": "p:a.py", "rule": "r1", "issueStatus": "ACCEPTED", "line": 7}
+    assert sonar.reopen(client, issue).startswith("a.py:7 ")

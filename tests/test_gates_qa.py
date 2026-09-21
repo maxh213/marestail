@@ -2,13 +2,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from marestail.gates import qa
-from marestail.report import Result
+from marestail.report import Result, result_seconds
 from tests.conftest import FakeRun, make_context
 
 
 def test_skips_without_command(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(qa)
-    assert qa.run_gate(make_context(tmp_path, {"qa": {"cmd": ""}})) == Result("qa", True, "skipped: no [qa] cmd configured")
+    assert qa.run_gate(make_context(tmp_path, {"qa": {"cmd": ""}})) == Result("qa", True, "skipped: no [qa] cmd configured", [], 0.0)
     assert fake.calls == []
 
 
@@ -18,7 +18,7 @@ def test_passes(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     assert (result.gate, result.ok, result.summary, result.findings) == ("qa", True, "qa passed", [])
     assert fake.calls == [["bash", "-lc", "make qa"]]
     assert fake.options == [{"cwd": tmp_path / ".", "timeout": 3600}]
-    assert result.seconds >= 0
+    assert result_seconds(result) >= 0
 
 
 def test_fails_with_tail_and_scope_note(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:

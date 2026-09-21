@@ -12,6 +12,31 @@ def config(raw: dict[str, Any] | None = None) -> Config:
     return Config(root=Path("/tmp"), raw=raw or {})
 
 
+def test_db_default_is_an_empty_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, ...]] = []
+
+    def get(_self: Config, section: str, key: str, default: Any = None) -> Any:
+        seen.append((section, key, default))
+        return default
+
+    monkeypatch.setattr(Config, "get", get)
+    assert settings.db(config()) == {}
+    assert seen == [(settings.SECTION, "db", {})]
+
+
+def test_control_default_is_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, ...]] = []
+
+    def get(_self: Config, section: str, key: str, default: Any = None) -> bool:
+        seen.append((section, key, default))
+        return False
+
+    monkeypatch.setattr(Config, "get", get)
+    assert settings.control(config()) is False
+    assert seen == [(settings.SECTION, "control", False)]
+    assert settings.SECTION == "perf"
+
+
 def test_defaults() -> None:
     plain = config()
     assert settings.threshold_percent(plain) == 10.0

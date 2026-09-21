@@ -18,7 +18,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = rust.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; rs.tests must run first", [])
+        return Result(GATE, False, "no coverage data; rs.tests must run first", [], 0.0)
     files = crap_files(ctx)
     if not files:
         return Result.skipped(GATE, "no files in scope")

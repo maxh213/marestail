@@ -52,6 +52,36 @@ def patch(monkeypatch: pytest.MonkeyPatch, target: object, name: str, *replies: 
     return recorder
 
 
+def test_pick_scope_focus_paths_enable_changed_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "resolve_focus", lambda config, paths: paths)
+    monkeypatch.setattr(runner, "hook_focus", lambda config: set())
+    config = Config(root=tmp_path, raw={})
+    changed, hard, focused = runner.pick_scope(config, None, ["src/a.py"])
+    assert (changed, hard, focused) == (True, False, {"src/a.py"})
+    none, _, empty = runner.pick_scope(config, None, None)
+    assert (none, empty) == (False, set())
+
+
+def test_disabled_reads_the_enabled_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, ...]] = []
+
+    def get(_self: Config, section: str, key: str, default: Any = None) -> bool:
+        seen.append((section, key, default))
+        return True
+
+    monkeypatch.setattr(Config, "get", get)
+    assert runner.disabled(make_state(tmp_path), PERF) is False
+    assert seen == [(PERF.name, runner.ENABLED, True)]
+    assert runner.ENABLED == "enabled"
+
+
+def test_judge_round_passes_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    judged = patch(monkeypatch, runner, "run_judge", (runner.PASS, None, "ok"))
+    assert runner.judge_round(state, CRITIC, "", 0) == (True, "ok")
+    assert judged.calls == [(state, CRITIC)]
+
+
 @pytest.mark.parametrize(
     ("fields", "flags", "hard_focus"),
     [
@@ -67,7 +97,7 @@ def test_run_scope_properties(tmp_path: Path, fields: dict[str, Any], flags: str
 
 
 def test_run_paths_and_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    gates = patch(monkeypatch, runner, "run_gates", [Result(gate="g", ok=True, summary="s")])
+    gates = patch(monkeypatch, runner, "run_gates", [Result(gate="g", ok=True, summary="s", seconds=0.0)])
     state = make_state(tmp_path, scope_changed=True, focus={"a.py"}, hard=True)
     assert state.task_name == "task"
     assert state.folder == tmp_path / ".marestail" / "runs" / "task"
@@ -75,7 +105,7 @@ def test_run_paths_and_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     first = state.next_report("coder")
     first.write_text("x")
     assert (first.name, state.next_report("critic").name) == ("01-coder.md", "02-critic.md")
-    assert state.gates("fast") == [Result(gate="g", ok=True, summary="s")]
+    assert state.gates("fast") == [Result(gate="g", ok=True, summary="s", seconds=0.0)]
     assert gates.calls == [("fast", True, None, {"a.py"}, True)]
 
 
@@ -206,6 +236,7 @@ def test_run_steps_completes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     state = make_state(tmp_path)
     assert runner.run_steps(state, [find("specifier"), find("critic"), find("coder")], True) == 0
     assert [call[1].name for call in run_step.calls] == ["specifier", "critic", "coder"]
+    assert [call[0] for call in run_step.calls] == [state, state, state]
     assert steps_env["archive"].calls == [(state,)]
     assert steps_env["approve"].calls == []
     assert capsys.readouterr().out == "pipeline complete\n"
@@ -489,7 +520,7 @@ def test_run_judge_perf_authoring_rounds(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 def test_run_judge_perf_with_failed_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_session: tuple[Session, list[str]]) -> None:
-    patch(monkeypatch, runner, "run_gates", [Result(gate="g", ok=False, summary="bad")])
+    patch(monkeypatch, runner, "run_gates", [Result(gate="g", ok=False, summary="bad", seconds=0.0)])
     author = patch(monkeypatch, runner, "author_phase", "authored")
     fill = patch(monkeypatch, runner, "fill_samples")
     patch(monkeypatch, runner, "judge_attempt", (("BOUNCE", None, "x"), ""))
@@ -624,11 +655,12 @@ def test_judge_attempt_perf_rejected(tmp_path: Path, judge_env: dict[str, Any], 
 
 def test_judge_attempt_perf_accepted(tmp_path: Path, judge_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
     patch(monkeypatch, runner, "review_measurements", "")
-    patch(monkeypatch, perf_hygiene, "discard_scratch", ["perf/tmp.txt"])
+    scratch = patch(monkeypatch, perf_hygiene, "discard_scratch", ["perf/tmp.txt"])
     judge_env["files"] = {"01-perf.md": "VERDICT: PASS"}
-    _, _, outcome = attempt_judge(tmp_path, PERF, session=Session(task="task"))
+    state, _, outcome = attempt_judge(tmp_path, PERF, session=Session(task="task"))
     assert outcome == (("PASS", None, "VERDICT: PASS"), "")
     assert judge_env["stage"].calls[0][1] == ()
+    assert scratch.calls == [(state.config.root,)]
     assert capsys.readouterr().out == "   removed perf scratch perf/tmp.txt\n   verdict PASS\n"
 
 
@@ -665,6 +697,7 @@ def test_author_phase_stops_when_benches_settle(tmp_path: Path, author_env: dict
     session = Session(task="task")
     assert runner.author_phase(state, PERF, session, "fb") == f"fb\n\n{runner.BENCHES_CHANGED}"
     note = state.folder / "perf-author-1.md"
+    assert author_env["trees"].calls[0] == (state.config, session)
     assert author_env["prompt"].calls[0] == (state.config, state.task, "task", "TREES", note, "fb")
     assert author_env["invoke"].calls[0] == (state, "perf-author-1", "AUTHOR PROMPT")
     assert author_env["discard"].calls[0] == (state.config, ("keep", note), ("writes", ("perf/**",)))
@@ -703,7 +736,9 @@ def two_trees() -> Session:
 
 def test_fill_samples_without_benches(tmp_path: Path, samples_env: dict[str, Any]) -> None:
     samples_env["benches"].replies = [[]]
-    runner.fill_samples(make_state(tmp_path), two_trees())
+    state = make_state(tmp_path)
+    runner.fill_samples(state, two_trees())
+    assert samples_env["benches"].calls == [(state.config,)]
     assert samples_env["policy"].calls == []
 
 
@@ -752,7 +787,7 @@ def test_fill_samples_needs_database(tmp_path: Path, samples_env: dict[str, Any]
 def test_review_measurements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     outcome = SimpleNamespace(problems=[])
     review = patch(monkeypatch, perf_review, "review", SimpleNamespace(problems=["a", "b"]), outcome)
-    patch(monkeypatch, perf_review, "changes_summary", "CHANGES")
+    summary = patch(monkeypatch, perf_review, "changes_summary", "CHANGES")
     table = patch(monkeypatch, perf_review, "record_table")
     state = make_state(tmp_path)
     session = Session(task="task")
@@ -763,6 +798,7 @@ def test_review_measurements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert state.perf_changes == "CHANGES"
     assert runner.review_measurements(state, session, report, "BOUNCE", "text") == ""
     assert review.calls[0] == (state.config, session, report, "PASS")
+    assert summary.calls[0] == (outcome, "text", session)
     assert table.calls == [(state.config, session, outcome)]
 
 

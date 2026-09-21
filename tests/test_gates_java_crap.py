@@ -9,7 +9,7 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_crap
-from marestail.report import Result
+from marestail.report import Result, result_seconds
 from tests.conftest import make_context
 
 APP = "src/main/java/app/App.java"
@@ -53,7 +53,7 @@ def fake_scan(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) ->
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result.seconds
+    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
 
 
 def test_needs_coverage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

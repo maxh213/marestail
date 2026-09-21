@@ -147,6 +147,13 @@ def test_describe(item: Any, expected: str) -> None:
     assert deadcode.describe(Path("f.ts"), "exports", item) == expected
 
 
+def test_knip_missing_keys_are_empty() -> None:
+    assert deadcode.report_items({}, "files") == []
+    assert deadcode.report_items({"files": ["a.ts"]}, "files") == ["a.ts"]
+    assert deadcode.unused_files({}, ["files"], Path("web")) == []
+    assert deadcode.knip_findings({}, ["files", "exports"], Path("web")) == []
+
+
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [

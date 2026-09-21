@@ -168,6 +168,10 @@ def test_theme_constants_and_running_attr() -> None:
     assert theme.STATUS_RUNNING == "running"
     assert theme.VERDICT_BOUNCE == "BOUNCE"
     assert theme.VERDICT_PASS == "PASS"
+    assert theme.MISSING == ""
+    assert theme.named_or_missing(None) == ""
+    assert theme.named_or_missing("PASS") == "PASS"
+    assert theme.VERDICT_GLYPHS[theme.VERDICT_PASS] == theme.GLYPH_PASSED
     mono = theme.mono_theme()
     assert theme.step_attr(mono, "running", "BOUNCE") == mono.worker
     assert theme.step_attr(mono, "running", "PASS") == mono.worker

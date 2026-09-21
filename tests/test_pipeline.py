@@ -32,6 +32,18 @@ def test_window_slices_inclusively(start: str | None, stop: str | None, expected
     assert [step.name for step in pipeline.window(start, stop)] == expected
 
 
+def test_window_helpers() -> None:
+    coder = pipeline.find("coder")
+    assert pipeline.started(False, coder, "coder") is True
+    assert pipeline.started(False, coder, "qa") is False
+    assert pipeline.started(True, coder, "qa") is True
+    assert pipeline.taken(True, coder) == [coder]
+    assert pipeline.taken(False, coder) == []
+    assert pipeline.stop_here(True, coder, "coder") is True
+    assert pipeline.stop_here(True, coder, None) is False
+    assert pipeline.stop_here(False, coder, "coder") is False
+
+
 def test_step_defaults() -> None:
     worker = Worker("w", None)
     judge = Judge("j", "sonar", bounce_to="w")

@@ -41,6 +41,7 @@ def test_listify(value: Any, expected: list[str]) -> None:
 def test_rel(tmp_path: Path) -> None:
     ctx = ctx_at(tmp_path)
     assert java.rel(ctx, "a/b.java") == "a/b.java"
+    assert java.rel(ctx, "./a/b.java") == "a/b.java"
     assert java.rel(ctx, tmp_path / "c" / "d.java") == "c/d.java"
     assert java.rel(ctx, Path("/elsewhere/x.java")) == "/elsewhere/x.java"
 

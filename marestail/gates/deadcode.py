@@ -123,19 +123,24 @@ def ts_findings(ctx: Context) -> list[str]:
     return knip_findings(report, kinds, ts_root.relative_to(ctx.root))
 
 
+def report_items(report: dict[str, Any], key: str) -> list[Any]:
+    value = report.get(key)
+    return [] if value is None else list(value)
+
+
 def knip_findings(report: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
     return unused_files(report, kinds, prefix) + [
-        finding for issue in report.get("issues", []) for finding in issue_findings(issue, kinds, prefix)
+        finding for issue in report_items(report, "issues") for finding in issue_findings(issue, kinds, prefix)
     ]
 
 
 def unused_files(report: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
-    return [f"{prefix / file} unused file" for file in report.get("files", []) if "files" in kinds]
+    return [f"{prefix / file} unused file" for file in report_items(report, "files") if "files" in kinds]
 
 
 def issue_findings(issue: dict[str, Any], kinds: list[str], prefix: Path) -> list[str]:
     file = prefix / issue.get("file", "")
-    return [describe(file, kind, item) for kind in kinds if kind != "files" for item in issue.get(kind, [])]
+    return [describe(file, kind, item) for kind in kinds if kind != "files" for item in report_items(issue, kind)]
 
 
 def describe(file: Path, kind: str, item: Any) -> str:

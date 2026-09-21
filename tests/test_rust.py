@@ -147,7 +147,7 @@ def test_configured_list() -> None:
     assert rust.configured_list([]) == []
     assert rust.configured_list(["a", 2]) == ["a", "2"]
     assert rust.configured_list("x") == ["x"]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=r"^list$"):
         rust.configured_list(None)
 
 

@@ -265,8 +265,9 @@ def test_add_tree_failed_worktree_joins_the_last_five_lines(tmp_path: Path, fake
     output = "\n".join(str(index) for index in range(8))
     fake_run(trees, [(1, output)])
     session = trees.Session("t1")
+    config = config_at(tmp_path)
     with pytest.raises(RuntimeError) as raised:
-        trees.add_tree(config_at(tmp_path), session, "baseline", "abc")
+        trees.add_tree(config, session, "baseline", "abc")
     assert str(raised.value) == "git worktree add for the baseline tree at abc failed: 3 4 5 6 7"
 
 

@@ -14,7 +14,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = dotnet.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; cs.tests must run first", [])
+        return Result(GATE, False, "no coverage data; cs.tests must run first", [], 0.0)
     files = dotnet.in_scope(ctx, dotnet.sources(ctx))
     if not files:
         return Result.skipped(GATE, "no C# files in scope")
