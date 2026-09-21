@@ -146,5 +146,28 @@ def test_parse(output: str, expected: Any) -> None:
     assert ts_lint.parse(output) == expected
 
 
+def test_as_report_only_keeps_a_list() -> None:
+    assert ts_lint.as_report([1]) == [1]
+    assert ts_lint.as_report({"a": 1}) is None
+
+
+def test_str_field_defaults_missing_keys() -> None:
+    assert ts_lint.str_field({}, "message") == ""
+    assert ts_lint.str_field({"message": "x"}, "message") == "x"
+    assert ts_lint.str_field({"message": None}, "message") == ""
+    assert ts_lint.GATE == "ts.lint"
+    assert ts_lint.TS_SUFFIXES == (".ts", ".tsx", ".js", ".jsx")
+
+
+def test_list_field_defaults_and_rejects_a_non_list() -> None:
+    assert ts_lint.list_field({}, "messages") == []
+    assert ts_lint.list_field({"messages": [1]}, "messages") == [1]
+
+
+def test_list_field_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        ts_lint.list_field({"messages": {}}, "messages")
+
+
 def test_meaningful_drops_npm_noise_and_blank_lines() -> None:
     assert ts_lint.meaningful("npm notice a\n  \nnpm warn b\nnpm WARN c\n real\n") == [" real"]

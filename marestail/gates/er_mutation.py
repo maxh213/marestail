@@ -211,8 +211,15 @@ def apply_cap(mutants: list[dict[str, Any]], ctx: Context) -> None:
 
 
 def mutation_cap(ctx: Context) -> int:
-    value = ctx.erlang("mutation_max", 0)
-    return int(value or 0)
+    return cap_value(ctx.erlang("mutation_max", 0))
+
+
+def cap_value(value: object) -> int:
+    if type(value) is int:
+        return value
+    if type(value) is str:
+        return int(value)
+    raise TypeError("cap")
 
 
 def kept_ids(mutants: list[dict[str, Any]], cap: int) -> set[Any]:

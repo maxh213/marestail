@@ -35,7 +35,7 @@ def mutants_problem(ctx: Context, started: float) -> Result | None:
 
 
 def mutate(ctx: Context, files: list[Path], started: float) -> Result:
-    shutil.rmtree(ctx.work / OUTPUT, ignore_errors=True)
+    clear_outcomes(ctx.work / OUTPUT)
     code, output = rust.cargo(ctx, command(ctx, files), timeout=int(ctx.rust("mutation_timeout", 7200)))
     report = ctx.work / OUTPUT / "outcomes.json"
     if not report.exists():
@@ -56,8 +56,15 @@ def command(ctx: Context, files: list[Path]) -> list[str]:
         "--jobs",
         jobs,
         *scoped,
-        *rust.listify(ctx.rust("mutation_args", [])),
+        *rust.configured_list(ctx.rust("mutation_args", rust.EMPTY)),
     ]
+
+
+IGNORE_MISSING = True
+
+
+def clear_outcomes(path: Path) -> None:
+    shutil.rmtree(path, ignore_errors=IGNORE_MISSING)
 
 
 def baseline_failed(outcomes: list[Outcome]) -> bool:
@@ -66,7 +73,8 @@ def baseline_failed(outcomes: list[Outcome]) -> bool:
 
 
 def is_mutant(outcome: Outcome) -> bool:
-    return isinstance(outcome.get("scenario"), dict) and "Mutant" in outcome["scenario"]
+    scenario = outcome.get("scenario")
+    return isinstance(scenario, dict) and "Mutant" in scenario
 
 
 def viable_mutants(outcomes: list[Outcome]) -> list[Outcome]:
@@ -77,11 +85,17 @@ def survivors(viable: list[Outcome]) -> list[Outcome]:
     return [o for o in viable if o.get("summary") not in KILLED]
 
 
+def require_output(output: object) -> None:
+    if type(output) is not str:
+        raise TypeError("output")
+
+
 def mutation_summary(survived: list[Outcome], viable: list[Outcome]) -> str:
     return f"{len(survived)} of {len(viable)} mutants not killed" if survived else f"all {len(viable)} mutants killed"
 
 
 def verdict(ctx: Context, report: dict[str, Any], output: str, started: float) -> Result:
+    require_output(output)
     outcomes = report.get("outcomes", [])
     if baseline_failed(outcomes):
         return Result(GATE, False, "tests fail before any mutation", tail(output), elapsed(started))
@@ -97,6 +111,14 @@ def describe(ctx: Context, outcome: Outcome) -> str:
     mutant = outcome["scenario"]["Mutant"]
     line = mutant.get("span", {}).get("start", {}).get("line", 0)
     function = (mutant.get("function") or {}).get("function_name", "?")
-    change = mutant.get("name", "").split(": ", 1)[-1].removesuffix(f" in {function}")
+    change = after_colon(text_or_empty(mutant.get("name")), function)
     state = "survived" if outcome.get("summary") == "MissedMutant" else outcome.get("summary", "?")
     return f"{rust.rel(ctx, mutant['file'])}:{line} {function}: {change} {state}"
+
+
+def text_or_empty(value: object) -> str:
+    return value if type(value) is str else ""
+
+
+def after_colon(name: str, function: str) -> str:
+    return name.split(": ", 1)[-1].removesuffix(f" in {function}")

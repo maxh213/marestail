@@ -10,7 +10,7 @@ from marestail import java
 from marestail.context import Context
 from marestail.gates import java_deps
 from marestail.report import Result, result_seconds
-from tests.conftest import make_context
+from tests.conftest import make_context, reject_none
 
 WEB = "src/main/java/app/web/Api.java"
 DOMAIN = "src/main/java/app/domain/Order.java"
@@ -63,7 +63,7 @@ def fake_scan(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) ->
         seen.append((mode, paths))
         return reply
 
-    monkeypatch.setattr(java, "scan", scan)
+    monkeypatch.setattr(java, "scan", reject_none(scan))
     return seen
 
 
@@ -157,6 +157,7 @@ def test_layer_findings_under_nested_root(tmp_path: Path) -> None:
 def test_layer_findings_unknown_edge_package(tmp_path: Path) -> None:
     data = {"files": [], "edges": [{"from": "x/X.java", "to": "y/Y.java", "toPackage": "app.web", "symbol": "Y", "line": 2}]}
     assert java_deps.layer_findings(make_context(tmp_path), [{"from": "app", "forbid": ["app.web"]}], data) == []
+    assert java_deps.layer_findings(make_context(tmp_path), [{"from": "XXXX", "forbid": ["app.web"]}], data) == []
     assert java_deps.layer_findings(make_context(tmp_path), [{"from": "x/", "forbid": ["app.web"]}], data) == [
         "x/X.java:2 x/ must not depend on app.web (Y)"
     ]

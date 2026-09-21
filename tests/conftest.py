@@ -69,6 +69,12 @@ def reject_none(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapped
 
 
+def required_timeout(timeout: object) -> int:
+    if type(timeout) is not int:
+        raise TypeError("timeout")
+    return timeout
+
+
 def check_fake_run(command: list[str], cwd: Path, options: dict[str, Any]) -> None:
     if cwd is None:
         raise TypeError("cwd")

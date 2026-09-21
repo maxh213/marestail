@@ -1053,3 +1053,67 @@ def test_approve_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, an
     monkeypatch.setattr("builtins.input", asked)
     assert runner.approve(make_state(tmp_path)) is expected
     assert asked.calls == [("continue to coder? [y/N] ",)]
+
+
+def test_commit_verdict_passes_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
+        if before is None:
+            raise TypeError("before")
+        seen.append(before)
+        return {}
+
+    monkeypatch.setattr(runner, "drop_ignored_since", drop_ignored_since)
+    monkeypatch.setattr(runner, "stage_writes", lambda *args: None)
+    monkeypatch.setattr(runner, "record_commit", lambda *args: None)
+    monkeypatch.setattr(runner, "restore_files", lambda *args: None)
+    monkeypatch.setattr(runner, "agent_label", lambda state: "L")
+    runner.commit_verdict(make_state(tmp_path), CRITIC, "abc", (runner.PASS, None, "ok"))
+    assert seen == ["abc"]
+
+
+def test_fingerprints_pass_each_bench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def fingerprint(root: Path, bench: str) -> str:
+        if bench is None:
+            raise TypeError("bench")
+        seen.append(bench)
+        return "fp"
+
+    monkeypatch.setattr(perf_hygiene, "fingerprint", fingerprint)
+    assert runner.fingerprints(Config(root=tmp_path, raw={}), ["perf/a.py"]) == {"perf/a.py": "fp"}
+    assert seen == ["perf/a.py"]
+
+
+def test_take_samples_pass_the_bench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def take_sample(config: Config, bench: str, tree: Tree, number: int, harness: object) -> str:
+        if bench is None:
+            raise TypeError("bench")
+        seen.append(bench)
+        return ""
+
+    monkeypatch.setattr(perf_samples, "take_sample", take_sample)
+    tree = Tree("head", "deadbeef", tmp_path)
+    runner.take_samples(Config(root=tmp_path, raw={}), "perf/a.py", tree, range(1, 2), (None, ""))
+    assert seen == ["perf/a.py"]
+
+
+def test_fold_handoff_forwards_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[set[str] | None] = []
+
+    def stamp_history(config: Config, before: str, label: str, used: set[str] | None = None) -> None:
+        if used is None:
+            raise TypeError("used")
+        seen.append(used)
+
+    monkeypatch.setattr(runner, "stamp_history", stamp_history)
+    monkeypatch.setattr(runner, "head", lambda config: "other")
+    monkeypatch.setattr(runner, "run", lambda *args, **kwargs: (0, "msg"))
+    report = tmp_path / "handoff.md"
+    report.write_text("body")
+    runner.fold_handoff(Config(root=tmp_path, raw={}), "coder", report, "before", "L", {"O"})
+    assert seen == [{"O"}]

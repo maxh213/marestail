@@ -125,6 +125,11 @@ def test_batch_findings_clean_code_drops_parsed_lines(tmp_path: Path) -> None:
     assert er_lint.batch_findings(0, "src/a.erl:1: unused", ctx) == []
 
 
+def test_batch_findings_rejects_a_missing_code(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^code$"):
+        er_lint.batch_findings(None, "src/a.erl:1: unused", make_context(tmp_path))  # type: ignore[arg-type]
+
+
 def test_erlang_suffixes_stay_lowercase() -> None:
     assert er_lint.ERLANG_SUFFIXES == (".erl", ".hrl")
     assert er_lint.LINT_TIMEOUT == 900

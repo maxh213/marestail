@@ -75,4 +75,4 @@ def in_scope_cycle(cycle: list[str], ctx: Context, root: Path) -> bool:
 
 def repo_path(file: str, ctx: Context, root: Path) -> str:
     prefix = root.relative_to(ctx.root)
-    return file if not prefix.parts else str(prefix / file)
+    return str(prefix / file)

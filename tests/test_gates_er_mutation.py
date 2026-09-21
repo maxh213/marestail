@@ -197,11 +197,29 @@ def test_per_mutant_timeout(
     assert fake.options[-1]["timeout"] == expected
 
 
-@pytest.mark.parametrize(("cap", "count", "skipped"), [(0, 3, 0), (None, 3, 0), (3, 3, 0), (5, 3, 0), (-1, 3, 0), (1, 3, 2), (2, 5, 3)])
+@pytest.mark.parametrize(("cap", "count", "skipped"), [(0, 3, 0), (3, 3, 0), (5, 3, 0), (-1, 3, 0), (1, 3, 2), (2, 5, 3)])
 def test_apply_cap(tmp_path: Path, cap: Any, count: int, skipped: int) -> None:
     mutants: list[dict[str, Any]] = [{"id": ident} for ident in range(count)]
     er_mutation.apply_cap(mutants, make_context(tmp_path, {"erlang": {"mutation_max": cap}}))
     assert sum(1 for entry in mutants if entry.get("status") == "skipped") == skipped
+
+
+def test_mutation_cap_rejects_none(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^cap$"):
+        er_mutation.mutation_cap(make_context(tmp_path, {"erlang": {"mutation_max": None}}))
+
+
+def test_cap_value_keeps_an_int() -> None:
+    assert er_mutation.cap_value(0) == 0
+    assert er_mutation.cap_value("3") == 3
+
+
+def test_write_report_uses_indent(tmp_path: Path) -> None:
+    ctx = project(tmp_path)
+    er_mutation.write_report(ctx, [mutant(tmp_path, 1)])
+    text = (tmp_path / ".marestail" / er_mutation.RESULTS).read_text()
+    assert text.startswith("{\n  ")
+    assert json.loads(text)["mutants"][0]["status"] == "not checked"
 
 
 def test_apply_cap_spreads_kept_mutants(tmp_path: Path) -> None:

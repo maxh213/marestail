@@ -84,6 +84,15 @@ def test_missing(code: int, output: str, expected: str | None) -> None:
     assert rust.missing(code, output, tool) == expected
 
 
+def test_missing_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^missing$"):
+        rust.missing(None, "", "clippy")  # type: ignore[arg-type]
+
+
+def test_require_missing_keeps_valid_args() -> None:
+    rust.require_missing(0, "clippy")
+
+
 def test_skipped(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert rust.skipped(ctx, tmp_path / "target" / "a.rs")
@@ -169,6 +178,11 @@ def test_crates_finds_manifests(tmp_path: Path) -> None:
     touch(tmp_path / "sub" / "Cargo.toml")
     touch(tmp_path / "target" / "Cargo.toml")
     assert rust.crates(make_context(tmp_path)) == {tmp_path, tmp_path / "sub"}
+
+
+def test_staged_crate_rejects_a_missing_ctx() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        rust.staged_crate(None)  # type: ignore[arg-type]
 
 
 def test_staged_crate_creates_nested_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

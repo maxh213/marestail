@@ -14,6 +14,7 @@ from marestail.shell import run, tail
 COVERAGE_SCRIPT = COVERAGE
 COVERAGE_JSON = EX_COVERAGE
 GATE = "ex.tests"
+MISSING_COUNT = ""
 
 
 def run_gate(ctx: Context) -> Result:
@@ -51,8 +52,8 @@ def scoped_percent(coverage: dict[str, Any], ctx: Context) -> float:
     total = 0
     for file_str, data in coverage["files"].items():
         if ctx.in_scope(relative_path(file_str, ctx)):
-            covered += data.get("covered", 0)
-            total += data.get("total", 0)
+            covered += counted(data, "covered")
+            total += counted(data, "total")
     return (covered / total) * 100.0 if total else 100.0
 
 
@@ -60,6 +61,10 @@ def count_tests(output: str) -> str:
     return next((count for count in map(passed_before, output.splitlines()) if count), "?")
 
 
+def counted(data: dict[str, Any], key: str) -> int:
+    return int(data[key]) if key in data else 0
+
+
 def passed_before(line: str) -> str:
     parts = line.split()
-    return next((parts[index - 1] for index in range(1, len(parts)) if parts[index] == "passed"), "")
+    return next((parts[index - 1] for index in range(1, len(parts)) if parts[index] == "passed"), MISSING_COUNT)

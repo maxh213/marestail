@@ -10,7 +10,9 @@ from marestail.shell import run
 
 GATE = "rb.lint"
 MAX_LINES = 60
+OUTPUT_TAIL = 200
 RUBY_SUFFIXES = (".rb", ".rake", ".jbuilder")
+EMPTY_LIST: list[Any] = []
 
 
 def run_gate(ctx: Context) -> Result:
@@ -33,7 +35,13 @@ def nothing_changed(ctx: Context, root: Path) -> bool:
 def lint_findings(code: int, output: str, ctx: Context) -> list[str]:
     if output.strip():
         return parse(output, ctx)
-    return [f"rubocop failed: {output.strip()[-200:]}"] if code != 0 else []
+    return [f"rubocop failed: {failed_tail(output)}"] if code != 0 else []
+
+
+def failed_tail(output: str) -> str:
+    text = output.strip()
+    start = max(0, len(text) - OUTPUT_TAIL)
+    return text[start:]
 
 
 def parse(output: str, ctx: Context) -> list[str]:
@@ -48,7 +56,7 @@ def nonblank(output: str) -> list[str]:
 
 
 def all_offenses(report: dict[str, Any], ctx: Context) -> list[str]:
-    return [finding for file in report.get("files", []) for finding in file_offenses(file, ctx)]
+    return [finding for file in list_field(report, "files") for finding in file_offenses(file, ctx)]
 
 
 def decode_report(output: str) -> dict[str, Any] | None:
@@ -66,7 +74,16 @@ def file_offenses(file: dict[str, Any], ctx: Context) -> list[str]:
     rel = relative(file.get("path", ""), ctx)
     if not ctx.in_scope(rel):
         return []
-    return [offense_line(rel, offense) for offense in file.get("offenses", [])]
+    return [offense_line(rel, offense) for offense in list_field(file, "offenses")]
+
+
+def list_field(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError("list")
+    return value
 
 
 def offense_line(rel: str, offense: dict[str, Any]) -> str:

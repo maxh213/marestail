@@ -62,6 +62,10 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
+def first_present[T](values: tuple[T | None, ...]) -> T | None:
+    return next(filter(present, values), None)
+
+
 def is_str(value: str | None) -> TypeGuard[str]:
     return value is not None
 
@@ -300,7 +304,7 @@ def log_name(path: Path) -> str:
 
 
 def newest_log(logs: list[Path]) -> Path:
-    return sorted(logs, key=log_name)[-1]
+    return max(logs, key=log_name)
 
 
 def latest_log(root: Path) -> Path | None:
@@ -413,7 +417,7 @@ def last_text(lines: list[str]) -> str:
 
 
 def chosen_step(steps: list[Step], matched: re.Match[str]) -> Step | None:
-    return next(filter(present, (running_named(steps, matched.group(1)), running_step(steps))), None)
+    return first_present((running_named(steps, matched.group(1)), running_step(steps)))
 
 
 def complete_step(step: Step, matched: re.Match[str]) -> None:
@@ -488,8 +492,12 @@ def expand_var(value: str) -> Path:
 
 
 def expanded_env(name: str) -> Path | None:
-    chosen = (none_of, expand_var)[bool(os.environ.get(name))]
-    return chosen(os.environ.get(name, ""))
+    chosen = (none_of, expand_named)[name in os.environ]
+    return chosen(name)
+
+
+def expand_named(name: str) -> Path:
+    return expand_var(os.environ[name])
 
 
 def work_home() -> Path:
@@ -518,7 +526,7 @@ def is_jsonl(path: Path) -> bool:
 
 
 def newest_fresh(logs: list[Path]) -> Path | None:
-    newest = sorted(logs, key=dir_mtime)[-1]
+    newest = max(logs, key=dir_mtime)
     return (newest, None)[time.time() - dir_mtime(newest) > TAIL_STALE_S]
 
 
@@ -785,7 +793,7 @@ def first_of(item: tuple[int, str]) -> int:
 
 
 def gate_text(found: list[tuple[int, str]]) -> str:
-    elapsed, label = sorted(found, key=first_of)[-1]
+    elapsed, label = max(found, key=first_of)
     return f"{label} {fmt_seconds(elapsed)}"
 
 
@@ -860,7 +868,7 @@ def skipped_gate(tokens: list[str], names: list[str]) -> bool:
 
 
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
-    return next(filter(present, gate_candidates(tokens, names)), None)
+    return first_present(gate_candidates(tokens, names))
 
 
 def gate_candidates(tokens: list[str], names: list[str]) -> tuple[str | None, ...]:
@@ -976,7 +984,7 @@ def token_eunit(tokens: list[str]) -> str | None:
 
 
 def eunit_gate(names: list[str], tokens: list[str]) -> str | None:
-    return next(filter(present, (erlc_eunit(names), token_eunit(tokens))), None)
+    return first_present((erlc_eunit(names), token_eunit(tokens)))
 
 
 def basename_is(tokens: list[str], name: str, index: int) -> bool:
@@ -1012,9 +1020,8 @@ def docker_at(tokens: list[str], index: int) -> bool:
 
 
 def docker_inner(tokens: list[str]) -> str | None:
-    return next(
-        filter(present, map(partial(compose_run_target, tokens), filter(partial(docker_at, tokens), range(max(0, len(tokens) - 3))))),
-        None,
+    return first_present(
+        tuple(map(partial(compose_run_target, tokens), filter(partial(docker_at, tokens), range(max(0, len(tokens) - 3)))))
     )
 
 
@@ -1109,7 +1116,16 @@ def run_git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str] | N
 
 
 def ok_git(out: object) -> bool:
-    return False not in (out is not None, getattr(out, "returncode", 1) == 0)
+    chosen = (missing_status, git_status)[hasattr(out, "returncode")]
+    return chosen(out) == 0
+
+
+def missing_status(_out: object) -> int:
+    return 1
+
+
+def git_status(out: object) -> int:
+    return int(getattr(out, "returncode"))
 
 
 def stripped_out(out: subprocess.CompletedProcess[str]) -> str:

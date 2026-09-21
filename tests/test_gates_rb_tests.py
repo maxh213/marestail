@@ -173,3 +173,33 @@ def test_relative_path(tmp_path: Path) -> None:
 )
 def test_count_examples(output: str, expected: str) -> None:
     assert rb_tests.count_examples(output) == expected
+
+
+def test_list_field_defaults_missing_keys() -> None:
+    assert rb_tests.list_field({}, "missing_lines") == []
+    assert rb_tests.list_field({"missing_lines": [1]}, "missing_lines") == [1]
+
+
+def test_list_field_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        rb_tests.list_field({"missing_lines": {}}, "missing_lines")
+
+
+def test_span_lines_defaults_missing_arms() -> None:
+    assert rb_tests.span_lines({}, "arm") == []
+    assert rb_tests.span_lines({"arm": [1, 2]}, "arm") == [1, 2]
+
+
+def test_span_lines_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        rb_tests.span_lines({"arm": "x"}, "arm")
+
+
+def test_mapping_field_defaults_and_rejects_a_non_map() -> None:
+    assert rb_tests.mapping_field({}, "branch_lines") == {}
+    assert rb_tests.mapping_field({"branch_lines": {"a": [1]}}, "branch_lines") == {"a": [1]}
+
+
+def test_mapping_field_rejects_a_non_map() -> None:
+    with pytest.raises(TypeError, match=r"^map$"):
+        rb_tests.mapping_field({"branch_lines": []}, "branch_lines")

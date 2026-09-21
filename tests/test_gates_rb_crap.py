@@ -181,6 +181,38 @@ def test_score_and_describe(tmp_path: Path) -> None:
     assert _crap.describe(scored) == "a.rb:1 A#x crap=6.0 (cc=2, coverage=0%)"
 
 
+def test_comment_prefix_stops_at_hash() -> None:
+    assert rb_crap.comment_prefix("x # y # z") == "x "
+    assert rb_crap.comment_prefix("hello") == "hello"
+    assert rb_crap.HASH == "#"
+    assert rb_crap.CRAP_POWER == 3
+
+
+def test_boundary_ends_before_the_next_method() -> None:
+    assert rb_crap.boundary([1, 5, 9], 0, 20) == 4
+    assert rb_crap.boundary([1, 5, 9], 2, 20) == 20
+
+
+def test_line_delta_ignores_indented_equals() -> None:
+    assert rb_crap.line_delta("  =begin") == 0
+    assert rb_crap.line_delta("x = 1") == 0
+
+
+def test_method_end_line_defaults_to_start() -> None:
+    assert rb_crap.method_end_line({1: 4}, 1) == 4
+    assert rb_crap.method_end_line({1: 4}, 2) == 2
+
+
+def test_method_end_line_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^line$"):
+        rb_crap.method_end_line({}, None)  # type: ignore[arg-type]
+
+
+def test_body_touched_at_the_first_line() -> None:
+    assert rb_crap.body_touched(1, 1, {1}) is True
+    assert rb_crap.body_touched(1, 1, {2}) is False
+
+
 def test_above_sorts_worst_first() -> None:
     scored = [{"crap": 5.0}, {"crap": 4.0}, {"crap": 9.0}]
     assert _crap.above(scored, 4.0) == [{"crap": 9.0}, {"crap": 5.0}]

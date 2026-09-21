@@ -13,15 +13,18 @@ MAX_LINES = 60
 NOISE = ("npm notice", "npm warn", "npm WARN")
 TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>\S.*)$")
 FILE_PATH = "filePath"
+GATE = "ts.lint"
+TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
+EMPTY = ""
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.scoped and not ctx.changed_under(ctx.ts_root(), (".ts", ".tsx", ".js", ".jsx")):
-        return Result.skipped("ts.lint", "no changed typescript files")
+    if ctx.scoped and not ctx.changed_under(ctx.ts_root(), TS_SUFFIXES):
+        return Result.skipped(GATE, "no changed typescript files")
     findings = tsc_findings(ctx) + eslint_findings(ctx)
     summary = "tsc and eslint clean" if not findings else f"{len(findings)} problems"
-    return Result("ts.lint", not findings, summary, findings[:MAX_LINES], elapsed(started))
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def tsc_findings(ctx: Context) -> list[str]:
@@ -61,7 +64,7 @@ def eslint_report(ctx: Context, code: int, output: str) -> list[str]:
 
 
 def scoped_messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
-    return messages([file for file in report if ctx.in_scope(relative(file.get(FILE_PATH, ""), ctx))], ctx)
+    return messages([file for file in report if ctx.in_scope(relative(str_field(file, FILE_PATH), ctx))], ctx)
 
 
 def unscoped_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
@@ -69,7 +72,7 @@ def unscoped_messages(report: list[dict[str, Any]], ctx: Context, code: int, out
 
 
 def messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
-    return [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
+    return [describe(file, message, ctx) for file in report for message in list_field(file, "messages")]
 
 
 def eslint_lines(output: str) -> list[str]:
@@ -89,12 +92,35 @@ def parse(output: str) -> list[Any] | None:
         report, _ = json.JSONDecoder().raw_decode(output, start)
     except ValueError:
         return None
-    return report if isinstance(report, list) else None
+    return as_report(report)
+
+
+def as_report(report: object) -> list[Any] | None:
+    return report if type(report) is list else None
 
 
 def describe(file: dict[str, Any], message: dict[str, Any], ctx: Context) -> str:
-    text = str(message.get("message", "")).splitlines()[0] if message.get("message") else ""
-    return f"{relative(file.get(FILE_PATH, ''), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
+    text = first_line(str_field(message, "message"))
+    return f"{relative(str_field(file, FILE_PATH), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
+
+
+def str_field(data: dict[str, Any], key: str) -> str:
+    if key not in data or data[key] is None:
+        return EMPTY
+    return str(data[key])
+
+
+def list_field(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return []
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError("list")
+    return value
+
+
+def first_line(text: str) -> str:
+    return text.splitlines()[0] if text else EMPTY
 
 
 def meaningful(output: str) -> list[str]:

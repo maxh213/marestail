@@ -15,6 +15,7 @@ COVERAGE_JSON = RB_COVERAGE
 GATE = "rb.tests"
 RESULTSET = Path("coverage/.resultset.json")
 BRANCH_SPAN = re.compile(r"\[\s*:\w+\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*,\s*(\d+)\s*,\s*\d+\s*\]")
+EMPTY_LIST: list[Any] = []
 
 
 def run_gate(ctx: Context) -> Result:
@@ -112,13 +113,40 @@ def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
 
 
 def file_findings(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
-    lines = [f"{file}:{line} not covered" for line in data.get("missing_lines", []) if line_gated(line, gated)]
+    lines = [f"{file}:{line} not covered" for line in list_field(data, "missing_lines") if line_gated(line, gated)]
     return lines + untaken_arms(file, data, gated)
 
 
 def untaken_arms(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
-    spans = data.get("branch_lines", {})
-    return [f"{file} branch {arm} not taken" for arm in data.get("missing_branches", []) if arm_gated(spans.get(arm, []), gated)]
+    spans = mapping_field(data, "branch_lines")
+    return [f"{file} branch {arm} not taken" for arm in list_field(data, "missing_branches") if arm_gated(span_lines(spans, arm), gated)]
+
+
+def list_field(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError("list")
+    return value
+
+
+def mapping_field(data: dict[str, Any], key: str) -> dict[str, Any]:
+    if key not in data:
+        return {}
+    value = data[key]
+    if type(value) is not dict:
+        raise TypeError("map")
+    return value
+
+
+def span_lines(spans: dict[str, Any], arm: str) -> list[int]:
+    if arm not in spans:
+        return EMPTY_LIST
+    value = spans[arm]
+    if type(value) is not list:
+        raise TypeError("list")
+    return value
 
 
 def line_gated(line: int, gated: set[int] | None) -> bool:

@@ -76,7 +76,7 @@ def finish(findings: list[str], pmd: list[str], error: str | None, started: floa
 def suppression_findings(ctx: Context, files: list[Path]) -> list[str]:
     findings = []
     for path in java.in_scope(ctx, files):
-        for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1):
+        for number, line in enumerate(java.read_replaced(path).splitlines(), start=1):
             if SUPPRESSION.search(line):
                 findings.append(f"{java.rel(ctx, path)}:{number} warning suppressed in source; fix the code instead")
     return findings
@@ -106,7 +106,13 @@ def squash(text: str) -> str:
     return " ".join(text.split())[:200]
 
 
+def require_paths(classpath: object, classes: object) -> None:
+    if not isinstance(classpath, Path) or not isinstance(classes, Path):
+        raise TypeError("path")
+
+
 def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path, release: str | None) -> tuple[list[str], str | None]:
+    require_paths(classpath, classes)
     tools, error = java.pmd_classpath(ctx)
     if tools is None:
         return [], str(error)

@@ -933,14 +933,15 @@ def test_newest_fresh_mtime_key_and_stale(tmp_path: Path, monkeypatch: Any) -> N
     b = tmp_path / "b.jsonl"
     a.write_text("1")
     b.write_text("2")
-    times = {a: 1.0, b: 5.0}
+    times = {a: 5.0, b: 1.0}
     monkeypatch.setattr(collect, "dir_mtime", lambda path: times[path])
     monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 6.0)
-    assert collect.newest_fresh([a, b]) is b
+    assert collect.newest_fresh([a, b]) is a
+    assert collect.newest_fresh([b, a]) is a
     monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 5.0 + collect.TAIL_STALE_S)
-    assert collect.newest_fresh([b]) is b
+    assert collect.newest_fresh([a]) is a
     monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 5.0 + collect.TAIL_STALE_S + 0.1)
-    assert collect.newest_fresh([b]) is None
+    assert collect.newest_fresh([a]) is None
 
 
 def test_split_tail_boundary() -> None:
@@ -1032,6 +1033,13 @@ def test_ints_row_and_parse_ps_split() -> None:
 def test_gate_text_uses_max_elapsed() -> None:
     assert collect.gate_text([(1, "echo"), (5, "pytest")]) == "pytest 5s"
     assert collect.gate_text([(5, "pytest"), (1, "echo")]) == "pytest 5s"
+    assert collect.gate_text([(5, "echo"), (5, "pytest")]) == "echo 5s"
+
+
+def test_first_present_keeps_empty_text() -> None:
+    assert collect.first_present(("",)) == ""
+    assert collect.first_present((None, "x")) == "x"
+    assert collect.first_present((None,)) is None
 
 
 def test_push_level_walks_children() -> None:

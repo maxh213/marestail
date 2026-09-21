@@ -91,6 +91,23 @@ def test_parse_scoped(tmp_path: Path) -> None:
     assert rb_lint.parse(rubocop_report(tmp_path), ctx) == ["lib/tool.rb:9 Style/X: "]
 
 
+def test_failed_tail_keeps_the_last_characters() -> None:
+    assert rb_lint.failed_tail("x" * 250) == "x" * 200
+    assert rb_lint.failed_tail("  short  ") == "short"
+    assert rb_lint.OUTPUT_TAIL == 200
+
+
+def test_list_field_defaults_and_rejects_a_non_list() -> None:
+    assert rb_lint.list_field({}, "files") == []
+    assert rb_lint.list_field({"files": [{"path": "a.rb"}]}, "files") == [{"path": "a.rb"}]
+    assert rb_lint.OUTPUT_TAIL == 200
+
+
+def test_list_field_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        rb_lint.list_field({"files": {}}, "files")
+
+
 def test_parse_under_ruby_root(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"ruby": {"root": "web"}})
     output = json.dumps({"files": [{"path": "app/a.rb", "offenses": [{"cop_name": "C", "message": "m", "location": {"line": 2}}]}]})

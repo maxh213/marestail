@@ -10,7 +10,7 @@ from marestail import java
 from marestail.context import Context
 from marestail.gates import java_mutation
 from marestail.report import Result, result_seconds
-from tests.conftest import make_context
+from tests.conftest import make_context, reject_none
 
 APP = "src/main/java/app/App.java"
 CORE = "src/main/java/app/core/Core.java"
@@ -64,7 +64,7 @@ def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply
             )
         return reply
 
-    monkeypatch.setattr(java, "mvn", mvn)
+    monkeypatch.setattr(java, "mvn", reject_none(mvn))
     return calls
 
 
@@ -248,6 +248,14 @@ def test_describe_edge_cases(tmp_path: Path) -> None:
     assert java_mutation.describe(ctx, bare) == ":0 m: d ?"
     in_tests = element(mutation("MEMORY_ERROR", "app.Helper", "4", "Helper.java"))
     assert java_mutation.describe(ctx, in_tests) == "app.Helper:4 run: removed call to helper memory error"
+
+
+def test_before_dollar_keeps_the_outer_class() -> None:
+    assert java_mutation.before_dollar("a.b.Outer$Inner$X") == "a.b.Outer"
+    assert java_mutation.before_dollar("Outer") == "Outer"
+    assert java_mutation.xml_text(None) == ""
+    assert java_mutation.xml_text("x") == "x"
+    assert java_mutation.EMPTY == ""
 
 
 def test_viable(tmp_path: Path) -> None:

@@ -85,11 +85,17 @@ def cargo(ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: in
 
 
 def missing(code: int, output: str, tool: str) -> str | None:
+    require_missing(code, tool)
     if code == 127:
         return f"cargo is not installed: {INSTALL['cargo']}"
     if "no such command" in output.lower() or "is not installed for the toolchain" in output.lower():
         return f"cargo {tool} is not installed: {INSTALL[tool]}"
     return None
+
+
+def require_missing(code: object, tool: object) -> None:
+    if type(code) is not int or type(tool) is not str:
+        raise TypeError("missing")
 
 
 def skipped(ctx: Context, path: Path) -> bool:
@@ -169,6 +175,7 @@ def build_error(code: int, output: str, binary: Path) -> str | None:
 
 
 def staged_crate(ctx: Context) -> Path:
+    ctx = live(ctx)
     manifest = scan_input(CARGO_TOML)
     if manifest.parent == SCAN_DIR:
         return SCAN_DIR

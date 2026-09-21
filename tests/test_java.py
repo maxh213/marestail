@@ -77,6 +77,31 @@ def test_configured_list_rejects_none() -> None:
         java.configured_list(None)
 
 
+def test_locate_rejects_a_missing_ctx(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        java.locate(None, "app", "App.java")  # type: ignore[arg-type]
+
+
+def test_locate_rejects_a_non_str_package(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^path$"):
+        java.locate(ctx_at(tmp_path), 1, "App.java")  # type: ignore[arg-type]
+
+
+def test_require_names_and_locate_folders(tmp_path: Path) -> None:
+    java.require_names("app", "App.java")
+    ctx = ctx_at(tmp_path)
+    folders = [tmp_path / "src"]
+    assert java.locate_folders(ctx, folders) == folders
+    assert java.locate_folders(ctx, None) == java.source_roots(ctx) + java.test_roots(ctx)
+
+
+def test_read_replaced_keeps_invalid_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "a.java"
+    path.write_bytes(b"ok\xffend")
+    assert "\ufffd" in java.read_replaced(path)
+    assert java.REPLACE == "replace"
+
+
 def test_pom_properties_strips_namespace() -> None:
     properties = ET.Element("properties")
     child = ET.SubElement(properties, "{http://maven.apache.org/POM/4.0.0}maven.compiler.release")

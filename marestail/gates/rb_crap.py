@@ -16,6 +16,8 @@ from marestail.ruby import scan, scanned, sources
 
 COVERAGE_JSON = RB_COVERAGE
 GATE = "rb.crap"
+CRAP_POWER = 3
+HASH = "#"
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
 OPENER = re.compile(r"^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b")
 BLOCK_DO = re.compile(r"\bdo\b(?:\s*\|[^|]*\|)?\s*$")
@@ -67,7 +69,7 @@ def touched(ctx: Context, file: str, group: list[dict[str, Any]]) -> list[dict[s
 
 def touched_methods(ctx: Context, file: str, group: list[dict[str, Any]], gated: set[int]) -> list[dict[str, Any]]:
     ends = method_ranges(file_text(ctx, file), [fn["line"] for fn in group])
-    return [fn for fn in group if body_touched(fn["line"], ends.get(fn["line"], fn["line"]), gated)]
+    return [fn for fn in group if body_touched(fn["line"], method_end_line(ends, fn["line"]), gated)]
 
 
 def by_file(functions: list[dict[str, Any]], ctx: Context) -> dict[str, list[dict[str, Any]]]:
@@ -82,6 +84,15 @@ def file_text(ctx: Context, file: str) -> str:
         return (ctx.root / file).read_text(errors="replace")
     except OSError:
         return ""
+
+
+def method_end_line(ends: dict[int, int], start: int) -> int:
+    if type(start) is not int:
+        raise TypeError("line")
+    try:
+        return ends[start]
+    except KeyError:
+        return start
 
 
 def body_touched(start: int, end: int, gated: set[int]) -> bool:
@@ -114,10 +125,14 @@ def opens(code: str) -> int:
 
 
 def line_delta(line: str) -> int:
-    code = STRING.sub("", line).split("#", 1)[0]
+    code = comment_prefix(STRING.sub("", line))
     if code.lstrip().startswith("="):
         return 0
     return opens(code) - len(CLOSER.findall(code))
+
+
+def comment_prefix(line: str) -> str:
+    return line.split(HASH, 1)[0]
 
 
 def recorded_hits(line: int, lines: list[Any]) -> int | None:
@@ -144,5 +159,5 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
         "name": fn["name"],
         "cc": complexity,
         "cov": covered,
-        "crap": complexity**2 * (1 - covered) ** 3 + complexity,
+        "crap": complexity**2 * (1 - covered) ** CRAP_POWER + complexity,
     }

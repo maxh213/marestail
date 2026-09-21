@@ -127,6 +127,30 @@ def test_verdict_failures(tmp_path: Path, report: dict[str, Any], summary: str) 
     assert (result.ok, result.summary, result.findings) == (False, summary, ["log line"])
 
 
+def test_is_mutant_requires_a_dict_scenario() -> None:
+    assert rs_mutation.is_mutant({"scenario": ["Mutant"]}) is False
+    assert rs_mutation.is_mutant({"scenario": {"Mutant": {}}}) is True
+
+
+def test_after_colon_splits_once() -> None:
+    assert rs_mutation.after_colon("replace x with y: z in f", "f") == "z"
+    assert rs_mutation.after_colon("plain", "f") == "plain"
+
+
+def test_verdict_rejects_a_missing_output(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^output$"):
+        rs_mutation.verdict(make_context(tmp_path), {"outcomes": []}, None, 0.0)  # type: ignore[arg-type]
+
+
+def test_require_output_keeps_text() -> None:
+    rs_mutation.require_output("log")
+
+
+def test_clear_outcomes_ignores_a_missing_folder(tmp_path: Path) -> None:
+    rs_mutation.clear_outcomes(tmp_path / "missing")
+    assert rs_mutation.IGNORE_MISSING is True
+
+
 def test_verdict_caps_findings(tmp_path: Path) -> None:
     report = {"outcomes": [mutant("a.rs", n, "f", "n", "MissedMutant") for n in range(70)]}
     result = rs_mutation.verdict(make_context(tmp_path), report, "", 0.0)

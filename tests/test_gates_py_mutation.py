@@ -119,6 +119,17 @@ def test_nothing_to_mutate(scope: MutationScope, patterns: list[str], expected: 
     assert py_mutation.nothing_to_mutate(scope, patterns) is expected
 
 
+def test_mutant_prefix_strips_a_trailing_star() -> None:
+    assert py_mutation.mutant_prefix("marestail.report.*") == "marestail.report."
+    assert py_mutation.mutant_prefix("plain") == "plain"
+    assert py_mutation.STAR == "*"
+
+
+def test_mutation_summary_rejects_a_missing_note() -> None:
+    with pytest.raises(TypeError, match=r"^note$"):
+        py_mutation.mutation_summary(1, [], None)  # type: ignore[arg-type]
+
+
 def test_exit_codes_without_the_key(tmp_path: Path) -> None:
     meta = tmp_path / "x.py.meta"
     meta.write_text("{}")

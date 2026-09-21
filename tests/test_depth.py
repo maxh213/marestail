@@ -10,7 +10,7 @@ from marestail import depth, dotnet, elixir, erlang, java, javascript, ruby, rus
 from marestail.config import Config
 from marestail.context import Context
 from marestail.depth import Module
-from tests.conftest import FakeRun
+from tests.conftest import FakeRun, required_timeout
 
 SCANNERS = ["python", "ts", "elixir", "erlang", "ruby", "dotnet", "rust", "java"]
 
@@ -314,8 +314,8 @@ def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple
 
     monkeypatch.setattr(erlang, "source_files", source_files)
 
-    def escript(ctx: Context, script: str, args: list[str], **_options: object) -> tuple[int, str]:
-        calls.append((ctx, script, args))
+    def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
+        calls.append((ctx, script, args, required_timeout(timeout)))
         return reply
 
     monkeypatch.setattr(erlang, "escript", escript)
@@ -330,7 +330,10 @@ def test_erlang_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         Module("src/a.erl", ["f/1"], 2, ["src/a.erl:5 f/1 only forwards its arguments"]),
         Module("src/b.erl", [], 0, []),
     ]
-    assert calls == [Context(config=config), (Context(config=config), "depth.escript", [str(tmp_path / "src/a.erl")])]
+    assert calls == [
+        Context(config=config),
+        (Context(config=config), "depth.escript", [str(tmp_path / "src/a.erl")], erlang.TOOL_TIMEOUT),
+    ]
 
 
 def test_erlang_modules_empty_and_failing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

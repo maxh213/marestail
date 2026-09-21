@@ -120,3 +120,13 @@ def test_scoped_percent(tmp_path: Path) -> None:
 )
 def test_count_tests(output: str, expected: str) -> None:
     assert ex_tests.count_tests(output) == expected
+
+
+def test_counted_defaults_missing_keys_to_zero() -> None:
+    assert ex_tests.counted({}, "covered") == 0
+    assert ex_tests.counted({"covered": 4}, "covered") == 4
+
+
+def test_passed_before_without_passed_is_blank() -> None:
+    assert ex_tests.passed_before("nothing here") == ""
+    assert ex_tests.MISSING_COUNT == ""

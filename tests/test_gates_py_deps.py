@@ -87,3 +87,20 @@ def test_module_paths(tmp_path: Path) -> None:
 )
 def test_broken_lines(output: str, expected: list[str]) -> None:
     assert py_deps.broken_lines(output) == expected
+
+
+def test_sliced_from_rejects_a_missing_start() -> None:
+    with pytest.raises(TypeError, match=r"^start$"):
+        py_deps.sliced_from(["a"], None)  # type: ignore[arg-type]
+
+
+def test_sliced_from_caps_at_sixty() -> None:
+    lines = [f"x{n}" for n in range(70)]
+    assert py_deps.sliced_from(lines, 0) == lines[:60]
+    assert py_deps.sliced_from(lines, 10) == lines[10:70][:60]
+
+
+def test_is_text_treats_box_drawing_as_non_text() -> None:
+    assert py_deps.is_text("─") is False
+    assert py_deps.is_text("hello") is True
+    assert py_deps.is_text("".join(py_deps.BOX_DRAWING)) is False

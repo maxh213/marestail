@@ -54,7 +54,13 @@ def module_paths(module: str, ctx: Context) -> list[Path]:
 
 def broken_lines(output: str) -> list[str]:
     interesting = [line for line in (raw.strip() for raw in output.splitlines()) if is_text(line)]
-    return interesting[first_broken(interesting) :][:60]
+    return sliced_from(interesting, first_broken(interesting))
+
+
+def sliced_from(lines: list[str], start: int) -> list[str]:
+    if type(start) is not int:
+        raise TypeError("start")
+    return lines[start:][:60]
 
 
 def is_text(line: str) -> bool:

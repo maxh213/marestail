@@ -11,7 +11,7 @@ from marestail import java
 from marestail.context import Context
 from marestail.gates import java_lint
 from marestail.report import Result, result_seconds
-from tests.conftest import make_context
+from tests.conftest import make_context, reject_none
 
 APP = "src/main/java/app/App.java"
 TEST = "src/test/java/app/AppTest.java"
@@ -47,6 +47,16 @@ def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
     return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
 
 
+def test_pmd_findings_rejects_a_missing_path(tmp_path: Path) -> None:
+    ctx = project(tmp_path)
+    with pytest.raises(TypeError, match=r"^path$"):
+        java_lint.pmd_findings(ctx, [], tmp_path, None, None)  # type: ignore[arg-type]
+
+
+def test_require_paths_accepts_paths(tmp_path: Path) -> None:
+    java_lint.require_paths(tmp_path, tmp_path)
+
+
 class Seams:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
         self.root = root
@@ -54,9 +64,9 @@ class Seams:
         self.diagnostics: tuple[Any, str | None] = ([], None)
         self.classpath: tuple[Path | None, str | None] = (root / ".marestail" / "java-classpath.txt", None)
         self.tools: tuple[str | None, str | None] = ("/m2/pmd.jar", None)
-        monkeypatch.setattr(java, "classpath", lambda ctx: self.classpath)
-        monkeypatch.setattr(java, "pmd_classpath", lambda ctx: self.tools)
-        monkeypatch.setattr(java, "scan", self.scan)
+        monkeypatch.setattr(java, "classpath", reject_none(lambda ctx: self.classpath))
+        monkeypatch.setattr(java, "pmd_classpath", reject_none(lambda ctx: self.tools))
+        monkeypatch.setattr(java, "scan", reject_none(self.scan))
 
     def scan(self, ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
         self.scans.append((mode, paths, extra))

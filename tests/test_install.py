@@ -161,6 +161,20 @@ def test_mapping_default_rejects_a_missing_key_name() -> None:
         install.mapping_default({}, None, 1)  # type: ignore[arg-type]
 
 
+def test_merge_cursor_hook_passes_the_version_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+
+    def mapping_default(data: dict[str, Any], key: str, default: Any) -> Any:
+        seen.append(default)
+        return 1
+
+    monkeypatch.setattr(install, "mapping_default", mapping_default)
+    path = tmp_path / "hooks.json"
+    path.write_text("{}")
+    install.merge_cursor_hook(path)
+    assert seen == [install.VERSION_DEFAULT]
+
+
 def test_trust_entry_marks_the_folder_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", lambda: 9.7)
     assert install.trust_entry() == {install.TRUSTED: True, install.DECIDED: 9}
@@ -244,6 +258,8 @@ def test_trust_grok_folder_with_empty_store(home: Path, target: Path) -> None:
     store.write_text("folders = {}\n")
     install.trust_grok_folder(target)
     assert store.read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1234\n'
+    folders = install.trusted_folders(store)
+    assert folders[str(target.resolve())] == {install.TRUSTED: True, install.DECIDED: 1234}
 
 
 def test_trust_grok_folder_reports_write_errors(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:

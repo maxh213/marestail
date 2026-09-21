@@ -142,6 +142,20 @@ def test_mutator_name_keeps_the_last_segment() -> None:
     assert ex_mutation.ELIXIR_SUFFIXES == (".ex", ".exs")
 
 
+def test_switches_default_to_no_filter(tmp_path: Path) -> None:
+    assert ex_mutation.switches(make_context(tmp_path)) == ["--no-filter"]
+
+
+def test_flag_off_only_is_false() -> None:
+    assert ex_mutation.flag_off(False) is True
+    assert ex_mutation.flag_off(True) is False
+
+
+def test_flag_off_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^flag$"):
+        ex_mutation.flag_off(None)
+
+
 def test_mutation_list_missing_key_is_empty() -> None:
     assert ex_mutation.mutation_list({}) == []
     assert ex_mutation.mutation_list({"mutations": [{"status": "killed"}]}) == [{"status": "killed"}]

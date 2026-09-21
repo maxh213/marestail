@@ -53,6 +53,13 @@ def writes_session(root: Path, report: str, output: str = "") -> Callable[[list[
 
 def test_mutation_default_is_enabled() -> None:
     assert rb_mutation.MUTATION_DEFAULT is True
+    assert rb_mutation.mutation_off(True) is False
+    assert rb_mutation.mutation_off(False) is True
+
+
+def test_mutation_off_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^flag$"):
+        rb_mutation.mutation_off(None)
 
 
 def test_disabled(tmp_path: Path) -> None:
@@ -171,6 +178,40 @@ def test_label(identification: str, expected: tuple[str, int]) -> None:
 
 def test_sessions_without_folder(tmp_path: Path) -> None:
     assert rb_mutation.sessions(tmp_path) == set()
+
+
+def test_exec_prefix_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^exec$"):
+        rb_mutation.exec_prefix(None)
+
+
+def test_with_note_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^note$"):
+        rb_mutation.with_note("all killed", None)  # type: ignore[arg-type]
+
+
+def test_colons_from_right_include_a_trailing_colon() -> None:
+    assert rb_mutation.colons_from_right("a:b:") == [3, 1]
+
+
+def test_right_colon_splits_from_the_end() -> None:
+    assert rb_mutation.right_colon("a:b:c") == ("a:b", ":", "c")
+
+
+def test_mutable_skips_vendor() -> None:
+    assert rb_mutation.mutable(Path("vendor/a.rb")) is False
+    assert rb_mutation.mutable(Path("app/a.rb")) is True
+
+
+def test_constants_replace_invalid_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "a.rb"
+    path.write_bytes(b"class A\n\xff\n")
+    assert "A" in rb_mutation.constants(path)
+    assert rb_mutation.REPLACE == "replace"
+
+
+def test_label_keeps_colons_in_the_owner() -> None:
+    assert rb_mutation.label("A#b:app/foo:bar.rb:12") == ("A#b:app/foo", 12)
 
 
 @pytest.mark.parametrize(

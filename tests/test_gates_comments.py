@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.gates import comments
-from tests.conftest import Clock, gate_shape, make_context, reject_none
+from tests.conftest import Clock, gate_shape, make_context, reject_none, required_timeout
 
 EVERYWHERE = {"comments": {"paths": ["."]}}
 
@@ -23,12 +23,12 @@ class ErlangScript:
         self.source = source
         self.reply = reply
         self.hint = hint
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[str, list[str], int]] = []
 
-    def __call__(self, ctx: object, script: str, args: list[str], **_options: object) -> tuple[int, str]:
+    def __call__(self, ctx: object, script: str, args: list[str], cwd: object = None, *, timeout: int) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
-        self.calls.append((script, args))
+        self.calls.append((script, args, required_timeout(timeout)))
         return self.reply[0], self.reply[1].replace("FILE", str(self.source))
 
     def hinted(self, code: object, output: object) -> str | None:
@@ -202,7 +202,7 @@ def test_erlang_findings(
     monkeypatch.setattr(erlang, "escript", script)
     monkeypatch.setattr(erlang, "hint", script.hinted)
     assert comments.erlang_findings(make_context(tmp_path, EVERYWHERE)) == expected
-    assert script.calls == [("comments.escript", [str(source)])]
+    assert script.calls == [("comments.escript", [str(source)], erlang.TOOL_TIMEOUT)]
 
 
 def test_erlang_findings_without_files(tmp_path: Path) -> None:
@@ -357,18 +357,18 @@ def test_elixir_findings_scans_exs(tmp_path: Path, fake_run: Any) -> None:
 
 def test_erlang_findings_scans_hrl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = write(tmp_path, "include/a.hrl", "% c\n")
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], int]] = []
 
-    def escript(ctx: object, script: str, args: list[str], **_options: object) -> tuple[int, str]:
+    def escript(ctx: object, script: str, args: list[str], cwd: object = None, *, timeout: int) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
-        calls.append(args)
+        calls.append((args, required_timeout(timeout)))
         return 0, json.dumps([{"file": str(source), "line": 1, "text": "% c"}])
 
     monkeypatch.setattr(erlang, "escript", escript)
     monkeypatch.setattr(erlang, "hint", lambda code, output: None)
     assert comments.erlang_findings(make_context(tmp_path, EVERYWHERE)) == ["include/a.hrl:1 comment: % c"]
-    assert calls == [[str(source)]]
+    assert calls == [([str(source)], erlang.TOOL_TIMEOUT)]
 
 
 def test_ruby_findings_scans_rake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

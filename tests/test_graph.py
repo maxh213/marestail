@@ -8,7 +8,7 @@ import pytest
 from marestail import dotnet, erlang, graph, java, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
-from tests.conftest import FakeRun, make_context
+from tests.conftest import FakeRun, make_context, required_timeout
 
 EDGES = [{"from": "A", "to": "B", "symbol": "s", "fun": "f/1"}, {"from": "B", "to": "C", "symbol": "t", "fun": "g/0"}]
 
@@ -192,16 +192,16 @@ def test_rust_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 class FakeErlang:
     def __init__(self, erlc: tuple[int, str], escript: tuple[int, str]) -> None:
         self.replies = {"erlc": erlc, "escript": escript}
-        self.calls: list[tuple[Context, str, list[str]]] = []
+        self.calls: list[tuple[Context, str, list[str], int]] = []
 
-    def erlc(self, ctx: Context, args: list[str], **_options: object) -> tuple[int, str]:
-        self.calls.append((ctx, "erlc", args))
+    def erlc(self, ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
+        self.calls.append((ctx, "erlc", args, required_timeout(timeout)))
         (Path(args[2]) / "b.beam").write_text("")
         (Path(args[2]) / "a.beam").write_text("")
         return self.replies["erlc"]
 
-    def escript(self, ctx: Context, script: str, args: list[str], **_options: object) -> tuple[int, str]:
-        self.calls.append((ctx, script, args))
+    def escript(self, ctx: Context, script: str, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
+        self.calls.append((ctx, script, args, required_timeout(timeout)))
         return self.replies["escript"]
 
 
@@ -220,9 +220,13 @@ def test_erlang_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (ebin / "stale.beam").write_text("")
     assert graph.erlang_graph(config(tmp_path, {"erlang": {}})) == "## Erlang modules\nA -> B (f/1)\nB -> C (g/0)"
     assert fake.calls[0][0].config.root == tmp_path
-    assert fake.calls[0][1:] == ("erlc", ["+debug_info", "-o", str(ebin), str(tmp_path / "a.erl"), str(tmp_path / "b.erl")])
+    assert fake.calls[0][1:] == (
+        "erlc",
+        ["+debug_info", "-o", str(ebin), str(tmp_path / "a.erl"), str(tmp_path / "b.erl")],
+        erlang.ERLC_TIMEOUT,
+    )
     assert fake.calls[1][0].config.root == tmp_path
-    assert fake.calls[1][1:] == ("deps.escript", [str(ebin / "a.beam"), str(ebin / "b.beam")])
+    assert fake.calls[1][1:] == ("deps.escript", [str(ebin / "a.beam"), str(ebin / "b.beam")], erlang.TOOL_TIMEOUT)
 
 
 @pytest.mark.parametrize(

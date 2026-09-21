@@ -10,7 +10,7 @@ from marestail import java
 from marestail.context import Context
 from marestail.gates import java_crap
 from marestail.report import Result, result_seconds
-from tests.conftest import make_context
+from tests.conftest import make_context, reject_none
 
 APP = "src/main/java/app/App.java"
 CORE = "src/main/java/app/Core.java"
@@ -48,7 +48,7 @@ def fake_scan(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) ->
         seen.append((mode, paths))
         return reply
 
-    monkeypatch.setattr(java, "scan", scan)
+    monkeypatch.setattr(java, "scan", reject_none(scan))
     return seen
 
 
@@ -149,6 +149,12 @@ def test_score(tmp_path: Path) -> None:
         "cov": 0.4,
         "crap": 5**2 * 0.6**3 + 5,
     }
+
+
+def test_excluded_coverage_is_full(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java, "coverage_excluded", lambda ctx, file: True)
+    scored = java_crap.score(make_context(tmp_path), MEMBERS[0], COVERAGE)
+    assert scored["cov"] == java_crap.COVERED == 1.0
 
 
 def test_score_without_file_coverage(tmp_path: Path) -> None:

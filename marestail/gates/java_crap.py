@@ -12,6 +12,7 @@ FILE = "file"
 START = "startLine"
 END = "endLine"
 CRAP = "crap"
+COVERED = 1.0
 
 
 def run_gate(ctx: Context) -> Result:
@@ -56,7 +57,9 @@ def touches_hunk(member: dict[str, Any], ctx: Context) -> bool:
 def score(ctx: Context, member: dict[str, Any], coverage: dict[str, Any]) -> dict[str, Any]:
     complexity = member["complexity"]
     covered = (
-        1.0 if java.coverage_excluded(ctx, member[FILE]) else window(coverage["files"].get(member[FILE], {}), member[START], member[END])
+        COVERED
+        if java.coverage_excluded(ctx, member[FILE])
+        else window(coverage["files"].get(member[FILE], {}), member[START], member[END])
     )
     return {
         FILE: member[FILE],

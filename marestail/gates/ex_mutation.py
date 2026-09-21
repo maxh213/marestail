@@ -117,11 +117,17 @@ def command(ctx: Context, files: list[str]) -> list[str]:
 
 def switches(ctx: Context) -> list[str]:
     flags = []
-    if not bool(ctx.elixir("muex_filter", False)):
+    if flag_off(ctx.elixir("muex_filter", False)):
         flags.append("--no-filter")
-    if not ctx.elixir("muex_optimize", True):
+    if flag_off(ctx.elixir("muex_optimize", True)):
         flags.append("--no-optimize")
     return flags
+
+
+def flag_off(value: object) -> bool:
+    if type(value) is not bool:
+        raise TypeError("flag")
+    return value is False
 
 
 def option(flag: str, value: Any) -> list[str]:

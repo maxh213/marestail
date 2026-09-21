@@ -15,6 +15,7 @@ IGNORED = {"NON_VIABLE"}
 INSTALL = "declare org.pitest:pitest-maven with the org.pitest:pitest-junit5-plugin dependency in pom.xml; copy templates/java-pitest.xml"
 STATUS = "status"
 NO_MUTANTS = "no mutants were generated"
+EMPTY = ""
 
 
 def run_gate(ctx: Context) -> Result:
@@ -32,7 +33,7 @@ def pom_problem(ctx: Context) -> Result | None:
     error = java.require_pom(ctx)
     if error:
         return Result(GATE, False, error, [], 0.0)
-    if PITEST.split(":")[1] not in java.pom(ctx).read_text(errors="replace"):
+    if PITEST.split(":")[1] not in java.read_replaced(java.pom(ctx)):
         return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"], 0.0)
     return None
 
@@ -104,7 +105,7 @@ def class_globs(name: str | None) -> list[str]:
 
 
 def test_glob(name: str | None) -> str:
-    package = (name or "").rpartition(".")[0]
+    package = xml_text(name).rpartition(".")[0]
     return f"{package}.*" if package else "*"
 
 
@@ -124,6 +125,14 @@ def describe(ctx: Context, mutant: ET.Element) -> str:
 
 
 def mutant_location(ctx: Context, mutant: ET.Element) -> str:
-    owner = (mutant.findtext("mutatedClass") or "").split("$", 1)[0]
-    path = java.locate(ctx, java.package_dir(owner), mutant.findtext("sourceFile") or "", java.source_roots(ctx))
+    owner = before_dollar(xml_text(mutant.findtext("mutatedClass")))
+    path = java.locate(ctx, java.package_dir(owner), xml_text(mutant.findtext("sourceFile")), java.source_roots(ctx))
     return java.rel(ctx, path) if path is not None else owner
+
+
+def xml_text(value: str | None) -> str:
+    return value if value is not None else EMPTY
+
+
+def before_dollar(text: str) -> str:
+    return text.split("$", 1)[0]

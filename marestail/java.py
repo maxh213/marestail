@@ -27,6 +27,7 @@ MISSING_TOOL = 127
 STAMP = "stamp"
 NS_CLOSE = "}"
 EMPTY = ""
+REPLACE = "replace"
 OUTPUT_TAIL = 300
 MISSING = -1
 EMPTY_PATTERNS: list[str] = []
@@ -68,6 +69,10 @@ def output_tail(output: str) -> str:
     return output.strip()[-OUTPUT_TAIL:]
 
 
+def read_replaced(path: Path) -> str:
+    return path.read_text(errors=REPLACE)
+
+
 def tool(ctx: Context, name: str) -> str:
     home = ctx.java("java_home") or os.environ.get("JAVA_HOME")
     return str(Path(str(home)) / "bin" / name) if home else name
@@ -82,6 +87,7 @@ def mvn_command(ctx: Context) -> list[str]:
 
 
 def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = None) -> tuple[int, str]:
+    ctx = live(ctx)
     target = ["-f", str(pom)] if pom else []
     return run([*mvn_command(ctx), "-B", "-ntp", *target, *args], cwd=ctx.java_root(), timeout=timeout)
 
@@ -208,11 +214,22 @@ def class_name(ctx: Context, path: Path) -> str | None:
 
 
 def locate(ctx: Context, package: str, file_name: str, folders: list[Path] | None = None) -> Path | None:
-    for folder in folders if folders is not None else source_roots(ctx) + test_roots(ctx):
+    ctx = live(ctx)
+    require_names(package, file_name)
+    for folder in locate_folders(ctx, folders):
         candidate = folder / package / file_name
         if candidate.is_file():
             return candidate
     return None
+
+
+def require_names(package: object, file_name: object) -> None:
+    if type(package) is not str or type(file_name) is not str:
+        raise TypeError("path")
+
+
+def locate_folders(ctx: Context, folders: list[Path] | None) -> list[Path]:
+    return folders if folders is not None else source_roots(ctx) + test_roots(ctx)
 
 
 def excluded(ctx: Context, relative: str, key: str) -> bool:
@@ -296,6 +313,7 @@ def run_scanner(ctx: Context, mode: str, paths: list[Path], extra: list[str]) ->
 
 
 def classpath(ctx: Context) -> tuple[Path | None, str | None]:
+    ctx = live(ctx)
     out = ctx.work / "java-classpath.txt"
     out.unlink(missing_ok=True)
     code, output = mvn(ctx, [BUILD_CLASSPATH, f"-Dmdep.outputFile={out}", "-Dmdep.includeScope=test"])
@@ -304,6 +322,7 @@ def classpath(ctx: Context) -> tuple[Path | None, str | None]:
 
 
 def pmd_classpath(ctx: Context) -> tuple[str | None, str | None]:
+    ctx = live(ctx)
     folder = ctx.work / "java-tools"
     out, stamp = folder / "pmd.classpath", folder / STAMP
     digest = digest_of(TOOLS_POM)

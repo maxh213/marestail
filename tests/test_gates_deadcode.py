@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, ruby, rust
 from marestail.gates import deadcode
-from tests.conftest import gate_shape, make_context, reject_none
+from tests.conftest import gate_shape, make_context, reject_none, required_timeout
 
 VULTURE = "\n".join(
     [
@@ -378,16 +378,16 @@ class FakeErlang:
             (self.ebin / name).write_text("")
         return self.ebin
 
-    def erlc(self, ctx: Any, args: list[str], timeout: int) -> tuple[int, str]:
+    def erlc(self, ctx: Any, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
-        self.calls.append(("erlc", args, timeout))
+        self.calls.append(("erlc", args, required_timeout(timeout)))
         return self.compiled
 
-    def escript(self, ctx: Any, script: str, args: list[str], timeout: int) -> tuple[int, str]:
+    def escript(self, ctx: Any, script: str, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
         if ctx is None:
             raise TypeError("ctx")
-        self.calls.append(("escript", script, args, timeout))
+        self.calls.append(("escript", script, args, required_timeout(timeout)))
         return self.xref
 
 

@@ -19,6 +19,9 @@ FRAME = re.compile(r"at ([\w.$]+)\.[\w$<>]+\(([\w$]+\.java):(\d+)\)")
 NO_MESSAGE = "no message"
 LINES = "lines"
 FILES = "files"
+EMPTY = ""
+PACKAGE = "package"
+JAVA_SUFFIX = ".java"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -97,7 +100,7 @@ def failure_lines(ctx: Context, cases: list[ET.Element]) -> list[str]:
 
 
 def failure_line(ctx: Context, case: ET.Element, problem: ET.Element) -> str:
-    return f"{where(ctx, case, problem.text or '')} {case.get('classname')}.{case.get('name')} failed: {first_message(problem)[:200]}"
+    return f"{where(ctx, case, xml_text(problem.text))} {xml_attr(case, 'classname')}.{xml_attr(case, 'name')} failed: {first_message(problem)[:200]}"
 
 
 def first_message(problem: ET.Element) -> str:
@@ -105,7 +108,7 @@ def first_message(problem: ET.Element) -> str:
 
 
 def where(ctx: Context, case: ET.Element, trace: str) -> str:
-    return trace_location(ctx, trace) or class_location(ctx, case.get("classname") or "")
+    return trace_location(ctx, trace) or class_location(ctx, xml_attr(case, "classname"))
 
 
 def trace_location(ctx: Context, trace: str) -> str | None:
@@ -117,13 +120,34 @@ def trace_location(ctx: Context, trace: str) -> str | None:
 
 
 def class_location(ctx: Context, owner: str) -> str:
-    path = java.locate(ctx, java.package_dir(owner), owner.rsplit(".", 1)[-1].split("$", 1)[0] + ".java")
+    path = java.locate(ctx, java.package_dir(owner), java_file_name(owner))
     return f"{java.rel(ctx, path)}:1" if path is not None else f"{java.rel(ctx, java.pom(ctx))}:1"
+
+
+def java_file_name(owner: str) -> str:
+    return before_mark(after_last(owner, "."), "$") + JAVA_SUFFIX
+
+
+def after_last(text: str, mark: str) -> str:
+    return text.rsplit(mark, 1)[-1]
+
+
+def before_mark(text: str, mark: str) -> str:
+    return text.split(mark, 1)[0]
+
+
+def xml_text(value: str | None) -> str:
+    return value if value is not None else EMPTY
+
+
+def xml_attr(node: ET.Element, key: str) -> str:
+    value = node.get(key)
+    return value if value is not None else EMPTY
 
 
 def normalise(ctx: Context, report: ET.Element) -> dict[str, Any]:
     files: dict[str, dict[str, Any]] = {}
-    for package in report.iter("package"):
+    for package in report.iter(PACKAGE):
         files.update(package_files(ctx, package))
     return {FILES: files, "totals": {"percent_covered": percent_covered(files)}}
 
@@ -131,7 +155,7 @@ def normalise(ctx: Context, report: ET.Element) -> dict[str, Any]:
 def package_files(ctx: Context, package: ET.Element) -> list[tuple[str, dict[str, Any]]]:
     found = []
     for source in package.findall("sourcefile"):
-        path = java.locate(ctx, package.get("name", ""), source.get("name", ""), java.source_roots(ctx))
+        path = java.locate(ctx, xml_attr(package, "name"), xml_attr(source, "name"), java.source_roots(ctx))
         if path is not None and not java.coverage_excluded(ctx, java.rel(ctx, path)):
             found.append((java.rel(ctx, path), source_coverage(source)))
     return found

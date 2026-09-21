@@ -37,7 +37,7 @@ def run_gate(ctx: Context) -> Result:
     patterns = mutant_patterns(ctx, scope.files or [])
     if nothing_to_mutate(scope, patterns):
         return Result.skipped(GATE, "no changed python sources")
-    return mutate(ctx, patterns, scope.note, started)
+    return mutate(ctx, patterns, str(scope.note), started)
 
 
 def nothing_to_mutate(scope: MutationScope, patterns: list[str]) -> bool:
@@ -61,6 +61,8 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
 
 
 def mutation_summary(total: int, survivors: list[str], note: str) -> str:
+    if type(note) is not str:
+        raise TypeError("note")
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
     return summary + (f" {note}" if note else "")
 
@@ -84,7 +86,7 @@ def module_name(root: Path, file: Path) -> str:
 
 
 def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str]]:
-    prefixes = tuple(pattern.rstrip("*") for pattern in patterns)
+    prefixes = tuple(mutant_prefix(pattern) for pattern in patterns)
     statuses = mutant_statuses(ctx.python_root() / "mutants", prefixes)
     return len(statuses), [f"{name}: {status}" for name, status in statuses if status not in PASSING]
 
@@ -111,3 +113,10 @@ def codes_field(data: dict[str, Any]) -> Any:
 
 def selected(name: str, prefixes: tuple[str, ...]) -> bool:
     return not prefixes or name.startswith(prefixes)
+
+
+STAR = "*"
+
+
+def mutant_prefix(pattern: str) -> str:
+    return pattern[: -len(STAR)] if pattern.endswith(STAR) else pattern

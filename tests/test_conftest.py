@@ -77,6 +77,15 @@ def test_reject_none_rejects_none() -> None:
         reject_ctx(None)
 
 
+def test_required_timeout_keeps_an_int() -> None:
+    assert conftest.required_timeout(600) == 600
+
+
+def test_required_timeout_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^timeout$"):
+        conftest.required_timeout(None)
+
+
 def test_git_try_show_toplevel() -> None:
     completed = conftest.git_try("rev-parse", "--show-toplevel")
     assert completed.returncode == 0

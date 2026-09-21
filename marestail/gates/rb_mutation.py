@@ -19,18 +19,25 @@ MUTANT_TAIL = re.compile(r":(\d+):(\S+)")
 RESULTS_LINE = re.compile(r"^Results:\s*(\d+)$", re.MULTILINE)
 MAX_FINDINGS = 60
 INSTALL = 'add gem "mutant" and gem "mutant-rspec" to the Gemfile and run bundle install'
+REPLACE = "replace"
 
 Failure = tuple[str, int, str, str]
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.ruby("mutation", MUTATION_DEFAULT) is False:
+    if mutation_off(ctx.ruby("mutation", MUTATION_DEFAULT)):
         return Result.skipped(GATE, "disabled: [ruby] mutation = false")
     scope = ctx.mutation_files("ruby", ctx.ruby_root(), (".rb",))
     if scope.mode == "error":
         return Result(GATE, False, scope.note, [], elapsed(started))
     return scoped_run(ctx, scope, started)
+
+
+def mutation_off(value: object) -> bool:
+    if type(value) is not bool:
+        raise TypeError("flag")
+    return value is False
 
 
 def scoped_run(ctx: Context, scope: MutationScope, started: float) -> Result:
@@ -119,13 +126,15 @@ def verdict(total: int, failures: list[Failure], output: str, started: float, no
 
 
 def with_note(summary: str, note: str) -> str:
+    if type(note) is not str:
+        raise TypeError("note")
     return f"{summary} {note}" if note else summary
 
 
 def stdout_findings(output: str, ctx: Context) -> list[Failure]:
     failures = []
     for kind, subject, line in identifications(output):
-        syntax, _, path = subject.rpartition(":")
+        syntax, _, path = right_colon(subject)
         failures.append((relative(path, ctx), int(line), syntax or "?", kind))
     return failures
 
@@ -142,18 +151,45 @@ def identification(line: str) -> tuple[str, str, str] | None:
     return None if match is None else (kind, rest[: match.start()], match.group(1))
 
 
+def right_colon(text: str) -> tuple[str, str, str]:
+    index = text.rfind(":")
+    if index == -1:
+        return "", "", text
+    return text[:index], ":", text[index + 1 :]
+
+
 def colons_from_right(text: str) -> list[int]:
-    return [at for at in range(len(text) - 1, 0, -1) if text[at] == ":"]
+    last = len(text) - 1
+    return [at for at in range(last, 0, -1) if text[at] == ":"]
+
+
+BUNDLE_EXEC = ["bundle", "exec"]
+BUNDLE = ["bundle"]
 
 
 def bundler(ctx: Context) -> list[str]:
-    prefix = listify(ctx.ruby("exec", ["bundle", "exec"]))
-    return prefix[:-1] or ["bundle"]
+    prefix = exec_prefix(ctx.ruby("exec", BUNDLE_EXEC))
+    return prefix[:-1] or BUNDLE
+
+
+def exec_prefix(value: object) -> list[str]:
+    if value is None:
+        raise TypeError("exec")
+    return listify(value)
 
 
 def sessions(root: Path) -> set[Path]:
     folder = root / RESULTS_DIR
-    return set(folder.glob("*.json")) if folder.is_dir() else set()
+    chosen = (empty_sessions, json_sessions)[folder.is_dir()]
+    return chosen(folder)
+
+
+def empty_sessions(_folder: Path) -> set[Path]:
+    return set()
+
+
+def json_sessions(folder: Path) -> set[Path]:
+    return set(folder.glob("*.json"))
 
 
 def mutable(path: Path) -> bool:
@@ -170,17 +206,25 @@ def changed_subjects(ctx: Context, files: list[str]) -> list[str]:
 
 def constants(path: Path) -> set[str]:
     try:
-        text = path.read_text(errors="replace")
+        text = path.read_text(errors=REPLACE)
     except OSError:
         return set()
     return {match.group(1) for line in text.splitlines() if (match := DECLARATION.match(line))}
 
 
 def label(identification: str) -> tuple[str, int]:
-    parts = identification.rsplit(":", 2)
+    parts = split_label(identification)
     if len(parts) != 3 or not parts[2].isdigit():
         return identification or "?", 0
     return parts[0], int(parts[2])
+
+
+def split_label(identification: str) -> list[str]:
+    rest, sep, line = right_colon(identification)
+    if not sep:
+        return [identification]
+    owner, _, path = right_colon(rest)
+    return [owner, path, line] if owner else [rest, "", line]
 
 
 def describe(path: str, line: int, syntax: str, kind: str, count: int) -> str:

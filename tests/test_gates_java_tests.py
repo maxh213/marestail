@@ -301,3 +301,20 @@ def test_coverage_findings_scoped(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("line", "gated", "expected"), [(3, None, True), (3, {3}, True), (3, {4}, False), (3, set(), False)])
 def test_gated_in(line: int, gated: set[int] | None, expected: bool) -> None:
     assert java_tests.gated_in(line, gated) is expected
+
+
+def test_java_file_name_strips_package_then_nested_class() -> None:
+    assert java_tests.java_file_name("a.b.c.Outer$Inner$X") == "Outer.java"
+    assert java_tests.after_last("a.b.C", ".") == "C"
+    assert java_tests.after_last("C", ".") == "C"
+    assert java_tests.before_mark("Outer$Inner$X", "$") == "Outer"
+    assert java_tests.xml_text(None) == ""
+    assert java_tests.xml_text("x") == "x"
+    assert java_tests.xml_attr(ET.fromstring("<x/>"), "name") == ""
+    assert java_tests.xml_attr(ET.fromstring("<x name='App.java'/>"), "name") == "App.java"
+    assert java_tests.PACKAGE == "package"
+    assert java_tests.JAVA_SUFFIX == ".java"
+
+
+def test_line_gaps_keep_gated_lines() -> None:
+    assert java_tests.line_gaps("a.java", [3, 4], {3}) == ["a.java:3 not covered"]
