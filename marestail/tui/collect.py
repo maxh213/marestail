@@ -66,6 +66,10 @@ def surely[T](value: T | None) -> T:
     return cast(T, value)
 
 
+def first_text(*parts: str | None) -> str:
+    return cast(str, next(filter(present, parts)))
+
+
 def empty_list(*_args: object) -> list[Any]:
     return []
 
@@ -1036,7 +1040,7 @@ def hours_fmt(seconds: int) -> str:
 
 
 def fmt_seconds(seconds: int) -> str:
-    return surely(next(filter(present, (secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds)))))
+    return first_text(secs_fmt(seconds), mins_fmt(seconds), hours_fmt(seconds))
 
 
 def make_process(pid: int, elapsed: int, tokens: list[str], backend: str) -> Process:

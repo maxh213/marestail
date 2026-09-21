@@ -30,6 +30,11 @@ def test_surely_keeps_missing_values() -> None:
     assert collect.present(None) is False
 
 
+def test_first_text_skips_missing_and_keeps_a_string() -> None:
+    assert collect.first_text(None, "45s") == "45s"
+    assert collect.first_text("12s", "0m") == "12s"
+
+
 def test_work_path(tmp_path: Path) -> None:
     assert collect.work_path(tmp_path) == tmp_path / collect.WORK
     assert collect.work_path(tmp_path, "runs", "x") == tmp_path / collect.WORK / "runs" / "x"

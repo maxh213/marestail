@@ -74,6 +74,10 @@ def surely[T](value: T | None) -> T:
     return cast(T, value)
 
 
+def first_text(*parts: str | None) -> str:
+    return cast(str, next(filter(present, parts)))
+
+
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
@@ -200,7 +204,7 @@ def minutes_label(minutes: float | None) -> str | None:
 
 
 def fmt_elapsed(worker: Worker) -> str:
-    return surely(next(filter(present, (fmt_from_process(worker.process), minutes_label(worker.step.minutes), "--"))))
+    return first_text(fmt_from_process(worker.process), minutes_label(worker.step.minutes), "--")
 
 
 def is_worker_row(repo: RepoState) -> bool:
@@ -361,7 +365,7 @@ def runner_label_text(activity: str | None) -> str | None:
 
 
 def alive_label(repo: RepoState) -> str:
-    return surely(next(filter(present, (gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), BETWEEN_STEPS))))
+    return first_text(gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), BETWEEN_STEPS)
 
 
 def marquee_summary(worker: Worker, width: int, state: WatchState) -> str:

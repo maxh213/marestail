@@ -616,6 +616,11 @@ def test_as_false_rejects_none() -> None:
         panels.as_false(None)  # type: ignore[arg-type]
 
 
+def test_first_text_skips_missing_and_keeps_a_string() -> None:
+    assert panels.first_text(None, "--") == "--"
+    assert panels.first_text("in gate: x", "runner: y") == "in gate: x"
+
+
 def test_shift_left_keeps_column_zero() -> None:
     assert shift_left(1, 0, "ab") == (1, 0, "ab")
     assert shift_left(1, -1, "ab") == (1, 0, "b")
