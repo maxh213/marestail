@@ -49,7 +49,6 @@ def test_recorded_and_active(tmp_path: Path) -> None:
     assert trees.active(config) == {"head": trees.Tree("head", "abc", tmp_path)}
     text = trees.trees_file(config).read_text()
     assert text == json.dumps(json.loads(text), indent=trees.INDENT) + "\n"
-    assert trees.INDENT == 2
 
 
 def test_close_removes_non_head_worktrees(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +211,6 @@ def test_prompt_section_rejects_missing_config(tmp_path: Path) -> None:
     session = trees.Session("t1")
     with pytest.raises(TypeError, match=r"^config$"):
         trees.prompt_section(None, session)  # type: ignore[arg-type]
-    assert trees.CONFIG_ERROR == "config"
 
 
 def test_prompt_section_lists_trees_policy_and_notes(tmp_path: Path) -> None:
@@ -263,7 +261,6 @@ def test_add_tree_uses_the_temp_prefix(tmp_path: Path, fake_run: Callable[..., F
     config = config_at(tmp_path)
     trees.add_tree(config, session, "baseline", "abc")
     assert seen == [trees.TEMP_PREFIX]
-    assert trees.TEMP_PREFIX == "marestail-perf-"
     assert fake.calls == [["git", "worktree", "add", "--detach", str(session.trees[0].path), "abc"]]
     assert fake.options[0]["cwd"] is config.root
 
@@ -294,8 +291,6 @@ def test_pre_marestail_git_flags(tmp_path: Path, fake_run: Callable[..., FakeRun
         ["git", "log", "--diff-filter=A", "--reverse", trees.FULL_HASH, "--", "marestail.toml"],
         ["git", "rev-parse", "--verify", trees.QUIET, "fullhash^"],
     ]
-    assert trees.FULL_HASH == "--format=%H"
-    assert trees.QUIET == "--quiet"
     assert all(option["cwd"] is config.root for option in fake.options)
 
 

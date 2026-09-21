@@ -104,7 +104,6 @@ def test_in_layer_and_forbidden_trim_slashes() -> None:
     assert rb_deps.in_layer("srcX/a.rb", "srcX/") is True
     assert rb_deps.layer_prefix("srcX") == "srcX/"
     assert rb_deps.layer_prefix("srcX/") == "srcX/"
-    assert rb_deps.SLASH == "/"
     assert rb_deps.forbidden("srcX/a.rb", ["srcX"]) is True
     assert rb_deps.forbidden("srcX/a.rb", ["srcX/"]) is True
     assert rb_deps.forbidden("other.rb", ["srcX"]) is False

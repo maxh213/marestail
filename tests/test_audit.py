@@ -145,7 +145,6 @@ def test_is_related_accepts_stem_inside_the_task_name() -> None:
 def test_line_end_keeps_a_newline_at_the_start() -> None:
     assert audit.line_end("\nabc", 0) == 0
     assert audit.line_end("abc", 0) == 3
-    assert audit.MISSING == -1
 
 
 def test_line_trace_on_spaces_without_a_bullet() -> None:
@@ -177,7 +176,6 @@ def test_named_target_end_index_is_past_the_name() -> None:
 
 def test_feature_paths_use_the_module_constants(tmp_path: Path) -> None:
     write(tmp_path / audit.FEATURES / "t.feature", "x")
-    assert audit.FEATURE_GLOB == "*.feature"
     assert [file.name for file in audit.feature_files(config(tmp_path), "t")] == ["t.feature"]
 
 
@@ -202,11 +200,6 @@ def test_test_exists(tmp_path: Path) -> None:
 
 def test_problems_without_features(tmp_path: Path) -> None:
     assert audit.problems(config(tmp_path), "t", "- a -> b::c") == ["audit: no feature file found for this task"]
-
-
-def test_problems_rejects_a_missing_config() -> None:
-    with pytest.raises(TypeError, match=r"^config$"):
-        audit.problems(None, "t", "")  # type: ignore[arg-type]
 
 
 def test_problems_without_scenarios(tmp_path: Path) -> None:

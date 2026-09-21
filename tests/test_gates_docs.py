@@ -169,4 +169,3 @@ def test_line_at_counts_newlines_in_the_prefix() -> None:
     assert docs.line_at("a\nb\nc", 0) == 1
     assert docs.line_at("a\nb\nc", 2) == 2
     assert docs.line_at("a\nb\nc", 4) == 3
-    assert docs.NEWLINE == "\n"

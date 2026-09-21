@@ -97,7 +97,6 @@ def test_build_database_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         "marestail-perf-pgdata",
         tmp_path / ".config" / "marestail",
     )
-    assert db.EMPTY == ""
     assert db.build_database(Config(root=tmp_path, raw={}), {}, 5, "rs", "img", "is").migrate == db.EMPTY
 
 
@@ -120,28 +119,6 @@ def perf_config(tmp_path: Path, section: dict[str, Any] | None = None) -> Config
 
 def test_for_run_not_configured(tmp_path: Path) -> None:
     assert db.for_run(perf_config(tmp_path, {})) == (None, "configure [perf.db] migrate in marestail.toml")
-
-
-def test_for_run_rejects_a_missing_config() -> None:
-    with pytest.raises(TypeError, match=r"^config$"):
-        db.for_run(None)  # type: ignore[arg-type]
-
-
-def test_db_constants() -> None:
-    assert db.MILLISECONDS == 1000
-    assert db.BYTE_ORDER == "big"
-    assert db.SIZE_WIDTH == 8
-    assert db.MKDIR_PARENTS is True
-
-
-def test_require_name_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^name$"):
-        db.require_name(None)
-
-
-def test_seed_golden_rejects_a_missing_env(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^env$"):
-        db.seed_golden(object(), object(), "c", tmp_path / "s", None)  # type: ignore[arg-type]
 
 
 def test_for_run_bad_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,6 +196,14 @@ def test_prepare_without_seed_stops(
         "MARESTAIL_PERF_DB_ROWS",
     )
     assert session_calls == [("write", "postgres:18", 1)]
+
+
+def test_prepare_reads_rows_from_the_configuration(tmp_path: Path, session_calls: list[Any], capsys: pytest.CaptureFixture[str]) -> None:
+    session = trees.Session("t", [tree(tmp_path)])
+    db.prepare(perf_config(tmp_path, {"migrate": "m", "rows": 0}), session)
+    assert (session.rows, session.rows_source) == (0, "marestail.toml")
+    assert session_calls == [("write", "postgres:18", 0), ("build", "head", 0)]
+    assert capsys.readouterr().out == "   no Postgres version found in the repo; using postgres:18\n"
 
 
 def test_prepare_builds_each_tree(
@@ -404,7 +389,6 @@ def test_wait_ready_retries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fak
     db.wait_ready(make_db(tmp_path), "box", 10)
     assert len(fake.calls) == 2
     assert slept == [db.POLL]
-    assert db.POLL == 0.05
 
 
 def test_wait_ready_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
@@ -433,13 +417,11 @@ def test_host_port(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     assert fake.calls == [["docker", "port", "box", "5432/tcp"]]
     assert db.after_last_colon("0.0.0.0:9") == "9"
     assert db.after_last_colon("plain") == "plain"
-    assert db.COLON == ":"
 
 
 def test_after_tab_takes_the_path() -> None:
     assert db.after_tab("100644 blob abc\tperf/mig.sql") == "perf/mig.sql"
     assert db.after_tab("no-tab") == "no-tab"
-    assert db.TAB == "\t"
 
 
 def test_host_port_failure_uses_the_label(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
@@ -596,7 +578,6 @@ def test_process_alive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "kill", lambda pid, signal: seen.append((pid, signal)))
     assert db.process_alive(9) is True
     assert seen == [(9, db.ALIVE)]
-    assert db.ALIVE == 0
 
     def refuse(pid: int, signal: int) -> None:
         raise ProcessLookupError(pid)
@@ -715,7 +696,6 @@ def test_build_golden_seeded(tmp_path: Path, fake_run: Callable[..., FakeRun], f
     (database.root / "perf").mkdir()
     (database.root / "perf" / "seed.sql").write_text("insert")
     db.build_golden(database, tree(tmp_path), "g")
-    assert db.META_TIME == "%Y-%m-%dT%H:%M:%S%z"
     assert labels == [
         "df",
         "preparing the golden directory",
@@ -773,6 +753,30 @@ def test_build_golden_seeded(tmp_path: Path, fake_run: Callable[..., FakeRun], f
     assert stop["timeout"] == 900
     seed = next(option for command, option in zip(fake.calls, fake.options, strict=True) if command[:3] == ["docker", "exec", "-i"])
     assert seed["timeout"] == db.BUILD_TIMEOUT
+
+
+def test_build_golden_names_the_golden_in_the_disk_refusal(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    database = make_db(tmp_path, rows=10000000)
+    (database.root / "perf").mkdir()
+    (database.root / "perf" / "seed.sql").write_text("insert")
+    fake_run(db, rules({"df -B1": (0, "Avail\n1\n"), "META.json": (0, "")}))
+    head = tree(tmp_path)
+    with pytest.raises(db.DatabaseError, match=r"^not enough disk for g: "):
+        db.build_golden(database, head, "g")
+
+
+def test_build_golden_seeds_with_the_database_env(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], frozen: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step_labels(monkeypatch)
+    fake = fake_run(db, golden_rules())
+    database = make_db(tmp_path)
+    seed = executable(database.root / "perf" / "seed")
+    monkeypatch.setattr(db, "short_tables", lambda *args: [])
+    db.build_golden(database, tree(tmp_path), "g")
+    paired = dict(zip((tuple(command) for command in fake.calls), fake.options, strict=True))
+    assert paired[(str(seed),)]["env"] == paired[("bash", "-lc", database.migrate)]["env"]
+    assert paired[(str(seed),)]["env"]["MARESTAIL_PERF_DB_CONTAINER"] == "mp-golden-g"
 
 
 def test_build_golden_empty(tmp_path: Path, fake_run: Callable[..., FakeRun], frozen: None) -> None:
@@ -895,13 +899,26 @@ def test_start_build_background(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     database = make_db(tmp_path)
     name = db.golden_name(database, tree(tmp_path))
     log = tmp_path / "home" / "perf-db" / f"{name}.log"
-    log.parent.mkdir(parents=True)
+    assert not log.parent.exists()
     assert db.start_build(database, tree(tmp_path)) == (
         f"building {name} for the head tree in the background; poll marestail perf db status; log: {log}"
     )
     command = [sys.executable, str(db.CLI), "perf", "db", "golden", "--tree", "head", "--wait"]
     assert launched == [(command, database.root, subprocess.STDOUT, True, str(log))]
     assert db.read_status(database, name) == {"state": "building", "started": 1000.0, "pid": 4242}
+
+
+def test_start_build_reuses_an_existing_log_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun], frozen: None
+) -> None:
+    fake_run(db, rules({"test -f": (1, "")}))
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **options: FakeChild())
+    database = make_db(tmp_path)
+    name = db.golden_name(database, tree(tmp_path))
+    log = db.log_path(database, name)
+    log.parent.mkdir(parents=True)
+    assert db.start_build(database, tree(tmp_path)).startswith(f"building {name} for the head tree")
+    assert log.exists()
 
 
 @pytest.mark.parametrize(("ready", "state"), [(0, "ready"), (1, "building")])
@@ -962,11 +979,13 @@ def test_reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callab
 
 def test_prune(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     database = make_db(tmp_path)
-    listing = "\n".join(json.dumps({"name": name, "root": str(database.root)}) for name in ("keep", "drop"))
+    listing = "\n".join(json.dumps({"name": name, "root": str(database.root)}) for name in ("keep", "drop", "gone"))
     fake = fake_run(db, rules({"META.json": (0, listing)}))
     db.write_status(database, "keep", {})
-    assert db.prune(database, {"keep"}) == ["drop"]
-    assert joined(fake)[-1] == "docker exec mp-files bash -c rm -rf /perf/goldens/drop"
+    db.write_status(database, "drop", {})
+    db.log_path(database, "drop").write_text("log")
+    assert db.prune(database, {"keep"}) == ["drop", "gone"]
+    assert joined(fake)[-1] == "docker exec mp-files bash -c rm -rf /perf/goldens/gone"
     assert not db.status_path(database, "drop").exists()
     assert not db.log_path(database, "drop").exists()
     assert db.status_path(database, "keep").exists()

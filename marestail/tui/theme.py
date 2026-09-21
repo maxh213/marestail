@@ -176,18 +176,9 @@ def role_attr(theme: Theme, role: str) -> int:
     return (theme.worker, theme.judge)[{True: role in JUDGE_ROLES}[type(role) is str]]
 
 
-def blank_vine(_width: int) -> str:
-    return ""
-
-
 def vine_char(index: int) -> str:
     return VINE_SEGMENT[index % len(VINE_SEGMENT)]
 
 
 def full_vine(width: int) -> str:
     return "".join(map(vine_char, range(width)))
-
-
-def vine(width: int) -> str:
-    chosen = (blank_vine, full_vine)[width > 0]
-    return chosen(width)

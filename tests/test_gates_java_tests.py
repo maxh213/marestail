@@ -319,8 +319,6 @@ def test_java_file_name_strips_package_then_nested_class() -> None:
     assert java_tests.xml_text("x") == "x"
     assert java_tests.xml_attr(ET.fromstring("<x/>"), "name") == ""
     assert java_tests.xml_attr(ET.fromstring("<x name='App.java'/>"), "name") == "App.java"
-    assert java_tests.PACKAGE == "package"
-    assert java_tests.JAVA_SUFFIX == ".java"
 
 
 def test_require_tag_rejects_none() -> None:

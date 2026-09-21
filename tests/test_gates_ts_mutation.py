@@ -164,16 +164,6 @@ def test_json_map_and_list_defaults() -> None:
     assert ts_mutation.json_list({}, "mutants") == []
 
 
-def test_json_map_rejects_a_non_map() -> None:
-    with pytest.raises(TypeError, match=r"^map$"):
-        ts_mutation.json_map({"files": []}, "files")
-
-
-def test_json_list_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        ts_mutation.json_list({"mutants": {}}, "mutants")
-
-
 def test_drop_tree_skips_a_missing_path(tmp_path: Path) -> None:
     missing = tmp_path / "gone"
     ts_mutation.drop_tree(missing)

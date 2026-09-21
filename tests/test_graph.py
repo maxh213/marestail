@@ -113,9 +113,6 @@ def test_scanned_graph(tmp_path: Path) -> None:
     assert graph.scanned_graph(cfg, "lang", "Lang", sources([]), body) == ""
     assert graph.scanned_graph(cfg, "missing", "Lang", sources([tmp_path]), body) == ""
     assert len(seen) == 1
-    assert graph.HERE == "."
-    assert graph.EMPTY_JSON == "[]"
-    assert graph.LINE_JOIN == "\n"
 
 
 def test_ruby_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

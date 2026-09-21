@@ -35,6 +35,7 @@ WORK_CONFIG_ENV = "DANDELION_CLAUDE_WORK_CONFIG_DIR"
 WORK_HOME_DEFAULT = "~/.claude-work"
 CLAUDE_CONFIG_ENV = "CLAUDE_CONFIG_DIR"
 CLAUDE_HOME = ".claude"
+NO_HOME: list[Path] = []
 PROMPT_SUFFIX = ".prompt.md"
 RESULT_SUFFIX = ".json"
 HANDOFF_SUFFIX = ".md"
@@ -509,9 +510,12 @@ def work_home() -> Path:
     return Path(next(filter(None, (os.environ.get(WORK_CONFIG_ENV), WORK_HOME_DEFAULT)))).expanduser()
 
 
+def configured_home(home: Path | None) -> list[Path]:
+    return (NO_HOME, [surely(home)])[is_path(home)]
+
+
 def claude_homes() -> list[Path]:
-    homes: tuple[Path | None, ...] = (Path.home() / CLAUDE_HOME, work_home(), expanded_env(CLAUDE_CONFIG_ENV))
-    return list(filter(is_path, homes))
+    return [Path.home() / CLAUDE_HOME, work_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:

@@ -121,8 +121,3 @@ def test_relevant() -> None:
 def test_problems_ignore_output_when_code_is_zero() -> None:
     assert ex_lint.problems("format", (0, "lib/a.ex is not formatted")) == []
     assert ex_lint.problems("format", (1, "lib/a.ex is not formatted")) == ["format: lib/a.ex is not formatted"]
-
-
-def test_lint_timeouts() -> None:
-    assert ex_lint.FORMAT_TIMEOUT == 300
-    assert ex_lint.COMPILE_TIMEOUT == 600

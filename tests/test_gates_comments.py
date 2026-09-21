@@ -320,8 +320,6 @@ def test_suffix_constants() -> None:
     assert comments.JAVA_SUFFIXES == (".java",)
     assert comments.PYTHON_SUFFIXES == (".py",)
     assert comments.MARKUP_SUFFIXES == (".html", ".jinja", ".j2", ".css")
-    assert comments.COMMENTS_MODE == "comments"
-    assert comments.EMPTY_JSON == "[]"
 
 
 def test_has_docstring_shapes() -> None:

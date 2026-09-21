@@ -16,7 +16,6 @@ def test_listify(value: Any, expected: list[str]) -> None:
 
 
 def test_source_defaults() -> None:
-    assert ruby.SOURCES_KEY == "sources"
     assert ruby.DEFAULT_FOLDERS == ["app", "lib"]
 
 

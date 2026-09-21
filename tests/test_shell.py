@@ -83,8 +83,6 @@ def test_ensure_dir_is_idempotent(tmp_path: Path) -> None:
     assert nested.is_dir()
     shell.ensure_dir(nested)
     assert nested.is_dir()
-    assert shell.PARENTS is True
-    assert shell.EXIST_OK is True
 
 
 def test_check_run_rejects_missing_cwd_and_command_parts(tmp_path: Path) -> None:
@@ -93,4 +91,3 @@ def test_check_run_rejects_missing_cwd_and_command_parts(tmp_path: Path) -> None
     with pytest.raises(TypeError, match=r"^run$"):
         shell.check_run(["echo", None], tmp_path)  # type: ignore[list-item]
     shell.check_run(["echo"], tmp_path)
-    assert shell.RUN_ERROR == "run"

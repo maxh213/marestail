@@ -7,7 +7,7 @@ import pytest
 
 from marestail import config as config_module
 from marestail.perf import db as perf_db
-from marestail.perf import samples, trees
+from marestail.perf import hygiene, samples, trees
 
 BENCH = "perf/bench_a"
 GOOD = '{"target": "t", "unit": "ms", "better": "lower", "value": 3}'
@@ -80,7 +80,8 @@ def test_with_database_without_db(root: Path) -> None:
     assert active is not None
     target, problem = samples.with_database(config, BENCH, active["head"], False)
     assert problem == samples.OK
-    assert target is not None and target.database is None
+    assert target is not None
+    assert target.database is None
 
 
 def test_run_command_rejects_unknown_tree(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -218,6 +219,32 @@ def test_run_command_reports_dropped_samples(root: Path, capsys: pytest.CaptureF
         "take its samples again on every tree\n"
     )
     assert len(saved(root)) == 1
+
+
+def test_run_command_keeps_samples_taken_at_the_current_fingerprint(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    start_session(root)
+    bench(root, f"echo '{GOOD}'")
+    config = config_module.load(root)
+    stamp = hygiene.fingerprint(root, BENCH)
+    trees.samples_file(config).write_text(line(BENCH, "old") + "\n" + line(BENCH, stamp) + "\n")
+    assert samples.run_command(BENCH, "head", 1, False) == 0
+    assert "dropped 1 earlier measurements" in capsys.readouterr().err
+    assert [record["fingerprint"] for record in saved(root)] == [stamp, stamp]
+
+
+def test_with_database_asks_the_configuration_for_the_database(root: Path) -> None:
+    start_session(root)
+    config = config_module.load(root)
+    active = trees.active(config)
+    assert active is not None
+    assert samples.with_database(config, BENCH, active["head"], True) == (None, perf_db.NOT_CONFIGURED)
+
+
+def test_resolve_passes_the_configuration_down_to_the_database(root: Path) -> None:
+    start_session(root)
+    bench(root, "true")
+    config = config_module.load(root)
+    assert samples.resolve(config, BENCH, "head", True) == (None, perf_db.NOT_CONFIGURED)
 
 
 @pytest.mark.parametrize(

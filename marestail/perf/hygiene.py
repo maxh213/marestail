@@ -1,6 +1,5 @@
 import hashlib
 from pathlib import Path
-from typing import Literal
 
 FOLDER = "perf"
 COMPILED = (".pyc", ".pyo")
@@ -9,7 +8,6 @@ ROOT_ERROR = "root"
 BENCH_ERROR = "bench"
 JOIN = "\n"
 ERRORS = "ignore"
-BYTE_ORDER: Literal["big"] = "big"
 SIZE_WIDTH = 8
 
 
@@ -78,7 +76,7 @@ def fingerprint(root: Path, bench: str) -> str:
     digest = hashlib.sha256()
     for path in harness_files(root, bench):
         for part in (path.relative_to(root).as_posix().encode(), path.read_bytes()):
-            digest.update(len(part).to_bytes(SIZE_WIDTH, BYTE_ORDER))
+            digest.update(len(part).to_bytes(SIZE_WIDTH))
             digest.update(part)
     return digest.hexdigest()[:16]
 

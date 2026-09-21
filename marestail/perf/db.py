@@ -7,7 +7,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from marestail import config as config_module
 from marestail.config import Config
@@ -134,23 +134,12 @@ def build_database(config: Config, section: dict[str, Any], rows: int, rows_sour
     )
 
 
-CONFIG_ERROR = "config"
-NAME_ERROR = "name"
-ENV_ERROR = "env"
 MILLISECONDS = 1000
-BYTE_ORDER: Literal["big"] = "big"
 SIZE_WIDTH = 8
 MKDIR_PARENTS = True
 
 
-def require_config(config: object) -> Config:
-    if type(config) is not Config:
-        raise TypeError(CONFIG_ERROR)
-    return config
-
-
 def for_run(config: Config) -> tuple[Database | None, str]:
-    config = require_config(config)
     section = settings.db(config)
     if not section.get(MIGRATE):
         return None, NOT_CONFIGURED
@@ -176,7 +165,6 @@ def recorded_image(config: Config, section: dict[str, Any], recorded: dict[str, 
 
 
 def prepare(config: Config, session: trees.Session) -> None:
-    config = require_config(config)
     section = settings.db(config)
     if not section.get(MIGRATE):
         return
@@ -405,7 +393,7 @@ def golden_name(database: Database, tree: trees.Tree) -> str:
 def golden_hash(root: str, image: str, identity: str, seed: bytes, rows: int) -> str:
     digest = hashlib.sha256()
     for part in (root.encode(), image.encode(), identity.encode(), seed, str(rows).encode()):
-        digest.update(len(part).to_bytes(SIZE_WIDTH, BYTE_ORDER))
+        digest.update(len(part).to_bytes(SIZE_WIDTH))
         digest.update(part)
     return "golden_" + digest.hexdigest()[:16]
 
@@ -439,18 +427,12 @@ def refuses(free: int, goldens: list[dict[str, Any]], rows: int, min_free_gb: fl
     return rows > 0 and free < estimate_bytes(goldens, rows, min_free_gb)
 
 
-def require_name(name: object) -> str:
-    if type(name) is not str:
-        raise TypeError(NAME_ERROR)
-    return name
-
-
 def status_path(database: Database, name: str) -> Path:
-    return database.home / "perf-db" / f"{require_name(name)}.json"
+    return database.home / "perf-db" / f"{name}.json"
 
 
 def log_path(database: Database, name: str) -> Path:
-    return database.home / "perf-db" / f"{require_name(name)}.log"
+    return database.home / "perf-db" / f"{name}.log"
 
 
 def read_status(database: Database, name: str) -> dict[str, Any]:
@@ -551,7 +533,6 @@ def build_golden(database: Database, tree: trees.Tree, name: str) -> None:
 
 
 def required_seed(database: Database, name: str) -> Path | None:
-    name = require_name(name)
     if database.rows <= 0:
         return None
     seed = seed_script(database.root)
@@ -562,8 +543,6 @@ def required_seed(database: Database, name: str) -> Path | None:
 
 
 def seed_golden(database: Database, tree: trees.Tree, container: str, seed: Path, env: dict[str, str]) -> None:
-    if type(env) is not dict:
-        raise TypeError(ENV_ERROR)
     run_seed(database, tree, container, seed, env)
     short = short_tables(database, container)
     if short:

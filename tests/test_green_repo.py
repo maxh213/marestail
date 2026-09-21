@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from marestail import cli, graph, report
+from marestail import cli, graph, report, route
 from marestail import config as config_module
 from marestail.gates import comments, configured_gates, py_mutation, py_runtime
 from marestail.report import Result
@@ -36,6 +36,11 @@ PASSING_SCRIPTS = [
     "test-practices.py",
 ]
 PERF_FAIL_LINE = "verdict-commit-files: '' != 'perf/bench_x.py'"
+DOCKER_SCRIPT = "test-perf-db.py"
+DOCKER = "docker"
+DANDELION_SRC = "MARESTAIL_DANDELION_SRC"
+FIXTURE_MODEL = "claude-opus-5"
+MINIMUM_ROUTE_LINES = 12
 FAST_GATES = ["py.tests", "py.crap", "py.lint", "py.deps", "py.runtime", "comments", "depth", "deadcode", "docs"]
 RESULT_LINE = re.compile(r"^\[ok  \] .{14} .+  \(\d+\.\d+s\)$")
 DOCUMENTED = [
@@ -237,8 +242,15 @@ def last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def run_tools_script(name: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(ROOT / "tools" / name)], cwd=ROOT, capture_output=True, text=True, timeout=180)
+def run_tools_script(name: str, overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "tools" / name)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env={**os.environ, **overrides},
+    )
 
 
 def under_mutmut() -> bool:
@@ -249,24 +261,51 @@ def restricted_path() -> bool:
     return shutil.which("ps") is None or under_mutmut()
 
 
+def dandelion_route_source() -> str:
+    accounts = "\n".join(f"  {{ id: '{name}', ...CLAUDE_LINES }}," for name in sorted(route.BACKENDS))
+    providers = ", ".join(f"'{name}'" for name in sorted(route.BACKENDS))
+    return (
+        f"const CLAUDE_LINES = {{ standard: '{FIXTURE_MODEL} high', max: '{FIXTURE_MODEL} max' }}\n"
+        f"const ACCOUNTS = [\n{accounts}\n]\n"
+        f"const ROUTES = [{{ providers: [{providers}], line: '{FIXTURE_MODEL} medium' }}]\n"
+    )
+
+
+@pytest.fixture
+def script_env(tmp_path: Path) -> dict[str, str]:
+    routes = tmp_path / "route.ts"
+    routes.write_text(dandelion_route_source())
+    return {DANDELION_SRC: str(routes)}
+
+
 @pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
 @pytest.mark.parametrize("name", PASSING_SCRIPTS)
-def test_diagnostic_script_exits_ok(name: str) -> None:
-    completed = run_tools_script(name)
+def test_diagnostic_script_exits_ok(name: str, script_env: dict[str, str]) -> None:
+    completed = run_tools_script(name, script_env)
     assert completed.returncode == 0
     assert "ok" in last_line(completed.stdout + completed.stderr)
 
 
-@pytest.mark.skipif(restricted_path() or shutil.which("docker") is None, reason="perf-db needs docker")
-def test_perf_db_script_exits_ok() -> None:
-    completed = run_tools_script("test-perf-db.py")
-    assert completed.returncode == 0
-    assert "ok" in last_line(completed.stdout + completed.stderr)
+def test_the_route_fixture_offers_more_lines_than_the_script_demands() -> None:
+    source = dandelion_route_source()
+    accounts = source.count("...CLAUDE_LINES")
+    provided = len(re.findall(r"'([\w-]+)'", source.splitlines()[-1]))
+    assert accounts == len(route.BACKENDS)
+    assert provided == len(route.BACKENDS)
+    assert accounts * 2 + len(route.BACKENDS) >= MINIMUM_ROUTE_LINES
+    assert all(route.parse(f"{FIXTURE_MODEL} high {name}").backend for name in route.BACKENDS)
+
+
+def test_only_the_perf_db_script_needs_docker() -> None:
+    hermetic = [name for name in PASSING_SCRIPTS if DOCKER in (ROOT / "tools" / name).read_text()]
+    assert hermetic == []
+    assert DOCKER in (ROOT / "tools" / DOCKER_SCRIPT).read_text()
+    assert DOCKER_SCRIPT not in PASSING_SCRIPTS
 
 
 @pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
-def test_tools_test_perf_fails_as_before() -> None:
-    completed = run_tools_script("test-perf.py")
+def test_tools_test_perf_fails_as_before(script_env: dict[str, str]) -> None:
+    completed = run_tools_script("test-perf.py", script_env)
     assert completed.returncode == 1
     assert last_line(completed.stdout + completed.stderr) == PERF_FAIL_LINE
 

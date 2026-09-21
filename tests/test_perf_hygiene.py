@@ -116,13 +116,6 @@ def test_fingerprint_rejects_a_missing_bench(tmp_path: Path) -> None:
         hygiene.checked_bench(None)  # type: ignore[arg-type]
 
 
-def test_hygiene_constants() -> None:
-    assert hygiene.JOIN == "\n"
-    assert hygiene.ERRORS == "ignore"
-    assert hygiene.BYTE_ORDER == "big"
-    assert hygiene.SIZE_WIDTH == 8
-
-
 def test_kept_text_joins_with_newlines(tmp_path: Path) -> None:
     write(tmp_path, "perf/a.py", "one")
     write(tmp_path, "perf/b.py", "two")
@@ -131,10 +124,17 @@ def test_kept_text_joins_with_newlines(tmp_path: Path) -> None:
 
 
 def test_deepest_first_orders_by_depth(tmp_path: Path) -> None:
-    (tmp_path / "perf" / "a").mkdir(parents=True)
-    (tmp_path / "perf" / "b" / "c").mkdir(parents=True)
+    (tmp_path / "perf" / "a" / "deep").mkdir(parents=True)
+    (tmp_path / "perf" / "z").mkdir(parents=True)
     found = hygiene.deepest_first(tmp_path)
-    assert found[0].parts[-2:] == ("b", "c")
+    assert [path.relative_to(tmp_path).as_posix() for path in found] == ["perf/a/deep", "perf/a", "perf/z"]
+
+
+def test_kept_text_ignores_undecodable_bytes(tmp_path: Path) -> None:
+    write(tmp_path, "perf/a.py", "one")
+    rogue = tmp_path / "perf" / "b.py"
+    rogue.write_bytes(b"tw\xffo")
+    assert hygiene.kept_text(tmp_path, [tmp_path / "perf/a.py", rogue]) == "one\ntwo"
 
 
 def test_drop_scratch_ignores_missing(tmp_path: Path) -> None:

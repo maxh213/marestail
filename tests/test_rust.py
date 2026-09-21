@@ -242,23 +242,23 @@ def test_build_scanner_failures(tmp_path: Path, fake_run: Any, reply: tuple[int,
     assert not stamp(tmp_path).exists()
 
 
-def test_scanner_digest_is_sha256() -> None:
-    payload = rust.DIGEST_JOIN.join(rust.scan_input(name).read_bytes() for name in rust.SCAN_INPUTS)
+SCANNER_SOURCES = ("main.rs", "Cargo.toml", "Cargo.lock")
+
+
+def scanner_folder() -> Path:
+    return Path(rust.__file__).resolve().parent / "rs" / "scan"
+
+
+def test_scanner_digest_is_sha256_of_the_three_frozen_sources_in_order() -> None:
+    payload = b"".join((scanner_folder() / name).read_bytes() for name in SCANNER_SOURCES)
     assert rust.scanner_digest() == hashlib.sha256(payload).hexdigest()
-    assert rust.SCAN_INPUTS == ("main.rs", "Cargo.toml", "Cargo.lock")
-    assert rust.CLIPPY == "clippy"
-    assert rust.ERROR_TAIL == 300
-    assert rust.SLASH == "/"
-    assert rust.EMPTY == []
-    assert rust.DIGEST_JOIN == b""
 
 
 def test_scan_input_uses_the_frozen_manifest() -> None:
-    assert rust.SCAN_DIR == rust.PACKAGE / "rs" / "scan"
-    assert rust.scan_input("main.rs") == rust.SCAN_DIR / "main.rs"
-    assert rust.scan_input("Cargo.lock") == rust.SCAN_DIR / "Cargo.lock"
-    assert rust.scan_input(rust.CARGO_TOML) == rust.SCAN_MANIFEST
-    assert (rust.SCAN_DIR / "main.rs").is_file()
+    assert rust.scan_input("main.rs") == scanner_folder() / "main.rs"
+    assert rust.scan_input("Cargo.lock") == scanner_folder() / "Cargo.lock"
+    assert rust.scan_input("Cargo.toml") == rust.SCAN_MANIFEST
+    assert (scanner_folder() / "main.rs").is_file()
 
 
 def test_scan_input_prefers_a_bundled_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

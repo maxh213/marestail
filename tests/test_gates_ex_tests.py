@@ -129,4 +129,3 @@ def test_counted_defaults_missing_keys_to_zero() -> None:
 
 def test_passed_before_without_passed_is_blank() -> None:
     assert ex_tests.passed_before("nothing here") == ""
-    assert ex_tests.MISSING_COUNT == ""

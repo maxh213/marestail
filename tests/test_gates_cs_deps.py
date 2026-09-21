@@ -134,7 +134,6 @@ def test_edge_and_using_breaks_without_optional_keys() -> None:
     record = {"path": "cs/Domain/A.cs", "usings": [{"name": "Y", "line": 2}]}
     assert cs_deps.edge_breaks("cs/", layer, edge) == []
     assert cs_deps.using_breaks(layer, record) == []
-    assert cs_deps.EMPTY_BANS == []
 
 
 def test_layer_findings_at_repo_root(tmp_path: Path) -> None:

@@ -74,7 +74,6 @@ def test_disabled_reads_the_enabled_default(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(Config, "get", get)
     assert runner.disabled(make_state(tmp_path), PERF) is False
     assert seen == [(PERF.name, runner.ENABLED, True)]
-    assert runner.ENABLED == "enabled"
 
 
 def test_judge_round_passes_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -400,16 +399,8 @@ def test_attempts_shown() -> None:
 
 
 def test_runner_constants() -> None:
-    assert runner.UNLIMITED == "unlimited"
-    assert runner.ENABLED == "enabled"
-    assert runner.GROK == "grok"
-    assert runner.SPACE == " "
-    assert runner.ATTEMPT_CAP == 10000
-    assert runner.RUN_TYPE == "run"
-    assert runner.MISSING_OK is True
     assert runner.labels_of(None) == set()
     assert runner.labels_of({"a"}) == {"a"}
-    assert runner.RENAME_MARK == " -> "
     assert runner.AUTHOR_VERDICT.pattern == r"^\s*VERDICT:\s*AUTHOR\b"
     assert runner.VERDICT_LINE.pattern == r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?"
 
@@ -437,8 +428,6 @@ def test_after_marker_and_until_heading() -> None:
     assert runner.until_heading("only") == "only"
     assert runner.until_heading("\n## First\nrest") == ""
     assert runner.until_heading("a\n## One\nmid\n## Two\nend") == "a"
-    assert runner.HEADING_MARK == "\n## "
-    assert runner.MISSING == -1
 
 
 @pytest.mark.parametrize(
@@ -876,10 +865,11 @@ def test_review_measurements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert state.perf_changes == ""
     assert runner.review_measurements(state, session, report, "PASS", "text") == ""
     assert state.perf_changes == "CHANGES"
+    assert table.calls == [(state.config, session, outcome)]
     assert runner.review_measurements(state, session, report, "BOUNCE", "text") == ""
+    assert table.calls == [(state.config, session, outcome)]
     assert review.calls[0] == (state.config, session, report, "PASS")
     assert summary.calls[0] == (outcome, "text", session)
-    assert table.calls == [(state.config, session, outcome)]
 
 
 @pytest.mark.parametrize(
@@ -934,11 +924,6 @@ def test_parse_verdict_without_extra_reads_the_report(tmp_path: Path) -> None:
     report = tmp_path / "r.md"
     report.write_text("VERDICT: PASS")
     assert runner.parse_verdict(report) == ("PASS", None)
-    assert runner.EMPTY == ""
-    assert runner.NEWLINE == "\n"
-    assert runner.GIT == "git"
-    assert runner.DIFF == "diff"
-    assert runner.HEAD_REF == "HEAD"
 
 
 def test_read_or_empty_missing_is_blank(tmp_path: Path) -> None:

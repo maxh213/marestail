@@ -15,7 +15,6 @@ KEY = "proj"
 
 
 def test_failed_analysis_tail_length() -> None:
-    assert sonar.FAILED_TAIL == 15
     lines = "\n".join(f"line {n}" for n in range(20))
     assert sonar.analysis_tail(lines) == [f"line {n}" for n in range(5, 20)]
 
@@ -25,8 +24,6 @@ def test_coverage_and_duplication_scores() -> None:
     assert sonar.coverage_score({sonar.COVERAGE: 50.0}) == 50.0
     assert sonar.duplication_score({}) == 0.0
     assert sonar.duplication_score({sonar.DUPLICATION: 0.5}) == 0.5
-    assert sonar.FULL_COVERAGE == 100.0
-    assert sonar.NO_DUPLICATION == 0.0
 
 
 def test_after_colon_uses_the_first_colon() -> None:
@@ -306,12 +303,24 @@ def dotnet_calls(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]
     return calls
 
 
-@pytest.mark.parametrize(("output", "expected"), [("tool broke", "tool broke"), ("Unable to find image x", None)])
-def test_dotnet_tool_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str, expected: str | None) -> None:
+def test_dotnet_tool_install_reports_a_missing_sdk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    dotnet_calls(monkeypatch, [(127, "tool broke")])
+    code, note = sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY)
+    assert code == 127
+    assert note.startswith("dotnet unavailable: ")
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"), [("tool broke", "tool broke"), ("Unable to find image x", "docker image missing: docker pull ")]
+)
+def test_dotnet_tool_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str, expected: str) -> None:
     product = tmp_path / "App.csproj"
     monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
     calls = dotnet_calls(monkeypatch, [(3, output)])
-    assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (3, expected or dotnet.hint(3, output))
+    code, note = sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY)
+    assert (code, note.startswith(expected)) == (3, True)
     tools = tmp_path / ".marestail" / "dotnet-tools"
     assert calls == [
         (
@@ -487,6 +496,20 @@ def test_collect_scoped() -> None:
     )
 
 
+def test_collect_scoped_keeps_the_findings_on_a_changed_file() -> None:
+    client: Any = FakeClient(collect_responder)
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
+    findings, status = sonar.collect(ctx, client, KEY)
+    assert status == "ERROR"
+    assert findings == [
+        "src/a.py:0 r1 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties",
+        "src/a.py:0 MAJOR r1: m",
+        "src/a.py:0 hotspot: look",
+        "src/a.py:1 sonar duplication 2.0% (need 0)",
+    ]
+    assert client.posts == [("api/issues/do_transition", {"issue": "I1", "transition": "reopen"})]
+
+
 def test_scoped_duplication_uses_key_when_path_missing() -> None:
     client: Any = FakeClient(collect_responder)
     ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
@@ -535,20 +558,6 @@ def test_summarize_scoped(tmp_path: Path) -> None:
     assert sonar.summarize(make_context(tmp_path), [], "ERROR") == "sonar clean"
 
 
-def test_sonar_constants() -> None:
-    assert sonar.EQUALS == "="
-    assert sonar.COLON == ":"
-    assert sonar.SLASH == "/"
-    assert sonar.COMMA == ","
-    assert sonar.LINE == "line"
-    assert sonar.COMPONENT == "component"
-    assert sonar.PATH_KEY == "path"
-    assert sonar.KEY == "key"
-    assert sonar.EMPTY == ""
-    assert sonar.EMPTY_LIST == []
-    assert sonar.NO_DUPLICATION == 0.0
-
-
 @pytest.mark.parametrize(
     ("line", "expected"),
     [("a=b", 1), ("a:b", 1), ("ab", -1), ("a=b:c", 1), (":x", 0), ("=x", 0), ("a=b=c", 1), ("a:b:c", 1)],
@@ -581,16 +590,14 @@ def test_gate_status_sends_the_project_key() -> None:
     assert client.gets == [("api/qualitygates/project_status", {"projectKey": KEY})]
 
 
-def test_metric_text_defaults_and_rejects_a_non_str() -> None:
-    assert sonar.metric_text({}) == ""
-    assert sonar.metric_text({"value": "12"}) == "12"
-    with pytest.raises(TypeError, match=r"^value$"):
-        sonar.metric_text({"value": 1})
-
-
 def test_component_measures_defaults_missing_component() -> None:
     assert sonar.component_measures({}) == []
     assert sonar.component_measures({"component": {"measures": [{"metric": "coverage"}]}}) == [{"metric": "coverage"}]
+
+
+def test_metric_text_reads_the_value_and_defaults_to_empty() -> None:
+    assert sonar.metric_text({"metric": "coverage", "value": "84.5"}) == "84.5"
+    assert sonar.metric_text({"metric": "coverage"}) == sonar.EMPTY
 
 
 def test_section_list_defaults_missing_exclusions(tmp_path: Path) -> None:
@@ -621,12 +628,10 @@ def test_issue_and_component_paths() -> None:
     assert sonar.component_path({}) == ""
     assert sonar.after_colon("proj:src:A.cs") == "src:A.cs"
     assert sonar.after_colon("leaf") == "leaf"
-    assert sonar.COLON == ":"
     assert sonar.mapping_list({}, "issues") == []
     assert sonar.mapping_list({"issues": [{"k": 1}]}, "issues") == [{"k": 1}]
     assert sonar.line_of({"line": 7}) == 7
     assert sonar.line_of({}) == 0
-    assert sonar.LINE == "line"
     client: Any = FakeClient(lambda path, params: {})
     issue = {"key": "I1", "component": "p:a.py", "rule": "r1", "issueStatus": "ACCEPTED", "line": 7}
     assert sonar.reopen(client, issue).startswith("a.py:7 ")

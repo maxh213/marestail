@@ -236,8 +236,6 @@ def test_mapping_text_uses_a_blank_when_missing() -> None:
 def test_path_of_finding_uses_the_last_colon() -> None:
     assert cs_lint.path_of_finding("App/A:b.cs:3") == "App/A:b.cs"
     assert cs_lint.path_of_finding("no-colon") == "no-colon"
-    assert cs_lint.COLON == ":"
-    assert cs_lint.SARIF_VERSION == "2.1"
 
 
 @pytest.mark.parametrize(
@@ -260,7 +258,6 @@ def test_project_findings_returns_the_no_sarif_result(tmp_path: Path, monkeypatc
 
 def test_path_of_finding_keeps_a_leading_colon() -> None:
     assert cs_lint.path_of_finding(":10") == ""
-    assert cs_lint.MISSING == -1
 
 
 def test_required_path_rejects_none() -> None:

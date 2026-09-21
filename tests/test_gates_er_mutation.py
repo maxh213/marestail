@@ -255,13 +255,6 @@ def test_mutant_status_defaults_to_not_checked() -> None:
     assert er_mutation.mutant_status({"status": "killed"}) == "killed"
 
 
-def test_notes_join_and_remaining_floor() -> None:
-    assert er_mutation.NOTES_JOIN == "; "
-    assert er_mutation.REMAINING_FLOOR == 120
-    assert er_mutation.FULL_MODE == "full"
-    assert er_mutation.REPORT_INDENT == 2
-
-
 def test_remove_ebin_is_idempotent(tmp_path: Path) -> None:
     ebin = tmp_path / "ebin"
     ebin.mkdir()

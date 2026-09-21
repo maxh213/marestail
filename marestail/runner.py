@@ -1008,8 +1008,6 @@ def record_commit(config: Config, subject: str, body: str, role: str, label: str
 
 
 def stamped(message: str, label: str, used: set[str] | None = None) -> str:
-    if type(label) is not str:
-        raise TypeError(RUN_TYPE)
     if not label or stamped_already(message, {label, *labels_of(used)}):
         return message
     return f"[{label}] {message}"
@@ -1218,21 +1216,7 @@ def claude_command(state: Run) -> list[str]:
     return command + optional_flag(MODEL_FLAG, state.model) + optional_flag(EFFORT_FLAG, state.effort)
 
 
-def spawn_command(command: object) -> list[str]:
-    if type(command) is not list:
-        raise TypeError(RUN_TYPE)
-    return command
-
-
-def spawn_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
-    if env is None:
-        raise TypeError(RUN_TYPE)
-    return env
-
-
 def spawn(command: list[str], state: Run, env: Mapping[str, str], stdin: str, shown: str) -> Spawned:
-    command = spawn_command(command)
-    env = spawn_env(env)
     try:
         return subprocess.run(
             command,

@@ -20,8 +20,6 @@ class Client:
         self.basic = f"{token}:" if password is None else f"{token}:{password}"
 
     def get(self, path: str, **params: Param) -> dict[str, Any]:
-        if any(value is None for value in params.values()):
-            raise TypeError("param")
         query = urllib.parse.urlencode(params)
         return self.request("GET", f"{path}?{query}")
 

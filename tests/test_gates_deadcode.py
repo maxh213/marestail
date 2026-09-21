@@ -155,14 +155,12 @@ def test_unused_kind_strips_a_trailing_s() -> None:
 def test_without_confidence_drops_unmatched_lines() -> None:
     assert deadcode.without_confidence("no confidence") == ""
     assert deadcode.without_confidence("a.py:1: unused function foo (80% confidence)") == "a.py:1: unused function foo"
-    assert deadcode.MISSING_CONFIDENCE == ""
 
 
 def test_colons_from_left_includes_the_first_colon() -> None:
     assert deadcode.colons_from_left("a:b:c") == [1, 3]
     assert deadcode.colons_from_left(":") == []
     assert deadcode.colons_from_left("a:b") == [1]
-    assert deadcode.COLON == ":"
 
 
 def test_ignore_names_requires_a_list() -> None:

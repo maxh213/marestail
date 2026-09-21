@@ -17,8 +17,6 @@ TS_SUFFIXES = (".ts", ".tsx")
 EMPTY = ""
 EMPTY_LIST: list[Any] = []
 EMPTY_MAP: dict[str, Any] = {}
-LIST_ERROR = "list"
-MAP_ERROR = "map"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -85,19 +83,15 @@ def surviving(report: dict[str, Any], ctx: Context) -> list[str]:
 def json_map(data: dict[str, Any], key: str) -> dict[str, Any]:
     if key not in data:
         return EMPTY_MAP
-    value = data[key]
-    if type(value) is not dict:
-        raise TypeError(MAP_ERROR)
-    return value
+    found: dict[str, Any] = data[key]
+    return found
 
 
 def json_list(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
-    value = data[key]
-    if type(value) is not list:
-        raise TypeError(LIST_ERROR)
-    return value
+    found: list[Any] = data[key]
+    return found
 
 
 def named_files(report: dict[str, Any], ctx: Context) -> list[tuple[str, dict[str, Any]]]:

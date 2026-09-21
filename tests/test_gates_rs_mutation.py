@@ -136,7 +136,6 @@ def test_after_colon_splits_once() -> None:
     assert rs_mutation.after_colon("replace x with y: z in f", "f") == "z"
     assert rs_mutation.after_colon("plain", "f") == "plain"
     assert rs_mutation.after_colon("replace a: b with c: d in f", "f") == "b with c: d"
-    assert rs_mutation.COLON_SPACE == ": "
 
 
 def test_verdict_rejects_a_missing_output(tmp_path: Path) -> None:
@@ -151,7 +150,6 @@ def test_require_output_keeps_text() -> None:
 
 def test_clear_outcomes_ignores_a_missing_folder(tmp_path: Path) -> None:
     rs_mutation.clear_outcomes(tmp_path / "missing")
-    assert rs_mutation.IGNORE_MISSING is True
 
 
 def test_verdict_caps_findings(tmp_path: Path) -> None:

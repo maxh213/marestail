@@ -298,13 +298,6 @@ def test_source_files(tmp_path: Path) -> None:
     assert depth.source_files(tmp_path, depth.RUBY_SOURCES, depth.RUBY_TEST_SUFFIX) == [tmp_path / "a.rb", tmp_path / "b.rb"]
 
 
-def test_language_globs() -> None:
-    assert depth.ELIXIR_SOURCES == "*.ex"
-    assert depth.ELIXIR_TEST_SUFFIX == "_test.exs"
-    assert depth.RUBY_SOURCES == "*.rb"
-    assert depth.RUBY_TEST_SUFFIX == "_spec.rb"
-
-
 def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple[int, str]) -> list[Any]:
     calls: list[Any] = []
 

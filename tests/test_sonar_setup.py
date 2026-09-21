@@ -94,7 +94,6 @@ def test_wait_until_up(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "sleep", slept.append)
     setup.wait_until_up("http://x")
     assert slept == [5, 5]
-    assert setup.ATTEMPTS == 120
 
 
 def test_wait_until_up_uses_the_attempts_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +110,6 @@ def test_wait_until_up_uses_the_attempts_default(monkeypatch: pytest.MonkeyPatch
         setup.wait_until_up("http://x")
     assert urls == ["http://x"] * setup.ATTEMPTS
     assert slept == [5] * setup.ATTEMPTS
-    assert setup.ATTEMPTS == 120
 
 
 def test_wait_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:

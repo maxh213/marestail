@@ -75,18 +75,6 @@ def test_backend_effort_for_grok_and_others(monkeypatch: pytest.MonkeyPatch) -> 
     assert runner.backend_effort(other) == ""
 
 
-def test_spawn_rejects_a_missing_command() -> None:
-    state = make_state()
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.spawn(None, state, os.environ, "", "x")  # type: ignore[arg-type]
-
-
-def test_spawn_rejects_a_missing_env() -> None:
-    state = make_state()
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.spawn(["x"], state, None, "", "x")  # type: ignore[arg-type]
-
-
 def test_grok_always_approve_locked_rejects_a_missing_code() -> None:
     with pytest.raises(TypeError, match=r"^run$"):
         runner.grok_always_approve_locked(None, "out")  # type: ignore[arg-type]
@@ -253,6 +241,8 @@ def test_kimi_run_output(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str
     fake = install_subprocess(monkeypatch, result)
     assert runner.kimi_run(make_state(), Path("/w/p.md")) == expected
     assert fake.calls[0]["input"] == ""
+    assert fake.calls[0]["command"] == runner.kimi_command(make_state(), Path("/w/p.md"))
+    assert fake.calls[0]["env"] is os.environ
 
 
 @pytest.mark.parametrize(
@@ -525,9 +515,6 @@ def test_kilo_text_reads_part_then_text() -> None:
     assert runner.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
     assert runner.kilo_text({"type": "text", "text": "plain"}) == "plain"
     assert runner.kilo_text({"type": "other", "text": "nope"}) == ""
-    assert runner.TYPE_KEY == "type"
-    assert runner.TEXT == "text"
-    assert runner.PART == "part"
 
 
 def test_mapping_text_rejects_a_missing_key_name() -> None:
@@ -558,9 +545,6 @@ def test_turns_summary_prefers_result_over_response() -> None:
     text = runner.turns_summary(data, {})
     assert "hello" in text
     assert "other" not in text
-    assert runner.RESULT == "result"
-    assert runner.NUM_TURNS == "num_turns"
-    assert runner.SUMMARY_WIDTH == 120
 
 
 @pytest.mark.parametrize(

@@ -122,7 +122,6 @@ def test_nothing_to_mutate(scope: MutationScope, patterns: list[str], expected: 
 def test_mutant_prefix_strips_a_trailing_star() -> None:
     assert py_mutation.mutant_prefix("marestail.report.*") == "marestail.report."
     assert py_mutation.mutant_prefix("plain") == "plain"
-    assert py_mutation.STAR == "*"
 
 
 def test_mutation_summary_rejects_a_missing_note() -> None:

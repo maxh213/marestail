@@ -70,8 +70,8 @@ def test_mono_and_glyphs() -> None:
     assert theme.step_attr(mono, "done", None) == mono.done
     assert theme.role_attr(mono, "critic") == mono.judge
     assert theme.role_attr(mono, "coder") == mono.worker
-    assert theme.vine(0) == ""
-    assert len(theme.vine(5)) == 5
+    assert theme.full_vine(0) == ""
+    assert len(theme.full_vine(5)) == 5
 
 
 def test_color_theme(monkeypatch: Any) -> None:
@@ -152,8 +152,7 @@ def test_theme_dispatch_helpers(monkeypatch: Any) -> None:
     assert theme.verdict_attr(mono, "BOUNCE") == mono.bounced
     assert theme.verdict_attr(mono, "PASS") == mono.passed
     assert theme.verdict_attr(mono, None) == mono.done
-    assert theme.blank_vine(8) == ""
-    assert theme.full_vine(5) == theme.vine(5)
+    assert theme.full_vine(5) == "─∙❧─∙"
     assert theme.rich_palette() == theme.RICH_PALETTE
     assert theme.basic_palette()[0] == FakeCurses.COLOR_YELLOW
     monkeypatch.setattr(FakeCurses, "default_ok", True)
@@ -167,10 +166,6 @@ def test_theme_dispatch_helpers(monkeypatch: Any) -> None:
 
 
 def test_theme_constants_and_running_attr() -> None:
-    assert theme.STATUS_RUNNING == "running"
-    assert theme.VERDICT_BOUNCE == "BOUNCE"
-    assert theme.VERDICT_PASS == "PASS"
-    assert theme.MISSING == ""
     assert theme.named_or_missing(None) == ""
     assert theme.named_or_missing("PASS") == "PASS"
     assert theme.VERDICT_GLYPHS[theme.VERDICT_PASS] == theme.GLYPH_PASSED
@@ -180,12 +175,10 @@ def test_theme_constants_and_running_attr() -> None:
     assert theme.step_glyph("running", "BOUNCE") == theme.GLYPH_RUNNING
     assert theme.verdict_glyph("BOUNCE") == theme.GLYPH_BOUNCED
     assert theme.verdict_glyph(None) == theme.GLYPH_DONE
-    assert theme.vine(1) == theme.full_vine(1)
-    assert theme.vine(1) != ""
-    assert theme.vine(0) == ""
-    assert theme.vine(-1) == ""
-    assert theme.full_vine(4) == "".join(theme.VINE_SEGMENT[i % 3] for i in range(4))
-    assert len(theme.full_vine(5)) == 5
-    assert theme.VINE_SEGMENT == "─∙❧"
+    assert theme.full_vine(1) == "─"
+    assert theme.full_vine(0) == ""
+    assert theme.full_vine(-1) == ""
+    assert theme.full_vine(4) == "─∙❧─"
+    mono = theme.mono_theme()
     with pytest.raises(KeyError):
-        theme.role_attr(theme.mono_theme(), None)  # type: ignore[arg-type]
+        theme.role_attr(mono, None)  # type: ignore[arg-type]

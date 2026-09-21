@@ -155,7 +155,6 @@ def test_str_field_defaults_missing_keys() -> None:
     assert ts_lint.str_field({}, "message") == ""
     assert ts_lint.str_field({"message": "x"}, "message") == "x"
     assert ts_lint.str_field({"message": None}, "message") == ""
-    assert ts_lint.GATE == "ts.lint"
     assert ts_lint.TS_SUFFIXES == (".ts", ".tsx", ".js", ".jsx")
 
 

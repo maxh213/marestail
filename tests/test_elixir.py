@@ -37,12 +37,6 @@ def test_scan_rejects_missing_context(tmp_path: Path, fake_run: Any) -> None:
         elixir.scan(None, "comments", ["a.ex"], cwd=tmp_path)  # type: ignore[arg-type]
 
 
-def test_elixir_constants() -> None:
-    assert elixir.EMPTY == []
-    assert elixir.IGNORE_MODULES == "--ignore-modules"
-    assert elixir.IGNORE == "--ignore"
-
-
 def test_joined_and_option() -> None:
     assert elixir.joined("--ignore", []) == []
     assert elixir.joined("--ignore", ["A", "B"]) == ["--ignore", "A,B"]

@@ -42,7 +42,6 @@ def test_first_text_skips_missing_and_keeps_a_string() -> None:
     assert collect.first_text("", "later") == ""
     assert collect.first_text(None, None) == ""
     assert collect.first_text() == ""
-    assert collect.EMPTY == ""
 
 
 def test_first_present_skips_missing() -> None:
@@ -689,25 +688,6 @@ def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
     return Tracker(fn)
 
 
-def test_collect_constants() -> None:
-    assert collect.RUNS == "runs"
-    assert collect.HANDOFFS == "handoffs"
-    assert collect.LIVE == "live"
-    assert collect.STATUS_RUNNING == "running"
-    assert collect.STATUS_DONE == "done"
-    assert collect.ERRORS_IGNORE == "ignore"
-    assert collect.ERRORS_REPLACE == "replace"
-    assert collect.WORK_CONFIG_ENV == "DANDELION_CLAUDE_WORK_CONFIG_DIR"
-    assert collect.WORK_HOME_DEFAULT == "~/.claude-work"
-    assert collect.CLAUDE_CONFIG_ENV == "CLAUDE_CONFIG_DIR"
-    assert collect.CLAUDE_HOME == ".claude"
-    assert collect.PROMPT_SUFFIX == ".prompt.md"
-    assert collect.RESULT_SUFFIX == ".json"
-    assert collect.HANDOFF_SUFFIX == ".md"
-    assert collect.CONV_MAX_LINES == 200
-    assert collect.CONV_BYTES == 262144
-
-
 def test_transcript_conversation_uses_default_window(tmp_path: Path, monkeypatch: Any) -> None:
     seen: list[tuple[Path | None, int, int]] = []
 
@@ -879,6 +859,12 @@ def test_chosen_step_uses_finish_label() -> None:
     assert collect.chosen_step(steps, matched) is first
     named = collect.running_named(steps, "01-coder")
     assert named is first
+
+
+def test_eval_quote_prefers_the_decoded_literal() -> None:
+    matched = collect.QUOTED_RE.search(r" 'a\tb'")
+    assert matched is not None
+    assert collect.eval_quote("", matched) == "a b"
 
 
 def test_eval_quote_value_error() -> None:
@@ -1083,13 +1069,13 @@ def test_docker_inner_index_and_flags() -> None:
     short = ["docker", "compose", "run", "svc"]
     assert collect.compose_run_target(short, 0) is None
     assert collect.docker_inner(["echo", "compose", "run", "svc", "pytest"]) is None
-    assert collect.COMPOSE_SPAN == 3
-    assert collect.AFTER_RUN == 3
+    assert collect.docker_inner(["docker", "compose", "run", "svc", "pytest", "extra"]) == "pytest"
     assert collect.MISSING_ROW == (0, [])
 
 
 def test_parsed_literal_value_error() -> None:
     assert collect.parsed_literal("1+") is None
+    assert collect.parsed_literal("f(1)") is None
     assert collect.parsed_literal("'ok'") == "ok"
     with pytest.raises(KeyError):
         collect.parsed_literal(None)  # type: ignore[arg-type]

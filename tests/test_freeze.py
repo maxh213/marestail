@@ -55,11 +55,6 @@ def test_frozen_paths_by_role(role: str, expected: list[str]) -> None:
     assert freeze.frozen_paths(config(), role, paths) == expected
 
 
-def test_frozen_paths_rejects_a_missing_role() -> None:
-    with pytest.raises(TypeError, match=r"^role$"):
-        freeze.frozen_paths(config(), None, ["src/a.py"])  # type: ignore[arg-type]
-
-
 def test_frozen_paths_follow_configuration() -> None:
     raw: dict[str, object] = {"freeze": {"paths": ["src/**"], "spec": ["docs/**"], "allow": {"coder": ["src/ok.py"]}}}
     paths = ["src/a.py", "src/ok.py", "docs/x.md", "pyproject.toml"]

@@ -52,7 +52,6 @@ def writes_session(root: Path, report: str, output: str = "") -> Callable[[list[
 
 
 def test_mutation_default_is_enabled() -> None:
-    assert rb_mutation.MUTATION_DEFAULT is True
     assert rb_mutation.mutation_off(True) is False
     assert rb_mutation.mutation_off(False) is True
 
@@ -200,8 +199,6 @@ def test_right_colon_splits_from_the_end() -> None:
     assert rb_mutation.right_colon(":y") == ("", ":", "y")
     assert rb_mutation.right_colon("a:") == ("a", ":", "")
     assert rb_mutation.right_colon("abc") == ("", "", "abc")
-    assert rb_mutation.COLON == ":"
-    assert rb_mutation.EMPTY == ""
 
 
 def test_split_label_keeps_an_empty_path() -> None:
@@ -244,23 +241,24 @@ def test_stdout_result_rejects_a_missing_note(tmp_path: Path) -> None:
         rb_mutation.stdout_result(ctx, 0, "Results: 1\n", 0.0, None)  # type: ignore[arg-type]
 
 
-def test_verdict_rejects_a_missing_output() -> None:
-    with pytest.raises(TypeError, match=r"^output$"):
-        rb_mutation.verdict(1, [], None, 0.0, "")  # type: ignore[arg-type]
-
-
-def test_verdict_rejects_a_missing_note_value() -> None:
-    with pytest.raises(TypeError, match=r"^note$"):
-        rb_mutation.verdict(1, [], "out", 0.0, None)  # type: ignore[arg-type]
-
-
-def test_verdict_requires_a_note() -> None:
-    with pytest.raises(TypeError):
-        rb_mutation.verdict(1, [], "out", 0.0)  # type: ignore[call-arg]
-
-
 def test_verdict_keeps_a_nonempty_note() -> None:
     result = rb_mutation.verdict(1, [], "out", 0.0, "scoped")
+    assert result.summary.endswith("scoped")
+
+
+def test_verdict_notes_nothing_by_default() -> None:
+    assert rb_mutation.verdict(1, [], "out", 0.0).summary == "all 1 mutants killed"
+
+
+def test_stdout_result_without_mutants_tails_the_output() -> None:
+    result = rb_mutation.stdout_result(make_context(Path("/tmp")), 0, "Results: 0\n", 0.0, "scoped")
+    assert (result.ok, result.summary, result.findings) == (False, "no mutants were generated", ["Results: 0"])
+
+
+def test_session_result_keeps_the_note(tmp_path: Path) -> None:
+    report = tmp_path / "session.json"
+    report.write_text(json.dumps({"subject_results": [{"coverage_results": [{"mutation": {"source": "x"}}]}]}))
+    result = rb_mutation.session_result(make_context(tmp_path), {report}, "out", 0.0, "scoped")
     assert result.summary.endswith("scoped")
 
 
@@ -273,7 +271,6 @@ def test_constants_replace_invalid_bytes(tmp_path: Path) -> None:
     path = tmp_path / "a.rb"
     path.write_bytes(b"class A\n\xff\n")
     assert "A" in rb_mutation.constants(path)
-    assert rb_mutation.REPLACE == "replace"
 
 
 def test_label_keeps_colons_in_the_owner() -> None:

@@ -21,8 +21,6 @@ JEST = "jest"
 RUNNER_ERROR = "runner"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
-LIST_ERROR = "list"
-TEXT_ERROR = "text"
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -103,10 +101,8 @@ def jest_command(ctx: Context) -> list[str]:
 def json_list(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
-    value = data[key]
-    if type(value) is not list:
-        raise TypeError(LIST_ERROR)
-    return value
+    found: list[Any] = data[key]
+    return found
 
 
 def jest_failures(ctx: Context) -> list[str]:
@@ -129,10 +125,8 @@ def failed_cases(suite: dict[str, Any]) -> list[dict[str, Any]]:
 def suite_message(suite: dict[str, Any]) -> str:
     if "message" not in suite:
         return EMPTY
-    value = suite["message"]
-    if type(value) is not str:
-        raise TypeError(TEXT_ERROR)
-    return value
+    found: str = suite["message"]
+    return found
 
 
 def suite_broken(file: str, suite: dict[str, Any], failed: list[dict[str, Any]]) -> list[str]:

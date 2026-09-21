@@ -159,8 +159,3 @@ def test_paired_ends_rejects_mismatched_lengths() -> None:
 
 def test_paired_ends_keeps_matching_bounds() -> None:
     assert er_crap.paired_ends("a.erl", [1, 4], [3, 9]) == {("a.erl", 1): 3, ("a.erl", 4): 9}
-
-
-def test_complexity_timeout_is_600() -> None:
-    assert er_crap.COMPLEXITY_TIMEOUT == 600
-    assert er_crap.REPLACE == "replace"

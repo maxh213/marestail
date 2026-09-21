@@ -134,10 +134,6 @@ def test_problems_on_one_target_do_not_hide_others() -> None:
 
 
 def test_bootstrap_needs_both_sides_and_rounds() -> None:
-    assert results.MIN_ROUNDS == 1
-    assert results.EMPTY_COMPARED == 0
-    assert results.P50 == 0
-    assert results.P95 == 1
     assert results.bootstrap(None, [1.0], 5, 1) is None
     assert results.bootstrap([1.0], [], 5, 1) is None
     assert results.bootstrap([1.0], [1.0], 0, 1) is None
@@ -149,7 +145,8 @@ def test_bootstrap_is_seeded() -> None:
     first = results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 7)
     assert first == results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 7)
     assert first != results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 8)
-    assert first is not None and first[0] != first[1]
+    assert first is not None
+    assert first[0] != first[1]
 
 
 def test_absence_problems_when_baseline_has_values() -> None:
@@ -157,8 +154,19 @@ def test_absence_problems_when_baseline_has_values() -> None:
     assert results.absence_problems("t", [], {}) == ["`t` is absent on both the baseline and head trees"]
 
 
-def test_min_compared_defaults_to_zero() -> None:
-    assert min(results.compared_sizes({}), default=results.EMPTY_COMPARED) == 0
+BOOTSTRAP = Policy(min_runs=1, values_per_sample=1, p95_min_values=1, bootstrap=50)
+
+
+def test_measurements_for_counts_no_compared_values() -> None:
+    found = results.measurements_for("t", [timed("baseline", 1.0)], {"control": [1.0], results.BASELINE: []}, BOOTSTRAP)
+    assert [item.values for item in found] == [0, 0]
+    assert [item.interval for item in found] == [None, None]
+
+
+def test_measurements_for_seeds_the_bootstrap_from_the_target_name() -> None:
+    values: dict[str, list[float] | None] = {results.BASELINE: [1.0, 5.0, 9.0], results.HEAD: [2.0, 6.0, 12.0]}
+    found = results.measurements_for("t", [timed("baseline", 1.0)], values, BOOTSTRAP)
+    assert [item.interval for item in found] == [(-77.777777778, 1100.0), (-77.777777778, 140.0)]
 
 
 def test_interval_takes_the_middle_ninety_five_percent() -> None:

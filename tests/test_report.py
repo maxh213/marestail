@@ -21,7 +21,6 @@ def test_skipped() -> None:
 
 def test_result_field_names() -> None:
     assert (report.GATE_FIELD, report.SECONDS_FIELD, report.FINDINGS_FIELD) == ("gate", "seconds", "findings")
-    assert report.FINDING_CAP == 60
 
 
 def test_capped_keeps_sixty() -> None:

@@ -37,8 +37,6 @@ def write_jest(root: Path, results: list[dict[str, Any]]) -> None:
 def test_chosen_runner_defaults_to_vitest(tmp_path: Path) -> None:
     assert ts_tests.chosen_runner(make_context(tmp_path)) == "vitest"
     assert ts_tests.chosen_runner(make_context(tmp_path, {"ts": {"runner": "jest"}})) == "jest"
-    assert ts_tests.VITEST == "vitest"
-    assert ts_tests.JEST == "jest"
 
 
 def test_chosen_runner_rejects_none(tmp_path: Path) -> None:
@@ -270,7 +268,6 @@ def test_finding_file_splits_on_the_first_colon() -> None:
     assert _coverage.finding_file("a.ts:1 x: y") == "a.ts"
     assert _coverage.finding_file("no-colon") == "no-colon"
     assert _coverage.finding_file(":leading") == ""
-    assert _coverage.COLON == ":"
 
 
 def test_failures_without_jest_ignores_results(tmp_path: Path) -> None:
@@ -278,23 +275,11 @@ def test_failures_without_jest_ignores_results(tmp_path: Path) -> None:
     assert ts_tests.failures(make_context(tmp_path, TS), False) == []
 
 
-def test_json_list_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        ts_tests.json_list({"testResults": {}}, "testResults")
-
-
 def test_jest_failures_default_missing_results(tmp_path: Path) -> None:
     path = tmp_path / ".marestail" / ts_tests.JEST_RESULTS
     path.parent.mkdir(parents=True)
     path.write_text("{}")
     assert ts_tests.jest_failures(make_context(tmp_path)) == []
-
-
-def test_suite_message_defaults_and_rejects_a_non_str() -> None:
-    assert ts_tests.suite_message({}) == ""
-    assert ts_tests.suite_message({"message": "boom"}) == "boom"
-    with pytest.raises(TypeError, match=r"^text$"):
-        ts_tests.suite_message({"message": 1})
 
 
 def test_suite_broken_without_a_message() -> None:

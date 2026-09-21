@@ -402,10 +402,8 @@ def checked_language(ctx: Context, client: Client, key: str, check: LanguageChec
 def metric_text(measure: dict[str, Any]) -> str:
     if "value" not in measure:
         return EMPTY
-    value = measure["value"]
-    if type(value) is not str:
-        raise TypeError("value")
-    return value
+    found: str = measure["value"]
+    return found
 
 
 def component_measures(data: dict[str, Any]) -> list[Any]:

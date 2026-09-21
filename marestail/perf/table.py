@@ -14,7 +14,6 @@ HEADER_START = "| Task |"
 CELL_BORDER = re.compile(r"(?<!\\)\|")
 MARKS = {"degraded": " ⚠", "improved": " ✓", "unchanged": ""}
 HEADER_ROWS = 2
-ZIP_STRICT = False
 
 
 @dataclass(frozen=True)
@@ -52,8 +51,13 @@ def parse(text: str) -> Table:
     header = split_row(lines[start])
     body = start + HEADER_ROWS
     end = table_end(lines, body)
-    rows = [dict(zip(header, split_row(line), strict=ZIP_STRICT)) for line in lines[body:end]]
+    rows = [row_map(header, split_row(line)) for line in lines[body:end]]
     return Table("".join(lines[:start]), extra_columns(header), rows, "".join(lines[end:]))
+
+
+def row_map(header: list[str], cells: list[str]) -> dict[str, str]:
+    paired = min(len(header), len(cells))
+    return {header[index]: cells[index] for index in range(paired)}
 
 
 def header_index(lines: list[str]) -> int | None:

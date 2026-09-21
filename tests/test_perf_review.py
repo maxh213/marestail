@@ -56,7 +56,6 @@ def test_review_classifies_and_writes_results(tmp_path: Path) -> None:
     raw = (tmp_path / "verdict.results.json").read_text()
     data = json.loads(raw)
     assert raw == json.dumps(data, indent=review.INDENT) + "\n"
-    assert review.INDENT == 2
     assert data["measurements"][0] | {"interval": None} == {
         "target": "t",
         "metric": "p50",
@@ -176,7 +175,6 @@ def test_snapshot_without_head_or_pre(tmp_path: Path, fake_run: Callable[..., Fa
     snapshot = review.snapshot_for(config, session_with("baseline"), outcome)
     assert fake.calls == [["git", "rev-parse", "--short", "HEAD"]]
     assert fake.options[0]["cwd"] is config.root
-    assert review.DATE == "%Y-%m-%d"
     assert snapshot == table.Snapshot("task-1", "HEADSHA", "2026-01-02", table.EMPTY, None, outcome.classified)
 
 
@@ -262,7 +260,6 @@ def test_changes_summary_with_nothing_changed() -> None:
 def test_setup_needed_runs_to_the_end_without_a_next_heading() -> None:
     assert review.setup_needed("## Setup needed\ninstall x\n### sub\nkeep") == "install x\n### sub\nkeep"
     assert review.setup_needed("nothing here") == ""
-    assert review.NEXT_HEADING == "\n## "
     assert review.setup_needed("## Setup needed\nkeep ## Setup needed extra\n## Next") == "keep ## Setup needed extra"
     assert review.setup_needed("## Setup needed\nfirst\n## Middle\n## Last") == "first"
     assert review.setup_needed("## Setup needed extra\nkeep") == "extra\nkeep"

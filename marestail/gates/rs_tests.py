@@ -17,7 +17,6 @@ PASSED = re.compile(r"^test result: \w+\. (\d+) passed", re.MULTILINE)
 
 Entry = dict[str, dict[str, int]]
 EMPTY_LIST: list[Any] = []
-LIST_ERROR = "list"
 
 
 def extra_args(ctx: Context) -> list[str]:
@@ -120,10 +119,8 @@ def lcov_line(ctx: Context, files: dict[str, Entry], current: Entry | None, line
 def json_list(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
-    value = data[key]
-    if type(value) is not list:
-        raise TypeError(LIST_ERROR)
-    return value
+    found: list[Any] = data[key]
+    return found
 
 
 def merge_regions(ctx: Context, files: dict[str, Entry]) -> None:

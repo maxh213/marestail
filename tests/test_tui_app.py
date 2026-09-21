@@ -372,23 +372,6 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert scr_keys.erased == 1
 
 
-def test_app_constants() -> None:
-    assert app.REPOS_ATTR == "repos"
-    assert app.KEY_LABEL == " key "
-    assert app.BACK_ACTION == "back"
-    assert app.COLLECT_PREFIX == "collect failed: "
-    assert app.ERROR_WIDTH == 60
-    assert app.TIME_FMT == "%H:%M:%S"
-    assert app.FLEET_HINT == "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
-    assert app.DETAIL_HINT == "j/k scroll · PgUp/PgDn · q back"
-    assert app.DETAIL_FOLLOW == " ⇊"
-    assert app.HEADER == " M A R E S T A I L "
-    assert app.TICK_MS == 125
-    assert app.SESSION_TICKS == 10000
-    assert app.MIN_W == 70
-    assert app.MIN_H == 20
-
-
 def test_main_records_timeout_and_session_args(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr(app, "init_theme", mono_theme)
     monkeypatch.setattr(app, "hide_cursor", lambda: None)
@@ -535,7 +518,6 @@ def test_detail_backs_and_key_action(tmp_path: Path, monkeypatch: Any) -> None:
     assert app.detail_backs(detail, ord("q"), watch) is True
     assert keys.calls[0][0] == (ord("q"), watch)
     assert app.key_action(detail, ord("q"), watch) == "back"
-    assert app.BACK_ACTION == "back"
 
 
 def test_bump_tick_increments(tmp_path: Path, monkeypatch: Any) -> None:
@@ -715,7 +697,6 @@ def test_draw_legend_box_on_odd_width(tmp_path: Path, monkeypatch: Any) -> None:
 
 def test_header_status_attr(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr("marestail.tui.app.time.strftime", lambda fmt: "01:02:03")
-    assert app.TIME_FMT == "%H:%M:%S"
     fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
     watch = WatchState(fleet=fleet, theme=mono_theme(), tick=0)
     status = app.status_text(watch)

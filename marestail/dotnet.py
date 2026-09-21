@@ -104,17 +104,7 @@ def dotnet(
     return run(dotnet_bin(ctx, folder, network, variables, program) + args, cwd=folder, env={**env(ctx), **variables}, timeout=timeout)
 
 
-CODE_ERROR = "code"
-
-
-def require_code(code: object) -> int:
-    if type(code) is not int:
-        raise TypeError(CODE_ERROR)
-    return code
-
-
 def hint(code: int, output: str) -> str | None:
-    code = require_code(code)
     if code == 127 or "cannot connect to the docker daemon" in output.lower():
         return f"dotnet unavailable: {INSTALL_HINT}"
     if "unable to find image" in output.lower():

@@ -146,24 +146,7 @@ def mutation_kind(result: dict[str, Any]) -> str:
     return kind
 
 
-OUTPUT_ERROR = "output"
-
-
-def require_output(output: object) -> str:
-    if type(output) is not str:
-        raise TypeError(OUTPUT_ERROR)
-    return output
-
-
-def require_note(note: object) -> str:
-    if type(note) is not str:
-        raise TypeError("note")
-    return note
-
-
-def verdict(total: int, failures: list[Failure], output: str, started: float, note: str) -> Result:
-    output = require_output(output)
-    note = require_note(note)
+def verdict(total: int, failures: list[Failure], output: str, started: float, note: str = "") -> Result:
     if total == 0:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
     findings = [describe(*failure, count) for failure, count in Counter(failures).items()]

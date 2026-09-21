@@ -202,13 +202,6 @@ def test_escript_uses_an_explicit_cwd(tmp_path: Path, fake_run: Callable[..., Fa
     assert fake.options == [{"cwd": other, "timeout": erlang.TOOL_TIMEOUT}]
 
 
-def test_erlang_constants() -> None:
-    assert erlang.TOOL_TIMEOUT == 600
-    assert erlang.ERLC_TIMEOUT == 900
-    assert erlang.PATH_SEP == ":"
-    assert erlang.EMPTY == ""
-
-
 def test_require_timeout_rejects_none() -> None:
     with pytest.raises(TypeError, match=r"^timeout$"):
         erlang.require_timeout(None)  # type: ignore[arg-type]

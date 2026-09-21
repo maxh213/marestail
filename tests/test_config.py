@@ -31,7 +31,6 @@ def test_get_rejects_non_string_names(tmp_path: Path) -> None:
         loaded.get(None, "root", ".")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match=r"^name$"):
         loaded.get("python", None, ".")  # type: ignore[arg-type]
-    assert config.NAME_ERROR == "name"
 
 
 def test_work(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from typing import Any, TypeGuard
 from .collect import collect_fleet
 from .model import Fleet, RepoState
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
-from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
+from .theme import GLYPH_FLOURISH, ROUND, full_vine, init_theme
 
 MIN_W = 70
 MIN_H = 20
@@ -292,7 +292,7 @@ def draw_header(win: curses.window, width: int, state: WatchState) -> None:
     put(win, 0, 0, f" {GLYPH_FLOURISH}{HEADER}{GLYPH_FLOURISH}", state.theme.heading)
     status = status_text(state)
     put(win, 0, width - len(status), status, state.theme.secondary)
-    put(win, 1, 0, vine(width), state.theme.border)
+    put(win, 1, 0, full_vine(width), state.theme.border)
 
 
 def status_text(state: WatchState) -> str:

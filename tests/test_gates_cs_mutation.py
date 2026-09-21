@@ -221,7 +221,6 @@ def test_describe_defaults() -> None:
 def test_trim_slash_pattern_only_strips_slashes() -> None:
     assert cs_mutation.trim_slash_pattern("/XGen/", "cs/") == "XGen"
     assert cs_mutation.trim_slash_pattern("cs/Gen/", "cs/") == "Gen"
-    assert cs_mutation.SLASH == "/"
 
 
 def test_precondition_reads_invalid_utf8(tmp_path: Path) -> None:
@@ -238,7 +237,6 @@ def test_mapping_uses_an_empty_dict_when_the_key_is_missing() -> None:
     assert cs_mutation.mapping({}, cs_mutation.FILES) == {}
     assert cs_mutation.mapping({"files": {"a": {}}}, cs_mutation.FILES) == {"a": {}}
     assert cs_mutation.mapping({"files": []}, cs_mutation.FILES) == {}
-    assert cs_mutation.FILES == "files"
 
 
 def test_mutants_of_missing_and_non_list() -> None:

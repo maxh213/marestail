@@ -133,4 +133,3 @@ def test_batch_findings_rejects_a_missing_code(tmp_path: Path) -> None:
 
 def test_erlang_suffixes_stay_lowercase() -> None:
     assert er_lint.ERLANG_SUFFIXES == (".erl", ".hrl")
-    assert er_lint.LINT_TIMEOUT == 900

@@ -59,17 +59,12 @@ def test_package_dir(owner: str, folder: str) -> None:
 def test_output_tail() -> None:
     assert java.output_tail("  short \n") == "short"
     assert java.output_tail("x" * 10 + "y" * 300 + "\n") == "y" * 300
-    assert java.OUTPUT_TAIL == 300
-    assert java.NS_CLOSE == "}"
-    assert java.EMPTY == ""
     assert java.local_tag("{ns}name") == "name"
     assert java.local_tag("plain") == "plain"
     assert java.local_tag("{a}b}c") == "b}c"
     assert java.trim_slash("/gen/") == "gen"
     assert java.trim_slash("gen") == "gen"
     assert java.configured_list(["a", 1]) == ["a", "1"]
-    assert java.SLASH == "/"
-    assert java.MISSING == -1
 
 
 def test_configured_list_rejects_none() -> None:
@@ -100,7 +95,6 @@ def test_read_replaced_keeps_invalid_bytes(tmp_path: Path) -> None:
     path = tmp_path / "a.java"
     path.write_bytes(b"ok\xffend")
     assert "\ufffd" in java.read_replaced(path)
-    assert java.REPLACE == "replace"
 
 
 def test_pom_properties_strips_namespace() -> None:

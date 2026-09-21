@@ -210,11 +210,6 @@ def test_stamped(message: str, label: str, used: set[str] | None, expected: str)
     assert runner.stamped(message, label, used) == expected
 
 
-def test_stamped_rejects_a_missing_label() -> None:
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.stamped("msg", None)  # type: ignore[arg-type]
-
-
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
@@ -295,6 +290,27 @@ def test_fold_handoff_without_label_keeps_history(repo: Path) -> None:
     report = write(repo, ".marestail/h/01-coder.md", "body")
     runner.fold_handoff(config, "coder", report, before, "")
     assert last_message(repo) == "work\n\nbody\n\nBy coder."
+
+
+def test_frozen_changes_follow_the_role_allow_list(repo: Path) -> None:
+    config = Config(root=repo, raw={})
+    before = runner.head(config)
+    write(repo, "pyproject.toml", "[tool]\n")
+    assert runner.frozen_changes(config, Worker("architect", None), before, ["pyproject.toml"]) == []
+    assert runner.frozen_changes(config, Worker("coder", None), before, ["pyproject.toml"]) == ["pyproject.toml"]
+
+
+def test_fold_handoff_stamps_an_amended_merge(repo: Path) -> None:
+    config = Config(root=repo, raw={})
+    before = runner.head(config)
+    git(repo, "checkout", "-q", "-b", "side")
+    write(repo, "side.txt")
+    commit_all(repo, "side\n\nBy coder.")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "-m", "merge\n\nBy coder.", "side")
+    report = write(repo, ".marestail/h/01-coder.md", "body")
+    runner.fold_handoff(config, "coder", report, before, LABEL)
+    assert last_message(repo) == "[m e] merge\n\nbody\n\nBy coder."
 
 
 def test_stamp_history_skips_merges(repo: Path) -> None:
@@ -440,6 +456,14 @@ def test_verify_worker_audits_existing_report(repo: Path, monkeypatch: pytest.Mo
     assert runner.verify_worker(state, Worker("coder", None, audit=True), report, runner.head(state.config)) == "audit task handoff coder"
 
 
+def test_verify_worker_audits_against_the_configured_features(repo: Path) -> None:
+    state = make_state(repo)
+    report = state.next_report("coder")
+    report.write_text("handoff")
+    audited = runner.verify_worker(state, Worker("coder", None, audit=True), report, runner.head(state.config))
+    assert audited == "audit: no feature file found for this task"
+
+
 def test_verify_worker_lists_first_twenty_dirty_paths(repo: Path) -> None:
     state = make_state(repo)
     report = state.next_report("coder")
@@ -506,28 +530,6 @@ def test_restamp_splits_on_newlines_and_sets_author_env(tmp_path: Path, fake_run
         runner.AUTHOR_DATE: "2020-01-01T00:00:00Z",
     }
     assert fake.calls[1][:6] == [runner.GIT, runner.COMMIT_TREE, "oldsha^{tree}", runner.PARENT_FLAG, "parent", runner.MESSAGE_FLAG]
-
-
-def test_git_flag_constants() -> None:
-    assert runner.ALL_FILES == "-A"
-    assert runner.QUIET == "-q"
-    assert runner.RECURSIVE == "-r"
-    assert runner.DOUBLE_DASH == "--"
-    assert runner.CHECK_IGNORE == "check-ignore"
-    assert runner.NO_INDEX == "--no-index"
-    assert runner.COMMIT_TREE == "commit-tree"
-    assert runner.PARENT_FLAG == "-p"
-    assert runner.MESSAGE_FLAG == "-m"
-    assert runner.AUTHOR_NAME == "GIT_AUTHOR_NAME"
-    assert runner.AUTHOR_EMAIL == "GIT_AUTHOR_EMAIL"
-    assert runner.AUTHOR_DATE == "GIT_AUTHOR_DATE"
-    assert runner.SPLIT_FIELDS == 3
-    assert runner.MINUTES == 60
-    assert runner.LIST_SHOW == 10
-    assert runner.COMMA_JOIN == ", "
-    assert runner.LAST == -1
-    assert runner.STATUS_WIDTH == 2
-    assert runner.SPACE_AT == 2
 
 
 def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

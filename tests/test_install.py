@@ -186,18 +186,8 @@ def test_require_entry_rejects_none() -> None:
         install.require_entry(None)
 
 
-def test_folder_fields_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^entry$"):
-        install.folder_fields(None)
-
-
 def test_install_constants() -> None:
-    assert install.VERSION == "version"
-    assert install.TRUSTED == "trusted"
-    assert install.DECIDED == "decided_at"
-    assert install.VERSION_DEFAULT == 1
     assert install.EMPTY_MAP == {}
-    assert install.EMPTY_LIST == []
 
 
 def test_mapping_and_listed() -> None:
@@ -244,6 +234,16 @@ def test_trust_grok_folder_uses_grok_home(
     )
     assert store.stat().st_mode & 0o777 == 0o600
     assert capsys.readouterr().out == f"trusted {tmp_path} for grok project hooks\n"
+
+
+def test_trust_grok_folder_hands_the_writer_a_trusted_entry(home: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = home / ".grok" / "trusted_folders.toml"
+    store.parent.mkdir()
+    store.write_text("folders = {}\n")
+    saved: list[Any] = []
+    monkeypatch.setattr(install, "save_trusted_folders", lambda path, key, folders: saved.append((path, key, folders[key])))
+    install.trust_grok_folder(target)
+    assert saved == [(store, str(target), {install.TRUSTED: True, install.DECIDED: 1234})]
 
 
 def test_trust_grok_folder_skips_trusted(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:

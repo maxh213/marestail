@@ -5,7 +5,6 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from marestail import config as config_module
 from marestail import context as context_module
@@ -99,7 +98,8 @@ def gate_from(spec: tuple[str, str, str | None, str]) -> Gate:
 
 def load_runner(module: str) -> Runner:
     loaded = importlib.import_module(f"{__package__}.{module}")
-    return cast(Runner, getattr(loaded, RUN_GATE))
+    found: Runner = getattr(loaded, RUN_GATE)
+    return found
 
 
 def select(tier: str, only: set[str] | None) -> list[Gate]:

@@ -34,7 +34,6 @@ def test_control_default_is_false(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Config, "get", get)
     assert settings.control(config()) is False
     assert seen == [(settings.SECTION, "control", False)]
-    assert settings.SECTION == "perf"
 
 
 def test_defaults() -> None:

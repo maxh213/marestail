@@ -185,10 +185,6 @@ def test_comment_prefix_stops_at_hash() -> None:
     assert rb_crap.comment_prefix("x # y # z") == "x "
     assert rb_crap.comment_prefix("hello") == "hello"
     assert rb_crap.comment_prefix("# only") == ""
-    assert rb_crap.HASH == "#"
-    assert rb_crap.CRAP_POWER == 3
-    assert rb_crap.EQUALS == "="
-    assert rb_crap.EMPTY == ""
 
 
 def test_without_strings_strips_quoted_text() -> None:

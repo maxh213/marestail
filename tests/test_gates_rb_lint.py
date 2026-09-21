@@ -94,13 +94,11 @@ def test_parse_scoped(tmp_path: Path) -> None:
 def test_failed_tail_keeps_the_last_characters() -> None:
     assert rb_lint.failed_tail("x" * 250) == "x" * 200
     assert rb_lint.failed_tail("  short  ") == "short"
-    assert rb_lint.OUTPUT_TAIL == 200
 
 
 def test_list_field_defaults_and_rejects_a_non_list() -> None:
     assert rb_lint.list_field({}, "files") == []
     assert rb_lint.list_field({"files": [{"path": "a.rb"}]}, "files") == [{"path": "a.rb"}]
-    assert rb_lint.OUTPUT_TAIL == 200
 
 
 def test_list_field_rejects_a_non_list() -> None:

@@ -192,10 +192,6 @@ def blank_marquee(_text: str, _width: int, _tick: int) -> str:
     return ""
 
 
-def just_text(text: str, _width: int, _tick: int) -> str:
-    return text
-
-
 def scrolled_text(text: str, width: int, tick: int) -> str:
     span = max(SPAN_FLOOR, len(text) - width)
     cycle = MARQUEE_PAUSE_TICKS + span + CYCLE_EXTRA
@@ -204,13 +200,8 @@ def scrolled_text(text: str, width: int, tick: int) -> str:
     return text[offset : offset + max(WIDTH_FLOOR, width)]
 
 
-def fit_or_scroll(text: str, width: int, tick: int) -> str:
-    chosen = (scrolled_text, just_text)[len(text) < width + 1]
-    return chosen(text, width, tick)
-
-
 def pick_marquee(width: int) -> Callable[[str, int, int], str]:
-    return {True: blank_marquee}.get(width <= 0, fit_or_scroll)
+    return {True: blank_marquee}.get(width <= 0, scrolled_text)
 
 
 def marquee(text: str, width: int, tick: int) -> str:
@@ -364,17 +355,17 @@ def paint_dead(win: curses.window, y: int, x: int, _width: int, _repo: RepoState
     put(win, y, x, f"{GLYPH_IDLE} {IDLE_TEXT}", state.theme.idle)
 
 
-def paint_idle_selected(win: curses.window, y: int, x: int, width: int, repo: RepoState, _selected: bool, state: WatchState) -> None:
+def paint_idle_selected(win: curses.window, y: int, x: int, width: int, repo: RepoState, state: WatchState) -> None:
     put(win, y, x, f"{GLYPH_RUNNING} {alive_label(repo)}".ljust(width)[:width], state.theme.selected)
 
 
-def paint_idle_plain(win: curses.window, y: int, x: int, width: int, repo: RepoState, _selected: bool, state: WatchState) -> None:
+def paint_idle_plain(win: curses.window, y: int, x: int, width: int, repo: RepoState, state: WatchState) -> None:
     put(win, y, x, f"{GLYPH_RUNNING} {alive_label(repo)}"[:width], state.theme.worker)
 
 
 def paint_alive(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
     chosen = (paint_idle_plain, paint_idle_selected)[{True: selected}[type(selected) is bool]]
-    chosen(win, y, x, width, repo, selected, state)
+    chosen(win, y, x, width, repo, state)
 
 
 def draw_idle_row(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:

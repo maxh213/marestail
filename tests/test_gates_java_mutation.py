@@ -257,8 +257,6 @@ def test_before_dollar_keeps_the_outer_class() -> None:
     assert java_mutation.before_dollar("a$b$c") == "a"
     assert java_mutation.xml_text(None) == ""
     assert java_mutation.xml_text("x") == "x"
-    assert java_mutation.EMPTY == ""
-    assert java_mutation.DOLLAR == "$"
 
 
 def test_viable(tmp_path: Path) -> None:

@@ -10,13 +10,6 @@ CHANGED = "changed"
 DEFAULT_BASE = "origin/master"
 BENCHMARKS = "perf"
 CTX_ERROR = "ctx"
-PATH_ERROR = "path"
-
-
-def require_path(path: object) -> str:
-    if type(path) is not str:
-        raise TypeError(PATH_ERROR)
-    return path
 
 
 @dataclass(frozen=True)
@@ -154,7 +147,6 @@ class Context:
         return any(path == entry or Path(path).is_relative_to(entry) for entry in self.focus)
 
     def in_scope(self, path: str) -> bool:
-        path = require_path(path)
         if not self.scoped:
             return True
         return path in self.changed or self.in_focus(path)
