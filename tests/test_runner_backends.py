@@ -67,6 +67,36 @@ def test_agent_label(fields: dict[str, Any], expected: str) -> None:
     assert runner.agent_label(make_state(**fields)) == expected
 
 
+def test_backend_effort_for_grok_and_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_GROK_EFFORT", "low")
+    grok = make_state(agent="grok", effort="")
+    other = make_state(agent="claude", effort="")
+    assert runner.backend_effort(grok) == "low"
+    assert runner.backend_effort(other) == ""
+
+
+def test_spawn_rejects_a_missing_command() -> None:
+    state = make_state()
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.spawn(None, state, os.environ, "", "x")  # type: ignore[arg-type]
+
+
+def test_spawn_rejects_a_missing_env() -> None:
+    state = make_state()
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.spawn(["x"], state, None, "", "x")  # type: ignore[arg-type]
+
+
+def test_grok_always_approve_locked_rejects_a_missing_code() -> None:
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.grok_always_approve_locked(None, "out")  # type: ignore[arg-type]
+
+
+def test_rate_limited_rejects_a_missing_code() -> None:
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.rate_limited(None, "{}")  # type: ignore[arg-type]
+
+
 def test_agent_env_for_claude_and_others() -> None:
     claude = make_state(account_env={"A": "1"})
     other = make_state(agent="grok", account_env={"A": "1"})

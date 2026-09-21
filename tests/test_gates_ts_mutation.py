@@ -148,3 +148,38 @@ def test_surviving_skips_out_of_scope_files(tmp_path: Path) -> None:
         "web/src/a.ts:2 BooleanLiteral CompileError: x",
     ]
     assert ts_mutation.surviving({}, ctx) == []
+
+
+def test_ts_suffixes_include_tsx() -> None:
+    assert ts_mutation.TS_SUFFIXES == (".ts", ".tsx")
+
+
+def test_replacement_text_defaults_and_clips() -> None:
+    assert ts_mutation.replacement_text({}) == ""
+    assert ts_mutation.replacement_text({"replacement": "x" * 80}) == "x" * 60
+
+
+def test_json_map_and_list_defaults() -> None:
+    assert ts_mutation.json_map({}, "files") == {}
+    assert ts_mutation.json_list({}, "mutants") == []
+
+
+def test_json_map_rejects_a_non_map() -> None:
+    with pytest.raises(TypeError, match=r"^map$"):
+        ts_mutation.json_map({"files": []}, "files")
+
+
+def test_json_list_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        ts_mutation.json_list({"mutants": {}}, "mutants")
+
+
+def test_drop_tree_skips_a_missing_path(tmp_path: Path) -> None:
+    missing = tmp_path / "gone"
+    ts_mutation.drop_tree(missing)
+    assert not missing.exists()
+    present = tmp_path / "tmp"
+    present.mkdir()
+    (present / "x").write_text("x")
+    ts_mutation.drop_tree(present)
+    assert not present.exists()

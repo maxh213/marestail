@@ -150,7 +150,12 @@ def named_target(text: str, begin: int, split: int) -> tuple[tuple[str, str], in
     return ((text[begin:split], name), start + len(name)) if name else None
 
 
+CONFIG_ERROR = "config"
+
+
 def problems(config: Config, task_name: str, handoff: str, role: str = "coder") -> list[str]:
+    if type(config) is not Config:
+        raise TypeError(CONFIG_ERROR)
     titles = scenarios(feature_files(config, task_name))
     if not titles:
         return ["audit: no feature file found for this task"]

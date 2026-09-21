@@ -5,7 +5,7 @@ import time
 from functools import partial
 from itertools import repeat, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .collect import collect_fleet
 from .model import Fleet, RepoState
@@ -148,7 +148,7 @@ class WatchSession:
         self.detail = None
 
     def handle_panel(self, key: int) -> int | None:
-        chosen: Any = PANEL_ACTIONS.get(cast(str, self.panels[self.active].on_key(key, self.state)), skip)
+        chosen: Any = PANEL_ACTIONS.get(self.panels[self.active].on_key(key, self.state), skip)
         result: int | None = chosen(self)
         return result
 

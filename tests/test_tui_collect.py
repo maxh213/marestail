@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from marestail.tui import collect
 from marestail.tui.model import Process, RepoState, Step, Worker
 
@@ -1081,6 +1083,31 @@ def test_docker_inner_index_and_flags() -> None:
     short = ["docker", "compose", "run", "svc"]
     assert collect.compose_run_target(short, 0) is None
     assert collect.docker_inner(["echo", "compose", "run", "svc", "pytest"]) is None
+    assert collect.COMPOSE_SPAN == 3
+    assert collect.AFTER_RUN == 3
+    assert collect.MISSING_ROW == (0, [])
+
+
+def test_parsed_literal_value_error() -> None:
+    assert collect.parsed_literal("1+") is None
+    assert collect.parsed_literal("'ok'") == "ok"
+    with pytest.raises(KeyError):
+        collect.parsed_literal(None)  # type: ignore[arg-type]
+
+
+def test_matching_agent_rejects_a_missing_root() -> None:
+    with pytest.raises(KeyError):
+        collect.matching_agent([], None)  # type: ignore[arg-type]
+
+
+def test_java_sonar_rejects_missing_tokens() -> None:
+    with pytest.raises(KeyError):
+        collect.java_sonar(["java"], None)  # type: ignore[arg-type]
+
+
+def test_pmd_gate_rejects_missing_tokens() -> None:
+    with pytest.raises(KeyError):
+        collect.pmd_gate(["java"], None)  # type: ignore[arg-type]
 
 
 def test_time_fmt_boundaries() -> None:

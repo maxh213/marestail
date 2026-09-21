@@ -88,14 +88,14 @@ def state_of(fleet: Fleet | None = None) -> WatchState:
 
 def test_put_and_clip() -> None:
     win: Any = FakeWin(4, 10)
-    put(win, 0, 0, "ab")
+    put(win, 0, 0, "ab", 0)
     put(win, 0, 3, "z", 5)
-    put(win, -1, 0, "x")
-    put(win, 0, 20, "x")
-    put(win, 0, -2, "hello")
-    put(win, 1, 0, "")
+    put(win, -1, 0, "x", 0)
+    put(win, 0, 20, "x", 0)
+    put(win, 0, -2, "hello", 0)
+    put(win, 1, 0, "", 0)
     win.fail = True
-    put(win, 2, 0, "nope")
+    put(win, 2, 0, "nope", 0)
     assert (0, 0, "ab", 0) in win.cells
     assert (0, 3, "z", 5) in win.cells
     assert clip_text(0, 0, "", 4, 10) is None
@@ -506,9 +506,18 @@ def test_draw_bed_positions(tmp_path: Path) -> None:
     gate_cells = [cell for cell in win.cells if cell[2].startswith("⚒ gate:")]
     assert gate_cells
     assert gate_cells[0][1] == 6
+    assert gate_cells[0][0] == rect.y + panels.BED_GATE_ROW
     tail_cells = [cell for cell in win.cells if cell[2].startswith("tail-line")]
     assert tail_cells
     assert tail_cells[0][1] == 6
+    assert panels.BED_GATE_ROW == 3
+    assert panels.BED_WORKER_ROW == 2
+    assert panels.PAGE_MIN == 1
+    assert panels.SCROLL_FLOOR == 0
+    assert panels.SPAN_FLOOR == 0
+    assert panels.WIDTH_FLOOR == 0
+    assert panels.CYCLE_EXTRA == 1
+    assert panels.LAST_STEPS == -12
 
 
 def test_paint_bed_frame_attr(tmp_path: Path) -> None:
@@ -524,6 +533,11 @@ def test_put_tail_and_paint_tails(tmp_path: Path, monkeypatch: Any) -> None:
     watch = state_of()
     panels.put_tail(win, 3, 2, 10, watch, 1, "hello-tail")
     assert (4, 2, "hello-tail", watch.theme.secondary) in win.cells
+    short: Any = FakeWin(10, 40)
+    panels.put_tail(short, 0, 0, 4, watch, 0, "hello-tail")
+    assert any(cell[2] == "hell" for cell in short.cells)
+    with pytest.raises(KeyError):
+        panels.need_int(None)
     strip = tracker()
     monkeypatch.setattr(panels, "draw_strip", strip)
     live = make_repo(tmp_path, tail_lines=["t"])
@@ -679,7 +693,7 @@ def test_bed_fits_and_visible_beds() -> None:
     assert panels.bed_fits(rect, (0, 5)) is False
     visible = panels.visible_beds(Rect(0, 0, 12, 10), [5, 5, 5], 0)
     assert visible[0][0] == 0
-    assert len(visible) >= 1
+    assert len(visible) == 2
     sliced = panels.visible_beds(Rect(0, 0, 12, 10), [5, 5], 1)
     assert sliced[0][0] == 1
 
@@ -841,6 +855,15 @@ def test_conversation_render_geometry(tmp_path: Path, monkeypatch: Any) -> None:
     panel.page = 2
     panel.place_scroll()
     assert panel.scroll == 0
+    panel.follow = True
+    panel.lines = [("a", False)]
+    panel.page = 3
+    panel.place_scroll()
+    assert panel.scroll == 0
+    tiny = ConversationPanel(live)
+    tiny.sections = [("prompt", "hello")]
+    tiny.render(win, Rect(0, 0, 2, 12), True, watch)
+    assert tiny.page == 1
     ensured = tracker(lambda width: None)
     monkeypatch.setattr(panel, "ensure_lines", ensured)
     panel.render(win, Rect(0, 0, 4, 10), True, watch)

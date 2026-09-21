@@ -201,6 +201,12 @@ def is_trusted(entry: Any) -> bool:
     return isinstance(entry, dict) and bool(entry.get("trusted"))
 
 
+def folder_fields(meta: object) -> dict[str, Any]:
+    if type(meta) is not dict:
+        raise TypeError(ENTRY_ERROR)
+    return meta
+
+
 def folder_lines(path: str, meta: Any) -> list[str]:
     fields = meta if isinstance(meta, dict) else {}
     trusted = fields.get(TRUSTED, True)
@@ -209,7 +215,7 @@ def folder_lines(path: str, meta: Any) -> list[str]:
 
 
 def save_trusted_folders(store: Path, key: str, folders: dict[str, Any]) -> None:
-    lines = [line for path, meta in folders.items() for line in folder_lines(path, meta)]
+    lines = [line for path, meta in folders.items() for line in folder_lines(path, folder_fields(meta))]
     try:
         ensure_dir(store.parent)
         store.write_text("\n".join(lines))

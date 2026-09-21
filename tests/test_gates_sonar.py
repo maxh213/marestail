@@ -7,7 +7,7 @@ import pytest
 
 from marestail import dotnet
 from marestail.gates import sonar
-from tests.conftest import make_context
+from tests.conftest import make_context, reject_none
 
 CREDS = {"url": "http://sonar:9000", "token": "tok"}
 KEY = "proj"
@@ -44,6 +44,8 @@ class FakeClient:
         self.posts: list[tuple[str, dict[str, Any]]] = []
 
     def get(self, path: str, **params: Any) -> dict[str, Any]:
+        if any(value is None for value in params.values()):
+            raise TypeError("param")
         self.gets.append((path, params))
         return self.respond(path, params)
 
@@ -191,7 +193,7 @@ def test_dotnet_run_uses_its_report(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         (report / "report-task.txt").write_text("ceTaskId=D1\n")
         return 0, ""
 
-    monkeypatch.setattr(sonar, "dotnet_scan", fake_scan)
+    monkeypatch.setattr(sonar, "dotnet_scan", reject_none(fake_scan))
     result = sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}, "dotnet": {}}))
     assert (result.ok, result.summary) == (True, "sonar clean")
     assert scans == [(CREDS, KEY)]
@@ -287,7 +289,7 @@ def test_dotnet_refuses_properties_file(tmp_path: Path) -> None:
 
 
 def test_dotnet_project_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(dotnet, "projects", lambda ctx: (None, None, "set [dotnet] project"))
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (None, None, "set [dotnet] project")))
     assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (1, "set [dotnet] project")
 
 
@@ -299,14 +301,14 @@ def dotnet_calls(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]
         calls.append((args, options))
         return pending.pop(0)
 
-    monkeypatch.setattr(dotnet, "dotnet", fake)
+    monkeypatch.setattr(dotnet, "dotnet", reject_none(fake))
     return calls
 
 
 @pytest.mark.parametrize(("output", "expected"), [("tool broke", "tool broke"), ("Unable to find image x", None)])
 def test_dotnet_tool_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str, expected: str | None) -> None:
     product = tmp_path / "App.csproj"
-    monkeypatch.setattr(dotnet, "projects", lambda ctx: (product, product, None))
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
     calls = dotnet_calls(monkeypatch, [(3, output)])
     assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (3, expected or dotnet.hint(3, output))
     tools = tmp_path / ".marestail" / "dotnet-tools"
@@ -320,7 +322,7 @@ def test_dotnet_tool_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 def test_dotnet_scan_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     product = tmp_path / "App.csproj"
-    monkeypatch.setattr(dotnet, "projects", lambda ctx: (product, product, None))
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
     calls = dotnet_calls(monkeypatch, [(0, "installed"), (0, "scanned")])
     (tmp_path / "One.sln").write_text("")
     ctx = make_context(tmp_path, {"sonar": {"project_name": "Nice"}})
@@ -346,7 +348,7 @@ def test_dotnet_scan_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_dotnet_scan_builds_project_when_solutions_are_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     product = tmp_path / "App.csproj"
-    monkeypatch.setattr(dotnet, "projects", lambda ctx: (product, product, None))
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
     calls = dotnet_calls(monkeypatch, [(0, "scanned")])
     (tmp_path / ".marestail" / "dotnet-tools" / "dotnet-sonarscanner").mkdir(parents=True)
     (tmp_path / "A.sln").write_text("")
@@ -543,6 +545,7 @@ def test_sonar_constants() -> None:
     assert sonar.KEY == "key"
     assert sonar.EMPTY == ""
     assert sonar.EMPTY_LIST == []
+    assert sonar.NO_DUPLICATION == 0.0
 
 
 @pytest.mark.parametrize(
@@ -564,6 +567,47 @@ def test_collect_rejects_a_missing_key(tmp_path: Path) -> None:
     client = object()
     with pytest.raises(TypeError, match=r"^key$"):
         sonar.collect(ctx, client, None)  # type: ignore[arg-type]
+
+
+def test_gate_status_rejects_a_missing_key() -> None:
+    with pytest.raises(TypeError, match=r"^key$"):
+        sonar.gate_status(object(), None)  # type: ignore[arg-type]
+
+
+def test_gate_status_sends_the_project_key() -> None:
+    client = FakeClient(healthy)
+    assert sonar.gate_status(client, KEY) == "OK"
+    assert client.gets == [("api/qualitygates/project_status", {"projectKey": KEY})]
+
+
+def test_metric_text_defaults_and_rejects_a_non_str() -> None:
+    assert sonar.metric_text({}) == ""
+    assert sonar.metric_text({"value": "12"}) == "12"
+    with pytest.raises(TypeError, match=r"^value$"):
+        sonar.metric_text({"value": 1})
+
+
+def test_component_measures_defaults_missing_component() -> None:
+    assert sonar.component_measures({}) == []
+    assert sonar.component_measures({"component": {"measures": [{"metric": "coverage"}]}}) == [{"metric": "coverage"}]
+
+
+def test_section_list_defaults_missing_exclusions(tmp_path: Path) -> None:
+    assert sonar.section_list(make_context(tmp_path), "exclusions") == []
+
+
+def test_scoped_duplication_reports_a_fraction(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, changed={"src/a.py"})
+
+    def respond(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "components": [
+                {"path": "src/a.py", "measures": [{"metric": "duplicated_lines_density", "value": "0.5"}]},
+                {"path": "src/b.py", "measures": [{"metric": "duplicated_lines_density", "value": "2.0"}]},
+            ]
+        }
+
+    assert sonar.scoped_duplication(ctx, FakeClient(respond), KEY) == ["src/a.py:1 sonar duplication 0.5% (need 0)"]
 
 
 def test_issue_and_component_paths() -> None:

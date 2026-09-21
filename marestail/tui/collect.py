@@ -448,10 +448,14 @@ def collapse_rest(rest: str, _matched: re.Match[str] | None) -> str:
     return collapse(rest)
 
 
-def eval_quote(_rest: str, matched: re.Match[str]) -> str:
+def parsed_literal(text: str) -> str | None:
     with contextlib.suppress(ValueError, SyntaxError):
-        return collapse(str(ast.literal_eval(matched.group(1))))
-    return collapse(matched.group(1)[1:-1])
+        return collapse(str(ast.literal_eval({True: text}[type(text) is str])))
+    return None
+
+
+def eval_quote(_rest: str, matched: re.Match[str]) -> str:
+    return next(filter(present, (parsed_literal(matched.group(1)), collapse(matched.group(1)[1:-1]))))
 
 
 def quoted_or_plain(rest: str, matched: re.Match[str] | None) -> str:
@@ -732,7 +736,7 @@ def min_elapsed(found: list[Process]) -> Process | None:
 
 
 def matching_agent(rows: list[ProcRow], real: Path) -> Process | None:
-    return min_elapsed(list(filter(partial(agent_under, real), agents_of(rows))))
+    return min_elapsed(list(filter(partial(agent_under, {True: real}[isinstance(real, Path)]), agents_of(rows))))
 
 
 def row_agent(pid: int, _ppid: int, elapsed: int, tokens: list[str]) -> Process | None:
@@ -839,8 +843,11 @@ def unwind(children: dict[int, list[int]], stack: list[int]) -> list[int]:
     return found
 
 
+MISSING_ROW = (0, [])
+
+
 def gate_hit_pid(by_pid: dict[int, tuple[int, list[str]]], pid: int) -> list[tuple[int, str]]:
-    return gate_hit(by_pid.get(pid, (0, [])))
+    return gate_hit(by_pid.get(pid, MISSING_ROW))
 
 
 def descendant_gates(
@@ -931,8 +938,8 @@ def sonar_if_named(tokens: list[str], _names: list[str] | None = None) -> str | 
 
 
 def java_sonar(names: list[str], tokens: list[str]) -> str | None:
-    chosen = (none_of, partial(sonar_if_named, tokens))["java" in names]
-    return chosen(names)
+    chosen = (none_of, sonar_if_named)["java" in names]
+    return chosen({True: tokens}[type(tokens) is list])
 
 
 def maven_cmd(names: list[str]) -> bool:
@@ -960,8 +967,8 @@ def pmd_if_java(tokens: list[str], _names: list[str] | None = None) -> str | Non
 
 
 def pmd_gate(names: list[str], tokens: list[str]) -> str | None:
-    chosen = (none_of, partial(pmd_if_java, tokens))["java" in names]
-    return chosen(names)
+    chosen = (none_of, pmd_if_java)["java" in names]
+    return chosen({True: tokens}[type(tokens) is list])
 
 
 def named_tool(names: list[str]) -> str | None:
@@ -1020,10 +1027,16 @@ def docker_at(tokens: list[str], index: int) -> bool:
     return docker_compose_run(tokens[index], tokens, index)
 
 
+COMPOSE_SPAN = 3
+AFTER_RUN = 3
+
+
+def docker_starts(tokens: list[str]) -> range:
+    return range(max(0, len(tokens) - COMPOSE_SPAN))
+
+
 def docker_inner(tokens: list[str]) -> str | None:
-    return first_present(
-        tuple(map(partial(compose_run_target, tokens), filter(partial(docker_at, tokens), range(max(0, len(tokens) - 3)))))
-    )
+    return first_present(tuple(map(partial(compose_run_target, tokens), filter(partial(docker_at, tokens), docker_starts(tokens)))))
 
 
 def not_flag(token: str) -> bool:
@@ -1040,7 +1053,7 @@ def inner_name(inner: list[str]) -> str | None:
 
 
 def compose_run_target(tokens: list[str], index: int) -> str | None:
-    return inner_name(list(filter(not_flag, tokens[index + 3 :])))
+    return inner_name(list(filter(not_flag, tokens[index + AFTER_RUN :])))
 
 
 def secs_fmt(seconds: int) -> str | None:

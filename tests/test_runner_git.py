@@ -130,6 +130,9 @@ def test_restore_paths_handles_only_tracked_or_only_untracked(repo: Path) -> Non
     write(repo, "new.txt")
     runner.restore_paths(config, ["new.txt"])
     assert not (repo / "new.txt").exists()
+    runner.drop_missing(repo / "missing.txt")
+    with pytest.raises(FileNotFoundError):
+        runner.drop_missing(repo / "missing.txt", missing_ok=False)
 
 
 def test_stage_writes_without_patterns_runs_nothing(repo: Path, fake_run: Any) -> None:
@@ -205,6 +208,11 @@ def test_restore_files_creates_parents(tmp_path: Path) -> None:
 )
 def test_stamped(message: str, label: str, used: set[str] | None, expected: str) -> None:
     assert runner.stamped(message, label, used) == expected
+
+
+def test_stamped_rejects_a_missing_label() -> None:
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.stamped("msg", None)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

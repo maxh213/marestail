@@ -16,6 +16,8 @@ CODE_REGION = 0
 PASSED = re.compile(r"^test result: \w+\. (\d+) passed", re.MULTILINE)
 
 Entry = dict[str, dict[str, int]]
+EMPTY_LIST: list[Any] = []
+LIST_ERROR = "list"
 
 
 def extra_args(ctx: Context) -> list[str]:
@@ -94,13 +96,16 @@ DA = "DA:"
 COMMA = ","
 
 
+def before_comma(text: str) -> str:
+    if COMMA not in text:
+        return text
+    return text[: text.index(COMMA)]
+
+
 def da_hits(line: str) -> tuple[str, str]:
     body = line[len(DA) :]
     index = body.index(COMMA)
-    rest = body[index + 1 :]
-    if COMMA in rest:
-        rest = rest[: rest.index(COMMA)]
-    return body[:index], rest
+    return body[:index], before_comma(body[index + 1 :])
 
 
 def lcov_line(ctx: Context, files: dict[str, Entry], current: Entry | None, line: str) -> Entry | None:
@@ -112,15 +117,25 @@ def lcov_line(ctx: Context, files: dict[str, Entry], current: Entry | None, line
     return current
 
 
+def json_list(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError(LIST_ERROR)
+    return value
+
+
 def merge_regions(ctx: Context, files: dict[str, Entry]) -> None:
-    for export in json.loads((ctx.work / RAW_JSON).read_text()).get("data", []):
-        for function in export.get("functions", []):
+    payload = json.loads((ctx.work / RAW_JSON).read_text())
+    for export in json_list(payload, "data"):
+        for function in json_list(export, "functions"):
             merge_function(ctx, files, function)
 
 
 def merge_function(ctx: Context, files: dict[str, Entry], function: dict[str, Any]) -> None:
-    names = function.get("filenames", [])
-    for start, column, _end, _end_column, count, file_id, _expanded, kind in function.get("regions", []):
+    names = json_list(function, "filenames")
+    for start, column, _end, _end_column, count, file_id, _expanded, kind in json_list(function, "regions"):
         if kind == CODE_REGION and file_id < len(names):
             keep_max(entry_for(files, rust.rel(ctx, names[file_id]))["regions"], f"{start}:{column}", count)
 

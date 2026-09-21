@@ -166,6 +166,12 @@ def test_in_scope(tmp_path: Path) -> None:
     assert [scoped.in_scope(path) for path in ("a.py", "pkg/b.py", "c.py")] == [True, True, False]
 
 
+def test_in_scope_rejects_a_missing_path(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^path$"):
+        make_context(tmp_path).in_scope(None)  # type: ignore[arg-type]
+    assert context.PATH_ERROR == "path"
+
+
 def test_gated_lines(tmp_path: Path) -> None:
     tree(tmp_path, "pkg/b.py")
     (tmp_path / "pkg" / "empty.py").write_text("")

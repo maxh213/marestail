@@ -164,6 +164,8 @@ def test_lcov_line_records_hits(tmp_path: Path) -> None:
     current = rs_tests.lcov_line(ctx, files, current, "DA:10,3,extra")
     assert files["src/lib.rs"]["lines"]["10"] == 3
     assert rs_tests.da_hits("DA:10,3,extra") == ("10", "3")
+    assert rs_tests.da_hits("DA:10,3,extra,more") == ("10", "3")
+    assert rs_tests.da_hits("DA:4,0") == ("4", "0")
     assert rs_tests.SF == "SF:"
     assert rs_tests.DA == "DA:"
     assert rs_tests.COMMA == ","
@@ -176,3 +178,19 @@ def test_coverage_findings_orders_regions(tmp_path: Path) -> None:
         "a.rs:9 code at column 2 never runs",
         "a.rs:9 code at column 12 never runs",
     ]
+
+
+def test_json_list_defaults_missing_keys() -> None:
+    assert rs_tests.json_list({}, "data") == []
+    assert rs_tests.json_list({"data": [1]}, "data") == [1]
+
+
+def test_json_list_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        rs_tests.json_list({"data": {}}, "data")
+
+
+def test_merge_function_skips_missing_regions(tmp_path: Path) -> None:
+    files: dict[str, rs_tests.Entry] = {}
+    rs_tests.merge_function(make_context(tmp_path), files, {})
+    assert files == {}

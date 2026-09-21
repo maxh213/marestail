@@ -271,3 +271,41 @@ def test_finding_file_splits_on_the_first_colon() -> None:
     assert _coverage.finding_file("no-colon") == "no-colon"
     assert _coverage.finding_file(":leading") == ""
     assert _coverage.COLON == ":"
+
+
+def test_failures_without_jest_ignores_results(tmp_path: Path) -> None:
+    write_jest(tmp_path, [{"name": "a.test.ts", "status": "failed", "message": "boom", "assertionResults": []}])
+    assert ts_tests.failures(make_context(tmp_path, TS), False) == []
+
+
+def test_json_list_rejects_a_non_list() -> None:
+    with pytest.raises(TypeError, match=r"^list$"):
+        ts_tests.json_list({"testResults": {}}, "testResults")
+
+
+def test_jest_failures_default_missing_results(tmp_path: Path) -> None:
+    path = tmp_path / ".marestail" / ts_tests.JEST_RESULTS
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    assert ts_tests.jest_failures(make_context(tmp_path)) == []
+
+
+def test_suite_message_defaults_and_rejects_a_non_str() -> None:
+    assert ts_tests.suite_message({}) == ""
+    assert ts_tests.suite_message({"message": "boom"}) == "boom"
+    with pytest.raises(TypeError, match=r"^text$"):
+        ts_tests.suite_message({"message": 1})
+
+
+def test_suite_broken_without_a_message() -> None:
+    assert ts_tests.suite_broken("a.ts", {"status": "failed"}, []) == ["a.ts:1 suite failed to run: no message"]
+
+
+def test_passed_count_uses_the_last_word() -> None:
+    assert ts_tests.passed_count("Tests extra 9 passed") == "9"
+
+
+def test_coverage_findings_skips_out_of_scope_files(tmp_path: Path) -> None:
+    coverage = {"a.ts": coverage_entry({"1": 0}, {}), "b.ts": coverage_entry({"1": 0}, {})}
+    ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/b.ts"})
+    assert ts_tests.coverage_findings(coverage, ctx) == ["web/b.ts:10 not covered"]

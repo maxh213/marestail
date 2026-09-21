@@ -98,7 +98,17 @@ ALLOWED = {
 }
 
 
+ROLE_ERROR = "role"
+
+
+def require_role(role: object) -> str:
+    if type(role) is not str:
+        raise TypeError(ROLE_ERROR)
+    return role
+
+
 def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
+    role = require_role(role)
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
     allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
     return [path for path in paths if matches_any(path, frozen) and not matches_any(path, allowed)]

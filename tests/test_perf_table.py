@@ -50,6 +50,11 @@ def test_parse_without_table() -> None:
     assert table.parse("# Title\n") == table.Table("# Title\n", [], [], "")
 
 
+def test_parse_constants() -> None:
+    assert table.HEADER_ROWS == 2
+    assert table.ZIP_STRICT is False
+
+
 def test_parse_table() -> None:
     text = "intro\n" + HEADER + "| t | a\\|b | d | 5 | 1ms |\n| short |\nafter\n| not | a row |\n"
     parsed = table.parse(text)

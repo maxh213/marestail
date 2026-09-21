@@ -204,6 +204,11 @@ def test_problems_without_features(tmp_path: Path) -> None:
     assert audit.problems(config(tmp_path), "t", "- a -> b::c") == ["audit: no feature file found for this task"]
 
 
+def test_problems_rejects_a_missing_config() -> None:
+    with pytest.raises(TypeError, match=r"^config$"):
+        audit.problems(None, "t", "")  # type: ignore[arg-type]
+
+
 def test_problems_without_scenarios(tmp_path: Path) -> None:
     write(tmp_path / "features" / "t.feature", "Feature: nothing\n")
     assert audit.problems(config(tmp_path), "t", "") == ["audit: no feature file found for this task"]

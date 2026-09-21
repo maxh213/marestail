@@ -201,13 +201,17 @@ SPACE = " "
 def last_word(text: str) -> str:
     if SPACE not in text:
         return text
-    return text[text.rindex(SPACE) + 1 :]
+    return text[text.rfind(SPACE) + 1 :]
+
+
+def example_prefix(stripped: str) -> str:
+    if EXAMPLE not in stripped:
+        return stripped
+    return stripped[: stripped.index(EXAMPLE)]
 
 
 def example_count(line: str) -> str:
-    stripped = line.strip()
-    prefix = stripped[: stripped.index(EXAMPLE)] if EXAMPLE in stripped else stripped
-    return last_word(prefix)
+    return last_word(example_prefix(line.strip()))
 
 
 def count_examples(output: str) -> str:

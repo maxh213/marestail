@@ -295,9 +295,16 @@ def write_settings(ctx: Context) -> Path:
     return path
 
 
+def section_list(ctx: Context, key: str) -> list[str]:
+    section = ctx.config.section(SECTION)
+    if section is None or key not in section:
+        return EMPTY_LIST
+    return dotnet.configured_list(section[key])
+
+
 def settings(ctx: Context) -> dict[str, str]:
     values = {
-        "sonar.exclusions": ",".join(DOTNET_EXCLUSIONS + dotnet.listify(ctx.config.get(SECTION, "exclusions", []))),
+        "sonar.exclusions": ",".join(DOTNET_EXCLUSIONS + section_list(ctx, "exclusions")),
         "sonar.coverage.exclusions": coverage_exclusions(ctx),
         "sonar.cs.opencover.reportsPaths": f"{ctx.work}/cs-tests/**/coverage.opencover.xml",
         "sonar.scm.disabled": "true",
@@ -392,9 +399,25 @@ def checked_language(ctx: Context, client: Client, key: str, check: LanguageChec
     return findings
 
 
+def metric_text(measure: dict[str, Any]) -> str:
+    if "value" not in measure:
+        return EMPTY
+    value = measure["value"]
+    if type(value) is not str:
+        raise TypeError("value")
+    return value
+
+
+def component_measures(data: dict[str, Any]) -> list[Any]:
+    component = data.get("component")
+    if type(component) is not dict:
+        return EMPTY_LIST
+    return mapping_list(component, "measures")
+
+
 def language_values(client: Client, key: str) -> dict[str, str]:
     data = client.get(MEASURES, component=key, metricKeys=f"{COVERAGE},{LANGUAGES}")
-    return {m["metric"]: m.get("value", "") for m in data.get("component", {}).get("measures", [])}
+    return {m["metric"]: metric_text(m) for m in component_measures(data)}
 
 
 def wait_for_analysis(client: Client, task_file: Path) -> str | None:
@@ -435,6 +458,7 @@ def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
 
 
 def gate_status(client: Client, key: str) -> str:
+    key = require_key(key)
     status: str = client.get("api/qualitygates/project_status", projectKey=key)["projectStatus"]["status"]
     return status
 
@@ -536,7 +560,7 @@ def scoped_duplication(ctx: Context, client: Client, key: str) -> list[str]:
     for component in mapping_list(data, "components"):
         path = component_path(component)
         density = metric_values(component).get(DUPLICATION, 0.0)
-        if ctx.in_scope(path) and density > 0.0:
+        if ctx.in_scope(path) and density > NO_DUPLICATION:
             findings.append(f"{path}:1 {duplication(density)}")
     return findings
 

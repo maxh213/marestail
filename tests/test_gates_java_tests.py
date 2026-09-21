@@ -336,8 +336,9 @@ def test_package_files_uses_source_roots(tmp_path: Path) -> None:
 
 def test_source_folders_rejects_missing_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(java, "source_roots", lambda ctx: None)
+    ctx = make_context(tmp_path)
     with pytest.raises(TypeError, match=r"^roots$"):
-        java_tests.source_folders(make_context(tmp_path))
+        java_tests.source_folders(ctx)
 
 
 def test_line_gaps_keep_gated_lines() -> None:

@@ -29,6 +29,14 @@ BED_GAP = 1
 STRIP_STEPS = 12
 MARQUEE_PAUSE_TICKS = 12
 TAIL_ROWS = 3
+BED_WORKER_ROW = 2
+BED_GATE_ROW = 3
+PAGE_MIN = 1
+SCROLL_FLOOR = 0
+SPAN_FLOOR = 0
+WIDTH_FLOOR = 0
+CYCLE_EXTRA = 1
+LAST_STEPS = -STRIP_STEPS
 REPOS_ATTR = "repos"
 EMPTY_BEDS = "no beds found — waiting for pipelines"
 BETWEEN_STEPS = "between steps"
@@ -103,7 +111,11 @@ def int_attr(attr: int) -> int:
     return {False: attr}[type(attr) is not int]
 
 
-def put(win: curses.window, y: int, x: int, text: str, attr: int = 0) -> None:
+def need_int(value: object) -> int:
+    return {True: value}[type(value) is int]
+
+
+def put(win: curses.window, y: int, x: int, text: str, attr: int) -> None:
     apply_clip(win, clip_text(y, x, text, *win.getmaxyx()), int_attr(attr))
 
 
@@ -136,7 +148,7 @@ def keep_pos(y: int, x: int, text: str) -> tuple[int, int, str]:
 
 
 def shift_neg(y: int, x: int, text: str) -> tuple[int, int, str]:
-    return y, 0, text[-x:]
+    return y, 0, text[-{True: x}[x < 0] :]
 
 
 def shift_left(y: int, x: int, text: str) -> tuple[int, int, str]:
@@ -185,15 +197,15 @@ def just_text(text: str, _width: int, _tick: int) -> str:
 
 
 def scrolled_text(text: str, width: int, tick: int) -> str:
-    span = max(0, len(text) - width)
-    cycle = MARQUEE_PAUSE_TICKS + span + 1
+    span = max(SPAN_FLOOR, len(text) - width)
+    cycle = MARQUEE_PAUSE_TICKS + span + CYCLE_EXTRA
     moment = tick % cycle
-    offset = min(max(0, moment - MARQUEE_PAUSE_TICKS), span)
-    return text[offset : offset + max(0, width)]
+    offset = min(max(SPAN_FLOOR, moment - MARQUEE_PAUSE_TICKS), span)
+    return text[offset : offset + max(WIDTH_FLOOR, width)]
 
 
 def fit_or_scroll(text: str, width: int, tick: int) -> str:
-    chosen = (scrolled_text, just_text)[len(text) <= width]
+    chosen = (scrolled_text, just_text)[len(text) < width + 1]
     return chosen(text, width, tick)
 
 
@@ -273,9 +285,12 @@ def placed(heights: list[int], current: int, height: int, top: int) -> bool:
     return True in (top == current, bed_span(heights, top, current) <= height)
 
 
+def fit_range(start: int, current: int) -> range:
+    return range(start, current + 1)
+
+
 def fit_top(heights: list[int], top: int, current: int, height: int) -> int:
-    start = min(top, current)
-    return next(filter(partial(placed, heights, current, height), range(start, current + 1)))
+    return next(filter(partial(placed, heights, current, height), fit_range(min(top, current), current)))
 
 
 def selected_border(selected: bool) -> Border:
@@ -291,10 +306,10 @@ def task_label(task: str | None) -> str:
 
 
 def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, state: WatchState) -> None:
-    inner = rect.w - 4
+    inner = need_int(rect.w - 4)
     paint_bed_frame(win, rect, repo, selected, state, inner)
-    draw_worker_row(win, rect.y + 2, rect.x + 2, inner, repo, selected, state)
-    row = draw_gate_row(win, rect.y + 3, rect.x + 2, inner, repo, state)
+    draw_worker_row(win, rect.y + BED_WORKER_ROW, rect.x + 2, inner, repo, selected, state)
+    row = draw_gate_row(win, rect.y + BED_GATE_ROW, rect.x + 2, inner, repo, state)
     paint_tails(win, row, rect.x + 2, inner, repo, state)
 
 
@@ -305,12 +320,12 @@ def paint_bed_frame(win: curses.window, rect: Rect, repo: RepoState, selected: b
 
 
 def put_tail(win: curses.window, row: int, x: int, inner: int, state: WatchState, offset: int, line: str) -> None:
-    put(win, row + offset, x, line[:inner], state.theme.secondary)
+    put(win, row + offset, x, line[: need_int(inner)], state.theme.secondary)
 
 
 def paint_tails(win: curses.window, row: int, x: int, inner: int, repo: RepoState, state: WatchState) -> None:
     tails = tail_lines_of(repo)
-    list(starmap(partial(put_tail, win, row, x, inner, state), enumerate(tails)))
+    list(starmap(partial(put_tail, win, row, x, need_int(inner), state), enumerate(tails)))
     draw_strip(win, row + len(tails), x, inner, repo.steps, state)
 
 
@@ -325,7 +340,7 @@ def paint_gate_row(win: curses.window, y: int, x: int, inner: int, repo: RepoSta
 
 def draw_gate_row(win: curses.window, y: int, x: int, inner: int, repo: RepoState, state: WatchState) -> int:
     chosen = (paint_gate_row, skip_gate_row)[repo.gate_activity is None]
-    return chosen(win, y, x, inner, repo, state)
+    return chosen(win, y, x, need_int(inner), repo, state)
 
 
 def worker_tails(worker: Worker | None) -> list[str]:
@@ -358,7 +373,7 @@ def paint_idle_plain(win: curses.window, y: int, x: int, width: int, repo: RepoS
 
 
 def paint_alive(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
-    chosen = (paint_idle_plain, paint_idle_selected)[selected]
+    chosen = (paint_idle_plain, paint_idle_selected)[{True: selected}[type(selected) is bool]]
     chosen(win, y, x, width, repo, selected, state)
 
 
@@ -409,7 +424,7 @@ def paint_busy_plain(win: curses.window, y: int, x: int, _width: int, worker: Wo
 def draw_busy_row(win: curses.window, y: int, x: int, width: int, worker: Worker, selected: bool, state: WatchState) -> None:
     head = f"{GLYPH_RUNNING} {worker.step.role} {worker.step.label} {fmt_elapsed(worker)} "
     chosen_tail = (marquee_summary, blank_tail)[bool(worker.tail_lines)]
-    tail = chosen_tail(worker, width - len(head), state)
+    tail = chosen_tail(worker, need_int(width) - len(head), state)
     chosen = (paint_busy_plain, paint_busy_selected)[selected]
     chosen(win, y, x, width, worker, state, head, tail)
 
@@ -425,7 +440,7 @@ def put_step(win: curses.window, y: int, x: int, state: WatchState, item: tuple[
 
 
 def draw_strip(win: curses.window, y: int, x: int, width: int, steps: list[Step], state: WatchState) -> None:
-    list(map(partial(put_step, win, y, x, state), filter(partial(in_strip, width), enumerate(steps[-STRIP_STEPS:]))))
+    list(map(partial(put_step, win, y, x, state), filter(partial(in_strip, width), enumerate(steps[LAST_STEPS:]))))
 
 
 def wrap_line(raw: str, width: int) -> list[str]:
@@ -471,8 +486,30 @@ class Panel:
         return None
 
 
+def yes_empty(_fleet: Fleet | None) -> bool:
+    return True
+
+
+def has_no_repos(fleet: Fleet | None) -> bool:
+    return not surely(fleet).repos
+
+
+def empty_repo_list(_fleet: Fleet | None) -> list[RepoState]:
+    return []
+
+
+def listed_repos(fleet: Fleet | None) -> list[RepoState]:
+    return list(surely(fleet).repos)
+
+
+def fleet_repos(fleet: Fleet | None) -> list[RepoState]:
+    chosen = (listed_repos, empty_repo_list)[fleet is None]
+    return chosen(fleet)
+
+
 def empty_repos(fleet: Fleet | None) -> bool:
-    return True in (fleet is None, not getattr(fleet, REPOS_ATTR, []))
+    chosen = (has_no_repos, yes_empty)[fleet is None]
+    return chosen(fleet)
 
 
 def empty_fleet(self: "FleetPanel", win: curses.window, rect: Rect, state: WatchState) -> None:
@@ -549,7 +586,7 @@ class FleetPanel(Panel):
         chosen(self, win, rect, state)
 
     def render_beds(self, win: curses.window, rect: Rect, state: WatchState) -> None:
-        repos = getattr(state.fleet, REPOS_ATTR, [])
+        repos = fleet_repos(state.fleet)
         heights = list(map(bed_height, repos))
         current = selected_repo(state)
         self.top = fit_top(heights, self.top, index_or_zero(state.fleet, current), rect.h)
@@ -702,7 +739,7 @@ class ConversationPanel(Panel):
     def render(self, win: curses.window, rect: Rect, focused: bool, state: WatchState) -> None:
         self.ensure_lines(rect.w - 1)
         put(win, rect.y, rect.x, self.heading()[: rect.w], state.theme.heading)
-        self.page = max(1, rect.h - 1)
+        self.page = max(PAGE_MIN, rect.h - 1)
         self.place_scroll()
         paint_lines(win, rect, self.lines[self.scroll : self.scroll + self.page], state)
 
@@ -715,7 +752,7 @@ class ConversationPanel(Panel):
         self.built_for = width
 
     def place_scroll(self) -> None:
-        bottom = max(0, len(self.lines) - self.page)
+        bottom = max(SCROLL_FLOOR, len(self.lines) - self.page)
         chosen = (skip, follow_bottom)[self.follow]
         chosen(self, bottom)
         self.scroll = clamp(self.scroll, 0, bottom)

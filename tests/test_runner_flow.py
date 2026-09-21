@@ -407,6 +407,8 @@ def test_runner_constants() -> None:
     assert runner.ATTEMPT_CAP == 10000
     assert runner.RUN_TYPE == "run"
     assert runner.MISSING_OK is True
+    assert runner.labels_of(None) == set()
+    assert runner.labels_of({"a"}) == {"a"}
     assert runner.RENAME_MARK == " -> "
     assert runner.AUTHOR_VERDICT.pattern == r"^\s*VERDICT:\s*AUTHOR\b"
     assert runner.VERDICT_LINE.pattern == r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?"

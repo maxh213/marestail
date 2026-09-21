@@ -742,3 +742,15 @@ def test_footer_and_error_cells(tmp_path: Path) -> None:
     none = FakeScr(24, 80)
     app.draw_footer(as_window(none), 24, 80, None, WatchState(fleet=None, theme=mono_theme(), tick=0))
     assert none.cells == [(23, 1, app.FLEET_HINT, mono_theme().secondary)]
+
+
+def test_sync_detail_uses_the_fleet(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    live = repo(tmp_path)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.detail = ConversationPanel(live)
+    other = repo(tmp_path)
+    other.task = "changed"
+    session.state.fleet = Fleet(repos=[other], scanned_at=0)
+    session.sync_detail()
+    assert session.detail.repo.task == "changed"

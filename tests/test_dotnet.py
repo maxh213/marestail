@@ -206,6 +206,11 @@ def test_hint(code: int, output: str, expected: str | None) -> None:
     assert dotnet.hint(code, output) == expected
 
 
+def test_hint_rejects_a_missing_code() -> None:
+    with pytest.raises(TypeError, match=r"^code$"):
+        dotnet.hint(None, "out")  # type: ignore[arg-type]
+
+
 def test_failure_keeps_output_tail() -> None:
     assert dotnet.failure(1, "  " + "x" * 400 + "END  ", "boom") == "boom: " + "x" * 297 + "END"
     assert dotnet.failure(127, "", "boom") == f"dotnet unavailable: {dotnet.INSTALL_HINT}"

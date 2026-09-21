@@ -11,6 +11,7 @@ from marestail.perf import db as perf_db
 from marestail.perf import hygiene, settings, trees
 
 BETTER = ("lower", "higher")
+OK = ""
 
 
 class Target(NamedTuple):
@@ -46,11 +47,11 @@ def resolve(config: Config, script: str, tree_name: str, db: bool) -> tuple[Targ
 
 def with_database(config: Config, bench: str, tree: trees.Tree, db: bool) -> tuple[Target | None, str]:
     if not db:
-        return Target(bench, tree, None), ""
+        return Target(bench, tree, None), OK
     database, problem = perf_db.for_run(config)
     if database is None:
         return None, problem
-    return Target(bench, tree, database), ""
+    return Target(bench, tree, database), OK
 
 
 def take_samples(config: Config, target: Target, samples: int) -> int:

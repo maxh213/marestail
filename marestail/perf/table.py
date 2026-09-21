@@ -13,6 +13,8 @@ EMPTY = "—"
 HEADER_START = "| Task |"
 CELL_BORDER = re.compile(r"(?<!\\)\|")
 MARKS = {"degraded": " ⚠", "improved": " ✓", "unchanged": ""}
+HEADER_ROWS = 2
+ZIP_STRICT = False
 
 
 @dataclass(frozen=True)
@@ -48,8 +50,9 @@ def parse(text: str) -> Table:
     if start is None:
         return Table(text, [], [], "")
     header = split_row(lines[start])
-    end = table_end(lines, start + 2)
-    rows = [dict(zip(header, split_row(line), strict=False)) for line in lines[start + 2 : end]]
+    body = start + HEADER_ROWS
+    end = table_end(lines, body)
+    rows = [dict(zip(header, split_row(line), strict=ZIP_STRICT)) for line in lines[body:end]]
     return Table("".join(lines[:start]), extra_columns(header), rows, "".join(lines[end:]))
 
 

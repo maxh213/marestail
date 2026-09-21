@@ -122,6 +122,28 @@ def test_for_run_not_configured(tmp_path: Path) -> None:
     assert db.for_run(perf_config(tmp_path, {})) == (None, "configure [perf.db] migrate in marestail.toml")
 
 
+def test_for_run_rejects_a_missing_config() -> None:
+    with pytest.raises(TypeError, match=r"^config$"):
+        db.for_run(None)  # type: ignore[arg-type]
+
+
+def test_db_constants() -> None:
+    assert db.MILLISECONDS == 1000
+    assert db.BYTE_ORDER == "big"
+    assert db.SIZE_WIDTH == 8
+    assert db.MKDIR_PARENTS is True
+
+
+def test_require_name_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^name$"):
+        db.require_name(None)
+
+
+def test_seed_golden_rejects_a_missing_env(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^env$"):
+        db.seed_golden(object(), object(), "c", tmp_path / "s", None)  # type: ignore[arg-type]
+
+
 def test_for_run_bad_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_PERF_DB_ROWS", "lots")
     assert db.for_run(perf_config(tmp_path)) == (None, "[perf.db] rows must be a whole number ≥ 0, got lots")

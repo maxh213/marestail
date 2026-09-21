@@ -148,6 +148,15 @@ def need(value: object, kind: type) -> None:
         raise TypeError(RUN_TYPE)
 
 
+def drop_missing(path: Path, missing_ok: bool = MISSING_OK) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+
+
 @dataclass
 class Run:
     config: Config
@@ -907,7 +916,7 @@ def restore_paths(config: Config, paths: list[str]) -> None:
     if untracked:
         run([GIT, RM, QUIET, CACHED, UNMATCHED, DOUBLE_DASH, *untracked], cwd=config.root)
     for path in untracked:
-        (config.root / path).unlink(missing_ok=MISSING_OK)
+        drop_missing(config.root / path)
 
 
 def written_paths(config: Config, writes: tuple[str, ...]) -> list[str]:
@@ -968,12 +977,18 @@ def restore_files(config: Config, saved: dict[str, bytes]) -> None:
         dest.write_bytes(data)
 
 
+def labels_of(used: set[str] | None) -> set[str]:
+    if used is None:
+        return set()
+    return used
+
+
 def fold_handoff(config: Config, role: str, report: Path, before: str, label: str, used: set[str] | None = None) -> None:
     body = report.read_text().strip()
     if head(config) == before:
         record_commit(config, f"{role} handoff", body, role, label)
         return
-    labels = used if used is not None else set()
+    labels = labels_of(used)
     stamp_history(config, before, label, labels)
     _, original = run([GIT, LOG, "-1", "--format=%B"], cwd=config.root)
     message = stamped(strip_byline(original, role), label, labels) + f"\n\n{body}\n\nBy {role}."
@@ -993,7 +1008,9 @@ def record_commit(config: Config, subject: str, body: str, role: str, label: str
 
 
 def stamped(message: str, label: str, used: set[str] | None = None) -> str:
-    if not label or stamped_already(message, {label, *(used or set())}):
+    if type(label) is not str:
+        raise TypeError(RUN_TYPE)
+    if not label or stamped_already(message, {label, *labels_of(used)}):
         return message
     return f"[{label}] {message}"
 
@@ -1201,7 +1218,21 @@ def claude_command(state: Run) -> list[str]:
     return command + optional_flag(MODEL_FLAG, state.model) + optional_flag(EFFORT_FLAG, state.effort)
 
 
+def spawn_command(command: object) -> list[str]:
+    if type(command) is not list:
+        raise TypeError(RUN_TYPE)
+    return command
+
+
+def spawn_env(env: Mapping[str, str] | None) -> Mapping[str, str]:
+    if env is None:
+        raise TypeError(RUN_TYPE)
+    return env
+
+
 def spawn(command: list[str], state: Run, env: Mapping[str, str], stdin: str, shown: str) -> Spawned:
+    command = spawn_command(command)
+    env = spawn_env(env)
     try:
         return subprocess.run(
             command,
@@ -1581,7 +1612,14 @@ def grok_summary(output: str) -> str:
     return f"turns={turns} {token_info(tokens)}{text!r}".strip()
 
 
+def require_code(code: object) -> int:
+    if type(code) is not int:
+        raise TypeError(RUN_TYPE)
+    return code
+
+
 def grok_always_approve_locked(code: int, output: str) -> bool:
+    code = require_code(code)
     if code == 0:
         return False
     data = grok_parse_json(output)
@@ -1590,6 +1628,7 @@ def grok_always_approve_locked(code: int, output: str) -> bool:
 
 
 def rate_limited(code: int, output: str) -> bool:
+    code = require_code(code)
     try:
         data = json.loads(output)
     except json.JSONDecodeError:

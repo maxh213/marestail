@@ -134,9 +134,14 @@ def test_problems_on_one_target_do_not_hide_others() -> None:
 
 
 def test_bootstrap_needs_both_sides_and_rounds() -> None:
+    assert results.MIN_ROUNDS == 1
+    assert results.EMPTY_COMPARED == 0
+    assert results.P50 == 0
+    assert results.P95 == 1
     assert results.bootstrap(None, [1.0], 5, 1) is None
     assert results.bootstrap([1.0], [], 5, 1) is None
     assert results.bootstrap([1.0], [1.0], 0, 1) is None
+    assert results.bootstrap([10.0, 10.0], [15.0, 15.0], 1, 1) == ((50.0, 50.0), (50.0, 50.0))
     assert results.bootstrap([10.0, 10.0], [15.0, 15.0], 4, 1) == ((50.0, 50.0), (50.0, 50.0))
 
 
@@ -144,6 +149,16 @@ def test_bootstrap_is_seeded() -> None:
     first = results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 7)
     assert first == results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 7)
     assert first != results.bootstrap([1.0, 5.0, 9.0], [2.0, 6.0, 12.0], 50, 8)
+    assert first is not None and first[0] != first[1]
+
+
+def test_absence_problems_when_baseline_has_values() -> None:
+    assert results.absence_problems("t", [], {results.BASELINE: [1.0]}) == []
+    assert results.absence_problems("t", [], {}) == ["`t` is absent on both the baseline and head trees"]
+
+
+def test_min_compared_defaults_to_zero() -> None:
+    assert min(results.compared_sizes({}), default=results.EMPTY_COMPARED) == 0
 
 
 def test_interval_takes_the_middle_ninety_five_percent() -> None:

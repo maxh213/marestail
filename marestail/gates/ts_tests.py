@@ -19,6 +19,10 @@ GATE = "ts.tests"
 VITEST = "vitest"
 JEST = "jest"
 RUNNER_ERROR = "runner"
+EMPTY = ""
+EMPTY_LIST: list[str] = []
+LIST_ERROR = "list"
+TEXT_ERROR = "text"
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -38,8 +42,13 @@ def run_gate(ctx: Context) -> Result:
     return passed(ctx, output, started)
 
 
+def empty_failures(_ctx: Context) -> list[str]:
+    return EMPTY_LIST
+
+
 def failures(ctx: Context, jest: bool) -> list[str]:
-    return jest_failures(ctx) if jest else []
+    chosen = (empty_failures, jest_failures)[jest]
+    return chosen(ctx)
 
 
 def passed(ctx: Context, output: str, started: float) -> Result:
@@ -91,11 +100,20 @@ def jest_command(ctx: Context) -> list[str]:
     ]
 
 
+def json_list(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError(LIST_ERROR)
+    return value
+
+
 def jest_failures(ctx: Context) -> list[str]:
     path = ctx.work / JEST_RESULTS
     if not path.exists():
-        return []
-    return [finding for suite in json.loads(path.read_text()).get("testResults", []) for finding in suite_failures(suite, ctx)]
+        return EMPTY_LIST
+    return [finding for suite in json_list(json.loads(path.read_text()), "testResults") for finding in suite_failures(suite, ctx)]
 
 
 def suite_failures(suite: dict[str, Any], ctx: Context) -> list[str]:
@@ -108,10 +126,19 @@ def failed_cases(suite: dict[str, Any]) -> list[dict[str, Any]]:
     return [case for case in suite.get("assertionResults", []) if case["status"] == "failed"]
 
 
+def suite_message(suite: dict[str, Any]) -> str:
+    if "message" not in suite:
+        return EMPTY
+    value = suite["message"]
+    if type(value) is not str:
+        raise TypeError(TEXT_ERROR)
+    return value
+
+
 def suite_broken(file: str, suite: dict[str, Any], failed: list[dict[str, Any]]) -> list[str]:
     if not failed and suite.get("status") == "failed":
-        return [f"{file}:1 suite failed to run: {first_line(suite.get('message', ''))}"]
-    return []
+        return [f"{file}:1 suite failed to run: {first_line(suite_message(suite))}"]
+    return EMPTY_LIST
 
 
 def case_failure(file: str, case: dict[str, Any]) -> str:
@@ -123,16 +150,19 @@ def first_line(text: str) -> str:
     return next((line.strip()[:200] for line in text.splitlines() if line.strip()), "no message")
 
 
+def file_gaps(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
+    return uncovered_statements(file, data, gated) + uncovered_branches(file, data, gated)
+
+
+def scoped_gaps(file: str, data: dict[str, Any], ctx: Context) -> list[str]:
+    relative = relative_path(file, ctx)
+    if not ctx.in_scope(relative):
+        return EMPTY_LIST
+    return file_gaps(relative, data, ctx.gated_lines(relative))
+
+
 def coverage_findings(coverage: dict[str, Any], ctx: Context) -> list[str]:
-    findings: list[str] = []
-    for file, data in sorted(coverage.items()):
-        relative = relative_path(file, ctx)
-        if not ctx.in_scope(relative):
-            continue
-        gated = ctx.gated_lines(relative)
-        findings.extend(uncovered_statements(relative, data, gated))
-        findings.extend(uncovered_branches(relative, data, gated))
-    return findings
+    return [finding for file, data in sorted(coverage.items()) for finding in scoped_gaps(file, data, ctx)]
 
 
 def uncovered_statements(file: str, data: dict[str, Any], gated: set[int] | None) -> list[str]:
@@ -168,8 +198,12 @@ def arm_lines(branch: dict[str, Any], index: int) -> set[Any]:
     return lines
 
 
+def passed_count(line: str) -> str:
+    return line.split("passed")[0].split()[-1]
+
+
 def count_tests(output: str) -> str:
     for line in output.splitlines():
         if "Tests" in line and "passed" in line:
-            return line.split("passed")[0].split()[-1]
+            return passed_count(line)
     return "?"

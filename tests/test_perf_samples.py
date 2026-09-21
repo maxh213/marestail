@@ -69,6 +69,19 @@ def test_run_command_rejects_a_bench_directory(root: Path, capsys: pytest.Captur
     assert "perf/bench_dir is not an executable" in capsys.readouterr().err
 
 
+def test_ok_constant_is_empty() -> None:
+    assert samples.OK == ""
+
+
+def test_with_database_without_db(root: Path) -> None:
+    start_session(root)
+    config = config_module.load(root)
+    tree = trees.active(config)["head"]
+    target, problem = samples.with_database(config, BENCH, tree, False)
+    assert problem == samples.OK
+    assert target is not None and target.database is None
+
+
 def test_run_command_rejects_unknown_tree(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     start_session(root)
     bench(root, "true")

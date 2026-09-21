@@ -150,7 +150,7 @@ def test_no_report(tmp_path: Path, fake_run: Any) -> None:
 
 def test_findings_capped() -> None:
     failures = [(f"f{n}.rb", n, "X", "evil") for n in range(70)]
-    result = rb_mutation.verdict(100, failures, "", 0.0)
+    result = rb_mutation.verdict(100, failures, "", 0.0, "")
     assert (result.summary, len(result.findings)) == ("70 of 100 mutants not killed", 60)
     assert result.findings[0] == "f0.rb:0 X: 1 mutant survived"
 
@@ -242,6 +242,26 @@ def test_stdout_result_rejects_a_missing_note(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     with pytest.raises(TypeError, match=r"^note$"):
         rb_mutation.stdout_result(ctx, 0, "Results: 1\n", 0.0, None)  # type: ignore[arg-type]
+
+
+def test_verdict_rejects_a_missing_output() -> None:
+    with pytest.raises(TypeError, match=r"^output$"):
+        rb_mutation.verdict(1, [], None, 0.0, "")  # type: ignore[arg-type]
+
+
+def test_verdict_rejects_a_missing_note_value() -> None:
+    with pytest.raises(TypeError, match=r"^note$"):
+        rb_mutation.verdict(1, [], "out", 0.0, None)  # type: ignore[arg-type]
+
+
+def test_verdict_requires_a_note() -> None:
+    with pytest.raises(TypeError):
+        rb_mutation.verdict(1, [], "out", 0.0)  # type: ignore[call-arg]
+
+
+def test_verdict_keeps_a_nonempty_note() -> None:
+    result = rb_mutation.verdict(1, [], "out", 0.0, "scoped")
+    assert result.summary.endswith("scoped")
 
 
 def test_mutable_skips_vendor() -> None:

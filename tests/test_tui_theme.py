@@ -1,6 +1,8 @@
 import curses
 from typing import Any, ClassVar
 
+import pytest
+
 from marestail.tui import theme
 
 
@@ -181,4 +183,9 @@ def test_theme_constants_and_running_attr() -> None:
     assert theme.vine(1) == theme.full_vine(1)
     assert theme.vine(1) != ""
     assert theme.vine(0) == ""
+    assert theme.vine(-1) == ""
+    assert theme.full_vine(4) == "".join(theme.VINE_SEGMENT[i % 3] for i in range(4))
+    assert len(theme.full_vine(5)) == 5
     assert theme.VINE_SEGMENT == "─∙❧"
+    with pytest.raises(KeyError):
+        theme.role_attr(theme.mono_theme(), None)  # type: ignore[arg-type]

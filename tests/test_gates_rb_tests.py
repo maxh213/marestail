@@ -179,7 +179,10 @@ def test_count_examples(output: str, expected: str) -> None:
 def test_last_word_and_example_count() -> None:
     assert rb_tests.last_word("7") == "7"
     assert rb_tests.last_word("ran 7") == "7"
+    assert rb_tests.last_word("foo bar baz") == "baz"
     assert rb_tests.example_count("  ran 7 examples, 0 failures  ") == "7"
+    assert rb_tests.example_count("1 example 12 examples, 0 failures") == "1"
+    assert rb_tests.example_count("7 tests, 0 failures") == "failures"
     assert rb_tests.EXAMPLE == " example"
     assert rb_tests.UNKNOWN == "?"
     assert rb_tests.SPACE == " "

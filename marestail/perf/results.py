@@ -10,6 +10,10 @@ BASELINE = "baseline"
 HEAD = "head"
 COMPARED = (BASELINE, HEAD)
 CONTROL = "control"
+EMPTY_COMPARED = 0
+MIN_ROUNDS = 1
+P50 = 0
+P95 = 1
 
 Record = dict[str, Any]
 TreeValues = dict[str, list[float] | None]
@@ -130,8 +134,14 @@ def rows_on(rows: list[Record], tree: str) -> list[Record]:
     return [row for row in rows if row["tree"] == tree]
 
 
+def tree_values_of(values: TreeValues, tree: str) -> list[float] | None:
+    if tree not in values:
+        return None
+    return values[tree]
+
+
 def absence_problems(target: str, problems: list[str], values: TreeValues) -> list[str]:
-    if problems or values.get(BASELINE) is not None or values.get(HEAD) is not None:
+    if problems or tree_values_of(values, BASELINE) is not None or tree_values_of(values, HEAD) is not None:
         return []
     return [f"`{target}` is absent on both the baseline and head trees"]
 
@@ -197,8 +207,8 @@ def measurements_for(target: str, rows: list[Record], values: TreeValues, policy
     first = first_measured(rows)
     stats = tree_stats(values)
     runs = run_count(rows, values)
-    compared = min(compared_sizes(values), default=0)
-    intervals = bootstrap(values.get(BASELINE), values.get(HEAD), policy.bootstrap, zlib.crc32(target.encode()))
+    compared = min(compared_sizes(values), default=EMPTY_COMPARED)
+    intervals = bootstrap(tree_values_of(values, BASELINE), tree_values_of(values, HEAD), policy.bootstrap, zlib.crc32(target.encode()))
     return [
         Measurement(
             target,
@@ -246,7 +256,7 @@ def stat(stats: dict[str, tuple[float, float]], tree: str, index: int) -> float 
 def bootstrap(
     baseline: list[float] | None, head: list[float] | None, rounds: int, seed: int
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
-    if not baseline or not head or rounds <= 0:
+    if not baseline or not head or rounds < MIN_ROUNDS:
         return None
     return resampled_intervals(baseline, head, rounds, random.Random(seed))
 
@@ -260,7 +270,7 @@ def resampled_intervals(
         after = resample(rng, head)
         for index, collected in enumerate(changes):
             collected.append(percent_change(before[index], after[index]))
-    return interval(changes[0]), interval(changes[1])
+    return interval(changes[P50]), interval(changes[P95])
 
 
 def resample(rng: random.Random, values: list[float]) -> tuple[float, float]:

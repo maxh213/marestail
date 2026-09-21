@@ -1,11 +1,16 @@
 import hashlib
 from pathlib import Path
+from typing import Literal
 
 FOLDER = "perf"
 COMPILED = (".pyc", ".pyo")
 CACHE = "__pycache__"
 ROOT_ERROR = "root"
 BENCH_ERROR = "bench"
+JOIN = "\n"
+ERRORS = "ignore"
+BYTE_ORDER: Literal["big"] = "big"
+SIZE_WIDTH = 8
 
 
 def is_scratch(relative: Path) -> bool:
@@ -16,9 +21,18 @@ def scratch_name(name: str) -> bool:
     return name.startswith("_") and not (name.startswith("__") and Path(name).stem.endswith("__"))
 
 
+def empty_entries(_folder: Path) -> list[Path]:
+    return []
+
+
+def listed_entries(folder: Path) -> list[Path]:
+    return sorted(folder.rglob("*"))
+
+
 def perf_entries(root: Path) -> list[Path]:
     folder = root / FOLDER
-    return sorted(folder.rglob("*")) if folder.is_dir() else []
+    chosen = (empty_entries, listed_entries)[folder.is_dir()]
+    return chosen(folder)
 
 
 def perf_files(root: Path) -> list[Path]:
@@ -26,7 +40,7 @@ def perf_files(root: Path) -> list[Path]:
 
 
 def kept_text(root: Path, files: list[Path]) -> str:
-    return "\n".join(path.read_text(errors="ignore") for path in files if not is_scratch(path.relative_to(root)))
+    return JOIN.join(path.read_text(errors=ERRORS) for path in files if not is_scratch(path.relative_to(root)))
 
 
 def scratch_files(root: Path) -> list[Path]:
@@ -64,13 +78,17 @@ def fingerprint(root: Path, bench: str) -> str:
     digest = hashlib.sha256()
     for path in harness_files(root, bench):
         for part in (path.relative_to(root).as_posix().encode(), path.read_bytes()):
-            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(len(part).to_bytes(SIZE_WIDTH, BYTE_ORDER))
             digest.update(part)
     return digest.hexdigest()[:16]
 
 
+def depth_of(path: Path) -> int:
+    return len(path.parts)
+
+
 def deepest_first(root: Path) -> list[Path]:
-    return sorted((path for path in perf_entries(root) if path.is_dir()), key=lambda path: len(path.parts), reverse=True)
+    return sorted((path for path in perf_entries(root) if path.is_dir()), key=depth_of, reverse=True)
 
 
 def remove_empty_scratch_directories(root: Path) -> None:
@@ -79,9 +97,16 @@ def remove_empty_scratch_directories(root: Path) -> None:
             directory.rmdir()
 
 
+def drop_scratch(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
 def discard_scratch(root: Path) -> list[str]:
     removed = scratch_files(root)
     for path in removed:
-        path.unlink(missing_ok=True)
+        drop_scratch(path)
     remove_empty_scratch_directories(root)
     return [path.relative_to(root).as_posix() for path in removed]

@@ -173,17 +173,21 @@ def step_attr(theme: Theme, status: str, verdict: str | None) -> int:
 
 
 def role_attr(theme: Theme, role: str) -> int:
-    return (theme.worker, theme.judge)[role in JUDGE_ROLES]
+    return (theme.worker, theme.judge)[{True: role in JUDGE_ROLES}[type(role) is str]]
 
 
 def blank_vine(_width: int) -> str:
     return ""
 
 
+def vine_char(index: int) -> str:
+    return VINE_SEGMENT[index % len(VINE_SEGMENT)]
+
+
 def full_vine(width: int) -> str:
-    return (VINE_SEGMENT * (width // len(VINE_SEGMENT) + 1))[:width]
+    return "".join(map(vine_char, range(width)))
 
 
 def vine(width: int) -> str:
-    chosen = (full_vine, blank_vine)[width <= 0]
+    chosen = (blank_vine, full_vine)[width > 0]
     return chosen(width)

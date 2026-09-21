@@ -114,3 +114,28 @@ def test_fingerprint_rejects_a_missing_root(tmp_path: Path) -> None:
 def test_fingerprint_rejects_a_missing_bench(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match=r"^bench$"):
         hygiene.checked_bench(None)  # type: ignore[arg-type]
+
+
+def test_hygiene_constants() -> None:
+    assert hygiene.JOIN == "\n"
+    assert hygiene.ERRORS == "ignore"
+    assert hygiene.BYTE_ORDER == "big"
+    assert hygiene.SIZE_WIDTH == 8
+
+
+def test_kept_text_joins_with_newlines(tmp_path: Path) -> None:
+    write(tmp_path, "perf/a.py", "one")
+    write(tmp_path, "perf/b.py", "two")
+    files = [tmp_path / "perf/a.py", tmp_path / "perf/b.py"]
+    assert hygiene.kept_text(tmp_path, files) == "one\ntwo"
+
+
+def test_deepest_first_orders_by_depth(tmp_path: Path) -> None:
+    (tmp_path / "perf" / "a").mkdir(parents=True)
+    (tmp_path / "perf" / "b" / "c").mkdir(parents=True)
+    found = hygiene.deepest_first(tmp_path)
+    assert found[0].parts[-2:] == ("b", "c")
+
+
+def test_drop_scratch_ignores_missing(tmp_path: Path) -> None:
+    hygiene.drop_scratch(tmp_path / "missing")

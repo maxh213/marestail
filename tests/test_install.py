@@ -186,6 +186,11 @@ def test_require_entry_rejects_none() -> None:
         install.require_entry(None)
 
 
+def test_folder_fields_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^entry$"):
+        install.folder_fields(None)
+
+
 def test_install_constants() -> None:
     assert install.VERSION == "version"
     assert install.TRUSTED == "trusted"

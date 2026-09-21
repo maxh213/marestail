@@ -54,6 +54,12 @@ def test_get_builds_query_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.TIMEOUT == 60
 
 
+def test_get_rejects_a_missing_param(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, b"{}")
+    with pytest.raises(TypeError, match=r"^param$"):
+        Client("http://host", "tok").get("api/x", projectKey=None)  # type: ignore[arg-type]
+
+
 def test_post_sends_form_body_with_password(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = install(monkeypatch, b"  \n")
     assert Client("http://host", "admin", "pw").post("api/y", a="1", b="2") == {}
