@@ -455,7 +455,7 @@ def parsed_literal(text: str) -> str | None:
 
 
 def eval_quote(_rest: str, matched: re.Match[str]) -> str:
-    return next(filter(present, (parsed_literal(matched.group(1)), collapse(matched.group(1)[1:-1]))))
+    return first_text(parsed_literal(matched.group(1)), collapse(matched.group(1)[1:-1]))
 
 
 def quoted_or_plain(rest: str, matched: re.Match[str] | None) -> str:
@@ -843,7 +843,7 @@ def unwind(children: dict[int, list[int]], stack: list[int]) -> list[int]:
     return found
 
 
-MISSING_ROW = (0, [])
+MISSING_ROW: tuple[int, list[str]] = (0, [])
 
 
 def gate_hit_pid(by_pid: dict[int, tuple[int, list[str]]], pid: int) -> list[tuple[int, str]]:

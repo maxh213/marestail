@@ -148,7 +148,7 @@ class WatchSession:
         self.detail = None
 
     def handle_panel(self, key: int) -> int | None:
-        chosen: Any = PANEL_ACTIONS.get(self.panels[self.active].on_key(key, self.state), skip)
+        chosen: Any = PANEL_ACTIONS.get(surely(self.panels[self.active].on_key(key, self.state)), skip)
         result: int | None = chosen(self)
         return result
 

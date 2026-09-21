@@ -111,7 +111,7 @@ def int_attr(attr: int) -> int:
     return {False: attr}[type(attr) is not int]
 
 
-def need_int(value: object) -> int:
+def need_int(value: int) -> int:
     return {True: value}[type(value) is int]
 
 

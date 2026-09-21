@@ -76,8 +76,9 @@ def test_ok_constant_is_empty() -> None:
 def test_with_database_without_db(root: Path) -> None:
     start_session(root)
     config = config_module.load(root)
-    tree = trees.active(config)["head"]
-    target, problem = samples.with_database(config, BENCH, tree, False)
+    active = trees.active(config)
+    assert active is not None
+    target, problem = samples.with_database(config, BENCH, active["head"], False)
     assert problem == samples.OK
     assert target is not None and target.database is None
 

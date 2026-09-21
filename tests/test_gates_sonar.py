@@ -1,12 +1,13 @@
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from marestail import dotnet
 from marestail.gates import sonar
+from marestail.sonar.client import Client
 from tests.conftest import make_context, reject_none
 
 CREDS = {"url": "http://sonar:9000", "token": "tok"}
@@ -576,7 +577,7 @@ def test_gate_status_rejects_a_missing_key() -> None:
 
 def test_gate_status_sends_the_project_key() -> None:
     client = FakeClient(healthy)
-    assert sonar.gate_status(client, KEY) == "OK"
+    assert sonar.gate_status(cast(Client, client), KEY) == "OK"
     assert client.gets == [("api/qualitygates/project_status", {"projectKey": KEY})]
 
 
@@ -607,7 +608,7 @@ def test_scoped_duplication_reports_a_fraction(tmp_path: Path) -> None:
             ]
         }
 
-    assert sonar.scoped_duplication(ctx, FakeClient(respond), KEY) == ["src/a.py:1 sonar duplication 0.5% (need 0)"]
+    assert sonar.scoped_duplication(ctx, cast(Client, FakeClient(respond)), KEY) == ["src/a.py:1 sonar duplication 0.5% (need 0)"]
 
 
 def test_issue_and_component_paths() -> None:
