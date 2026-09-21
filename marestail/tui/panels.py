@@ -71,7 +71,7 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return cast(T, (value,)[0])
+    return cast(T, value)
 
 
 def first_text(*parts: str | None) -> str:
