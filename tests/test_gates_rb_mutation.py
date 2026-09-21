@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import rb_mutation
-from tests.conftest import gate_shape, make_context
+from tests.conftest import checked, gate_shape, make_context, untimed
 
 USER = "class User\n  module Named\n  end\nend\nclass Admin::Boss < User\n"
 INFO = ["bundle", "info", "mutant"]
@@ -56,24 +56,19 @@ def test_mutation_default_is_enabled() -> None:
     assert rb_mutation.mutation_off(False) is True
 
 
-def test_mutation_off_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^flag$"):
-        rb_mutation.mutation_off(None)
-
-
 def test_disabled(tmp_path: Path) -> None:
-    result = rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation": False}}))
+    result = untimed(rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation": False}})), rb_mutation.GATE)
     assert gate_shape(result) == ("rb.mutation", True, "skipped: disabled: [ruby] mutation = false", [])
 
 
 def test_bad_scope_setting(tmp_path: Path) -> None:
-    result = rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation_scope": "some"}}))
+    result = checked(rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation_scope": "some"}})), rb_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, '[ruby] mutation_scope must be "changed" or "all", got \'some\'', [])
 
 
 def test_nothing_changed(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_mutation)
-    result = rb_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"spec/user_spec.rb"}))
+    result = untimed(rb_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"spec/user_spec.rb"})), rb_mutation.GATE)
     assert gate_shape(result)[:3] == ("rb.mutation", True, "skipped: no changed ruby sources")
     assert fake.calls == []
 
@@ -87,7 +82,7 @@ def test_nothing_changed(tmp_path: Path, fake_run: Any) -> None:
 )
 def test_bundle_problems(tmp_path: Path, fake_run: Any, code: int, summary: str, finding: str) -> None:
     fake = fake_run(rb_mutation, [(code, "")])
-    result = rb_mutation.run_gate(scoped(tmp_path, {"ruby": {"exec": ["bin/bundle", "exec"]}}))
+    result = checked(rb_mutation.run_gate(scoped(tmp_path, {"ruby": {"exec": ["bin/bundle", "exec"]}})), rb_mutation.GATE)
     assert gate_shape(result) == ("rb.mutation", False, summary, [finding])
     assert fake.calls == [["bin/bundle", "info", "mutant"]]
     assert fake.options == [{"cwd": tmp_path, "timeout": 120}]
@@ -95,7 +90,7 @@ def test_bundle_problems(tmp_path: Path, fake_run: Any, code: int, summary: str,
 
 def test_session_report(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_mutation, writes_session(tmp_path, json.dumps(session(tmp_path))))
-    result = rb_mutation.run_gate(scoped(tmp_path))
+    result = checked(rb_mutation.run_gate(scoped(tmp_path)), rb_mutation.GATE)
     assert fake.calls == [INFO, ["bundle", "exec", "mutant", "run", "Admin::Boss*", "Named*", "User*"]]
     assert fake.options[1] == {"cwd": tmp_path, "timeout": 7200}
     assert (result.ok, result.summary) == (False, "5 of 6 mutants not killed")
@@ -108,13 +103,13 @@ def test_session_report(tmp_path: Path, fake_run: Any) -> None:
 
 def test_unreadable_session(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_mutation, writes_session(tmp_path, "{broken", "boom\n"))
-    result = rb_mutation.run_gate(scoped(tmp_path))
+    result = checked(rb_mutation.run_gate(scoped(tmp_path)), rb_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "mutant session report unreadable", ["boom"])
 
 
 def test_session_with_no_mutants(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_mutation, writes_session(tmp_path, json.dumps({"subject_results": []}), "nothing"))
-    result = rb_mutation.run_gate(scoped(tmp_path))
+    result = checked(rb_mutation.run_gate(scoped(tmp_path)), rb_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "no mutants were generated", ["nothing"])
 
 
@@ -126,7 +121,7 @@ def stdout_report(root: Path) -> str:
 def test_stdout_report_full_run(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_mutation, [(0, ""), (1, stdout_report(tmp_path))])
     ctx = make_context(tmp_path, {"ruby": {"mutation_scope": "all"}})
-    result = rb_mutation.run_gate(ctx)
+    result = checked(rb_mutation.run_gate(ctx), rb_mutation.GATE)
     assert fake.calls == [["bundle", "info", "mutant"], ["bundle", "exec", "mutant", "run"]]
     assert (result.ok, result.summary) == (False, "3 of 10 mutants not killed")
     assert result.findings == [
@@ -137,13 +132,27 @@ def test_stdout_report_full_run(tmp_path: Path, fake_run: Any) -> None:
 
 def test_stdout_all_killed_with_note(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_mutation, [(0, ""), (0, "Results: 4\n")])
-    result = rb_mutation.run_gate(make_context(tmp_path, {"git": {"base": "origin/none"}}))
+    result = checked(rb_mutation.run_gate(make_context(tmp_path, {"git": {"base": "origin/none"}})), rb_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "all 4 mutants killed (no base origin/none; full run)", [])
+
+
+def test_session_all_killed_with_note(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(
+        rb_mutation,
+        writes_session(
+            tmp_path,
+            json.dumps(
+                {"subject_results": [{"identification": "X#y:lib/x.rb:1", "source_path": "lib/x.rb", "coverage_results": [KILLED]}]}
+            ),
+        ),
+    )
+    result = checked(rb_mutation.run_gate(make_context(tmp_path, {"git": {"base": "origin/none"}})), rb_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "all 1 mutants killed (no base origin/none; full run)", [])
 
 
 def test_no_report(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_mutation, [(0, ""), (2, "crashed\n")])
-    result = rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation_scope": "all"}}))
+    result = checked(rb_mutation.run_gate(make_context(tmp_path, {"ruby": {"mutation_scope": "all"}})), rb_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "mutant produced no report (exit 2)", ["crashed"])
 
 
@@ -179,16 +188,6 @@ def test_sessions_without_folder(tmp_path: Path) -> None:
     assert rb_mutation.sessions(tmp_path) == set()
 
 
-def test_exec_prefix_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^exec$"):
-        rb_mutation.exec_prefix(None)
-
-
-def test_with_note_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^note$"):
-        rb_mutation.with_note("all killed", None)  # type: ignore[arg-type]
-
-
 def test_colons_from_right_include_a_trailing_colon() -> None:
     assert rb_mutation.colons_from_right("a:b:") == [3, 1]
 
@@ -210,35 +209,16 @@ def test_session_failures_defaults_missing_keys(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert rb_mutation.session_failures({}, ctx) == (0, [])
     assert rb_mutation.list_field({}, rb_mutation.SUBJECT_RESULTS) == []
-
-
-def test_session_failures_rejects_a_non_list(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^list$"):
-        rb_mutation.session_failures({rb_mutation.SUBJECT_RESULTS: {}}, ctx)
+    assert rb_mutation.list_field({rb_mutation.SUBJECT_RESULTS: 1}, rb_mutation.SUBJECT_RESULTS) == []
+    assert rb_mutation.text_field({"kind": "evil"}, "kind") == "evil"
+    assert rb_mutation.text_field({"kind": 1}, "kind") == ""
+    assert rb_mutation.text_field({}, "kind") == ""
 
 
 def test_subject_failures_defaults_missing_keys(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert rb_mutation.subject_failures({rb_mutation.COVERAGE_RESULTS: [SURVIVOR]}, ctx) == [(".", 0, "?", "evil")]
     assert rb_mutation.subject_failures({}, ctx) == []
-
-
-def test_text_field_rejects_a_non_str() -> None:
-    with pytest.raises(TypeError, match=r"^text$"):
-        rb_mutation.text_field({rb_mutation.IDENTIFICATION: 1}, rb_mutation.IDENTIFICATION)
-
-
-def test_session_result_rejects_a_missing_note(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^note$"):
-        rb_mutation.session_result(ctx, set(), "out", 0.0, None)  # type: ignore[arg-type]
-
-
-def test_stdout_result_rejects_a_missing_note(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^note$"):
-        rb_mutation.stdout_result(ctx, 0, "Results: 1\n", 0.0, None)  # type: ignore[arg-type]
 
 
 def test_verdict_keeps_a_nonempty_note() -> None:

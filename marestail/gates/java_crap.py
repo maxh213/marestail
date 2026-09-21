@@ -19,7 +19,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage = java.load_coverage(ctx)
     if coverage is None:
-        return Result(GATE, False, "no coverage data; java.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; java.tests must run first")
     files = java.in_scope(ctx, java.sources(ctx))
     if not files:
         return Result.skipped(GATE, "no Java files in scope")

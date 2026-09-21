@@ -7,7 +7,7 @@ import pytest
 
 from marestail import rust
 from marestail.gates import rs_mutation
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 VERSION = ["cargo", "mutants", "--version"]
 
@@ -61,7 +61,7 @@ def writes(root: Path, report: dict[str, Any] | None, output: str = "") -> Calla
 
 def test_skips_without_changed_sources(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust)
-    result = rs_mutation.run_gate(make_context(tmp_path, scope_changed=True))
+    result = untimed(rs_mutation.run_gate(make_context(tmp_path, scope_changed=True)), rs_mutation.GATE)
     assert (result.gate, result.ok, result.summary) == ("rs.mutation", True, "skipped: no changed rust sources")
     assert fake.calls == []
 
@@ -76,7 +76,7 @@ def test_skips_without_changed_sources(tmp_path: Path, fake_run: Any) -> None:
 )
 def test_mutants_missing(tmp_path: Path, fake_run: Any, reply: tuple[int, str], finding: str) -> None:
     fake = fake_run(rust, [reply])
-    result = rs_mutation.run_gate(make_context(tmp_path))
+    result = checked(rs_mutation.run_gate(make_context(tmp_path)), rs_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "cargo-mutants missing", [finding])
     assert fake.options == [{"cwd": tmp_path, "env": {}, "timeout": 60}]
 
@@ -84,7 +84,10 @@ def test_mutants_missing(tmp_path: Path, fake_run: Any, reply: tuple[int, str], 
 def test_full_run(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake = fake_run(rust, writes(tmp_path, outcomes()))
-    result = rs_mutation.run_gate(make_context(tmp_path, {"rust": {"mutation_args": ["--in-place"], "mutation_timeout": "99"}}))
+    result = checked(
+        rs_mutation.run_gate(make_context(tmp_path, {"rust": {"mutation_args": ["--in-place"], "mutation_timeout": "99"}})),
+        rs_mutation.GATE,
+    )
     work = str(tmp_path / ".marestail")
     assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--jobs", "2", "--in-place"]
     assert fake.options[1] == {"cwd": tmp_path, "env": {}, "timeout": 99}
@@ -101,16 +104,32 @@ def test_scoped_run_passes(tmp_path: Path, fake_run: Any) -> None:
     report = {"outcomes": [mutant("src/lib.rs", 1, "f", "n", "CaughtMutant")]}
     fake = fake_run(rust, writes(tmp_path, report))
     ctx = make_context(tmp_path, {"rust": {"mutation_jobs": 4}}, scope_changed=True, changed={"src/lib.rs"})
-    result = rs_mutation.run_gate(ctx)
+    result = checked(rs_mutation.run_gate(ctx), rs_mutation.GATE)
     assert fake.calls[1][-3:] == ["4", "--file", "src/lib.rs"]
     assert fake.options[1]["timeout"] == 7200
     assert (result.ok, result.summary, result.findings) == (True, "all 1 mutants killed", [])
 
 
+def test_failing_baseline_tails_the_cargo_output(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    report = {"outcomes": [{"scenario": "Baseline", "summary": "Failure"}]}
+    fake_run(rust, writes(tmp_path, report, "baseline log\n"))
+    result = checked(rs_mutation.run_gate(make_context(tmp_path)), rs_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "tests fail before any mutation", ["baseline log"])
+
+
+def test_only_unviable_mutants_tails_the_cargo_output(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    report = {"outcomes": [mutant("src/lib.rs", 1, "f", "n", "Unviable")]}
+    fake_run(rust, writes(tmp_path, report, "unviable log\n"))
+    result = checked(rs_mutation.run_gate(make_context(tmp_path)), rs_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "no viable mutants were generated", ["unviable log"])
+
+
 def test_no_outcomes(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake_run(rust, writes(tmp_path, None, "error: boom\n"))
-    result = rs_mutation.run_gate(make_context(tmp_path))
+    result = checked(rs_mutation.run_gate(make_context(tmp_path)), rs_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "cargo mutants produced no outcomes.json (exit 2)", ["error: boom"])
 
 
@@ -136,16 +155,6 @@ def test_after_colon_splits_once() -> None:
     assert rs_mutation.after_colon("replace x with y: z in f", "f") == "z"
     assert rs_mutation.after_colon("plain", "f") == "plain"
     assert rs_mutation.after_colon("replace a: b with c: d in f", "f") == "b with c: d"
-
-
-def test_verdict_rejects_a_missing_output(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^output$"):
-        rs_mutation.verdict(ctx, {"outcomes": []}, None, 0.0)  # type: ignore[arg-type]
-
-
-def test_require_output_keeps_text() -> None:
-    rs_mutation.require_output("log")
 
 
 def test_clear_outcomes_ignores_a_missing_folder(tmp_path: Path) -> None:

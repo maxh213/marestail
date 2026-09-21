@@ -69,10 +69,6 @@ def test_run_command_rejects_a_bench_directory(root: Path, capsys: pytest.Captur
     assert "perf/bench_dir is not an executable" in capsys.readouterr().err
 
 
-def test_ok_constant_is_empty() -> None:
-    assert samples.OK == ""
-
-
 def test_with_database_without_db(root: Path) -> None:
     start_session(root)
     config = config_module.load(root)

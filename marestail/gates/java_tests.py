@@ -28,7 +28,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error)
     build = java.build_dir(ctx)
     reports, site = build / "surefire-reports", build / "site" / "jacoco"
     code, output = run_maven(ctx, reports, site)
@@ -113,14 +113,14 @@ def where(ctx: Context, case: ET.Element, trace: str) -> str:
 
 def trace_location(ctx: Context, trace: str) -> str | None:
     for owner, file_name, line in FRAME.findall(trace):
-        path = java.locate(ctx, java.package_dir(owner), file_name)
+        path = java.locate(java.all_roots(ctx), java.package_dir(owner), file_name)
         if path is not None:
             return f"{java.rel(ctx, path)}:{line}"
     return None
 
 
 def class_location(ctx: Context, owner: str) -> str:
-    path = java.locate(ctx, java.package_dir(owner), java_file_name(owner))
+    path = java.locate(java.all_roots(ctx), java.package_dir(owner), java_file_name(owner))
     return f"{java.rel(ctx, path)}:1" if path is not None else f"{java.rel(ctx, java.pom(ctx))}:1"
 
 
@@ -149,21 +149,8 @@ def xml_attr(node: ET.Element, key: str) -> str:
     return value if value is not None else EMPTY
 
 
-def require_tag(tag: object) -> str:
-    if type(tag) is not str:
-        raise TypeError("tag")
-    return tag
-
-
 def package_nodes(report: ET.Element) -> list[ET.Element]:
-    return list(report.iter(require_tag(PACKAGE)))
-
-
-def source_folders(ctx: Context) -> list[Path]:
-    roots = java.source_roots(ctx)
-    if roots is None:
-        raise TypeError("roots")
-    return roots
+    return list(report.iter(PACKAGE))
 
 
 def normalise(ctx: Context, report: ET.Element) -> dict[str, Any]:
@@ -175,9 +162,9 @@ def normalise(ctx: Context, report: ET.Element) -> dict[str, Any]:
 
 def package_files(ctx: Context, package: ET.Element) -> list[tuple[str, dict[str, Any]]]:
     found = []
-    roots = source_folders(ctx)
+    roots = java.source_roots(ctx)
     for source in package.findall("sourcefile"):
-        path = java.locate(ctx, xml_attr(package, "name"), xml_attr(source, "name"), roots)
+        path = java.locate(roots, xml_attr(package, "name"), xml_attr(source, "name"))
         if path is not None and not java.coverage_excluded(ctx, java.rel(ctx, path)):
             found.append((java.rel(ctx, path), source_coverage(source)))
     return found

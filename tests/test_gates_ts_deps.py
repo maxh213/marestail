@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import ts_deps
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 TS = {"ts": {"root": "web"}}
 REPORT = "\n".join(
@@ -22,7 +22,7 @@ REPORT = "\n".join(
 def test_default_command_and_clean_run(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_deps, [(0, "no violations\n")])
 
-    result = ts_deps.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_deps.run_gate(make_context(tmp_path, TS)), "ts.deps")
 
     assert (result.gate, result.ok, result.summary, result.findings) == ("ts.deps", True, "dependency rules kept", [])
     assert fake.calls == [["npx", "depcruise", "--config", ".dependency-cruiser.cjs", "--output-type", "err", "src"]]
@@ -32,7 +32,7 @@ def test_default_command_and_clean_run(tmp_path: Path, fake_run: Any) -> None:
 def test_configured_command(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_deps, [(0, "")])
 
-    ts_deps.run_gate(make_context(tmp_path, {"ts": {"depcruise_config": "deps.cjs", "source": "lib"}}))
+    checked(ts_deps.run_gate(make_context(tmp_path, {"ts": {"depcruise_config": "deps.cjs", "source": "lib"}})), "ts.deps")
 
     assert fake.calls == [["npx", "depcruise", "--config", "deps.cjs", "--output-type", "err", "lib"]]
 
@@ -40,7 +40,7 @@ def test_configured_command(tmp_path: Path, fake_run: Any) -> None:
 def test_unscoped_failure_lists_nonblank_lines(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
-    result = ts_deps.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_deps.run_gate(make_context(tmp_path, TS)), "ts.deps")
 
     assert (result.ok, result.summary) == (False, "dependency rules broken")
     assert result.findings == [line for line in REPORT.splitlines() if line.strip()]
@@ -49,13 +49,13 @@ def test_unscoped_failure_lists_nonblank_lines(tmp_path: Path, fake_run: Any) ->
 def test_unscoped_failure_is_capped(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, "\n".join(f"line {n}" for n in range(70)))])
 
-    assert ts_deps.run_gate(make_context(tmp_path, TS)).findings == [f"line {n}" for n in range(60)]
+    assert checked(ts_deps.run_gate(make_context(tmp_path, TS)), "ts.deps").findings == [f"line {n}" for n in range(60)]
 
 
 def test_scoped_run_keeps_violations_in_scope(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
-    result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"}))
+    result = checked(ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"})), "ts.deps")
 
     assert (result.ok, result.summary, result.findings) == (
         False,
@@ -67,7 +67,7 @@ def test_scoped_run_keeps_violations_in_scope(tmp_path: Path, fake_run: Any) -> 
 def test_scoped_run_passes_when_violations_are_elsewhere(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_deps, [(1, REPORT)])
 
-    result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/z.ts"}))
+    result = checked(ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/z.ts"})), "ts.deps")
 
     assert (result.ok, result.summary, result.findings) == (True, "dependency rules kept", [])
 
@@ -76,7 +76,7 @@ def test_scoped_run_passes_when_violations_are_elsewhere(tmp_path: Path, fake_ru
 def test_scoped_run_without_violations(tmp_path: Path, fake_run: Any, code: int, expected: list[str]) -> None:
     fake_run(ts_deps, [(code, "  config broke  \n\n badly\n")])
 
-    result = ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True))
+    result = checked(ts_deps.run_gate(make_context(tmp_path, TS, scope_changed=True)), "ts.deps")
 
     assert (result.ok, result.findings) == (not expected, expected)
 

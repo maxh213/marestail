@@ -9,8 +9,8 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_crap
-from marestail.report import Result, result_seconds
-from tests.conftest import make_context, reject_none
+from marestail.report import Result
+from tests.conftest import checked, make_context, reject_none, untimed
 
 APP = "src/main/java/app/App.java"
 CORE = "src/main/java/app/Core.java"
@@ -53,13 +53,13 @@ def fake_scan(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) ->
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
+    return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
 def test_needs_coverage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path, None)
     seen = fake_scan(monkeypatch, ([], None))
-    result = java_crap.run_gate(make_context(tmp_path))
+    result = untimed(java_crap.run_gate(make_context(tmp_path)), java_crap.GATE)
     assert fields(result) == ("java.crap", False, "no coverage data; java.tests must run first", [], 0.0)
     assert seen == []
 
@@ -67,7 +67,7 @@ def test_needs_coverage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def test_skips_without_files_in_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     seen = fake_scan(monkeypatch, ([], None))
-    result = java_crap.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"}))
+    result = untimed(java_crap.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"})), java_crap.GATE)
     assert fields(result) == ("java.crap", True, "skipped: no Java files in scope", [], 0.0)
     assert seen == []
 
@@ -75,7 +75,7 @@ def test_skips_without_files_in_scope(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     seen = fake_scan(monkeypatch, (None, "java not found"))
-    result = java_crap.run_gate(make_context(tmp_path))
+    result = checked(java_crap.run_gate(make_context(tmp_path)), java_crap.GATE)
     assert fields(result) == ("java.crap", False, "java not found", [], 1.5)
     assert seen == [("complexity", [tmp_path / APP, tmp_path / CORE])]
 
@@ -83,7 +83,7 @@ def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_scores_every_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     fake_scan(monkeypatch, (MEMBERS, None))
-    result = java_crap.run_gate(make_context(tmp_path))
+    result = checked(java_crap.run_gate(make_context(tmp_path)), java_crap.GATE)
     assert fields(result) == (
         "java.crap",
         False,
@@ -100,7 +100,7 @@ def test_configured_limit_and_exclusions(tmp_path: Path, monkeypatch: pytest.Mon
     project(tmp_path)
     fake_scan(monkeypatch, (MEMBERS, None))
     ctx = make_context(tmp_path, {"java": {"crap_max": 10.5, "coverage_exclude": ["src/main/java/app/Core.java"]}})
-    result = java_crap.run_gate(ctx)
+    result = checked(java_crap.run_gate(ctx), java_crap.GATE)
     assert fields(result) == ("java.crap", True, "3 methods, 0 above CRAP 10.5", [], 1.5)
 
 
@@ -108,7 +108,7 @@ def test_scoped_run_keeps_touched_members(tmp_path: Path, monkeypatch: pytest.Mo
     project(tmp_path)
     seen = fake_scan(monkeypatch, (MEMBERS, None))
     ctx = make_context(tmp_path, scope_changed=True, changed={APP}, changed_lines_map={APP: {6}})
-    result = java_crap.run_gate(ctx)
+    result = checked(java_crap.run_gate(ctx), java_crap.GATE)
     assert seen == [("complexity", [tmp_path / APP])]
     assert fields(result) == (
         "java.crap",

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet, erlang, java, rust
-from marestail.context import Context, live
+from marestail.context import Context
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -39,14 +39,6 @@ PATH_KEY = "path"
 KEY = "key"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
-KEY_ERROR = "key"
-STATUS_ERROR = "status"
-
-
-def require_key(key: str) -> str:
-    if type(key) is not str:
-        raise TypeError(KEY_ERROR)
-    return key
 
 
 DOTNET_EXCLUSIONS = [
@@ -81,7 +73,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     creds = credentials()
     if creds is None:
-        return Result(GATE, False, "not set up", ["run: marestail sonar setup"], 0.0)
+        return Result(GATE, False, "not set up", ["run: marestail sonar setup"])
     return analyse(ctx, creds, started)
 
 
@@ -105,8 +97,6 @@ def analysis_tail(output: str) -> list[str]:
 
 
 def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
-    ctx = live(ctx)
-    key = require_key(key)
     if ctx.config.section("dotnet") is not None:
         code, output = dotnet_scan(ctx, creds, key)
         return code, output, ctx.root / DOTNET_REPORT_TASK
@@ -115,8 +105,6 @@ def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
 
 
 def summarize(ctx: Context, findings: list[str], status: str) -> str:
-    if type(status) is not str:
-        raise TypeError(STATUS_ERROR)
     base = "sonar clean" if not findings else f"{len(findings)} sonar findings"
     if not ctx.scoped:
         return base
@@ -124,8 +112,6 @@ def summarize(ctx: Context, findings: list[str], status: str) -> str:
 
 
 def scanner_command(ctx: Context, creds: Credentials, key: str) -> list[str]:
-    ctx = live(ctx)
-    key = require_key(key)
     return [*docker_arguments(ctx, creds), SCANNER_IMAGE, *scanner_properties(ctx, key)]
 
 
@@ -229,8 +215,6 @@ def separator_index(line: str) -> int:
 
 
 def dotnet_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str]:
-    ctx = live(ctx)
-    key = require_key(key)
     if (ctx.root / PROPERTIES_FILE).exists():
         return 1, PROPERTIES_CONFLICT
     product, _, error = dotnet.projects(ctx)
@@ -299,7 +283,7 @@ def section_list(ctx: Context, key: str) -> list[str]:
     section = ctx.config.section(SECTION)
     if section is None or key not in section:
         return EMPTY_LIST
-    return dotnet.configured_list(section[key])
+    return dotnet.listify(section[key])
 
 
 def settings(ctx: Context) -> dict[str, str]:
@@ -316,7 +300,7 @@ def settings(ctx: Context) -> dict[str, str]:
 def coverage_exclusions(ctx: Context) -> str:
     prefix = dotnet.rel(ctx, ctx.dotnet_root())
     prefix = "" if prefix == "." else prefix + "/"
-    return COMMA.join(prefix + pattern.strip(SLASH) for pattern in dotnet.configured_list(ctx.dotnet("coverage_exclude", EMPTY_LIST)))
+    return COMMA.join(prefix + pattern.strip(SLASH) for pattern in dotnet.listify(ctx.dotnet("coverage_exclude")))
 
 
 def report_paths(ctx: Context) -> dict[str, str]:
@@ -380,7 +364,6 @@ LANGUAGE_CHECKS = (
 
 
 def language_findings(ctx: Context, client: Client, key: str) -> list[str]:
-    key = require_key(key)
     findings: list[str] = []
     for check in LANGUAGE_CHECKS:
         if ctx.config.section(check.section) is not None:
@@ -408,7 +391,7 @@ def metric_text(measure: dict[str, Any]) -> str:
 
 def component_measures(data: dict[str, Any]) -> list[Any]:
     component = data.get("component")
-    if type(component) is not dict:
+    if not isinstance(component, dict):
         return EMPTY_LIST
     return mapping_list(component, "measures")
 
@@ -446,7 +429,6 @@ def report_pairs(text: str) -> dict[str, str]:
 
 
 def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
-    key = require_key(key)
     status = gate_status(client, key)
     findings = reopened(ctx, client, key)
     if not ctx.scoped and status != "OK":
@@ -456,7 +438,6 @@ def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
 
 
 def gate_status(client: Client, key: str) -> str:
-    key = require_key(key)
     status: str = client.get("api/qualitygates/project_status", projectKey=key)["projectStatus"]["status"]
     return status
 

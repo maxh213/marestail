@@ -84,15 +84,6 @@ def test_missing(code: int, output: str, expected: str | None) -> None:
     assert rust.missing(code, output, tool) == expected
 
 
-def test_missing_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^missing$"):
-        rust.missing(None, "", "clippy")  # type: ignore[arg-type]
-
-
-def test_require_missing_keeps_valid_args() -> None:
-    rust.require_missing(0, "clippy")
-
-
 def test_skipped(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert rust.skipped(ctx, tmp_path / "target" / "a.rs")
@@ -152,20 +143,6 @@ def test_excluded(tmp_path: Path, root: str, relative: str, expected: bool) -> N
     assert rust.excluded(ctx, relative, "skip") is expected
 
 
-def test_configured_list() -> None:
-    assert rust.configured_list([]) == []
-    assert rust.configured_list(["a", 2]) == ["a", "2"]
-    assert rust.configured_list("ab") == ["ab"]
-    with pytest.raises(TypeError, match=r"^list$"):
-        rust.configured_list(None)
-
-
-def test_require_timeout_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^timeout$"):
-        rust.require_timeout(None)  # type: ignore[arg-type]
-    assert rust.require_timeout(1800) == 1800
-
-
 def test_cargo_requires_timeout(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(0, "")])
     ctx = make_context(tmp_path)
@@ -178,11 +155,6 @@ def test_crates_finds_manifests(tmp_path: Path) -> None:
     touch(tmp_path / "sub" / "Cargo.toml")
     touch(tmp_path / "target" / "Cargo.toml")
     assert rust.crates(make_context(tmp_path)) == {tmp_path, tmp_path / "sub"}
-
-
-def test_staged_crate_rejects_a_missing_ctx() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        rust.staged_crate(None)  # type: ignore[arg-type]
 
 
 def test_staged_crate_creates_nested_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,10 +200,25 @@ def test_build_scanner_builds_and_stamps(tmp_path: Path, fake_run: Any) -> None:
     assert stamp(tmp_path).read_text() == rust.scanner_digest()
 
 
+def test_build_scanner_points_at_the_staged_manifest(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    scan = tmp_path / "scan"
+    scan.mkdir()
+    for name in ("main.rs", "Cargo.lock"):
+        (scan / name).write_text("")
+    monkeypatch.setattr(rust, "SCAN_DIR", scan)
+    touch(binary(tmp_path))
+    fake = fake_run(rust, [(0, "")])
+    ctx = make_context(tmp_path)
+    ctx.work.mkdir(exist_ok=True)
+    assert rust.build_scanner(ctx) is None
+    assert fake.calls[0][-1] == str(ctx.work / rust.STAGE / rust.CARGO_TOML)
+
+
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
         ((127, ""), f"cargo is not installed: {rust.INSTALL['cargo']}"),
+        ((101, "error: no such command: `build`"), f"cargo clippy is not installed: {rust.INSTALL['clippy']}"),
         ((101, "x" * 400 + " boom  \n"), "rust scanner build failed: " + "x" * 295 + " boom"),
         ((0, "built"), "rust scanner build failed: built"),
     ],
@@ -302,11 +289,6 @@ def test_scan_without_paths(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust)
     assert rust.scan(make_context(tmp_path), "deps", []) == ([], None)
     assert fake.calls == []
-
-
-def test_scan_rejects_missing_context() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        rust.scan(None, "deps", [])  # type: ignore[arg-type]
 
 
 def test_scan_reports_build_error(tmp_path: Path, fake_run: Any) -> None:

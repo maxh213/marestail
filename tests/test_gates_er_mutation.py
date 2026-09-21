@@ -9,7 +9,7 @@ from marestail import erlang
 from marestail.context import Context, MutationScope
 from marestail.gates import er_mutation
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 Reply = tuple[int, str]
@@ -65,27 +65,27 @@ def run(
     tmp_path: Path, fake_run: Callable[..., FakeRun], mutants: list[dict[str, Any]] | None, replies: list[Reply], **options: Any
 ) -> Result:
     fake_run(erlang, toolchain(mutants, replies))
-    return er_mutation.run_gate(project(tmp_path, **options))
+    return checked(er_mutation.run_gate(project(tmp_path, **options)), er_mutation.GATE)
 
 
 def test_skips_without_sources(tmp_path: Path) -> None:
-    result = er_mutation.run_gate(project(tmp_path, ()))
+    result = untimed(er_mutation.run_gate(project(tmp_path, ())), er_mutation.GATE)
     assert shape(result) == ("er.mutation", True, "skipped: no erlang sources under [erlang] sources (default src/)", [])
 
 
 def test_bad_scope_setting(tmp_path: Path) -> None:
-    result = er_mutation.run_gate(project(tmp_path, settings={"mutation_scope": "some"}))
+    result = checked(er_mutation.run_gate(project(tmp_path, settings={"mutation_scope": "some"})), er_mutation.GATE)
     assert shape(result) == ("er.mutation", False, '[erlang] mutation_scope must be "changed" or "all", got \'some\'', [])
 
 
 @pytest.mark.parametrize("changed", [{"README.md"}, {"src/gone.erl"}])
 def test_skips_unchanged_sources(tmp_path: Path, changed: set[str]) -> None:
-    result = er_mutation.run_gate(project(tmp_path, scope_changed=True, changed=changed))
+    result = untimed(er_mutation.run_gate(project(tmp_path, scope_changed=True, changed=changed)), er_mutation.GATE)
     assert shape(result) == ("er.mutation", True, "skipped: no changed erlang sources", [])
 
 
 def test_needs_tests(tmp_path: Path) -> None:
-    result = er_mutation.run_gate(project(tmp_path, ("src/a.erl",)))
+    result = checked(er_mutation.run_gate(project(tmp_path, ("src/a.erl",))), er_mutation.GATE)
     finding = "marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"
     assert shape(result) == ("er.mutation", False, "no eunit test files", [finding])
 
@@ -126,7 +126,7 @@ def test_runs_every_mutant(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> 
     mutants = [mutant(tmp_path, ident, ident) for ident in range(1, 6)]
     outcomes = [(1, "bad"), (0, ""), (0, ""), (0, ""), (1, ""), (0, ""), (124, ""), (0, ""), (3, "")]
     fake = fake_run(erlang, toolchain(mutants, [(0, ""), (0, ""), (0, ""), (0, ""), *outcomes]))
-    result = er_mutation.run_gate(project(tmp_path))
+    result = checked(er_mutation.run_gate(project(tmp_path)), er_mutation.GATE)
     finding = "src/a.erl:2 comparison mutant survived: < -> >="
     assert shape(result) == ("er.mutation", False, "1 of 4 mutants not killed (1 failed to compile)", [finding])
     scratch = tmp_path / ".marestail" / "er-mutation"
@@ -168,7 +168,7 @@ def test_nothing_runnable(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> N
 def test_cap_skips_mutants(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     mutants = [mutant(tmp_path, ident) for ident in range(1, 5)]
     fake = fake_run(erlang, toolchain(mutants, [(0, "")] * 4 + [(0, ""), (1, ""), (0, ""), (1, "")]))
-    result = er_mutation.run_gate(project(tmp_path, settings={"mutation_max": 2}))
+    result = checked(er_mutation.run_gate(project(tmp_path, settings={"mutation_max": 2})), er_mutation.GATE)
     assert shape(result) == ("er.mutation", True, "all 2 mutants killed (2 skipped by mutation_max)", [])
     assert [call[5] for call in fake.calls[4::2]] == [
         str(tmp_path / ".marestail/er-mutation/ebin-1"),
@@ -180,7 +180,7 @@ def test_time_budget(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypat
     monkeypatch.setattr(er_mutation, "time", Clock(0, 10, 110, 6900, 7090))
     mutants = [mutant(tmp_path, 1, 4), mutant(tmp_path, 2, 8)]
     fake = fake_run(erlang, toolchain(mutants, [(0, "")] * 6))
-    result = er_mutation.run_gate(project(tmp_path))
+    result = checked(er_mutation.run_gate(project(tmp_path)), er_mutation.GATE)
     findings = ["src/a.erl:4 comparison mutant survived: < -> >=", "src/a.erl:8 comparison mutant not checked (time budget): < -> >="]
     assert shape(result) == ("er.mutation", False, "1 of 2 mutants not killed (1 unchecked (time budget))", findings)
     assert fake.options[-1]["timeout"] == 300
@@ -193,7 +193,7 @@ def test_per_mutant_timeout(
 ) -> None:
     monkeypatch.setattr(er_mutation, "time", Clock(0, 0, baseline, baseline))
     fake = fake_run(erlang, toolchain([mutant(tmp_path, 1)], [(0, "")] * 5 + [(1, "")]))
-    er_mutation.run_gate(project(tmp_path))
+    checked(er_mutation.run_gate(project(tmp_path)), er_mutation.GATE)
     assert fake.options[-1]["timeout"] == expected
 
 
@@ -204,15 +204,11 @@ def test_apply_cap(tmp_path: Path, cap: Any, count: int, skipped: int) -> None:
     assert sum(1 for entry in mutants if entry.get("status") == "skipped") == skipped
 
 
-def test_mutation_cap_rejects_none(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path, {"erlang": {"mutation_max": None}})
-    with pytest.raises(TypeError, match=r"^cap$"):
-        er_mutation.mutation_cap(ctx)
-
-
 def test_cap_value_keeps_an_int() -> None:
     assert er_mutation.cap_value(0) == 0
     assert er_mutation.cap_value("3") == 3
+    assert er_mutation.cap_value(None) == 0
+    assert er_mutation.cap_value([2]) == 0
 
 
 def test_write_report_uses_indent(tmp_path: Path) -> None:
@@ -241,13 +237,6 @@ def test_loaded_mutants_missing_key_is_empty(tmp_path: Path) -> None:
     manifest = tmp_path / "mutants.json"
     manifest.write_text("{}")
     assert er_mutation.loaded_mutants(manifest) == []
-
-
-def test_loaded_mutants_rejects_a_null_list(tmp_path: Path) -> None:
-    manifest = tmp_path / "mutants.json"
-    manifest.write_text('{"mutants": null}')
-    with pytest.raises(TypeError):
-        er_mutation.loaded_mutants(manifest)
 
 
 def test_mutant_status_defaults_to_not_checked() -> None:

@@ -61,8 +61,6 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
 
 
 def mutation_summary(total: int, survivors: list[str], note: str) -> str:
-    if type(note) is not str:
-        raise TypeError("note")
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
     return summary + (f" {note}" if note else "")
 

@@ -73,19 +73,6 @@ def test_head_matches_git(repo: Path) -> None:
     assert runner.head(Config(root=repo, raw={})) == git(repo, "rev-parse", "HEAD").strip()
 
 
-def test_head_rejects_a_missing_config() -> None:
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.head(None)  # type: ignore[arg-type]
-
-
-def test_drop_ignored_since_rejects_missing_args(repo: Path) -> None:
-    config = Config(root=repo, raw={})
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.drop_ignored_since(None, "abc")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.drop_ignored_since(config, None)  # type: ignore[arg-type]
-
-
 def test_discard_edits_without_strays_does_nothing(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     keep = write(repo, "report.md")
     runner.discard_edits(Config(root=repo, raw={}), keep)
@@ -172,9 +159,11 @@ def test_drop_ignored_since_without_commit_only_unstages(repo: Path) -> None:
     write(repo, "a.log")
     git(repo, "add", "-f", "a.log")
     (repo / "a.log").unlink()
+    history = git(repo, "reflog", "show", "HEAD")
     assert runner.drop_ignored_since(config, before) == {}
     assert "a.log" not in tracked(repo)
     assert runner.head(config) == before
+    assert git(repo, "reflog", "show", "HEAD") == history
 
 
 def test_drop_ignored_since_with_nothing_ignored(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -184,6 +173,26 @@ def test_drop_ignored_since_with_nothing_ignored(repo: Path, capsys: pytest.Capt
     commit_all(repo, "b")
     assert runner.drop_ignored_since(config, before) == {}
     assert capsys.readouterr().out == ""
+
+
+def test_ignored_files_tracked_before_are_kept(repo: Path) -> None:
+    config = Config(root=repo, raw={})
+    write(repo, "old.log", "old\n")
+    git(repo, "add", "-f", "old.log")
+    git(repo, "commit", "-q", "-m", "old log")
+    before = runner.head(config)
+    write(repo, "new.log", "new\n")
+    git(repo, "add", "-f", "new.log")
+    git(repo, "commit", "-q", "-m", "new log")
+    assert runner.newly_tracked_ignored(config, before) == ["new.log"]
+
+
+def test_revert_commands_check_out_then_stage_then_commit() -> None:
+    assert runner.revert_commands("abc", ["a.toml"], "why") == [
+        ["git", "checkout", "abc", "--", "a.toml"],
+        ["git", "add", "-A", "--", "a.toml"],
+        ["git", "commit", "-q", "-m", "why"],
+    ]
 
 
 def test_added_paths() -> None:

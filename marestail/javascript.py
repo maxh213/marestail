@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from marestail.context import CTX_ERROR, Context
+from marestail.context import Context
 from marestail.shell import run
 
 SCANNERS = Path(__file__).resolve().parent / "js"
@@ -16,8 +16,6 @@ def script(mode: str) -> Path:
 
 
 def scan(ctx: Context, mode: str, files: Sequence[Path | str], cwd: Path | None = None) -> tuple[int, str]:
-    if type(ctx) is not Context:
-        raise TypeError(CTX_ERROR)
     root = ctx.ts_root()
     working = root if cwd is None else cwd
     return run(["node", str(script(mode)), str(root), *map(str, files)], cwd=working)

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from marestail.context import CTX_ERROR, Context, live
+from marestail.context import Context
 from marestail.shell import run, tail
 
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
@@ -52,20 +52,12 @@ def docker_bin(ctx: Context, cwd: Path, program: str) -> list[str]:
     return [*command, "-w", str(cwd), str(ctx.erlang("image", IMAGE)), program]
 
 
-def require_timeout(timeout: int) -> int:
-    if type(timeout) is not int:
-        raise TypeError("timeout")
-    return timeout
-
-
 def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
-    ctx = live(ctx)
     cwd = cwd or ctx.erlang_root()
-    return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=require_timeout(timeout))
+    return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=timeout)
 
 
 def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
-    ctx = live(ctx)
     return tool(ctx, "escript", [str(SCRIPT_DIR / script), *args], cwd, timeout=timeout)
 
 
@@ -74,17 +66,11 @@ def erlc(ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: int
 
 
 def hint(code: int, output: str) -> str | None:
-    require_hint(code, output)
     if unavailable(code, output):
         return UNAVAILABLE
     if "unable to find image" in output.lower():
         return f"docker image missing: docker pull {IMAGE}"
     return None
-
-
-def require_hint(code: int, output: str) -> None:
-    if code is None or output is None:
-        raise TypeError(CTX_ERROR)
 
 
 def unavailable(code: int, output: str) -> bool:
@@ -117,7 +103,6 @@ def compile_with_tests(ctx: Context, sources: list[Path], tests: list[Path], ebi
 
 
 def rel(ctx: Context, path: str | Path) -> str:
-    ctx = live(ctx)
     try:
         return Path(path).resolve().relative_to(ctx.root.resolve()).as_posix()
     except ValueError:
@@ -155,7 +140,6 @@ def erl_files(root: Path, folders: Iterable[Path], pattern: str) -> list[Path]:
 
 
 def source_files(ctx: Context) -> list[Path]:
-    ctx = live(ctx)
     return sorted(path for path in erl_files(ctx.erlang_root(), source_dirs(ctx), "*.erl") if not path.name.endswith("_tests.erl"))
 
 

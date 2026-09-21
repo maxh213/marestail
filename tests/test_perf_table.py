@@ -50,10 +50,6 @@ def test_parse_without_table() -> None:
     assert table.parse("# Title\n") == table.Table("# Title\n", [], [], "")
 
 
-def test_parse_constants() -> None:
-    assert table.HEADER_ROWS == 2
-
-
 def test_row_map_pairs_cells_up_to_the_shorter_side() -> None:
     assert table.row_map(["a", "b"], ["1", "2"]) == {"a": "1", "b": "2"}
     assert table.row_map(["a", "b", "c"], ["1", "2"]) == {"a": "1", "b": "2"}

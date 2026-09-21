@@ -18,13 +18,6 @@ def tree(root: Path, *paths: str) -> None:
         (root / path).write_text("one\ntwo\n")
 
 
-def test_live_rejects_missing_context(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    assert context.live(ctx) is ctx
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        context.live(None)  # type: ignore[arg-type]
-
-
 def test_focus_path_joins_relative_and_keeps_absolute(tmp_path: Path) -> None:
     config = make_context(tmp_path).config
     inner = tmp_path / "a.py"

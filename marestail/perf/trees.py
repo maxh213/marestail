@@ -12,7 +12,6 @@ from marestail.perf import settings, table
 from marestail.shell import run, tail
 
 NO_PRE_MARESTAIL = "no commit before marestail.toml; skipping the pre-marestail row"
-CONFIG_ERROR = "config"
 CONTROL = "control"
 INDENT = 2
 TEMP_PREFIX = "marestail-perf-"
@@ -184,8 +183,6 @@ def close(config: Config, session: Session) -> None:
 
 
 def prompt_section(config: Config, session: Session) -> str:
-    if type(config) is not Config:
-        raise TypeError(CONFIG_ERROR)
     lines = [f"- {tree.name}: {tree.sha} at {tree.path}" for tree in session.trees]
     lines += policy_lines(config)
     lines += control_lines(session)

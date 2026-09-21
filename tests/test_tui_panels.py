@@ -2,8 +2,6 @@ import curses
 from pathlib import Path
 from typing import Any, cast
 
-import pytest
-
 from marestail.tui import panels
 from marestail.tui.model import Fleet, Process, RepoState, Step, Worker
 from marestail.tui.panels import (
@@ -64,8 +62,8 @@ def as_window(fake: FakeWin) -> curses.window:
     return cast(curses.window, fake)
 
 
-def step(status: str = "running", verdict: str | None = None) -> Step:
-    return Step(role="coder", label="01-coder", attempt=1, status=status, summary="hello world", verdict=verdict, minutes=1.0)
+def step(status: str = "running", verdict: str | None = None, role: str = "coder") -> Step:
+    return Step(role=role, label="01-coder", attempt=1, status=status, summary="hello world", verdict=verdict, minutes=1.0)
 
 
 def make_repo(root: Path, alive: bool = True, worker: Worker | None = None, **fields: Any) -> RepoState:
@@ -109,16 +107,10 @@ def test_put_and_clip() -> None:
     assert shift_left(0, 0, "ab") == (0, 0, "ab")
     assert shift_left(0, -1, "ab") == (0, 0, "b")
     assert shift_left(0, -2, "hello") == (0, 0, "llo")
-    assert panels.shift_neg(0, -2, "hello") == (0, 0, "llo")
-    with pytest.raises(KeyError):
-        panels.shift_neg(0, 0, "hello")
     assert panels.clipped(0, 8, "abcdef", 10) == (0, 8, "ab")
     assert panels.surely("x") == "x"
     assert panels.surely(0) == 0
     assert panels.surely(None) is None
-    with pytest.raises(KeyError):
-        panels.int_attr(None)  # type: ignore[arg-type]
-    assert panels.int_attr(5) == 5
     assert panels.first_text("", "later") == ""
     assert panels.first_text(None, "later") == "later"
     assert panels.first_text() == ""
@@ -129,7 +121,6 @@ def test_put_and_clip() -> None:
     assert panels.present(None) is False
     assert panels.is_str("a") is True
     assert panels.is_str(None) is False
-    assert panels.keep_pos(1, 2, "t") == (1, 2, "t")
 
 
 def test_draw_box_and_helpers() -> None:
@@ -376,8 +367,7 @@ def test_panel_helpers(tmp_path: Path) -> None:
     panels.apply_repo(panel, None)
     panel.rebuild_lines(12)
     assert panel.built_for == 12
-    assert panels.keep_pos(1, 2, "ab") == (1, 2, "ab")
-    assert panels.shift_neg(1, -1, "ab") == (1, 0, "b")
+    assert panels.shift_left(1, -1, "ab") == (1, 0, "b")
     panels.write_cell(win, 0, 0, "ok", 0)
     panels.paint_box(win, Rect(0, 0, 3, 5), ROUND, 0)
     assert panels.is_worker_row(live) is True
@@ -496,12 +486,22 @@ def test_draw_bed_positions(tmp_path: Path) -> None:
     assert tail_cells[0][1] == 6
 
 
+def test_draw_bed_clips_the_gate_and_tail_to_the_inner_width(tmp_path: Path) -> None:
+    win: Any = FakeWin(20, 60)
+    live = make_repo(tmp_path, alive=True, gate_activity="g" * 40, tail_lines=["t" * 40])
+    watch = state_of()
+    draw_bed(win, Rect(0, 0, 10, 20), live, False, watch)
+    gate = next(cell for cell in win.cells if cell[2].startswith(panels.GATE_PREFIX))
+    assert gate[2] == f"{panels.GATE_PREFIX}{'g' * 40}"[:16]
+    assert next(cell for cell in win.cells if cell[2].startswith("tttt"))[2] == "t" * 16
+
+
 def test_paint_bed_frame_attr(tmp_path: Path) -> None:
     win: Any = FakeWin(10, 30)
     live = make_repo(tmp_path)
     watch = state_of()
     panels.paint_bed_frame(win, Rect(0, 0, 6, 20), live, True, watch, 16)
-    assert any(cell[3] == watch.theme.border_focus for cell in win.cells)
+    assert {cell[3] for cell in win.cells} == {watch.theme.border_focus, watch.theme.heading, watch.theme.secondary}
 
 
 def test_put_tail_and_paint_tails(tmp_path: Path, monkeypatch: Any) -> None:
@@ -512,8 +512,6 @@ def test_put_tail_and_paint_tails(tmp_path: Path, monkeypatch: Any) -> None:
     short: Any = FakeWin(10, 40)
     panels.put_tail(short, 0, 0, 4, watch, 0, "hello-tail")
     assert any(cell[2] == "hell" for cell in short.cells)
-    with pytest.raises(KeyError):
-        panels.need_int(None)  # type: ignore[arg-type]
     strip = tracker()
     monkeypatch.setattr(panels, "draw_strip", strip)
     live = make_repo(tmp_path, tail_lines=["t"])
@@ -586,8 +584,12 @@ def test_idle_and_busy_attrs(tmp_path: Path) -> None:
     heads = [cell for cell in win.cells if cell[0] == 5 and cell[2] == "HEAD "]
     tails = [cell for cell in win.cells if cell[0] == 5 and cell[2] == "TAIL"]
     assert heads[0][1] == 2
+    assert heads[0][3] == watch.theme.worker
     assert tails[0][1] == 7
     assert tails[0][3] == watch.theme.secondary
+    judge = Worker(step=step(role="hardener"), process=None, result_path=None, prompt_path=None, handoff_path=None)
+    panels.paint_busy_plain(win, 6, 0, 20, judge, watch, "HEAD ", "TAIL")
+    assert next(cell for cell in win.cells if cell[0] == 6 and cell[2] == "HEAD ")[3] == watch.theme.judge
 
 
 def test_draw_busy_row_tail_choice(tmp_path: Path) -> None:
@@ -654,12 +656,7 @@ def test_wrap_line_flags() -> None:
     assert wrap_line("x  ", 10) == ["x  "]
     assert wrap_line("ab", 1) == ["a", "b"]
     assert wrap_line("abcd", 2) == ["ab", "cd"]
-    assert panels.as_false(False) is False
-
-
-def test_as_false_rejects_none() -> None:
-    with pytest.raises(KeyError):
-        panels.as_false(None)  # type: ignore[arg-type]
+    assert wrap_line("a b c", 3) == ["a b", " c"]
 
 
 def test_first_text_skips_missing_and_keeps_a_string() -> None:
@@ -696,7 +693,7 @@ def test_empty_repos_and_empty_fleet(tmp_path: Path) -> None:
     win: Any = FakeWin(10, 80)
     watch = state_of()
     panels.empty_fleet(FleetPanel(), win, Rect(3, 5, 8, 60), watch)
-    assert any(cell[0] == 3 and cell[1] == 7 and cell[2].startswith("no beds found") for cell in win.cells)
+    assert any(cell[:2] == (3, 7) and cell[2].startswith("no beds found") and cell[3] == watch.theme.secondary for cell in win.cells)
 
 
 def test_index_or_zero_uses_current(tmp_path: Path) -> None:

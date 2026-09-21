@@ -64,31 +64,7 @@ def test_output_tail() -> None:
     assert java.local_tag("{a}b}c") == "b}c"
     assert java.trim_slash("/gen/") == "gen"
     assert java.trim_slash("gen") == "gen"
-    assert java.configured_list(["a", 1]) == ["a", "1"]
-
-
-def test_configured_list_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        java.configured_list(None)
-
-
-def test_locate_rejects_a_missing_ctx(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        java.locate(None, "app", "App.java")  # type: ignore[arg-type]
-
-
-def test_locate_rejects_a_non_str_package(tmp_path: Path) -> None:
-    ctx = ctx_at(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        java.locate(ctx, 1, "App.java")  # type: ignore[arg-type]
-
-
-def test_require_names_and_locate_folders(tmp_path: Path) -> None:
-    java.require_names("app", "App.java")
-    ctx = ctx_at(tmp_path)
-    folders = [tmp_path / "src"]
-    assert java.locate_folders(ctx, folders) == folders
-    assert java.locate_folders(ctx, None) == java.source_roots(ctx) + java.test_roots(ctx)
+    assert java.listify(["a", 1]) == ["a", "1"]
 
 
 def test_read_replaced_keeps_invalid_bytes(tmp_path: Path) -> None:
@@ -287,10 +263,10 @@ def test_class_name_and_locate(tmp_path: Path) -> None:
     assert java.class_name(ctx, paths["inner"]) == "app.core.Core"
     assert java.class_name(ctx, paths["test"]) == "app.AppTest"
     assert java.class_name(ctx, tmp_path / "other" / "X.java") is None
-    assert java.locate(ctx, "app", "AppTest.java") == paths["test"]
-    assert java.locate(ctx, "app", "AppTest.java", java.source_roots(ctx)) is None
-    assert java.locate(ctx, "app/core", "Core.java", java.source_roots(ctx)) == paths["inner"]
-    assert java.locate(ctx, "app", "core") is None
+    assert java.locate(java.all_roots(ctx), "app", "AppTest.java") == paths["test"]
+    assert java.locate(java.source_roots(ctx), "app", "AppTest.java") is None
+    assert java.locate(java.source_roots(ctx), "app/core", "Core.java") == paths["inner"]
+    assert java.locate(java.all_roots(ctx), "app", "core") is None
 
 
 @pytest.mark.parametrize(
@@ -334,10 +310,6 @@ def test_load_coverage(tmp_path: Path) -> None:
 
 
 def test_frozen_java_project_files_live_in_the_package() -> None:
-    assert java.JVM_DIR == java.PACKAGE / "jvm"
-    assert java.TOOLS_POM == java.JVM_DIR / "tools" / "pom.xml"
-    assert java.PMD_RULESET == java.JVM_DIR / "pmd-ruleset.xml"
-    assert java.SCAN_SOURCE == java.JVM_DIR / "Scan.java"
     assert java.TOOLS_POM.is_file()
     assert java.PMD_RULESET.is_file()
     assert java.SCAN_SOURCE.is_file()
@@ -419,11 +391,6 @@ def test_scan_nothing(tmp_path: Path, fake_run: Any, mode: str, empty: Any) -> N
     fake = fake_run(java)
     assert java.scan(ctx_at(tmp_path), mode, []) == (empty, None)
     assert fake.calls == []
-
-
-def test_scan_rejects_missing_context(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        java.scan(None, "lint", [])  # type: ignore[arg-type]
 
 
 def test_scan_runs_scanner(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -545,3 +512,8 @@ def test_pmd_classpath_failure(tmp_path: Path, fake_run: Any) -> None:
     fake_run(java, [(1, "offline\n")])
     assert java.pmd_classpath(ctx_at(tmp_path)) == (None, "maven could not fetch PMD: offline")
     assert not (tmp_path / ".marestail" / "java-tools" / "stamp").exists()
+
+
+def test_all_roots_joins_source_and_test_roots(tmp_path: Path) -> None:
+    ctx = ctx_at(tmp_path)
+    assert java.all_roots(ctx) == java.source_roots(ctx) + java.test_roots(ctx)

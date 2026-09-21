@@ -136,8 +136,6 @@ def table(value: object) -> dict[str, Any]:
 
 
 def floor_claim(where: str, stated: object) -> tuple[str, Version] | None:
-    if type(where) is not str:
-        raise TypeError("where")
     if not isinstance(stated, str):
         return None
     found = floor_version(stated)

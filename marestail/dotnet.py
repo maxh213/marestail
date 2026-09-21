@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from marestail.context import Context, live, under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
@@ -25,7 +25,6 @@ COVERAGE_JSON = "cs-coverage.json"
 COVERAGE_EXCLUDE = "coverage_exclude"
 MUTATION_EXCLUDE = "mutation_exclude"
 SLASH = "/"
-EMPTY: list[str] = []
 REPLACE = "replace"
 GENERATED_DIRS = {"obj", "bin", ".marestail", "node_modules", "Migrations"}
 GENERATED_SUFFIXES = (".g.cs", ".Designer.cs", ".AssemblyInfo.cs")
@@ -39,12 +38,6 @@ PROJECTS: dict[str, tuple[Path | None, Path | None]] = {}
 def listify(value: Any) -> list[str]:
     if value is None:
         return []
-    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
-
-
-def configured_list(value: Any) -> list[str]:
-    if value is None:
-        raise TypeError("list")
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
@@ -98,7 +91,6 @@ def dotnet(
     extra: dict[str, str] | None = None,
     program: str = DOTNET,
 ) -> tuple[int, str]:
-    ctx = live(ctx)
     folder = cwd or ctx.dotnet_root()
     variables = extra or {}
     return run(dotnet_bin(ctx, folder, network, variables, program) + args, cwd=folder, env={**env(ctx), **variables}, timeout=timeout)
@@ -176,25 +168,18 @@ def missing_projects(ctx: Context) -> str:
     return f"set [dotnet] project and test_project in marestail.toml (.csproj files under {rel(ctx, ctx.dotnet_root())}: {found})"
 
 
-def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
-    ctx = live(ctx)
+def project_pair(ctx: Context) -> tuple[Path, Path] | str:
     product, tests = cached_projects(ctx)
     if present(product) and present(tests):
-        return product, tests, None
-    return None, None, missing_projects(ctx)
+        return product, tests
+    return missing_projects(ctx)
 
 
-def project_pair(ctx: Context) -> tuple[Path, Path] | str:
-    product, tests, error = projects(ctx)
-    if error is not None:
-        return str(error)
-    return paths_or_raise(product, tests)
-
-
-def paths_or_raise(product: Path | None, tests: Path | None) -> tuple[Path, Path]:
-    if product is None or tests is None:
-        raise TypeError("pair")
-    return product, tests
+def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
+    found = project_pair(ctx)
+    if isinstance(found, str):
+        return None, None, found
+    return (*found, None)
 
 
 def in_separate_test_project(ctx: Context, path: Path) -> bool:
@@ -215,7 +200,6 @@ def is_test(ctx: Context, path: Path) -> bool:
 
 
 def files(ctx: Context) -> list[Path]:
-    ctx = live(ctx)
     return sorted(path for path in ctx.dotnet_root().rglob("*.cs") if not generated(ctx, path))
 
 
@@ -224,7 +208,6 @@ def sources(ctx: Context) -> list[Path]:
 
 
 def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
-    ctx = live(ctx)
     if not ctx.scoped:
         return paths
     return [path for path in paths if ctx.in_scope(rel(ctx, path))]
@@ -249,11 +232,11 @@ def matches_any(relative: str, patterns: list[str]) -> bool:
 
 def coverage_excluded(ctx: Context, relative: str) -> bool:
     prefix = root_prefix(ctx)
-    return matches_any(relative, [prefix + pattern.strip(SLASH) for pattern in configured_list(ctx.dotnet(COVERAGE_EXCLUDE, EMPTY))])
+    return matches_any(relative, [prefix + pattern.strip(SLASH) for pattern in listify(ctx.dotnet(COVERAGE_EXCLUDE))])
 
 
 def mutation_patterns(ctx: Context) -> list[str]:
-    return configured_list(ctx.dotnet(MUTATION_EXCLUDE, EMPTY)) or configured_list(ctx.dotnet(COVERAGE_EXCLUDE, EMPTY))
+    return listify(ctx.dotnet(MUTATION_EXCLUDE)) or listify(ctx.dotnet(COVERAGE_EXCLUDE))
 
 
 def mutation_excluded(ctx: Context, relative: str) -> bool:
@@ -338,7 +321,6 @@ def build_scanner(ctx: Context) -> str | None:
 
 
 def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
-    ctx = live(ctx)
     error = build_scanner(ctx)
     if error:
         return None, error

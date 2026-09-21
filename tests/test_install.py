@@ -156,38 +156,23 @@ def test_mapping_default_uses_the_fallback() -> None:
     assert install.mapping_default({"version": 2}, "version", 1) == 2
 
 
-def test_mapping_default_rejects_a_missing_key_name() -> None:
-    with pytest.raises(TypeError, match=r"^key$"):
-        install.mapping_default({}, None, 1)  # type: ignore[arg-type]
-
-
 def test_merge_cursor_hook_passes_the_version_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Any] = []
 
     def mapping_default(data: dict[str, Any], key: str, default: Any) -> Any:
-        seen.append(default)
+        seen.append((key, default))
         return 1
 
     monkeypatch.setattr(install, "mapping_default", mapping_default)
     path = tmp_path / "hooks.json"
     path.write_text("{}")
     install.merge_cursor_hook(path)
-    assert seen == [install.VERSION_DEFAULT]
+    assert seen == [(install.VERSION, install.VERSION_DEFAULT)]
 
 
 def test_trust_entry_marks_the_folder_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", lambda: 9.7)
     assert install.trust_entry() == {install.TRUSTED: True, install.DECIDED: 9}
-    assert install.require_entry(install.trust_entry())["trusted"] is True
-
-
-def test_require_entry_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^entry$"):
-        install.require_entry(None)
-
-
-def test_install_constants() -> None:
-    assert install.EMPTY_MAP == {}
 
 
 def test_mapping_and_listed() -> None:
@@ -195,13 +180,8 @@ def test_mapping_and_listed() -> None:
     assert install.mapping({}, "hooks") == {}
     assert install.listed({"stop": [1]}, "stop") == [1]
     assert install.listed({}, "stop") == []
-    with pytest.raises(TypeError, match=r"^map$"):
-        install.mapping({"hooks": 1}, "hooks")
-
-
-def test_listed_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        install.listed({"stop": 1}, "stop")
+    assert install.mapping({"hooks": 1}, "hooks") == {}
+    assert install.listed({"stop": 1}, "stop") == []
 
 
 def test_add_template_stops_without_template_key() -> None:

@@ -6,7 +6,7 @@ import pytest
 
 from marestail import rust
 from marestail.gates import rs_crap
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 
 def setup_crate(root: Path) -> None:
@@ -33,7 +33,7 @@ def functions(root: Path) -> str:
 
 
 def test_needs_coverage(tmp_path: Path) -> None:
-    result = rs_crap.run_gate(make_context(tmp_path))
+    result = untimed(rs_crap.run_gate(make_context(tmp_path)), rs_crap.GATE)
     assert (result.gate, result.ok, result.summary, result.findings, result.seconds) == (
         "rs.crap",
         False,
@@ -45,21 +45,21 @@ def test_needs_coverage(tmp_path: Path) -> None:
 
 def test_no_files(tmp_path: Path) -> None:
     setup_crate(tmp_path)
-    result = rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "src/"}}))
+    result = untimed(rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "src/"}})), rs_crap.GATE)
     assert (result.ok, result.summary) == (True, "skipped: no files in scope")
 
 
 def test_scanner_failure(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake_run(rust, [(1, "bad\n")])
-    result = rs_crap.run_gate(make_context(tmp_path))
+    result = checked(rs_crap.run_gate(make_context(tmp_path)), rs_crap.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "complexity scanner failed", ["rust scanner failed (complexity): bad"])
 
 
 def test_scores(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake = fake_run(rust, [(0, functions(tmp_path))])
-    result = rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "gen/"}}))
+    result = checked(rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "gen/"}})), rs_crap.GATE)
     assert fake.calls == [[str(tmp_path / ".marestail" / rust.SCAN_BIN), "complexity", str(tmp_path / "src" / "lib.rs")]]
     assert (result.ok, result.summary) == (False, "3 functions, 2 above CRAP 4")
     assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%)", "src/gen/out.rs:1 gen crap=6.0 (cc=2, coverage=0%)"]
@@ -68,7 +68,7 @@ def test_scores(tmp_path: Path, fake_run: Any) -> None:
 def test_clean_scores(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake_run(rust, [(0, "[]")])
-    result = rs_crap.run_gate(make_context(tmp_path, {"rust": {"crap_max": 1.5}}))
+    result = checked(rs_crap.run_gate(make_context(tmp_path, {"rust": {"crap_max": 1.5}})), rs_crap.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "0 functions, 0 above CRAP 1.5", [])
 
 

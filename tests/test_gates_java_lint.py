@@ -10,8 +10,8 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_lint
-from marestail.report import Result, result_seconds
-from tests.conftest import make_context, reject_none
+from marestail.report import Result
+from tests.conftest import checked, make_context, reject_none, untimed
 
 APP = "src/main/java/app/App.java"
 TEST = "src/test/java/app/AppTest.java"
@@ -44,17 +44,7 @@ def project(root: Path) -> Context:
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
-
-
-def test_pmd_findings_rejects_a_missing_path(tmp_path: Path) -> None:
-    ctx = project(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        java_lint.pmd_findings(ctx, [], tmp_path, None, release=None)  # type: ignore[arg-type]
-
-
-def test_require_paths_accepts_paths(tmp_path: Path) -> None:
-    java_lint.require_paths(tmp_path, tmp_path)
+    return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
 class Seams:
@@ -93,25 +83,31 @@ def violation(line: int, rule: str, description: str) -> dict[str, Any]:
 def test_skips_when_no_java_changed(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
     project(tmp_path)
     fake = fake_run(java_lint)
-    result = java_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md", "pom.xml"}))
+    result = untimed(java_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md", "pom.xml"})), java_lint.GATE)
     assert fields(result) == ("java.lint", True, "skipped: no changed Java files", [], 0.0)
     assert (fake.calls, seams.scans) == ([], [])
 
 
 def test_needs_pom(tmp_path: Path, seams: Seams) -> None:
-    result = java_lint.run_gate(make_context(tmp_path))
+    result = untimed(java_lint.run_gate(make_context(tmp_path)), java_lint.GATE)
     assert fields(result) == ("java.lint", False, java.require_pom(make_context(tmp_path)), [], 0.0)
 
 
 def test_skips_without_sources(tmp_path: Path, seams: Seams) -> None:
     write(tmp_path / "pom.xml", POM)
-    assert fields(java_lint.run_gate(make_context(tmp_path))) == ("java.lint", True, "skipped: no Java sources", [], 0.0)
+    assert fields(untimed(java_lint.run_gate(make_context(tmp_path)), java_lint.GATE)) == (
+        "java.lint",
+        True,
+        "skipped: no Java sources",
+        [],
+        0.0,
+    )
 
 
 def test_reports_classpath_error(tmp_path: Path, seams: Seams) -> None:
     ctx = project(tmp_path)
     seams.classpath = (None, "maven unavailable")
-    assert fields(java_lint.run_gate(ctx)) == ("java.lint", False, "maven unavailable", [], 0.5)
+    assert fields(checked(java_lint.run_gate(ctx), java_lint.GATE)) == ("java.lint", False, "maven unavailable", [], 0.5)
     assert seams.scans == []
 
 
@@ -119,7 +115,7 @@ def test_reports_scan_error(tmp_path: Path, seams: Seams) -> None:
     ctx = project(tmp_path)
     seams.diagnostics = (None, "java scanner failed (lint): boom")
     stale = write(tmp_path / ".marestail" / "java-lint-classes" / "Old.class", "x")
-    assert fields(java_lint.run_gate(ctx)) == ("java.lint", False, "java scanner failed (lint): boom", [], 0.5)
+    assert fields(checked(java_lint.run_gate(ctx), java_lint.GATE)) == ("java.lint", False, "java scanner failed (lint): boom", [], 0.5)
     classes = tmp_path / ".marestail" / "java-lint-classes"
     cp = tmp_path / ".marestail" / "java-classpath.txt"
     assert seams.scans == [
@@ -132,7 +128,7 @@ def test_stops_when_code_does_not_compile(tmp_path: Path, seams: Seams, fake_run
     ctx = project(tmp_path)
     seams.diagnostics = ([ERROR, WARNING, WARNING], None)
     fake = fake_run(java_lint)
-    assert fields(java_lint.run_gate(ctx)) == (
+    assert fields(checked(java_lint.run_gate(ctx), java_lint.GATE)) == (
         "java.lint",
         False,
         "does not compile",
@@ -151,7 +147,7 @@ def test_reports_pmd_error_with_unsorted_findings(tmp_path: Path, seams: Seams, 
     ctx = project(tmp_path)
     seams.diagnostics = ([WARNING], None)
     seams.tools = (None, "maven could not fetch PMD: offline")
-    assert fields(java_lint.run_gate(ctx)) == (
+    assert fields(checked(java_lint.run_gate(ctx), java_lint.GATE)) == (
         "java.lint",
         False,
         "maven could not fetch PMD: offline",
@@ -167,7 +163,7 @@ def test_reports_pmd_error_with_unsorted_findings(tmp_path: Path, seams: Seams, 
 def test_lint_passes_release_to_pmd(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
     ctx = project(tmp_path)
     fake = fake_run(java_lint, pmd_report({"files": []}))
-    java_lint.run_gate(ctx)
+    checked(java_lint.run_gate(ctx), java_lint.GATE)
     assert fake.calls[0][-2:] == ["--use-version", "java-17"]
 
 
@@ -182,7 +178,7 @@ def test_clean_run(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
     write(tmp_path / APP, "package app;\nclass App {}\n")
     write(tmp_path / ".marestail" / "java-classpath.txt", "/m2/a.jar")
     fake = fake_run(java_lint, pmd_report({"files": []}, code=0))
-    result = java_lint.run_gate(make_context(tmp_path))
+    result = checked(java_lint.run_gate(make_context(tmp_path)), java_lint.GATE)
     assert fields(result) == ("java.lint", True, "javac -Xlint:all and PMD clean", [], 0.5)
     assert seams.scans[0][2] == [
         "--classpath",
@@ -191,6 +187,8 @@ def test_clean_run(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
         str(tmp_path / ".marestail" / "java-lint-classes"),
     ]
     assert "--use-version" not in fake.calls[0]
+    aux = fake.calls[0][fake.calls[0].index("--aux-classpath") + 1]
+    assert aux == f"{tmp_path / '.marestail' / 'java-lint-classes'}{os.pathsep}/m2/a.jar"
 
 
 def test_merges_javac_and_pmd(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
@@ -200,7 +198,7 @@ def test_merges_javac_and_pmd(tmp_path: Path, seams: Seams, fake_run: Any) -> No
         "files": [{"filename": str(tmp_path / APP), "violations": [violation(3, "UnusedPrivateField", "Avoid unused\n  field 'x'.")]}]
     }
     fake_run(java_lint, pmd_report(report))
-    assert fields(java_lint.run_gate(ctx)) == (
+    assert fields(checked(java_lint.run_gate(ctx), java_lint.GATE)) == (
         "java.lint",
         False,
         "4 problems",
@@ -218,7 +216,7 @@ def test_findings_are_capped(tmp_path: Path, seams: Seams, fake_run: Any) -> Non
     ctx = project(tmp_path)
     violations = [violation(n, "R", "d") for n in range(100, 170)]
     fake_run(java_lint, pmd_report({"files": [{"filename": str(tmp_path / APP), "violations": violations}]}))
-    result = java_lint.run_gate(ctx)
+    result = checked(java_lint.run_gate(ctx), java_lint.GATE)
     assert (result.summary, len(result.findings), result.findings[0]) == ("72 problems", 60, f"{APP}:100 PMD R: d")
 
 

@@ -4,8 +4,6 @@ from pathlib import Path
 FOLDER = "perf"
 COMPILED = (".pyc", ".pyo")
 CACHE = "__pycache__"
-ROOT_ERROR = "root"
-BENCH_ERROR = "bench"
 JOIN = "\n"
 ERRORS = "ignore"
 SIZE_WIDTH = 8
@@ -60,19 +58,7 @@ def harness_files(root: Path, bench: str) -> list[Path]:
     return [path for path in perf_files(root) if harness_file(path, root, bench, scratch)]
 
 
-def checked_root(root: Path) -> None:
-    if not isinstance(root, Path):
-        raise TypeError(ROOT_ERROR)
-
-
-def checked_bench(bench: str) -> None:
-    if type(bench) is not str:
-        raise TypeError(BENCH_ERROR)
-
-
 def fingerprint(root: Path, bench: str) -> str:
-    checked_root(root)
-    checked_bench(bench)
     digest = hashlib.sha256()
     for path in harness_files(root, bench):
         for part in (path.relative_to(root).as_posix().encode(), path.read_bytes()):

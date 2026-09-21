@@ -4,8 +4,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from marestail.tui import collect
 from marestail.tui.model import Process, RepoState, Step, Worker
 
@@ -998,9 +996,11 @@ def test_matching_agent_filters_under(tmp_path: Path, monkeypatch: Any) -> None:
     inside = Process(1, 5, "m", "claude")
     outside = Process(2, 1, "m", "claude")
     monkeypatch.setattr(collect, "agents_of", lambda rows: [inside, outside])
-    monkeypatch.setattr(collect, "agent_under", lambda real, process: process is inside)
+    seen: list[Path] = []
+    monkeypatch.setattr(collect, "agent_under", lambda real, process: seen.append(real) is None and process is inside)
     found = collect.matching_agent([], tmp_path)
     assert found is inside
+    assert seen == [tmp_path, tmp_path]
 
 
 def test_row_agent_passes_pid_elapsed() -> None:
@@ -1070,30 +1070,12 @@ def test_docker_inner_index_and_flags() -> None:
     assert collect.compose_run_target(short, 0) is None
     assert collect.docker_inner(["echo", "compose", "run", "svc", "pytest"]) is None
     assert collect.docker_inner(["docker", "compose", "run", "svc", "pytest", "extra"]) == "pytest"
-    assert collect.MISSING_ROW == (0, [])
 
 
 def test_parsed_literal_value_error() -> None:
     assert collect.parsed_literal("1+") is None
     assert collect.parsed_literal("f(1)") is None
     assert collect.parsed_literal("'ok'") == "ok"
-    with pytest.raises(KeyError):
-        collect.parsed_literal(None)  # type: ignore[arg-type]
-
-
-def test_matching_agent_rejects_a_missing_root() -> None:
-    with pytest.raises(KeyError):
-        collect.matching_agent([], None)  # type: ignore[arg-type]
-
-
-def test_java_sonar_rejects_missing_tokens() -> None:
-    with pytest.raises(KeyError):
-        collect.java_sonar(["java"], None)  # type: ignore[arg-type]
-
-
-def test_pmd_gate_rejects_missing_tokens() -> None:
-    with pytest.raises(KeyError):
-        collect.pmd_gate(["java"], None)  # type: ignore[arg-type]
 
 
 def test_time_fmt_boundaries() -> None:

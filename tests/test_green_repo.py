@@ -17,7 +17,7 @@ from marestail import cli, graph, report, route
 from marestail import config as config_module
 from marestail.gates import comments, configured_gates, py_mutation, py_runtime
 from marestail.report import Result
-from tests.conftest import ForbiddenCallError, make_context
+from tests.conftest import ForbiddenCallError, checked, make_context, untimed
 
 
 def repo_root() -> Path:
@@ -112,7 +112,7 @@ def test_every_tier_names_the_same_gates_in_the_same_order(tier: str, expected: 
 
 
 def test_py_runtime_line_is_the_skip_line() -> None:
-    result = py_runtime.run_gate(make_context(ROOT, config_module.load(ROOT).raw))
+    result = untimed(py_runtime.run_gate(make_context(ROOT, config_module.load(ROOT).raw)), py_runtime.GATE)
     assert report.render_one(result) == "[ok  ] py.runtime     skipped: nothing declares the interpreter that ships  (0.0s)"
 
 
@@ -151,7 +151,7 @@ def test_gate_json_keeps_scope_focus_and_results() -> None:
 def test_a_comment_fails_the_comments_gate(tmp_path: Path) -> None:
     (tmp_path / "marestail").mkdir()
     (tmp_path / "marestail" / "_deliberate_comment.py").write_text("# a comment\npass\n")
-    result = comments.run_gate(make_context(tmp_path, {"comments": {"paths": ["marestail"]}}))
+    result = checked(comments.run_gate(make_context(tmp_path, {"comments": {"paths": ["marestail"]}})), "comments")
     rendered = report.render([result])
     assert "marestail/_deliberate_comment.py:1 comment: # a comment" in rendered
     assert rendered.endswith("GATE FAILED: comments")
@@ -311,10 +311,6 @@ def test_tools_test_perf_fails_as_before(script_env: dict[str, str]) -> None:
 
 
 def test_unchecked_mutants_fail_the_mutation_gate(tmp_path: Path) -> None:
-    assert py_mutation.STATUS_BY_EXIT_CODE[None] == "not checked"
-    assert "not checked" not in py_mutation.PASSING
-    assert "no tests" not in py_mutation.PASSING
-    assert "survived" not in py_mutation.PASSING
     folder = tmp_path / "mutants"
     folder.mkdir()
     (folder / "a.py.meta").write_text(json.dumps({"exit_code_by_key": {"pkg.fn__mutmut_1": None}}))

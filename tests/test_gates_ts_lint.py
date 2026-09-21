@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import ts_lint
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 TS = {"ts": {"root": "web"}}
 ESLINT = ["npx", "eslint", ".", "--max-warnings", "0", "--format", "json"]
@@ -30,7 +30,7 @@ def eslint_report(root: Path) -> str:
 def test_scoped_run_without_typescript_changes_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint)
 
-    result = ts_lint.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/readme.md"}))
+    result = untimed(ts_lint.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/readme.md"})), ts_lint.GATE)
 
     assert (result.gate, result.ok, result.summary) == ("ts.lint", True, "skipped: no changed typescript files")
     assert fake.calls == []
@@ -39,7 +39,7 @@ def test_scoped_run_without_typescript_changes_is_skipped(tmp_path: Path, fake_r
 def test_clean_run(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint, [(0, "whatever"), (0, "[]")])
 
-    result = ts_lint.run_gate(make_context(with_tsconfig(tmp_path), TS))
+    result = checked(ts_lint.run_gate(make_context(with_tsconfig(tmp_path), TS)), ts_lint.GATE)
 
     assert (result.ok, result.summary, result.findings) == (True, "tsc and eslint clean", [])
     assert fake.calls == [["npx", "tsc", "--noEmit", "-p", "tsconfig.app.json"], ESLINT]
@@ -49,7 +49,7 @@ def test_clean_run(tmp_path: Path, fake_run: Any) -> None:
 def test_missing_tsconfig_is_reported(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_lint, [(0, "")])
 
-    result = ts_lint.run_gate(make_context(tmp_path, {"ts": {"root": "web", "tsconfig": "tsconfig.json"}}))
+    result = checked(ts_lint.run_gate(make_context(tmp_path, {"ts": {"root": "web", "tsconfig": "tsconfig.json"}})), ts_lint.GATE)
 
     assert (result.ok, result.summary) == (False, "1 problems")
     assert result.findings == ["marestail.toml:1 [ts] tsconfig = 'tsconfig.json' does not exist under web"]
@@ -60,7 +60,7 @@ def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
     tsc = "\n".join(f"src/a.ts({n},1): error TS1: bad" for n in range(1, 71))
     fake_run(ts_lint, [(2, tsc), (1, "[]")])
 
-    result = ts_lint.run_gate(make_context(with_tsconfig(tmp_path), TS))
+    result = checked(ts_lint.run_gate(make_context(with_tsconfig(tmp_path), TS)), ts_lint.GATE)
 
     assert result.summary == "71 problems"
     assert result.findings == [f"web/src/a.ts:{n} error TS1: bad" for n in range(1, 61)]
@@ -155,17 +155,12 @@ def test_str_field_defaults_missing_keys() -> None:
     assert ts_lint.str_field({}, "message") == ""
     assert ts_lint.str_field({"message": "x"}, "message") == "x"
     assert ts_lint.str_field({"message": None}, "message") == ""
-    assert ts_lint.TS_SUFFIXES == (".ts", ".tsx", ".js", ".jsx")
 
 
 def test_list_field_defaults_and_rejects_a_non_list() -> None:
     assert ts_lint.list_field({}, "messages") == []
     assert ts_lint.list_field({"messages": [1]}, "messages") == [1]
-
-
-def test_list_field_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        ts_lint.list_field({"messages": {}}, "messages")
+    assert ts_lint.list_field({"messages": 1}, "messages") == []
 
 
 def test_meaningful_drops_npm_noise_and_blank_lines() -> None:

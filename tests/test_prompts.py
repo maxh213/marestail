@@ -55,10 +55,6 @@ def report(root: Path, name: str) -> Path:
     return root / ".marestail" / "handoffs" / "t" / f"{name}.md"
 
 
-def test_empty_and_paragraph_constants() -> None:
-    assert (prompts.EMPTY, prompts.PARAGRAPH) == ("", "\n\n")
-
-
 def test_role_text_reads_the_role_file() -> None:
     assert prompts.role_text("coder").startswith("You are the coder.")
 

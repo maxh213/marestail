@@ -25,14 +25,6 @@ def test_get_default_is_none(tmp_path: Path) -> None:
     assert Config(root=tmp_path, raw={}).get("a", "b") is None
 
 
-def test_get_rejects_non_string_names(tmp_path: Path) -> None:
-    loaded = Config(root=tmp_path, raw={"python": {"root": "src"}})
-    with pytest.raises(TypeError, match=r"^name$"):
-        loaded.get(None, "root", ".")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match=r"^name$"):
-        loaded.get("python", None, ".")  # type: ignore[arg-type]
-
-
 def test_work(tmp_path: Path) -> None:
     assert Config(root=tmp_path, raw={}).work == tmp_path / ".marestail"
 

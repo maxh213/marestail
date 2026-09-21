@@ -32,9 +32,9 @@ def run_gate(ctx: Context) -> Result:
 def pom_problem(ctx: Context) -> Result | None:
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error)
     if PITEST.split(":")[1] not in java.read_replaced(java.pom(ctx)):
-        return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"], 0.0)
+        return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"])
     return None
 
 
@@ -126,7 +126,7 @@ def describe(ctx: Context, mutant: ET.Element) -> str:
 
 def mutant_location(ctx: Context, mutant: ET.Element) -> str:
     owner = before_dollar(xml_text(mutant.findtext("mutatedClass")))
-    path = java.locate(ctx, java.package_dir(owner), xml_text(mutant.findtext("sourceFile")), java.source_roots(ctx))
+    path = java.locate(java.source_roots(ctx), java.package_dir(owner), xml_text(mutant.findtext("sourceFile")))
     return java.rel(ctx, path) if path is not None else owner
 
 

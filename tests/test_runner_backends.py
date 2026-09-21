@@ -75,16 +75,6 @@ def test_backend_effort_for_grok_and_others(monkeypatch: pytest.MonkeyPatch) -> 
     assert runner.backend_effort(other) == ""
 
 
-def test_grok_always_approve_locked_rejects_a_missing_code() -> None:
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.grok_always_approve_locked(None, "out")  # type: ignore[arg-type]
-
-
-def test_rate_limited_rejects_a_missing_code() -> None:
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.rate_limited(None, "{}")  # type: ignore[arg-type]
-
-
 def test_agent_env_for_claude_and_others() -> None:
     claude = make_state(account_env={"A": "1"})
     other = make_state(agent="grok", account_env={"A": "1"})
@@ -515,16 +505,6 @@ def test_kilo_text_reads_part_then_text() -> None:
     assert runner.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
     assert runner.kilo_text({"type": "text", "text": "plain"}) == "plain"
     assert runner.kilo_text({"type": "other", "text": "nope"}) == ""
-
-
-def test_mapping_text_rejects_a_missing_key_name() -> None:
-    with pytest.raises(TypeError, match=r"^key$"):
-        runner.mapping_text({"text": "x"}, None)  # type: ignore[arg-type]
-
-
-def test_event_dict_rejects_a_missing_key_name() -> None:
-    with pytest.raises(TypeError, match=r"^key$"):
-        runner.event_dict({"part": {}}, None)  # type: ignore[arg-type]
 
 
 def test_object_or_none_keeps_objects() -> None:

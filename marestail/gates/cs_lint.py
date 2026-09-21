@@ -17,7 +17,6 @@ LEVELS = {"error", "warning"}
 COLON = ":"
 SARIF_VERSION = "2.1"
 MISSING = -1
-PROJECT_ERROR = "project"
 SUPPRESSION = re.compile(r"#pragma\s+warning\s+disable|\[\s*SuppressMessage")
 
 
@@ -48,7 +47,7 @@ def project_findings(ctx: Context, project: Path, findings: list[str], started: 
     code, output = dotnet.dotnet(ctx, build_args(project, sarif), timeout=900)
     if not sarif.exists():
         return no_sarif(ctx, project, (code, output), started)
-    return findings + sarif_findings(ctx, sarif, required_path(project))
+    return findings + sarif_findings(ctx, sarif, project)
 
 
 def no_sarif(ctx: Context, project: Path, outcome: tuple[int, str], started: float) -> Result:
@@ -95,7 +94,6 @@ def mapping_text(data: dict[str, Any], key: str) -> str:
 
 
 def sarif_findings(ctx: Context, sarif: Path, project: Path) -> list[str]:
-    project = required_path(project)
     data = json.loads(sarif.read_text())
     version = mapping_text(data, "version")
     if not version.startswith(SARIF_VERSION):
@@ -115,12 +113,6 @@ def result_finding(ctx: Context, result: dict[str, Any], project: Path) -> list[
 
 def reportable(result: dict[str, Any], where: str, ctx: Context) -> bool:
     return result.get("level", "warning") in LEVELS and file_in_scope(where, ctx)
-
-
-def required_path(project: Path) -> Path:
-    if not isinstance(project, Path):
-        raise TypeError(PROJECT_ERROR)
-    return project
 
 
 def path_of_finding(where: str) -> str:

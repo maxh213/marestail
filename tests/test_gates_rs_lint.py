@@ -6,7 +6,7 @@ import pytest
 
 from marestail import rust
 from marestail.gates import rs_lint
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 CLIPPY = ["cargo", "clippy", "--all-targets", "--message-format=json", "--", "-D", "warnings", "-D", "clippy::pedantic"]
 FMT = ["cargo", "fmt", "--check", "--message-format", "short"]
@@ -45,14 +45,14 @@ def clippy_output(root: Path) -> str:
 
 def test_skips_without_rust_changes(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust)
-    result = rs_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"}))
+    result = untimed(rs_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"})), rs_lint.GATE)
     assert (result.gate, result.ok, result.summary) == ("rs.lint", True, "skipped: no changed rust files")
     assert fake.calls == []
 
 
 def test_clippy_missing(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust, [(101, "error: no such command: `clippy`")])
-    result = rs_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"Cargo.toml"}))
+    result = checked(rs_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"Cargo.toml"})), rs_lint.GATE)
     assert (result.ok, result.summary, result.findings) == (
         False,
         "clippy missing",
@@ -62,9 +62,20 @@ def test_clippy_missing(tmp_path: Path, fake_run: Any) -> None:
     assert fake.options == [{"cwd": tmp_path, "env": {}, "timeout": 1800}]
 
 
+def test_cargo_missing_stops_the_gate(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rust, [(127, "")])
+    result = checked(rs_lint.run_gate(make_context(tmp_path)), rs_lint.GATE)
+    assert (result.ok, result.findings) == (False, [f"cargo is not installed: {rust.INSTALL['cargo']}"])
+
+
+def test_fmt_names_the_missing_subcommand(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rust, [(101, "error: no such command: `fmt`")])
+    assert rs_lint.format_findings(make_context(tmp_path)) == [f"cargo clippy is not installed: {rust.INSTALL['clippy']}"]
+
+
 def test_reports_clippy_and_fmt(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust, [(101, clippy_output(tmp_path)), (1, f"{tmp_path}/src/lib.rs\nsrc/main.rs\nDiff in x\n")])
-    result = rs_lint.run_gate(make_context(tmp_path, {"rust": {"clippy_args": "-Dwarnings"}}))
+    result = checked(rs_lint.run_gate(make_context(tmp_path, {"rust": {"clippy_args": "-Dwarnings"}})), rs_lint.GATE)
     assert fake.calls == [[*CLIPPY[:5], "-Dwarnings"], FMT]
     assert fake.options[1] == {"cwd": tmp_path, "env": {}, "timeout": 300}
     assert (result.ok, result.summary) == (False, "4 problems")
@@ -78,13 +89,13 @@ def test_reports_clippy_and_fmt(tmp_path: Path, fake_run: Any) -> None:
 
 def test_clean(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(0, ""), (0, "")])
-    result = rs_lint.run_gate(make_context(tmp_path))
+    result = checked(rs_lint.run_gate(make_context(tmp_path)), rs_lint.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "clippy and rustfmt clean", [])
 
 
 def test_clippy_failure_without_messages(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rust, [(101, "error: could not compile\n"), (127, "")])
-    result = rs_lint.run_gate(make_context(tmp_path))
+    result = checked(rs_lint.run_gate(make_context(tmp_path)), rs_lint.GATE)
     assert result.findings == ["cargo clippy failed: error: could not compile", f"cargo is not installed: {rust.INSTALL['cargo']}"]
 
 
@@ -103,7 +114,7 @@ def test_scoped_findings(tmp_path: Path, fake_run: Any) -> None:
 def test_capped_at_max_lines(tmp_path: Path, fake_run: Any) -> None:
     output = "\n".join(message("src/lib.rs", n, "w") for n in range(1, 71))
     fake_run(rust, [(0, output), (0, "")])
-    result = rs_lint.run_gate(make_context(tmp_path))
+    result = checked(rs_lint.run_gate(make_context(tmp_path)), rs_lint.GATE)
     assert (result.summary, len(result.findings)) == ("70 problems", 60)
 
 

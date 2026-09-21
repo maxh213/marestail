@@ -6,8 +6,8 @@ import pytest
 
 from marestail import dotnet
 from marestail.gates import cs_crap
-from marestail.report import Result, result_seconds
-from tests.conftest import gate_shape, make_context
+from marestail.report import Result
+from tests.conftest import checked, gate_shape, make_context, untimed
 
 COVERAGE = {
     "files": {
@@ -64,29 +64,29 @@ def install(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) -> F
 
 
 def test_needs_coverage(tmp_path: Path) -> None:
-    result = cs_crap.run_gate(project(tmp_path, None))
+    result = untimed(cs_crap.run_gate(project(tmp_path, None)), cs_crap.GATE)
     assert view(result) == ("cs.crap", False, "no coverage data; cs.tests must run first", [])
     assert result.seconds == 0.0
 
 
 def test_skips_without_files_in_scope(tmp_path: Path) -> None:
-    result = cs_crap.run_gate(project(tmp_path, scope_changed=True, changed={"README.md"}))
+    result = untimed(cs_crap.run_gate(project(tmp_path, scope_changed=True, changed={"README.md"})), cs_crap.GATE)
     assert view(result) == ("cs.crap", True, "skipped: no C# files in scope", [])
 
 
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, (None, "C# scanner failed (complexity): boom"))
     ctx = project(tmp_path)
-    result = cs_crap.run_gate(ctx)
+    result = checked(cs_crap.run_gate(ctx), cs_crap.GATE)
     assert view(result) == ("cs.crap", False, "C# scanner failed (complexity): boom", [])
-    assert result_seconds(result) < 1_000_000
+    assert result.seconds < 1_000_000
     assert fake.calls == [("complexity", [tmp_path / "App" / "A.cs", tmp_path / "App" / "B.cs"])]
     assert fake.contexts == [ctx]
 
 
 def test_scores_all_members(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, (MEMBERS, None))
-    assert view(cs_crap.run_gate(project(tmp_path))) == (
+    assert view(checked(cs_crap.run_gate(project(tmp_path)), cs_crap.GATE)) == (
         "cs.crap",
         False,
         "4 members, 2 above CRAP 4",
@@ -99,13 +99,25 @@ def test_scores_all_members(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_passes_under_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, ([member("Low", 3, 5, 2)], None))
-    assert view(cs_crap.run_gate(project(tmp_path))) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])
+    assert view(checked(cs_crap.run_gate(project(tmp_path)), cs_crap.GATE)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])
+
+
+def test_configured_limit_replaces_the_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, ([member("Low", 3, 5, 2)], None))
+    ctx = project(tmp_path)
+    ctx.config.raw["dotnet"]["crap_max"] = 2
+    assert view(checked(cs_crap.run_gate(ctx), cs_crap.GATE)) == (
+        "cs.crap",
+        False,
+        "1 members, 1 above CRAP 2",
+        ["App/A.cs:3 Low crap=2.5 (cc=2, coverage=50%)"],
+    )
 
 
 def test_scoped_keeps_members_touching_hunks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, (MEMBERS, None))
     ctx = project(tmp_path, scope_changed=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {20}})
-    assert view(cs_crap.run_gate(ctx)) == (
+    assert view(checked(cs_crap.run_gate(ctx), cs_crap.GATE)) == (
         "cs.crap",
         False,
         "1 members, 1 above CRAP 4",
@@ -177,4 +189,4 @@ def test_default_crap_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     install(monkeypatch, ([member("Low", 3, 5, 2)], None))
     ctx = project(tmp_path)
     ctx.config.raw["dotnet"] = {}
-    assert view(cs_crap.run_gate(ctx)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])
+    assert view(checked(cs_crap.run_gate(ctx), cs_crap.GATE)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])

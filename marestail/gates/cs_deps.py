@@ -22,9 +22,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     contract = ctx.root / LAYERS_FILE
     if not contract.exists():
-        return Result(
-            GATE, False, f"no {LAYERS_FILE}; copy templates/dotnet-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"], 0.0
-        )
+        return Result(GATE, False, f"no {LAYERS_FILE}; copy templates/dotnet-layers.json and name the layers", [f"{LAYERS_FILE}:1 missing"])
     layers = json.loads(contract.read_text())["layers"]
     files = dotnet.sources(ctx)
     if not files:

@@ -9,7 +9,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from marestail import dotnet
-from marestail.context import Context, live
+from marestail.context import Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -55,7 +55,6 @@ def failed(message: str, output: str, started: float) -> Result:
 
 
 def run_tests(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
-    ctx = live(ctx)
     product, tests = pair
     results = ctx.work / RESULTS_DIR
     shutil.rmtree(results, ignore_errors=True)
@@ -133,7 +132,7 @@ def attribute_findings(ctx: Context) -> list[str]:
 
 def write_runsettings(ctx: Context, product: Path, tests: Path) -> Path:
     root = ctx.dotnet_root().resolve()
-    excludes = [f"{root}/{trim_glob(pattern)}" for pattern in dotnet.configured_list(ctx.dotnet("coverage_exclude", dotnet.EMPTY))]
+    excludes = [f"{root}/{trim_glob(pattern)}" for pattern in dotnet.listify(ctx.dotnet("coverage_exclude"))]
     if tests.parent != product.parent:
         excludes.append(f"{tests.parent.resolve()}/**/*.cs")
     include = str(tests.resolve() == product.resolve()).lower()

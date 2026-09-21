@@ -9,7 +9,6 @@ from marestail.config import Config, focus_paths
 CHANGED = "changed"
 DEFAULT_BASE = "origin/master"
 BENCHMARKS = "perf"
-CTX_ERROR = "ctx"
 
 
 @dataclass(frozen=True)
@@ -193,12 +192,6 @@ class Context:
             return MutationScope("full", note=f"(no base {base}; full run)")
         relative = root.relative_to(self.root)
         return scoped_files(sorted(path for path in changed_files(self.root, base) if matches(path, relative, suffixes)))
-
-
-def live(ctx: Context) -> Context:
-    if type(ctx) is not Context:
-        raise TypeError(CTX_ERROR)
-    return ctx
 
 
 def hard_context(config: Config, focused: set[str]) -> Context:

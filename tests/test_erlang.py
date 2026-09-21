@@ -116,14 +116,6 @@ def test_hint(code: int, output: str, expected: str | None) -> None:
     assert erlang.hint(code, output) == expected
 
 
-def test_require_hint_rejects_missing_values() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        erlang.require_hint(None, "x")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        erlang.require_hint(1, None)  # type: ignore[arg-type]
-    erlang.require_hint(0, "")
-
-
 @pytest.mark.parametrize(
     ("code", "output", "lines", "expected"),
     [
@@ -142,16 +134,6 @@ def test_rel(tmp_path: Path) -> None:
     assert erlang.rel(ctx, tmp_path / "src" / "a.erl") == "src/a.erl"
     assert erlang.rel(ctx, str(tmp_path / "b.erl")) == "b.erl"
     assert erlang.rel(ctx, "/elsewhere/c.erl") == "/elsewhere/c.erl"
-
-
-def test_rel_rejects_a_missing_ctx() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        erlang.rel(None, "a.erl")  # type: ignore[arg-type]
-
-
-def test_source_files_rejects_a_missing_ctx() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        erlang.source_files(None)  # type: ignore[arg-type]
 
 
 def test_in_scope_findings(tmp_path: Path) -> None:
@@ -200,12 +182,6 @@ def test_escript_uses_an_explicit_cwd(tmp_path: Path, fake_run: Callable[..., Fa
     other.mkdir()
     erlang.escript(ctx, "deps.escript", [], cwd=other, timeout=erlang.TOOL_TIMEOUT)
     assert fake.options == [{"cwd": other, "timeout": erlang.TOOL_TIMEOUT}]
-
-
-def test_require_timeout_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^timeout$"):
-        erlang.require_timeout(None)  # type: ignore[arg-type]
-    assert erlang.require_timeout(600) == 600
 
 
 def test_escript_requires_timeout(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:

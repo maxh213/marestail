@@ -126,27 +126,21 @@ def list_field(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
     value = data[key]
-    if type(value) is not list:
-        raise TypeError("list")
-    return value
+    return value if isinstance(value, list) else EMPTY_LIST
 
 
 def mapping_field(data: dict[str, Any], key: str) -> dict[str, Any]:
     if key not in data:
         return {}
     value = data[key]
-    if type(value) is not dict:
-        raise TypeError("map")
-    return value
+    return value if isinstance(value, dict) else {}
 
 
 def span_lines(spans: dict[str, Any], arm: str) -> list[int]:
     if arm not in spans:
         return EMPTY_LIST
     value = spans[arm]
-    if type(value) is not list:
-        raise TypeError("list")
-    return value
+    return value if isinstance(value, list) else EMPTY_LIST
 
 
 def line_gated(line: int, gated: set[int] | None) -> bool:

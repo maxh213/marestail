@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import _coverage, rb_tests
-from tests.conftest import Clock, gate_shape, make_context
+from tests.conftest import Clock, checked, gate_shape, make_context
 
 RSPEC_OK = "Randomized with seed 1\n\nFinished in 0.4 seconds\n12 examples, 0 failures\n"
 THEN_ARM = "[:then, 1, 4, 6, 4, 20]"
@@ -34,7 +34,7 @@ def write_resultset(root: Path) -> None:
 
 def run(ctx: Any, fake_run: Any, reply: tuple[int, str]) -> Any:
     fake = fake_run(rb_tests, [reply])
-    result = rb_tests.run_gate(ctx)
+    result = checked(rb_tests.run_gate(ctx), rb_tests.GATE)
     assert fake.calls == [["bundle", "exec", "rspec"]]
     assert fake.options == [{"cwd": ctx.ruby_root(), "timeout": 1800}]
     gate_shape(result)
@@ -188,28 +188,16 @@ def test_last_word_and_example_count() -> None:
 def test_list_field_defaults_missing_keys() -> None:
     assert rb_tests.list_field({}, "missing_lines") == []
     assert rb_tests.list_field({"missing_lines": [1]}, "missing_lines") == [1]
-
-
-def test_list_field_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        rb_tests.list_field({"missing_lines": {}}, "missing_lines")
+    assert rb_tests.list_field({"missing_lines": 1}, "missing_lines") == []
 
 
 def test_span_lines_defaults_missing_arms() -> None:
     assert rb_tests.span_lines({}, "arm") == []
     assert rb_tests.span_lines({"arm": [1, 2]}, "arm") == [1, 2]
-
-
-def test_span_lines_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        rb_tests.span_lines({"arm": "x"}, "arm")
+    assert rb_tests.span_lines({"arm": 1}, "arm") == []
 
 
 def test_mapping_field_defaults_and_rejects_a_non_map() -> None:
     assert rb_tests.mapping_field({}, "branch_lines") == {}
     assert rb_tests.mapping_field({"branch_lines": {"a": [1]}}, "branch_lines") == {"a": [1]}
-
-
-def test_mapping_field_rejects_a_non_map() -> None:
-    with pytest.raises(TypeError, match=r"^map$"):
-        rb_tests.mapping_field({"branch_lines": []}, "branch_lines")
+    assert rb_tests.mapping_field({"branch_lines": [1]}, "branch_lines") == {}

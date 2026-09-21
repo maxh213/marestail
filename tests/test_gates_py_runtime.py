@@ -4,18 +4,18 @@ from pathlib import Path
 import pytest
 
 from marestail.gates import py_runtime
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 CURRENT = f"{sys.version_info[0]}.{sys.version_info[1]}"
 
 
 def test_missing_root_skips(tmp_path: Path) -> None:
-    result = py_runtime.run_gate(make_context(tmp_path, {"python": {"root": "absent"}}))
+    result = untimed(py_runtime.run_gate(make_context(tmp_path, {"python": {"root": "absent"}})), py_runtime.GATE)
     assert (result.gate, result.ok, result.summary) == ("py.runtime", True, "skipped: no python root")
 
 
 def test_nothing_declared_skips(tmp_path: Path) -> None:
-    result = py_runtime.run_gate(make_context(tmp_path))
+    result = untimed(py_runtime.run_gate(make_context(tmp_path)), py_runtime.GATE)
     assert (result.ok, result.summary) == (True, "skipped: nothing declares the interpreter that ships")
 
 
@@ -23,20 +23,20 @@ def test_matching_pyproject_claim_is_silent(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     (tmp_path / "Dockerfile").write_text("FROM python:3.12\n")
     (tmp_path / "pyproject.toml").write_text('[tool.mypy]\npython_version = "3.12"\n')
-    result = py_runtime.run_gate(make_context(tmp_path))
+    result = checked(py_runtime.run_gate(make_context(tmp_path)), py_runtime.GATE)
     assert result.ok
     assert result.findings == []
 
 
 def test_clean_run(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
-    result = py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "python 3.12"}}))
+    result = checked(py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "python 3.12"}})), py_runtime.GATE)
     assert (result.ok, result.findings) == (True, [])
     assert result.summary == "3.12 from marestail.toml [python] runtime; tooling agrees and every source parses"
 
 
 def test_scoped_summary_carries_global_note(tmp_path: Path) -> None:
-    result = py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "3.12"}}, scope_changed=True))
+    result = checked(py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "3.12"}}, scope_changed=True)), py_runtime.GATE)
     assert result.summary.endswith("every source parses (global gate — scope: changed)")
 
 
@@ -47,7 +47,7 @@ def test_disagreements_and_parse_errors(tmp_path: Path) -> None:
     )
     (tmp_path / "tool.py").write_text("#!/usr/bin/env python3.10\nx = 1\n")
     (tmp_path / "new.py").write_text("type Alias = int\n")
-    result = py_runtime.run_gate(make_context(tmp_path))
+    result = checked(py_runtime.run_gate(make_context(tmp_path)), py_runtime.GATE)
     assert result.findings == [
         "pyproject.toml [project] requires-python says Python 3.12 but Dockerfile ships 3.11",
         "pyproject.toml [tool.ruff] target-version says Python 3.13 but Dockerfile ships 3.11",
@@ -59,12 +59,12 @@ def test_disagreements_and_parse_errors(tmp_path: Path) -> None:
 
 
 def test_future_interpreter(tmp_path: Path) -> None:
-    result = py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "3.99"}}))
+    result = checked(py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": "3.99"}})), py_runtime.GATE)
     assert result.findings == ["this interpreter cannot check syntax for Python 3.99; run the gate on 3.99 or newer"]
 
 
 def test_current_interpreter_is_understood(tmp_path: Path) -> None:
-    result = py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": CURRENT}}))
+    result = checked(py_runtime.run_gate(make_context(tmp_path, {"python": {"runtime": CURRENT}})), py_runtime.GATE)
     assert result.ok
 
 
@@ -130,11 +130,6 @@ def test_first_line_stops_at_the_first_newline() -> None:
 
 def test_highest_understood_uses_the_minor_version() -> None:
     assert py_runtime.highest_understood() == (sys.version_info.major, sys.version_info.minor)
-
-
-def test_floor_claim_rejects_a_missing_where() -> None:
-    with pytest.raises(TypeError, match=r"^where$"):
-        py_runtime.floor_claim(None, "3.12")  # type: ignore[arg-type]
 
 
 def test_shebang_reads_only_the_first_line(tmp_path: Path) -> None:

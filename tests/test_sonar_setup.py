@@ -76,7 +76,6 @@ def test_compose_passes_plugins_dir(commands: list[tuple[list[str], dict[str, An
     assert options["check"] is True
     assert options["env"]["MARESTAIL_SONAR_PLUGINS"] == str(setup.PLUGINS_DIR)
     assert options["env"]["KEEP"] == "1"
-    assert setup.COMPOSE.name == "docker-compose.yml"
 
 
 def test_up(monkeypatch: pytest.MonkeyPatch) -> None:

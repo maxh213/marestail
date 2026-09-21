@@ -265,6 +265,7 @@ def test_draw_header_and_legend_write_labels(tmp_path: Path) -> None:
     left = max(0, (80 - inner - 2) // 2)
     assert key[:3] == (top, left + 2, app.KEY_LABEL)
     assert key[3] == watch.theme.heading
+    assert {cell[3] for cell in legend.cells} == {watch.theme.border_focus, watch.theme.heading, watch.theme.secondary}
 
 
 def test_maybe_refresh_skips(tmp_path: Path, monkeypatch: Any) -> None:

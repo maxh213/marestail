@@ -7,7 +7,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_mutation
 from marestail.report import Result
-from tests.conftest import gate_shape, make_context
+from tests.conftest import checked, gate_shape, make_context, untimed
 
 NO_BASE = "(no base origin/master; full run)"
 
@@ -65,7 +65,7 @@ def report(root: Path, *mutants: dict[str, Any], name: str = "App/A.cs") -> dict
 
 
 def test_reports_missing_projects(tmp_path: Path) -> None:
-    result = cs_mutation.run_gate(make_context(tmp_path))
+    result = checked(cs_mutation.run_gate(make_context(tmp_path)), cs_mutation.GATE)
     assert result.ok is False
     assert result.summary.startswith("set [dotnet] project and test_project")
     assert result.findings == []
@@ -73,7 +73,7 @@ def test_reports_missing_projects(tmp_path: Path) -> None:
 
 def test_needs_separate_test_project(tmp_path: Path) -> None:
     ctx = project(tmp_path, section={"test_project": "App/App.csproj"})
-    assert view(cs_mutation.run_gate(ctx)) == (
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
         "cs.mutation",
         False,
         "stryker needs the tests in their own .csproj",
@@ -83,7 +83,7 @@ def test_needs_separate_test_project(tmp_path: Path) -> None:
 
 def test_sentry_needs_switch(tmp_path: Path) -> None:
     ctx = project(tmp_path, '<packagereference  include="Sentry.AspNetCore" />')
-    assert view(cs_mutation.run_gate(ctx)) == (
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
         "cs.mutation",
         False,
         "stryker cannot roll back mutants in Sentry's generated code",
@@ -94,19 +94,24 @@ def test_sentry_needs_switch(tmp_path: Path) -> None:
 def test_sentry_with_switch_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, mutant("Killed"))))
     ctx = project(tmp_path, f'<PackageReference Include="Sentry" />{cs_mutation.SENTRY_SWITCH}')
-    assert view(cs_mutation.run_gate(ctx)) == ("cs.mutation", True, f"all 1 mutants killed {NO_BASE}", [])
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == ("cs.mutation", True, f"all 1 mutants killed {NO_BASE}", [])
     assert fake.calls[0] == (["tool", "restore"], {"timeout": 900})
     assert fake.calls[1][1] == {"timeout": 7200}
 
 
 def test_bad_mutation_scope(tmp_path: Path) -> None:
     ctx = project(tmp_path, section={"mutation_scope": "some"})
-    assert view(cs_mutation.run_gate(ctx)) == ("cs.mutation", False, '[dotnet] mutation_scope must be "changed" or "all", got \'some\'', [])
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
+        "cs.mutation",
+        False,
+        '[dotnet] mutation_scope must be "changed" or "all", got \'some\'',
+        [],
+    )
 
 
 def test_skips_without_changed_sources(tmp_path: Path) -> None:
     ctx = project(tmp_path, scope_changed=True, changed={"AppTests/T.cs"})
-    assert view(cs_mutation.run_gate(ctx)) == ("cs.mutation", True, "skipped: no changed C# sources", [])
+    assert view(untimed(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == ("cs.mutation", True, "skipped: no changed C# sources", [])
 
 
 def test_restore_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,14 +120,14 @@ def test_restore_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     stale = ctx.work / "stryker" / "old.txt"
     stale.parent.mkdir()
     stale.write_text("")
-    result = cs_mutation.run_gate(ctx)
+    result = checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)
     assert view(result) == ("cs.mutation", False, f"dotnet tool restore failed: {cs_mutation.INSTALL}", ["nope"])
     assert not stale.exists()
 
 
 def test_restore_failure_with_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((127, ""), None))
-    result = cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"}))
+    result = checked(cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"})), cs_mutation.GATE)
     assert result.summary == f"dotnet unavailable: {dotnet.INSTALL_HINT}"
 
 
@@ -137,13 +142,13 @@ def test_restore_failure_with_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 )
 def test_missing_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], summary: str) -> None:
     install(monkeypatch, FakeDotnet((0, ""), None, reply))
-    result = cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"}))
+    result = checked(cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"})), cs_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, summary, [line for line in [reply[1]] if line])
 
 
 def test_no_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((0, ""), {"files": {}}, (0, "done")))
-    result = cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"}))
+    result = checked(cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"})), cs_mutation.GATE)
     assert view(result) == ("cs.mutation", False, "no mutants were generated", ["done"])
 
 
@@ -154,7 +159,7 @@ def test_reports_surviving_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     data["files"][str(tmp_path / "App" / "B.cs")] = {}
     fake = install(monkeypatch, FakeDotnet((0, ""), data))
     ctx = project(tmp_path, section={"mutation_scope": "all", "coverage_exclude": ["App/Gen"]})
-    assert view(cs_mutation.run_gate(ctx)) == (
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
         "cs.mutation",
         False,
         "3 of 5 mutants not killed",
@@ -166,12 +171,13 @@ def test_reports_surviving_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     )
     assert fake.calls[1][0][-2:] == ["-m", "!**/App/Gen"]
     assert fake.calls[1][0][3:7] == ["--test-project", str(tmp_path / "AppTests" / "AppTests.csproj"), "--project", "App.csproj"]
+    assert fake.calls[1][0][7:9] == ["-O", str(tmp_path / ".marestail" / cs_mutation.OUTPUT_DIR)]
 
 
 def test_scoped_run_targets_changed_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, mutant("Killed"))))
     ctx = project(tmp_path, scope_changed=True, changed={"App/B.cs", "AppTests/T.cs"})
-    assert view(cs_mutation.run_gate(ctx)) == ("cs.mutation", True, "all 1 mutants killed", [])
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == ("cs.mutation", True, "all 1 mutants killed", [])
     assert fake.calls[1][0][-2:] == ["-m", "**/App/B.cs"]
 
 
@@ -252,26 +258,3 @@ def test_load_mutants_without_files_key(tmp_path: Path) -> None:
     report.write_text("{}")
     ctx = project(tmp_path)
     assert cs_mutation.load_mutants(ctx, report) == []
-
-
-def test_command_rejects_a_missing_product(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        cs_mutation.command(ctx, None, tmp_path / "T.csproj", tmp_path / "out", [])  # type: ignore[arg-type]
-
-
-def test_command_rejects_a_missing_tests_project(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        cs_mutation.command(ctx, tmp_path / "A.csproj", None, tmp_path / "out", [])  # type: ignore[arg-type]
-
-
-def test_command_rejects_a_missing_output_dir(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        cs_mutation.command(ctx, tmp_path / "A.csproj", tmp_path / "T.csproj", None, [])  # type: ignore[arg-type]
-
-
-def test_required_path_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^path$"):
-        cs_mutation.required_path(None)  # type: ignore[arg-type]

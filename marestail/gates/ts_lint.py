@@ -16,6 +16,7 @@ FILE_PATH = "filePath"
 GATE = "ts.lint"
 TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
 EMPTY = ""
+EMPTY_LIST: list[Any] = []
 
 
 def run_gate(ctx: Context) -> Result:
@@ -96,7 +97,7 @@ def parse(output: str) -> list[Any] | None:
 
 
 def as_report(report: object) -> list[Any] | None:
-    return report if type(report) is list else None
+    return report if isinstance(report, list) else None
 
 
 def describe(file: dict[str, Any], message: dict[str, Any], ctx: Context) -> str:
@@ -112,11 +113,9 @@ def str_field(data: dict[str, Any], key: str) -> str:
 
 def list_field(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
-        return []
+        return EMPTY_LIST
     value = data[key]
-    if type(value) is not list:
-        raise TypeError("list")
-    return value
+    return value if isinstance(value, list) else EMPTY_LIST
 
 
 def first_line(text: str) -> str:

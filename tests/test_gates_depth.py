@@ -6,7 +6,7 @@ from marestail import depth
 from marestail.config import Config
 from marestail.depth import Module
 from marestail.gates import depth as depth_gate
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 
 def module(path: str, public: int = 1, statements: int = 10, breaks: int = 0) -> Module:
@@ -28,14 +28,14 @@ def fake_analyse(monkeypatch: pytest.MonkeyPatch, modules: list[Module]) -> list
 
 def test_no_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_analyse(monkeypatch, [])
-    result = depth_gate.run_gate(make_context(tmp_path))
+    result = checked(depth_gate.run_gate(make_context(tmp_path)), "depth")
     assert (result.gate, result.ok, result.summary, result.findings) == ("depth", True, "no modules", [])
 
 
 def test_counts_and_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = make_context(tmp_path)
     seen = fake_analyse(monkeypatch, [module("a.py", public=4, breaks=1), module("b.py"), module("c.py", public=5, statements=10)])
-    result = depth_gate.run_gate(ctx)
+    result = checked(depth_gate.run_gate(ctx), "depth")
     assert seen == [ctx.config]
     assert (result.ok, result.summary) == (False, "3 modules, 2 shallow, 2 rule breaks")
     assert result.findings == ["a.py forwards 0", "a.py private"]
@@ -43,7 +43,7 @@ def test_counts_and_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 def test_scoped_filters_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_analyse(monkeypatch, [module("a.py", breaks=1), module("b.py", public=4)])
-    result = depth_gate.run_gate(make_context(tmp_path, scope_changed=True, changed={"b.py"}))
+    result = checked(depth_gate.run_gate(make_context(tmp_path, scope_changed=True, changed={"b.py"})), "depth")
     assert (result.ok, result.summary, result.findings) == (True, "1 modules, 1 shallow, 0 rule breaks", [])
 
 

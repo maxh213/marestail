@@ -110,17 +110,17 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
-    found = data.get(key, EMPTY_MAP)
-    if not isinstance(found, dict):
-        raise TypeError("map")
-    return found
+    if key not in data:
+        return EMPTY_MAP
+    found = data[key]
+    return found if isinstance(found, dict) else EMPTY_MAP
 
 
 def listed(data: dict[str, Any], key: str) -> list[Any]:
-    found = data.get(key, EMPTY_LIST)
-    if not isinstance(found, list):
-        raise TypeError("list")
-    return found
+    if key not in data:
+        return EMPTY_LIST
+    found = data[key]
+    return found if isinstance(found, list) else EMPTY_LIST
 
 
 def add_template_stops(settings: dict[str, Any], template: dict[str, Any], key: str, stop: str) -> None:
@@ -148,8 +148,6 @@ def merge_grok_hook(path: Path) -> None:
 
 
 def mapping_default(data: dict[str, Any], key: str, default: Any) -> Any:
-    if type(key) is not str:
-        raise TypeError("key")
     if key not in data:
         return default
     return data[key]
@@ -169,17 +167,8 @@ def trust_grok_folder(root: Path) -> None:
     folders = trusted_folders(store)
     if is_trusted(folders.get(key)):
         return
-    folders[key] = require_entry(trust_entry())
+    folders[key] = trust_entry()
     save_trusted_folders(store, key, folders)
-
-
-ENTRY_ERROR = "entry"
-
-
-def require_entry(entry: object) -> dict[str, Any]:
-    if type(entry) is not dict:
-        raise TypeError(ENTRY_ERROR)
-    return entry
 
 
 def trust_entry() -> dict[str, Any]:

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from marestail.context import Context, live
+from marestail.context import Context
 from marestail.gates._coverage import finding_file
 from marestail.report import Result, elapsed
 from marestail.shell import run
@@ -31,8 +31,6 @@ ELIXIR_FAILED = "elixir dead code analysis failed"
 ERLANG_FAILED = "erlang dead code analysis failed"
 MISSING_CONFIDENCE = ""
 COLON = ":"
-NAMES_ERROR = "names"
-OUTPUT_ERROR = "output"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -107,13 +105,11 @@ def vulture_command(ctx: Context) -> list[str]:
         ",".join(get("deadcode", "python_exclude", PYTHON_EXCLUDES)),
         "--ignore-decorators",
         ",".join(get("deadcode", "python_decorators", PYTHON_DECORATORS)),
-        *ignore_names(get("deadcode", "python_ignore_names", [])),
+        *ignore_names(get("deadcode", "python_ignore_names")),
     ]
 
 
-def ignore_names(names: list[str]) -> list[str]:
-    if type(names) is not list:
-        raise TypeError(NAMES_ERROR)
+def ignore_names(names: Any) -> list[str]:
     return ["--ignore-names", ",".join(names)] if names else []
 
 
@@ -161,7 +157,6 @@ def describe(file: Path, kind: str, item: Any) -> str:
 
 
 def ruby_findings(ctx: Context) -> list[str]:
-    ctx = live(ctx)
     if ctx.config.section("ruby") is None:
         return []
     from marestail.ruby import scan, sources
@@ -180,7 +175,6 @@ def ruby_report(code: int, output: str) -> list[str]:
 
 
 def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, **options: Any) -> list[str]:
-    ctx = live(ctx)
     files = module.sources(ctx)
     if not files:
         return []
@@ -221,7 +215,6 @@ def unused_function(label: str, entry: dict[str, Any]) -> str:
 def elixir_findings(ctx: Context) -> list[str]:
     from marestail import elixir
 
-    ctx = live(ctx)
     if ctx.config.section("elixir") is None:
         return []
     root = ctx.elixir_root()
@@ -243,7 +236,6 @@ def elixir_label(name: str, root: Path, ctx: Context) -> str:
 
 
 def erlang_findings(ctx: Context) -> list[str]:
-    ctx = live(ctx)
     if ctx.config.section("erlang") is None:
         return []
     from marestail import erlang
@@ -260,8 +252,6 @@ def erlang_findings(ctx: Context) -> list[str]:
 def compile_problem(code: int, output: str) -> str | None:
     from marestail import erlang
 
-    if type(output) is not str:
-        raise TypeError(OUTPUT_ERROR)
     return erlang.hint(code, output) or (failed(ERLANG_FAILED, output) if code != 0 else None)
 
 
@@ -282,14 +272,12 @@ def xref_entries(ctx: Context, sources: list[Path], entries: list[dict[str, Any]
 
 
 def as_name_list(value: Any) -> list[str]:
-    if type(value) is not list:
-        raise TypeError(NAMES_ERROR)
-    return [str(part) for part in value]
+    return [str(part) for part in value] if isinstance(value, list) else []
 
 
 def xref_args(ctx: Context, ebin: Path) -> list[str]:
     beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
-    ignore = as_name_list(ctx.erlang("deadcode_ignore", []))
+    ignore = as_name_list(ctx.erlang("deadcode_ignore"))
     return (["--ignore", ",".join(ignore)] if ignore else []) + beams
 
 

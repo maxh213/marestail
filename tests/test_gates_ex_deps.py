@@ -7,7 +7,7 @@ import pytest
 from marestail.context import Context
 from marestail.gates import ex_deps
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context
 
 XREF = """Compiling 3 files (.ex)
 Cycle of length 2:
@@ -35,7 +35,7 @@ def project(root: Path, elixir_root: str = ".", **fields: Any) -> Context:
 
 def test_acyclic(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(ex_deps, [(0, "")])
-    assert shape(ex_deps.run_gate(project(tmp_path, "app"))) == ("ex.deps", True, "dependency graph acyclic", [])
+    assert shape(checked(ex_deps.run_gate(project(tmp_path, "app")), ex_deps.GATE)) == ("ex.deps", True, "dependency graph acyclic", [])
     assert fake.calls == [["mix", "xref", "graph", "--format", "cycles", "--fail-above", "0"]]
     assert fake.options == [{"cwd": tmp_path / "app", "timeout": 600}]
 
@@ -43,17 +43,17 @@ def test_acyclic(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 def test_unscoped_lists_cycle_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(ex_deps, [(1, XREF)])
     findings = ["Cycle of length 2:", "lib/a.ex", "lib/b.ex", "Cycle of length 3:", "lib/c.ex", "lib/d.ex", "lib/e.exs"]
-    assert shape(ex_deps.run_gate(project(tmp_path))) == ("ex.deps", False, "dependency cycles found", findings)
+    assert shape(checked(ex_deps.run_gate(project(tmp_path)), ex_deps.GATE)) == ("ex.deps", False, "dependency cycles found", findings)
 
 
 def test_unscoped_caps_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(ex_deps, [(1, "\n".join(f"lib/m{n}.ex" for n in range(70)))])
-    assert len(ex_deps.run_gate(project(tmp_path)).findings) == 60
+    assert len(checked(ex_deps.run_gate(project(tmp_path)), ex_deps.GATE).findings) == 60
 
 
 def test_scoped_without_cycles_output(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(ex_deps, [(1, "** (Mix) could not compile\n\nerror")])
-    result = ex_deps.run_gate(project(tmp_path, scope_changed=True, changed={"lib/a.ex"}))
+    result = checked(ex_deps.run_gate(project(tmp_path, scope_changed=True, changed={"lib/a.ex"})), ex_deps.GATE)
     assert shape(result) == ("ex.deps", False, "xref failed", ["** (Mix) could not compile", "error"])
 
 
@@ -75,7 +75,7 @@ def test_scoped_cycles(
     tmp_path: Path, fake_run: Callable[..., FakeRun], elixir_root: str, changed: set[str], ok: bool, summary: str, findings: list[str]
 ) -> None:
     fake_run(ex_deps, [(1, XREF)])
-    result = ex_deps.run_gate(project(tmp_path, elixir_root, scope_changed=True, changed=changed))
+    result = checked(ex_deps.run_gate(project(tmp_path, elixir_root, scope_changed=True, changed=changed)), ex_deps.GATE)
     assert shape(result) == ("ex.deps", ok, summary, findings)
 
 
@@ -105,7 +105,3 @@ def test_repo_path_uses_the_elixir_root(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"elixir": {"root": "app"}})
     assert ex_deps.repo_path("lib/a.ex", ctx, nested) == "app/lib/a.ex"
     assert ex_deps.repo_path("lib/a.ex", ctx, tmp_path) == "lib/a.ex"
-
-
-def test_xref_timeout() -> None:
-    assert ex_deps.XREF_TIMEOUT == 600

@@ -4,7 +4,7 @@ from typing import Any
 
 from marestail import ruby
 from marestail.gates import rb_deps
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 
 def write_sources(root: Path) -> list[Path]:
@@ -31,7 +31,7 @@ def edges(root: Path) -> list[dict[str, Any]]:
 
 def test_no_sources(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ruby)
-    result = rb_deps.run_gate(make_context(tmp_path))
+    result = untimed(rb_deps.run_gate(make_context(tmp_path)), rb_deps.GATE)
     assert (result.gate, result.ok, result.summary) == ("rb.deps", True, "skipped: no ruby sources")
     assert fake.calls == []
 
@@ -39,14 +39,14 @@ def test_no_sources(tmp_path: Path, fake_run: Any) -> None:
 def test_scanner_failure(tmp_path: Path, fake_run: Any) -> None:
     write_sources(tmp_path)
     fake_run(ruby, [(1, "\n".join(str(n) for n in range(12)))])
-    result = rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}}))
+    result = checked(rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}})), rb_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "dependency scanner failed", [str(n) for n in range(2, 12)])
 
 
 def test_default_layers(tmp_path: Path, fake_run: Any) -> None:
     paths = write_sources(tmp_path)
     fake = fake_run(ruby, [(0, json.dumps(edges(tmp_path)))])
-    result = rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}}))
+    result = checked(rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}})), rb_deps.GATE)
     assert fake.calls == [["rb", str(ruby.SCRIPT), "deps", str(tmp_path), *map(str, paths)]]
     assert (result.ok, result.summary) == (False, "2 layer breaks")
     assert result.findings == [
@@ -58,7 +58,7 @@ def test_default_layers(tmp_path: Path, fake_run: Any) -> None:
 def test_clean_run(tmp_path: Path, fake_run: Any) -> None:
     write_sources(tmp_path)
     fake_run(ruby, [(0, "")])
-    result = rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}}))
+    result = checked(rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}})), rb_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "layer contracts kept", [])
 
 
@@ -113,6 +113,8 @@ def test_run_gate_caps_findings(tmp_path: Path, fake_run: Any) -> None:
     write_sources(tmp_path)
     many = [{"from": "a.rb", "to": "b.rb", "line": n, "constant": "B"} for n in range(61)]
     fake_run(ruby, [(0, json.dumps(many))])
-    result = rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb", "layers": [{"from": "a.rb", "forbid": ["b.rb"]}]}}))
+    result = checked(
+        rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb", "layers": [{"from": "a.rb", "forbid": ["b.rb"]}]}})), rb_deps.GATE
+    )
     assert len(result.findings) == 60
     assert result.findings[-1].startswith("a.rb:59")

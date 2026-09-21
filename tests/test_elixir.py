@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from marestail import elixir
 from tests.conftest import make_context
 
@@ -24,17 +22,16 @@ def test_scan(tmp_path: Path, fake_run: Any) -> None:
     assert fake.options == [{"cwd": tmp_path / "app", "timeout": 600}]
 
 
-def test_scan_custom_cwd(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(elixir, [(1, "nope")])
-    ctx = make_context(tmp_path, {"elixir": {"root": "app"}})
-    assert elixir.scan(ctx, "comments", ["a.ex"], cwd=tmp_path) == (1, "nope")
+def test_scan_waits_an_hour_by_default(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(elixir, [(0, "[]")])
+    assert elixir.scan(make_context(tmp_path), "complexity", ["lib/a.ex"]) == (0, "[]")
     assert fake.options == [{"cwd": tmp_path, "timeout": 3600}]
 
 
-def test_scan_rejects_missing_context(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(elixir, [(0, "")])
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        elixir.scan(None, "comments", ["a.ex"], cwd=tmp_path)  # type: ignore[arg-type]
+def test_scan_in_uses_the_given_directory(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(elixir, [(1, "nope")])
+    assert elixir.scan_in(tmp_path, "comments", ["a.ex"]) == (1, "nope")
+    assert fake.options == [{"cwd": tmp_path, "timeout": 3600}]
 
 
 def test_joined_and_option() -> None:
@@ -42,8 +39,6 @@ def test_joined_and_option() -> None:
     assert elixir.joined("--ignore", ["A", "B"]) == ["--ignore", "A,B"]
     assert elixir.option("--preset", None) == []
     assert elixir.option("--preset", "phoenix") == ["--preset", "phoenix"]
-    with pytest.raises(TypeError):
-        elixir.joined("--ignore", None)
 
 
 def test_deadcode_flags(tmp_path: Path) -> None:
@@ -70,9 +65,3 @@ def test_project_files(tmp_path: Path) -> None:
     assert elixir.project_files(ctx, tmp_path, ["app/lib/a.ex", "lib/a.ex"]) == ["app/lib/a.ex"]
     assert elixir.strip_prefix("lib/a.ex", Path(".")) == Path("lib/a.ex")
     assert elixir.strip_prefix("app/lib/a.ex", Path("other")) == Path("app/lib/a.ex")
-
-
-def test_deadcode_command_rejects_a_missing_out(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^path$"):
-        elixir.deadcode_command(ctx, None)  # type: ignore[arg-type]

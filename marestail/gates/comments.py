@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from marestail.context import Context, live, under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.report import Result, elapsed
 
 SKIP_DIRS = {
@@ -157,7 +157,7 @@ def elixir_findings(ctx: Context) -> list[str]:
     paths = files(ctx, ELIXIR_SUFFIXES)
     if not paths:
         return []
-    code, output = elixir.scan(ctx, COMMENTS_MODE, paths, cwd=ctx.root)
+    code, output = elixir.scan_in(ctx.root, COMMENTS_MODE, paths)
     return scanned(ctx, code, output, "elixir comment scanner failed")
 
 
@@ -193,7 +193,6 @@ def ruby_payload(code: int, output: str) -> str:
 
 
 def structured(ctx: Context, module: ModuleType, paths: list[Path], failure: str, relabel: Callable[[Any], str] = str) -> list[str]:
-    ctx = live(ctx)
     if not paths:
         return []
     data, error = module.scan(ctx, COMMENTS_MODE, paths)

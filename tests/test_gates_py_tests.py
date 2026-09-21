@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import _coverage, py_tests
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 COVERAGE = {
     "totals": {"percent_covered": 87.25},
@@ -40,7 +40,7 @@ def test_pytest_command(tmp_path: Path) -> None:
 def test_failing_tests(tmp_path: Path, fake_run: Any) -> None:
     lines = "\n".join(f"line {n}" for n in range(40))
     fake = fake_run(py_tests, [(1, lines)])
-    result = py_tests.run_gate(make_context(tmp_path, {"python": {"root": "src"}}))
+    result = checked(py_tests.run_gate(make_context(tmp_path, {"python": {"root": "src"}})), py_tests.GATE)
     assert (result.gate, result.ok, result.summary) == ("py.tests", False, "tests failed")
     assert result.findings == [f"line {n}" for n in range(10, 40)]
     assert fake.options[0]["cwd"] == tmp_path / "src"
@@ -51,7 +51,7 @@ def test_failing_tests(tmp_path: Path, fake_run: Any) -> None:
 def test_unscoped_gaps(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(tmp_path, COVERAGE)
     fake_run(py_tests, [(0, "....\n12 passed in 0.3s\n")])
-    result = py_tests.run_gate(make_context(tmp_path))
+    result = checked(py_tests.run_gate(make_context(tmp_path)), py_tests.GATE)
     assert result.findings == [
         "a.py:1 not covered",
         "b.py:3 not covered",
@@ -66,7 +66,7 @@ def test_unscoped_gaps(tmp_path: Path, fake_run: Any) -> None:
 def test_clean_run(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(tmp_path, {"totals": {"percent_covered": 100.0}, "files": {"a.py": {"missing_lines": [], "missing_branches": []}}})
     fake_run(py_tests, [(0, "3 passed")])
-    result = py_tests.run_gate(make_context(tmp_path))
+    result = checked(py_tests.run_gate(make_context(tmp_path)), py_tests.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "3 passed, coverage 100.0%, 0 gaps (need 0)", [])
 
 
@@ -74,7 +74,7 @@ def test_scoped_gaps(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(tmp_path, COVERAGE)
     fake_run(py_tests, [(0, "7 passed")])
     ctx = make_context(tmp_path, scope_changed=True, changed={"b.py"}, changed_lines_map={"b.py": {9, 10}})
-    result = py_tests.run_gate(ctx)
+    result = checked(py_tests.run_gate(ctx), py_tests.GATE)
     assert result.findings == ["b.py:9 not covered", "b.py:10 branch to 12 not taken"]
     assert result.summary == "7 passed, coverage 87.2%, 2 gaps on changed lines (need 0)"
 

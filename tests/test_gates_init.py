@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from marestail import gates
-from marestail.gates import Gate, _crap
+from marestail.gates import Gate
 from marestail.report import Result
 from tests.conftest import make_context
 
@@ -26,10 +26,6 @@ def expected_registry() -> list[tuple[str, str, str | None]]:
     shared = [("comments", "fast", None), ("depth", "fast", None), ("deadcode", "fast", None), ("docs", "fast", "docs")]
     mutation = [(f"{prefix}.mutation", "full", section) for prefix, section in LANGUAGES]
     return [*fast, *shared, *mutation, ("sonar", "sonar", "sonar"), ("qa", "qa", "qa")]
-
-
-def test_crap_key_and_default() -> None:
-    assert (_crap.KEY, _crap.DEFAULT) == ("crap_max", 4)
 
 
 def test_registry_order_and_tiers() -> None:

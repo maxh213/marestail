@@ -7,7 +7,7 @@ import pytest
 
 from marestail import rust
 from marestail.gates import rs_tests
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 CARGO_OUT = "running 3 tests\ntest result: ok. 3 passed; 0 failed\n\ntest result: ok. 2 passed; 0 failed\n"
 
@@ -71,16 +71,22 @@ def work(root: Path) -> Path:
 
 def test_llvm_cov_missing(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust, [(101, "error: no such command: `llvm-cov`")])
-    result = rs_tests.run_gate(make_context(tmp_path, {"rust": {"test_args": ["--workspace"]}}))
+    result = checked(rs_tests.run_gate(make_context(tmp_path, {"rust": {"test_args": ["--workspace"]}})), rs_tests.GATE)
     assert (result.gate, result.ok, result.summary) == ("rs.tests", False, "cargo llvm-cov missing")
     assert result.findings == [f"cargo llvm-cov is not installed: {rust.INSTALL['llvm-cov']}"]
     assert fake.calls == [["cargo", "llvm-cov", "--no-report", "--workspace"]]
     assert fake.options == [{"cwd": tmp_path, "env": {}, "timeout": 3600}]
 
 
+def test_cargo_missing_stops_the_tests(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rust, [(127, "")])
+    result = checked(rs_tests.run_gate(make_context(tmp_path)), rs_tests.GATE)
+    assert (result.ok, result.findings) == (False, [f"cargo is not installed: {rust.INSTALL['cargo']}"])
+
+
 def test_tests_fail(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rust, [(101, "test a ... FAILED\n")])
-    result = rs_tests.run_gate(make_context(tmp_path))
+    result = checked(rs_tests.run_gate(make_context(tmp_path)), rs_tests.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "tests failed", ["test a ... FAILED"])
     assert fake.calls[0] == ["cargo", "llvm-cov", "--no-report"]
     assert rs_tests.extra_args(make_context(tmp_path)) == []
@@ -90,7 +96,7 @@ def test_tests_fail(tmp_path: Path, fake_run: Any) -> None:
 def test_report_missing(tmp_path: Path, fake_run: Any, second: tuple[int, str], flag: str) -> None:
     (work(tmp_path) / rs_tests.RAW_JSON).write_text("stale")
     fake = fake_run(rust, [(0, CARGO_OUT), second])
-    result = rs_tests.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "gen"}}))
+    result = checked(rs_tests.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "gen"}})), rs_tests.GATE)
     assert (result.ok, result.summary, result.findings) == (False, f"cargo llvm-cov report {flag} produced no report", tail_of(second[1]))
     raw = str(tmp_path / ".marestail" / rs_tests.RAW_JSON)
     assert fake.calls[1] == ["cargo", "llvm-cov", "report", "--json", "--ignore-filename-regex", "gen", "--output-path", raw]
@@ -110,7 +116,7 @@ def test_lcov_report_missing(tmp_path: Path, fake_run: Any) -> None:
         return (0, "") if "--lcov" not in command else (2, "lcov broke")
 
     fake = fake_run(rust, reply)
-    result = rs_tests.run_gate(make_context(tmp_path))
+    result = checked(rs_tests.run_gate(make_context(tmp_path)), rs_tests.GATE)
     assert result.summary == "cargo llvm-cov report --lcov produced no report"
     assert fake.calls[2] == ["cargo", "llvm-cov", "report", "--lcov", "--output-path", str(tmp_path / ".marestail" / rs_tests.LCOV)]
 
@@ -118,7 +124,7 @@ def test_lcov_report_missing(tmp_path: Path, fake_run: Any) -> None:
 def test_no_source_files(tmp_path: Path, fake_run: Any) -> None:
     work(tmp_path)
     fake_run(rust, writes_reports(tmp_path, "TN:\n", {"data": []}))
-    result = rs_tests.run_gate(make_context(tmp_path))
+    result = checked(rs_tests.run_gate(make_context(tmp_path)), rs_tests.GATE)
     assert (result.ok, result.summary) == (False, "coverage report lists no source files")
     assert result.findings == tail_of(CARGO_OUT)
 
@@ -126,7 +132,7 @@ def test_no_source_files(tmp_path: Path, fake_run: Any) -> None:
 def test_merged_coverage(tmp_path: Path, fake_run: Any) -> None:
     work(tmp_path)
     fake_run(rust, writes_reports(tmp_path, lcov(tmp_path), llvm_json(tmp_path)))
-    result = rs_tests.run_gate(make_context(tmp_path))
+    result = checked(rs_tests.run_gate(make_context(tmp_path)), rs_tests.GATE)
     assert (result.ok, result.summary) == (False, "5 passed, line coverage 50.0%, 4 gaps (need 0)")
     assert result.findings == [
         "src/gen.rs:1 code at column 4 never runs",
@@ -149,7 +155,7 @@ def test_scoped_summary(tmp_path: Path, fake_run: Any) -> None:
     work(tmp_path)
     fake_run(rust, writes_reports(tmp_path, "SF:src/lib.rs\nDA:1,3\n", {"data": []}))
     ctx = make_context(tmp_path, scope_changed=True, changed={"src/main.rs"})
-    result = rs_tests.run_gate(ctx)
+    result = checked(rs_tests.run_gate(ctx), rs_tests.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "5 passed, line coverage 100.0%, 0 gaps on changed files (need 0)", [])
 
 

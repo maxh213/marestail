@@ -9,8 +9,8 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_mutation
-from marestail.report import Result, result_seconds
-from tests.conftest import make_context, reject_none
+from marestail.report import Result
+from tests.conftest import checked, make_context, reject_none, untimed
 
 APP = "src/main/java/app/App.java"
 CORE = "src/main/java/app/core/Core.java"
@@ -40,7 +40,7 @@ def project(root: Path) -> None:
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
+    return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
 def mutation(status: str, cls: str = "app.App", line: str = "5", source: str = "App.java") -> str:
@@ -70,41 +70,41 @@ def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply
 
 def test_needs_pom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = fake_mvn(monkeypatch, [])
-    result = java_mutation.run_gate(make_context(tmp_path))
+    result = untimed(java_mutation.run_gate(make_context(tmp_path)), java_mutation.GATE)
     assert fields(result) == ("java.mutation", False, java.require_pom(make_context(tmp_path)), [], 0.0)
     assert calls == []
 
 
 def test_needs_pit_in_pom(tmp_path: Path) -> None:
     write(tmp_path / "svc" / "pom.xml", "<project/>")
-    result = java_mutation.run_gate(make_context(tmp_path, {"java": {"root": "svc"}}))
+    result = untimed(java_mutation.run_gate(make_context(tmp_path, {"java": {"root": "svc"}})), java_mutation.GATE)
     assert fields(result) == ("java.mutation", False, "PIT is not in the pom", [f"svc/pom.xml:1 {INSTALL}"], 0.0)
 
 
 def test_rejects_bad_scope_setting(tmp_path: Path) -> None:
     project(tmp_path)
-    result = java_mutation.run_gate(make_context(tmp_path, {"java": {"mutation_scope": "some"}}))
+    result = checked(java_mutation.run_gate(make_context(tmp_path, {"java": {"mutation_scope": "some"}})), java_mutation.GATE)
     assert fields(result) == ("java.mutation", False, '[java] mutation_scope must be "changed" or "all", got \'some\'', [], 0.25)
 
 
 def test_skips_without_changed_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     calls = fake_mvn(monkeypatch, [])
-    result = java_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"}))
+    result = untimed(java_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"README.md"})), java_mutation.GATE)
     assert fields(result) == ("java.mutation", True, "skipped: no changed Java sources", [], 0.0)
     assert calls == []
 
 
 def test_skips_without_sources(tmp_path: Path) -> None:
     write(tmp_path / "pom.xml", POM)
-    result = java_mutation.run_gate(make_context(tmp_path, ALL))
+    result = untimed(java_mutation.run_gate(make_context(tmp_path, ALL)), java_mutation.GATE)
     assert fields(result) == ("java.mutation", True, "skipped: no Java sources", [], 0.0)
 
 
 def test_skips_excluded_sources(tmp_path: Path) -> None:
     project(tmp_path)
     ctx = make_context(tmp_path, {"java": {"mutation_scope": "all", "mutation_exclude": ["src/main/java"]}})
-    assert fields(java_mutation.run_gate(ctx)) == ("java.mutation", True, "skipped: no Java sources", [], 0.0)
+    assert fields(untimed(java_mutation.run_gate(ctx), java_mutation.GATE)) == ("java.mutation", True, "skipped: no Java sources", [], 0.0)
 
 
 def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,7 +112,7 @@ def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     stale = write(tmp_path / ".marestail" / "pit" / "old.xml")
     calls = fake_mvn(monkeypatch, [mutation("KILLED"), mutation("TIMED_OUT"), mutation("NON_VIABLE")])
     ctx = make_context(tmp_path, {"java": {"mutation_scope": "all", "mutation_timeout": "60", "mutation_threads": 8}})
-    assert fields(java_mutation.run_gate(ctx)) == ("java.mutation", True, "all 2 mutants killed", [], 0.25)
+    assert fields(checked(java_mutation.run_gate(ctx), java_mutation.GATE)) == ("java.mutation", True, "all 2 mutants killed", [], 0.25)
     out = tmp_path / ".marestail" / "pit"
     assert calls == [
         (
@@ -140,7 +140,7 @@ def test_reports_survivors_for_changed_files(tmp_path: Path, monkeypatch: pytest
         mutation("NO_COVERAGE", "app.gone.Gone", "", "Gone.java"),
     ]
     calls = fake_mvn(monkeypatch, mutants)
-    result = java_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={APP}))
+    result = checked(java_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={APP})), java_mutation.GATE)
     assert fields(result) == (
         "java.mutation",
         False,
@@ -155,7 +155,7 @@ def test_reports_survivors_for_changed_files(tmp_path: Path, monkeypatch: pytest
 def test_appends_scope_note(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(git_repo)
     fake_mvn(monkeypatch, [mutation("KILLED")])
-    result = java_mutation.run_gate(make_context(git_repo))
+    result = checked(java_mutation.run_gate(make_context(git_repo)), java_mutation.GATE)
     assert result.summary == "all 1 mutants killed (no base origin/master; full run)"
 
 
@@ -172,14 +172,14 @@ def test_appends_scope_note(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_reports_missing_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reply: tuple[int, str], summary: str) -> None:
     project(tmp_path)
     fake_mvn(monkeypatch, None, reply)
-    result = java_mutation.run_gate(make_context(tmp_path, ALL))
+    result = checked(java_mutation.run_gate(make_context(tmp_path, ALL)), java_mutation.GATE)
     assert fields(result) == ("java.mutation", False, summary, [line for line in reply[1].splitlines() if line.strip()], 0.25)
 
 
 def test_reports_no_viable_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     fake_mvn(monkeypatch, [mutation("NON_VIABLE")], (0, "done\n\n"))
-    result = java_mutation.run_gate(make_context(tmp_path, ALL))
+    result = checked(java_mutation.run_gate(make_context(tmp_path, ALL)), java_mutation.GATE)
     assert fields(result) == ("java.mutation", False, "no mutants were generated", ["done"], 0.25)
 
 

@@ -34,7 +34,6 @@ def test_porcelain_path_rejects_short_and_unstaged_lines() -> None:
     assert changes.porcelain_path("MMa.py") is None
     assert changes.porcelain_path("M a.py") is None
     assert changes.porcelain_path(" M a.py") == "a.py"
-    assert (changes.STATUS_WIDTH, changes.PATH_START, changes.RENAME_ARROW) == (2, 3, " -> ")
 
 
 @pytest.mark.parametrize(("line", "expected"), [("+++ b/a.py", "a.py"), ("+++ /dev/null", None), ("+++ a.py ", "a.py")])

@@ -61,8 +61,6 @@ def lint(ctx: Context, batches: list[list[str]], started: float) -> Result:
 
 
 def batch_findings(code: int, output: str, ctx: Context) -> list[str]:
-    if type(code) is not int:
-        raise TypeError("code")
     return failed_findings(code, lint_findings(output, ctx))
 
 

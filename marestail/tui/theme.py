@@ -173,7 +173,7 @@ def step_attr(theme: Theme, status: str, verdict: str | None) -> int:
 
 
 def role_attr(theme: Theme, role: str) -> int:
-    return (theme.worker, theme.judge)[{True: role in JUDGE_ROLES}[type(role) is str]]
+    return (theme.worker, theme.judge)[role in JUDGE_ROLES]
 
 
 def vine_char(index: int) -> str:

@@ -163,10 +163,20 @@ def test_measurements_for_counts_no_compared_values() -> None:
     assert [item.interval for item in found] == [None, None]
 
 
+SPREAD: dict[str, list[float] | None] = {
+    results.BASELINE: [1.0, 2.0, 3.5, 5.0, 6.5, 8.0, 9.5, 11.0, 12.5, 14.0],
+    results.HEAD: [2.0, 3.0, 4.5, 7.0, 8.5, 11.0, 13.5, 15.0, 17.5, 21.0],
+}
+
+
+def intervals_for(target: str) -> list[tuple[float, float] | None]:
+    return [item.interval for item in results.measurements_for(target, [timed("baseline", 1.0)], SPREAD, BOOTSTRAP)]
+
+
 def test_measurements_for_seeds_the_bootstrap_from_the_target_name() -> None:
-    values: dict[str, list[float] | None] = {results.BASELINE: [1.0, 5.0, 9.0], results.HEAD: [2.0, 6.0, 12.0]}
-    found = results.measurements_for("t", [timed("baseline", 1.0)], values, BOOTSTRAP)
-    assert [item.interval for item in found] == [(-77.777777778, 1100.0), (-77.777777778, 140.0)]
+    assert intervals_for("t") == [(-40.909090909, 170.0), (7.142857143, 84.210526316)]
+    assert intervals_for("t") == intervals_for("t")
+    assert intervals_for("u") == [(-47.368421053, 178.571428571), (7.142857143, 90.909090909)]
 
 
 def test_interval_takes_the_middle_ninety_five_percent() -> None:

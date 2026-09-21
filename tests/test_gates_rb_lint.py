@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import rb_lint
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 
 def rubocop_report(root: Path) -> str:
@@ -31,14 +31,14 @@ def rubocop_report(root: Path) -> str:
 
 def test_skips_when_no_ruby_changed(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_lint)
-    result = rb_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"a.py"}))
+    result = untimed(rb_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"a.py"})), rb_lint.GATE)
     assert (result.gate, result.ok, result.summary) == ("rb.lint", True, "skipped: no changed ruby files")
     assert fake.calls == []
 
 
 def test_rubocop_missing(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(rb_lint, [(127, "")])
-    result = rb_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"views/a.jbuilder"}))
+    result = checked(rb_lint.run_gate(make_context(tmp_path, scope_changed=True, changed={"views/a.jbuilder"})), rb_lint.GATE)
     assert (result.ok, result.summary, result.findings) == (
         False,
         "rubocop missing",
@@ -50,7 +50,7 @@ def test_rubocop_missing(tmp_path: Path, fake_run: Any) -> None:
 
 def test_reports_offenses(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_lint, [(1, rubocop_report(tmp_path))])
-    result = rb_lint.run_gate(make_context(tmp_path))
+    result = checked(rb_lint.run_gate(make_context(tmp_path)), rb_lint.GATE)
     assert (result.ok, result.summary) == (False, "4 problems")
     assert result.findings == [
         "app/models/user.rb:3 Layout/LineLength: Line is too long.",
@@ -70,13 +70,13 @@ def test_reports_offenses(tmp_path: Path, fake_run: Any) -> None:
 )
 def test_empty_outputs(tmp_path: Path, fake_run: Any, reply: tuple[int, str], ok: bool, summary: str, findings: list[str]) -> None:
     fake_run(rb_lint, [reply])
-    result = rb_lint.run_gate(make_context(tmp_path))
+    result = checked(rb_lint.run_gate(make_context(tmp_path)), rb_lint.GATE)
     assert (result.ok, result.summary, result.findings) == (ok, summary, findings)
 
 
 def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
     fake_run(rb_lint, [(1, "\n".join(f"oops {n}" for n in range(70)))])
-    result = rb_lint.run_gate(make_context(tmp_path))
+    result = checked(rb_lint.run_gate(make_context(tmp_path)), rb_lint.GATE)
     assert result.summary == "60 problems"
     assert result.findings == [f"oops {n}" for n in range(60)]
 
@@ -99,11 +99,7 @@ def test_failed_tail_keeps_the_last_characters() -> None:
 def test_list_field_defaults_and_rejects_a_non_list() -> None:
     assert rb_lint.list_field({}, "files") == []
     assert rb_lint.list_field({"files": [{"path": "a.rb"}]}, "files") == [{"path": "a.rb"}]
-
-
-def test_list_field_rejects_a_non_list() -> None:
-    with pytest.raises(TypeError, match=r"^list$"):
-        rb_lint.list_field({"files": {}}, "files")
+    assert rb_lint.list_field({"files": "a.rb"}, "files") == []
 
 
 def test_parse_under_ruby_root(tmp_path: Path) -> None:

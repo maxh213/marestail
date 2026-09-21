@@ -20,7 +20,7 @@ EMPTY_LIST: list[Any] = []
 
 
 def extra_args(ctx: Context) -> list[str]:
-    return rust.configured_list(ctx.rust("test_args", rust.EMPTY))
+    return rust.listify(ctx.rust("test_args"))
 
 
 def run_gate(ctx: Context) -> Result:

@@ -26,7 +26,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, erlang.NO_SOURCES)
     tests = erlang.test_files(ctx)
     if not tests:
-        return Result(GATE, False, "no eunit test files", [erlang.NO_TESTS], 0.0)
+        return Result(GATE, False, "no eunit test files", [erlang.NO_TESTS])
     failed = erlang.compile_with_tests(ctx, sources, tests, ctx.work / EBIN, ctx.work / TEST_EBIN)
     if failed:
         return Result(GATE, False, *failed, elapsed(started))

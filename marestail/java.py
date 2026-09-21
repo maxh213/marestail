@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, live, under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.shell import ensure_dir, run
 
 PACKAGE = Path(__file__).resolve().parent
@@ -30,19 +30,12 @@ EMPTY = ""
 REPLACE = "replace"
 OUTPUT_TAIL = 300
 MISSING = -1
-EMPTY_PATTERNS: list[str] = []
 SLASH = "/"
 
 
 def listify(value: Any) -> list[str]:
     if value is None:
         return []
-    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
-
-
-def configured_list(value: Any) -> list[str]:
-    if value is None:
-        raise TypeError("list")
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
@@ -87,7 +80,6 @@ def mvn_command(ctx: Context) -> list[str]:
 
 
 def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = None) -> tuple[int, str]:
-    ctx = live(ctx)
     target = ["-f", str(pom)] if pom else []
     return run([*mvn_command(ctx), "-B", "-ntp", *target, *args], cwd=ctx.java_root(), timeout=timeout)
 
@@ -188,7 +180,6 @@ def java_files_in(ctx: Context, folder: Path) -> list[Path]:
 
 
 def sources(ctx: Context) -> list[Path]:
-    ctx = live(ctx)
     return collect(ctx, source_roots(ctx))
 
 
@@ -213,28 +204,21 @@ def class_name(ctx: Context, path: Path) -> str | None:
     return None
 
 
-def locate(ctx: Context, package: str, file_name: str, folders: list[Path] | None = None) -> Path | None:
-    ctx = live(ctx)
-    require_names(package, file_name)
-    for folder in locate_folders(ctx, folders):
+def locate(folders: list[Path], package: str, file_name: str) -> Path | None:
+    for folder in folders:
         candidate = folder / package / file_name
         if candidate.is_file():
             return candidate
     return None
 
 
-def require_names(package: object, file_name: object) -> None:
-    if type(package) is not str or type(file_name) is not str:
-        raise TypeError("path")
-
-
-def locate_folders(ctx: Context, folders: list[Path] | None) -> list[Path]:
-    return folders if folders is not None else source_roots(ctx) + test_roots(ctx)
+def all_roots(ctx: Context) -> list[Path]:
+    return source_roots(ctx) + test_roots(ctx)
 
 
 def excluded(ctx: Context, relative: str, key: str) -> bool:
     prefix = root_prefix(ctx)
-    return any(matches(relative, prefix + trim_slash(pattern)) for pattern in configured_list(ctx.java(key, EMPTY_PATTERNS)))
+    return any(matches(relative, prefix + trim_slash(pattern)) for pattern in listify(ctx.java(key)))
 
 
 def trim_slash(pattern: str) -> str:
@@ -290,7 +274,6 @@ def empty_scan(mode: str) -> list[Any] | dict[str, Any]:
 
 
 def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
-    ctx = live(ctx)
     if not paths:
         return empty_scan(mode), None
     error = build_scanner(ctx)
@@ -313,7 +296,6 @@ def run_scanner(ctx: Context, mode: str, paths: list[Path], extra: list[str]) ->
 
 
 def classpath(ctx: Context) -> tuple[Path | None, str | None]:
-    ctx = live(ctx)
     out = ctx.work / "java-classpath.txt"
     out.unlink(missing_ok=True)
     code, output = mvn(ctx, [BUILD_CLASSPATH, f"-Dmdep.outputFile={out}", "-Dmdep.includeScope=test"])
@@ -322,7 +304,6 @@ def classpath(ctx: Context) -> tuple[Path | None, str | None]:
 
 
 def pmd_classpath(ctx: Context) -> tuple[str | None, str | None]:
-    ctx = live(ctx)
     folder = ctx.work / "java-tools"
     out, stamp = folder / "pmd.classpath", folder / STAMP
     digest = digest_of(TOOLS_POM)

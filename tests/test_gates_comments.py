@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, javascript, ruby, rust
 from marestail.gates import comments
-from tests.conftest import Clock, gate_shape, make_context, reject_none, required_timeout
+from tests.conftest import Clock, checked, gate_shape, make_context, reject_none, required_timeout
 
 EVERYWHERE = {"comments": {"paths": ["."]}}
 
@@ -40,7 +40,7 @@ class ErlangScript:
 def test_clean_tree_passes(tmp_path: Path) -> None:
     write(tmp_path, "a.py", "x = 1\n")
 
-    result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
+    result = checked(comments.run_gate(make_context(tmp_path, EVERYWHERE)), "comments")
 
     assert gate_shape(result) == ("comments", True, "no comments", [])
 
@@ -48,7 +48,7 @@ def test_clean_tree_passes(tmp_path: Path) -> None:
 def test_clean_tree_measures_elapsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write(tmp_path, "a.py", "x = 1\n")
     monkeypatch.setattr("marestail.gates.comments.time.time", Clock())
-    result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
+    result = checked(comments.run_gate(make_context(tmp_path, EVERYWHERE)), "comments")
     assert result.seconds == 0.25
 
 
@@ -60,7 +60,7 @@ def test_python_comments_and_docstrings_are_reported(tmp_path: Path) -> None:
     )
     write(tmp_path, "b.html", "<p>\n<!-- hidden -->\n")
 
-    result = comments.run_gate(make_context(tmp_path, EVERYWHERE))
+    result = checked(comments.run_gate(make_context(tmp_path, EVERYWHERE)), "comments")
 
     assert result.ok is False
     assert result.summary == "5 comments or docstrings"
@@ -310,16 +310,6 @@ def test_markup_findings(tmp_path: Path) -> None:
         "c.j2:1 comment: <!-- " + "z" * 75,
         "e.jinja:1 comment: {# jinja #}",
     ]
-
-
-def test_suffix_constants() -> None:
-    assert comments.ELIXIR_SUFFIXES == (".ex", ".exs")
-    assert comments.ERLANG_SUFFIXES == (".erl", ".hrl")
-    assert comments.RUBY_SUFFIXES == (".rb", ".rake")
-    assert comments.RUST_SUFFIXES == (".rs",)
-    assert comments.JAVA_SUFFIXES == (".java",)
-    assert comments.PYTHON_SUFFIXES == (".py",)
-    assert comments.MARKUP_SUFFIXES == (".html", ".jinja", ".j2", ".css")
 
 
 def test_has_docstring_shapes() -> None:

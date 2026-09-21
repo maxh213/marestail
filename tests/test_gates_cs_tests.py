@@ -8,7 +8,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_tests
 from marestail.report import Result
-from tests.conftest import gate_shape, make_context
+from tests.conftest import checked, gate_shape, make_context
 
 NS = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
 
@@ -98,7 +98,7 @@ def install(monkeypatch: pytest.MonkeyPatch, fake: FakeDotnet) -> FakeDotnet:
 
 
 def test_reports_missing_projects(tmp_path: Path) -> None:
-    result = cs_tests.run_gate(make_context(tmp_path))
+    result = checked(cs_tests.run_gate(make_context(tmp_path)), cs_tests.GATE)
     assert (result.gate, result.ok) == ("cs.tests", False)
     assert result.summary.startswith("set [dotnet] project and test_project")
     assert result.findings == []
@@ -107,7 +107,7 @@ def test_reports_missing_projects(tmp_path: Path) -> None:
 def test_rejects_exclusion_attribute(tmp_path: Path) -> None:
     extra = {"App/B.cs": "using X;\n[ExcludeFromCodeCoverage]\nclass B {}\n", "AppTests/U.cs": "[ExcludeFromCodeCoverage]\n"}
     ctx = project(tmp_path, extra=extra)
-    assert view(cs_tests.run_gate(ctx)) == (
+    assert view(checked(cs_tests.run_gate(ctx), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "1 [ExcludeFromCodeCoverage] in sources; exclusions belong in [dotnet] coverage_exclude",
@@ -125,7 +125,7 @@ def test_runs_tests_and_writes_coverage(tmp_path: Path, monkeypatch: pytest.Monk
     ctx = project(tmp_path)
     results = ctx.work / "cs-tests"
     results.mkdir()
-    assert view(cs_tests.run_gate(ctx)) == (
+    assert view(checked(cs_tests.run_gate(ctx), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "3 passed, coverage 75.0%, 3 gaps (need 0)",
@@ -161,7 +161,7 @@ def test_runs_tests_and_writes_coverage(tmp_path: Path, monkeypatch: pytest.Monk
 def test_scoped_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((0, ""), trx(1), coverage(tmp_path)))
     ctx = project(tmp_path, scope_changed=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {4}})
-    assert view(cs_tests.run_gate(ctx)) == (
+    assert view(checked(cs_tests.run_gate(ctx), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "1 passed, coverage 75.0%, 1 gaps on changed files (need 0)",
@@ -172,7 +172,12 @@ def test_scoped_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def test_green_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = {"App.dll": {str(tmp_path / "App" / "A.cs"): {"A": {"M()": method({"1": 1})}}}}
     install(monkeypatch, FakeDotnet((0, ""), trx(2), report))
-    assert view(cs_tests.run_gate(project(tmp_path))) == ("cs.tests", True, "2 passed, coverage 100.0%, 0 gaps (need 0)", [])
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
+        "cs.tests",
+        True,
+        "2 passed, coverage 100.0%, 0 gaps (need 0)",
+        [],
+    )
 
 
 def test_failed_tests_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,7 +194,7 @@ def test_failed_tests_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         result_xml("T.Long", "Failed", "m" * 250, ""),
     ]
     install(monkeypatch, FakeDotnet((1, "Failed!\n"), trx(1, *results)))
-    assert view(cs_tests.run_gate(project(tmp_path))) == (
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "tests failed",
@@ -203,12 +208,17 @@ def test_failed_tests_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 def test_missing_trx_uses_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((0, "line one\n\nline two\n"), None))
-    assert view(cs_tests.run_gate(project(tmp_path))) == ("cs.tests", False, "tests failed", ["line one", "line two"])
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
+        "cs.tests",
+        False,
+        "tests failed",
+        ["line one", "line two"],
+    )
 
 
 def test_failure_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((127, "sh: dotnet: not found"), trx(0)))
-    assert view(cs_tests.run_gate(project(tmp_path))) == (
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
         "cs.tests",
         False,
         f"dotnet unavailable: {dotnet.INSTALL_HINT}",
@@ -219,7 +229,7 @@ def test_failure_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("text", [trx(0), trx(None)])
 def test_nothing_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
     install(monkeypatch, FakeDotnet((0, "Total: 0"), text))
-    assert view(cs_tests.run_gate(project(tmp_path))) == (
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "no test passed; a run that executes nothing is not green",
@@ -229,7 +239,7 @@ def test_nothing_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: s
 
 def test_no_coverage_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((0, "out"), trx(1)))
-    assert view(cs_tests.run_gate(project(tmp_path))) == (
+    assert view(checked(cs_tests.run_gate(project(tmp_path)), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "no coverage report; reference coverlet.collector from the test project",
@@ -240,7 +250,7 @@ def test_no_coverage_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 def test_coverage_names_no_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, FakeDotnet((0, "out"), trx(1), {"App.dll": {"/elsewhere/L.cs": {"L": {"M()": method({"1": 1})}}}}))
     ctx = project(tmp_path)
-    assert view(cs_tests.run_gate(ctx)) == (
+    assert view(checked(cs_tests.run_gate(ctx), cs_tests.GATE)) == (
         "cs.tests",
         False,
         "coverage report names no source file; check [dotnet] root and coverage_exclude",

@@ -9,7 +9,7 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates import _crap, er_crap
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 
@@ -47,19 +47,19 @@ def complexity(command: list[str]) -> tuple[int, str]:
 
 def test_needs_coverage(tmp_path: Path) -> None:
     (tmp_path / ".marestail").mkdir()
-    result = er_crap.run_gate(make_context(tmp_path))
+    result = untimed(er_crap.run_gate(make_context(tmp_path)), er_crap.GATE)
     assert shape(result) == ("er.crap", False, "no coverage data; er.tests must run first", [])
     assert result.seconds == 0.0
 
 
 def test_skips_without_files(tmp_path: Path) -> None:
     ctx = project(tmp_path, coverage={"files": {"/nowhere/x.erl": {}}})
-    assert shape(er_crap.run_gate(ctx)) == ("er.crap", True, "skipped: no files in scope", [])
+    assert shape(untimed(er_crap.run_gate(ctx), er_crap.GATE)) == ("er.crap", True, "skipped: no files in scope", [])
 
 
 def test_skips_empty_coverage(tmp_path: Path) -> None:
     ctx = project(tmp_path, coverage={"totals": {}})
-    assert er_crap.run_gate(ctx).summary == "skipped: no files in scope"
+    assert untimed(er_crap.run_gate(ctx), er_crap.GATE).summary == "skipped: no files in scope"
 
 
 @pytest.mark.parametrize(
@@ -73,12 +73,12 @@ def test_script_failures(
     tmp_path: Path, fake_run: Callable[..., FakeRun], code: int, output: str, summary: str, findings: list[str]
 ) -> None:
     fake_run(erlang, [(code, output)])
-    assert shape(er_crap.run_gate(project(tmp_path))) == ("er.crap", False, summary, findings)
+    assert shape(checked(er_crap.run_gate(project(tmp_path)), er_crap.GATE)) == ("er.crap", False, summary, findings)
 
 
 def test_scores_all_functions(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, [(0, functions(tmp_path))])
-    result = er_crap.run_gate(project(tmp_path))
+    result = checked(er_crap.run_gate(project(tmp_path)), er_crap.GATE)
     assert shape(result) == (
         "er.crap",
         False,
@@ -97,14 +97,14 @@ def test_scores_all_functions(tmp_path: Path, fake_run: Callable[..., FakeRun]) 
 
 def test_configured_limit_passes(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(erlang, [(0, functions(tmp_path))])
-    result = er_crap.run_gate(project(tmp_path, raw={"crap_max": 8.5}))
+    result = checked(er_crap.run_gate(project(tmp_path, raw={"crap_max": 8.5})), er_crap.GATE)
     assert shape(result) == ("er.crap", True, "4 functions, 0 above CRAP 8.5", [])
 
 
 def test_scoped_keeps_functions_touching_changes(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, complexity)
     ctx = project(tmp_path, scope_changed=True, changed={"src/a.erl"}, changed_lines_map={"src/a.erl": {7}})
-    result = er_crap.run_gate(ctx)
+    result = checked(er_crap.run_gate(ctx), er_crap.GATE)
     assert shape(result) == ("er.crap", False, "1 functions, 1 above CRAP 4", ["src/a.erl:5 mid/1 crap=6.0 (cc=4, coverage=50%)"])
     assert fake.calls[0][2:] == [str(tmp_path / "src/a.erl")]
 
@@ -112,7 +112,7 @@ def test_scoped_keeps_functions_touching_changes(tmp_path: Path, fake_run: Calla
 def test_scoped_focus_keeps_whole_file(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(erlang, complexity)
     ctx = project(tmp_path, focus={"src/b.erl"})
-    assert er_crap.run_gate(ctx).findings == ["src/b.erl:1 plain/0 crap=6.0 (cc=6, coverage=100%)"]
+    assert checked(er_crap.run_gate(ctx), er_crap.GATE).findings == ["src/b.erl:1 plain/0 crap=6.0 (cc=6, coverage=100%)"]
 
 
 def test_function_ends(tmp_path: Path) -> None:

@@ -38,17 +38,7 @@ def test_listify(value: Any, expected: list[str]) -> None:
 
 @pytest.mark.parametrize(("value", "expected"), [([], []), ([1, "a"], ["1", "a"]), (3, ["3"]), ("x", ["x"])])
 def test_configured_list(value: Any, expected: list[str]) -> None:
-    assert dotnet.configured_list(value) == expected
-
-
-def test_configured_list_rejects_none() -> None:
-    with pytest.raises(TypeError) as raised:
-        dotnet.configured_list(None)
-    assert str(raised.value) == "list"
-
-
-def test_dotnet_constants() -> None:
-    assert (dotnet.SLASH, dotnet.REPLACE, dotnet.EMPTY, dotnet.MUTATION_EXCLUDE) == ("/", "replace", [], "mutation_exclude")
+    assert dotnet.listify(value) == expected
 
 
 def test_env_creates_homes(tmp_path: Path) -> None:
@@ -167,11 +157,6 @@ def test_staged_project_creates_nested_work(tmp_path: Path) -> None:
     assert (ctx.work / dotnet.STAGE / dotnet.PROGRAM_CS).read_text() == "class P {}"
 
 
-def test_dotnet_rejects_a_missing_ctx() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        dotnet.dotnet(None, ["build"])  # type: ignore[arg-type]
-
-
 def test_dotnet_runs_in_root_by_default(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(dotnet, [(0, ""), (0, "done")])
     ctx = context(tmp_path, root="src")
@@ -279,16 +264,6 @@ def test_two_test_projects_do_not_fall_back_to_the_product(tmp_path: Path) -> No
     assert dotnet.test_project(ctx) is None
 
 
-def test_paths_or_raise(tmp_path: Path) -> None:
-    path = tmp_path / "App.csproj"
-    assert dotnet.paths_or_raise(path, path) == (path, path)
-    with pytest.raises(TypeError) as raised:
-        dotnet.paths_or_raise(None, path)
-    assert str(raised.value) == "pair"
-    with pytest.raises(TypeError):
-        dotnet.paths_or_raise(path, None)
-
-
 def test_projects_found_and_cached(tmp_path: Path) -> None:
     write(tmp_path, {"App/App.csproj": APP, "AppTests/AppTests.csproj": APP})
     ctx = context(tmp_path)
@@ -314,7 +289,9 @@ def test_projects_missing_file_says_none(tmp_path: Path) -> None:
 def test_projects_configured_test_project_missing(tmp_path: Path) -> None:
     write(tmp_path, {"App.csproj": APP})
     ctx = context(tmp_path, test_project="Gone.csproj")
-    assert isinstance(dotnet.project_pair(ctx), str)
+    message = "set [dotnet] project and test_project in marestail.toml (.csproj files under .: App.csproj)"
+    assert dotnet.project_pair(ctx) == message
+    assert dotnet.projects(ctx) == (None, None, message)
 
 
 @pytest.mark.parametrize(
@@ -449,7 +426,6 @@ def test_colocated_project_and_source() -> None:
 
 
 def test_scanner_sources_live_in_the_package() -> None:
-    assert dotnet.SCAN_DIR == dotnet.PACKAGE / "cs" / "scan"
     assert (dotnet.SCAN_DIR / dotnet.PROGRAM_CS).is_file()
     assert (dotnet.SCAN_DIR / dotnet.PROJECT_FILE).is_file()
 
@@ -527,11 +503,6 @@ def test_build_scanner_reports_missing_dll(tmp_path: Path, monkeypatch: pytest.M
 
 def fresh_scanner(ctx: Any) -> None:
     write(ctx.work / "cs-scan", {dotnet.SCAN_DLL: "dll", "stamp": dotnet.scanner_digest()})
-
-
-def test_scan_rejects_missing_context() -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        dotnet.scan(None, "deps", [])  # type: ignore[arg-type]
 
 
 def test_scan_returns_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:

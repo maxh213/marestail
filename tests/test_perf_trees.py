@@ -207,12 +207,6 @@ def test_measuring_cleans_up_after_a_failed_worktree(git_repo: Path) -> None:
     assert not trees.trees_file(config).exists()
 
 
-def test_prompt_section_rejects_missing_config(tmp_path: Path) -> None:
-    session = trees.Session("t1")
-    with pytest.raises(TypeError, match=r"^config$"):
-        trees.prompt_section(None, session)  # type: ignore[arg-type]
-
-
 def test_prompt_section_lists_trees_policy_and_notes(tmp_path: Path) -> None:
     (tmp_path / "PERFORMANCE.md").write_text(TABLE)
     config = config_at(tmp_path, threshold_percent=7.5, min_runs=3, min_change={"ms": 2, "rps": 0.5})

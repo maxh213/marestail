@@ -6,13 +6,12 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, live, under_benchmarks
+from marestail.context import Context, under_benchmarks
 from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
 CARGO_TOML = "Cargo.toml"
 SLASH = "/"
-EMPTY: list[str] = []
 CLIPPY = "clippy"
 ERROR_TAIL = 300
 DIGEST_JOIN = b""
@@ -38,16 +37,7 @@ def listify(value: Any) -> list[str]:
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
-def configured_list(value: Any) -> list[str]:
-    if value is None:
-        raise TypeError("list")
-    if type(value) is list:
-        return [str(part) for part in value]
-    return [str(value)]
-
-
 def rel(ctx: Context, path: str | Path) -> str:
-    ctx = live(ctx)
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = ctx.rust_root() / candidate
@@ -74,28 +64,16 @@ def cargo_bin(ctx: Context) -> list[str]:
     return listify(ctx.rust("cargo", "cargo"))
 
 
-def require_timeout(timeout: int) -> int:
-    if type(timeout) is not int:
-        raise TypeError("timeout")
-    return timeout
-
-
 def cargo(ctx: Context, args: list[str], cwd: Path | None = None, *, timeout: int) -> tuple[int, str]:
-    return run([*cargo_bin(ctx), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=require_timeout(timeout))
+    return run([*cargo_bin(ctx), *args], cwd=cwd or ctx.rust_root(), env=env(ctx), timeout=timeout)
 
 
 def missing(code: int, output: str, tool: str) -> str | None:
-    require_missing(code, tool)
     if code == 127:
         return f"cargo is not installed: {INSTALL['cargo']}"
     if "no such command" in output.lower() or "is not installed for the toolchain" in output.lower():
         return f"cargo {tool} is not installed: {INSTALL[tool]}"
     return None
-
-
-def require_missing(code: object, tool: object) -> None:
-    if type(code) is not int or type(tool) is not str:
-        raise TypeError("missing")
 
 
 def skipped(ctx: Context, path: Path) -> bool:
@@ -107,7 +85,6 @@ def rust_files(ctx: Context, root: Path, pattern: str) -> set[Path]:
 
 
 def sources(ctx: Context) -> list[Path]:
-    ctx = live(ctx)
     root = ctx.rust_root()
     found: set[Path] = set()
     for pattern in listify(ctx.rust("sources", ["src"])):
@@ -124,7 +101,6 @@ def crate_uses(ctx: Context, crate: Path) -> set[Path]:
 
 
 def use_files(ctx: Context) -> list[Path]:
-    ctx = live(ctx)
     found: set[Path] = set()
     for crate in crates(ctx):
         found.update(crate_uses(ctx, crate))
@@ -140,7 +116,7 @@ def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
 def exclude_patterns(ctx: Context, key: str) -> list[str]:
     prefix = rel(ctx, ctx.rust_root())
     prefix = "" if prefix == "." else prefix + "/"
-    return [prefix + pattern.strip(SLASH) for pattern in configured_list(ctx.rust(key, EMPTY))]
+    return [prefix + pattern.strip(SLASH) for pattern in listify(ctx.rust(key))]
 
 
 def matches(relative: str, pattern: str) -> bool:
@@ -175,7 +151,6 @@ def build_error(code: int, output: str, binary: Path) -> str | None:
 
 
 def staged_crate(ctx: Context) -> Path:
-    ctx = live(ctx)
     manifest = scan_input(CARGO_TOML)
     if manifest.parent == SCAN_DIR:
         return SCAN_DIR
@@ -218,7 +193,6 @@ def run_scanner(ctx: Context, mode: str, args: list[str]) -> tuple[list[Any] | N
 def scan(
     ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None, uses: list[Path] | None = None
 ) -> tuple[list[Any] | None, str | None]:
-    ctx = live(ctx)
     if not paths:
         return [], None
     error = build_scanner(ctx)

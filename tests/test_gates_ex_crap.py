@@ -9,7 +9,7 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_crap
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
 FUNCTIONS = [
     {"file": "lib/a.ex", "line": 2, "end_line": 4, "name": "small/0", "complexity": 1},
@@ -34,25 +34,30 @@ def project(root: Path, coverage: dict[str, Any] | None = None, raw: dict[str, A
 
 def test_needs_coverage(tmp_path: Path) -> None:
     (tmp_path / ".marestail").mkdir()
-    result = ex_crap.run_gate(make_context(tmp_path))
+    result = untimed(ex_crap.run_gate(make_context(tmp_path)), ex_crap.GATE)
     assert shape(result) == ("ex.crap", False, "no coverage data; ex.tests must run first", [])
     assert result.seconds == 0.0
 
 
 @pytest.mark.parametrize("coverage", [{"files": {"lib/none.ex": {}}}, {"totals": {}}])
 def test_skips_without_files(tmp_path: Path, coverage: dict[str, Any]) -> None:
-    assert shape(ex_crap.run_gate(project(tmp_path, coverage))) == ("ex.crap", True, "skipped: no files in scope", [])
+    assert shape(untimed(ex_crap.run_gate(project(tmp_path, coverage)), ex_crap.GATE)) == (
+        "ex.crap",
+        True,
+        "skipped: no files in scope",
+        [],
+    )
 
 
 def test_script_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(elixir, [(1, "\n".join(str(n) for n in range(12)))])
-    result = ex_crap.run_gate(project(tmp_path))
+    result = checked(ex_crap.run_gate(project(tmp_path)), ex_crap.GATE)
     assert shape(result) == ("ex.crap", False, "complexity script failed", [str(n) for n in range(2, 12)])
 
 
 def test_scores_functions(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(elixir, [(0, json.dumps(FUNCTIONS))])
-    result = ex_crap.run_gate(project(tmp_path))
+    result = checked(ex_crap.run_gate(project(tmp_path)), ex_crap.GATE)
     findings = ["lib/a.ex:6 big/2 crap=8.1 (cc=5, coverage=50%)", "lib/b.ex:1 plain/0 crap=6.0 (cc=6, coverage=100%)"]
     assert shape(result) == ("ex.crap", False, "3 functions, 2 above CRAP 4", findings)
     assert fake.calls == [["elixir", str(elixir.COMPLEXITY), "lib/a.ex", str(tmp_path / "b.ex")]]
@@ -61,13 +66,13 @@ def test_scores_functions(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> N
 
 def test_configured_limit(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(elixir, [(0, json.dumps(FUNCTIONS))])
-    assert ex_crap.run_gate(project(tmp_path, raw={"crap_max": 10})).summary == "3 functions, 0 above CRAP 10"
+    assert checked(ex_crap.run_gate(project(tmp_path, raw={"crap_max": 10})), ex_crap.GATE).summary == "3 functions, 0 above CRAP 10"
 
 
 def test_scoped(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(elixir, [(0, json.dumps(FUNCTIONS[:2]))])
     ctx = project(tmp_path, scope_changed=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {3}})
-    assert shape(ex_crap.run_gate(ctx)) == ("ex.crap", True, "1 functions, 0 above CRAP 4", [])
+    assert shape(checked(ex_crap.run_gate(ctx), ex_crap.GATE)) == ("ex.crap", True, "1 functions, 0 above CRAP 4", [])
     assert fake.calls[0][2:] == ["lib/a.ex"]
 
 

@@ -32,10 +32,6 @@ def test_matches(path: str, pattern: str, expected: bool) -> None:
     assert freeze.matches(path, pattern) is expected
 
 
-def test_glob_constants() -> None:
-    assert (freeze.DOUBLE_STAR, freeze.DIR_SUFFIX, freeze.ANY_DIR) == ("**/", "/**", "*/")
-
-
 def test_matches_any() -> None:
     assert freeze.matches_any("qa/x.md", ["features/**", "qa/**"]) is True
     assert freeze.matches_any("src/x.py", ["features/**", "qa/**"]) is False
@@ -61,8 +57,10 @@ def test_frozen_paths_follow_configuration() -> None:
     assert freeze.frozen_paths(config(raw), "coder", paths) == ["src/a.py", "docs/x.md"]
 
 
-def test_spec_constant() -> None:
-    assert freeze.SPEC == ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
+def test_every_spec_pattern_freezes_a_path_for_a_coder() -> None:
+    paths = ["features/a.feature", "qa/a.md", "tasks/a.md", "perf/bench_a.py", "PERFORMANCE.md", "guidance/a.md"]
+    assert freeze.frozen_paths(config(), "coder", paths) == paths
+    assert freeze.frozen_paths(config(), "specifier", paths) == ["tasks/a.md", "perf/bench_a.py", "PERFORMANCE.md", "guidance/a.md"]
 
 
 ADD = '+    <PackageReference Include="Foo" Version="1.2" />'

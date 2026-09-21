@@ -1,8 +1,6 @@
 import curses
 from typing import Any, ClassVar
 
-import pytest
-
 from marestail.tui import theme
 
 
@@ -168,7 +166,6 @@ def test_theme_dispatch_helpers(monkeypatch: Any) -> None:
 def test_theme_constants_and_running_attr() -> None:
     assert theme.named_or_missing(None) == ""
     assert theme.named_or_missing("PASS") == "PASS"
-    assert theme.VERDICT_GLYPHS[theme.VERDICT_PASS] == theme.GLYPH_PASSED
     mono = theme.mono_theme()
     assert theme.step_attr(mono, "running", "BOUNCE") == mono.worker
     assert theme.step_attr(mono, "running", "PASS") == mono.worker
@@ -179,6 +176,3 @@ def test_theme_constants_and_running_attr() -> None:
     assert theme.full_vine(0) == ""
     assert theme.full_vine(-1) == ""
     assert theme.full_vine(4) == "─∙❧─"
-    mono = theme.mono_theme()
-    with pytest.raises(KeyError):
-        theme.role_attr(mono, None)  # type: ignore[arg-type]

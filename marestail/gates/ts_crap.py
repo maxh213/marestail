@@ -18,7 +18,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / TS_COVERAGE_DIR / "coverage-final.json"
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; ts.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; ts.tests must run first")
     coverage = json.loads(coverage_path.read_text())
     files = scoped_files(coverage, ctx)
     if not files:

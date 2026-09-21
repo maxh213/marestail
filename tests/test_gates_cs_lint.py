@@ -7,7 +7,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import cs_lint
 from marestail.report import Result
-from tests.conftest import gate_shape, make_context
+from tests.conftest import checked, gate_shape, make_context, untimed
 
 SOURCES = {
     "App/App.csproj": "",
@@ -78,12 +78,12 @@ SUPPRESSED = [
 
 def test_skips_when_no_cs_changed(tmp_path: Path) -> None:
     ctx = project(tmp_path, scope_changed=True, changed={"README.md"})
-    assert view(cs_lint.run_gate(ctx)) == ("cs.lint", True, "skipped: no changed C# files", [])
+    assert view(untimed(cs_lint.run_gate(ctx), cs_lint.GATE)) == ("cs.lint", True, "skipped: no changed C# files", [])
 
 
 def test_reports_missing_projects(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
-    result = cs_lint.run_gate(ctx)
+    result = checked(cs_lint.run_gate(ctx), cs_lint.GATE)
     assert view(result) == (
         "cs.lint",
         False,
@@ -96,7 +96,7 @@ def test_builds_both_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     calls = install(monkeypatch, {"App": sarif(), "AppTests": sarif()})
     ctx = project(tmp_path)
     (ctx.work / "cs-lint-App.sarif").write_text("stale")
-    assert view(cs_lint.run_gate(ctx)) == ("cs.lint", False, "3 problems", SUPPRESSED)
+    assert view(checked(cs_lint.run_gate(ctx), cs_lint.GATE)) == ("cs.lint", False, "3 problems", SUPPRESSED)
     assert [args[1] for args, _ in calls] == [str(tmp_path / "App" / "App.csproj"), str(tmp_path / "AppTests" / "AppTests.csproj")]
     assert calls[0][1] == {"timeout": 900}
 
@@ -104,20 +104,27 @@ def test_builds_both_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_clean_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, {"App": sarif(), "AppTests": sarif()})
     ctx = project(tmp_path, scope_changed=True, changed={"App/B.cs"})
-    assert view(cs_lint.run_gate(ctx)) == ("cs.lint", True, "analyzers clean (AnalysisLevel 8.0, Recommended)", [])
+    assert view(checked(cs_lint.run_gate(ctx), cs_lint.GATE)) == ("cs.lint", True, "analyzers clean (AnalysisLevel 8.0, Recommended)", [])
+
+
+def test_finding_without_a_location_points_at_its_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    whole = {"ruleId": "CS1", "level": "error", "message": {"text": "x"}, "locations": []}
+    install(monkeypatch, {"App": sarif(whole), "AppTests": sarif()})
+    result = checked(cs_lint.run_gate(project(tmp_path)), cs_lint.GATE)
+    assert "App/App.csproj:1 CS1: x" in result.findings
 
 
 def test_single_project_built_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = install(monkeypatch, {"App": sarif()})
     ctx = project(tmp_path)
     monkeypatch.setattr(dotnet, "PROJECTS", {str(tmp_path): (tmp_path / "App" / "App.csproj",) * 2})
-    assert cs_lint.run_gate(ctx).summary == "3 problems"
+    assert checked(cs_lint.run_gate(ctx), cs_lint.GATE).summary == "3 problems"
     assert len(calls) == 1
 
 
 def test_missing_sarif_means_no_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, {"App": sarif()}, (1, "error CS1002: ; expected\n\nBuild FAILED.\n"))
-    result = cs_lint.run_gate(project(tmp_path))
+    result = checked(cs_lint.run_gate(project(tmp_path)), cs_lint.GATE)
     assert view(result) == (
         "cs.lint",
         False,
@@ -128,13 +135,13 @@ def test_missing_sarif_means_no_compile(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_missing_sarif_with_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, {}, (127, ""))
-    assert cs_lint.run_gate(project(tmp_path)).summary == f"dotnet unavailable: {dotnet.INSTALL_HINT}"
+    assert checked(cs_lint.run_gate(project(tmp_path)), cs_lint.GATE).summary == f"dotnet unavailable: {dotnet.INSTALL_HINT}"
 
 
 def test_findings_sorted_unique_and_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     results = [diagnostic("App/B.cs", line) for line in range(1, 71)]
     install(monkeypatch, {"App": sarif(*results), "AppTests": sarif(*results)})
-    result = cs_lint.run_gate(project(tmp_path))
+    result = checked(cs_lint.run_gate(project(tmp_path)), cs_lint.GATE)
     assert result.summary == "73 problems"
     assert len(result.findings) == 60
     assert result.findings[0] == "App/A.cs:3 analyzer suppressed in source; fix the code instead"
@@ -258,8 +265,3 @@ def test_project_findings_returns_the_no_sarif_result(tmp_path: Path, monkeypatc
 
 def test_path_of_finding_keeps_a_leading_colon() -> None:
     assert cs_lint.path_of_finding(":10") == ""
-
-
-def test_required_path_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^project$"):
-        cs_lint.required_path(None)  # type: ignore[arg-type]

@@ -119,14 +119,12 @@ def switches(ctx: Context) -> list[str]:
     flags = []
     if flag_off(ctx.elixir("muex_filter", False)):
         flags.append("--no-filter")
-    if flag_off(ctx.elixir("muex_optimize", True)):
+    if flag_off(ctx.elixir("muex_optimize")):
         flags.append("--no-optimize")
     return flags
 
 
 def flag_off(value: object) -> bool:
-    if type(value) is not bool:
-        raise TypeError("flag")
     return value is False
 
 

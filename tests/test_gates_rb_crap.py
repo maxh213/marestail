@@ -6,7 +6,7 @@ import pytest
 
 from marestail import ruby
 from marestail.gates import _crap, rb_crap
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 SOURCE = "class User\n  def a\n    1\n  end\n\n  def b\n    2\n  end\nend\n"
 
@@ -37,7 +37,7 @@ def methods(root: Path) -> str:
 
 def test_needs_coverage(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ruby)
-    result = rb_crap.run_gate(make_context(tmp_path))
+    result = untimed(rb_crap.run_gate(make_context(tmp_path)), rb_crap.GATE)
     assert (result.gate, result.ok, result.summary, result.findings, result.seconds) == (
         "rb.crap",
         False,
@@ -51,7 +51,7 @@ def test_needs_coverage(tmp_path: Path, fake_run: Any) -> None:
 def test_no_files_in_scope(tmp_path: Path, fake_run: Any) -> None:
     (tmp_path / ".marestail").mkdir()
     write_coverage(tmp_path)
-    result = rb_crap.run_gate(make_context(tmp_path))
+    result = untimed(rb_crap.run_gate(make_context(tmp_path)), rb_crap.GATE)
     assert (result.ok, result.summary) == (True, "skipped: no files in scope")
 
 
@@ -59,7 +59,7 @@ def test_scanner_failure(tmp_path: Path, fake_run: Any) -> None:
     write_tree(tmp_path)
     write_coverage(tmp_path)
     fake_run(ruby, [(1, "\n".join(f"err {n}" for n in range(15)))])
-    result = rb_crap.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}}))
+    result = checked(rb_crap.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}})), rb_crap.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "complexity scanner failed", [f"err {n}" for n in range(5, 15)])
 
 
@@ -67,7 +67,7 @@ def test_scores_methods(tmp_path: Path, fake_run: Any) -> None:
     write_tree(tmp_path)
     write_coverage(tmp_path)
     fake = fake_run(ruby, [(0, methods(tmp_path))])
-    result = rb_crap.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}}))
+    result = checked(rb_crap.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb"}})), rb_crap.GATE)
     assert fake.calls == [["rb", str(ruby.SCRIPT), "complexity", str(tmp_path / "app/models/user.rb"), str(tmp_path / "lib/tool.rb")]]
     assert (result.ok, result.summary) == (False, "3 methods, 2 above CRAP 4")
     assert result.findings == [
@@ -87,7 +87,7 @@ def test_scoped_scores_touched_methods(tmp_path: Path, fake_run: Any) -> None:
         changed={"app/models/user.rb"},
         changed_lines_map={"app/models/user.rb": {3}},
     )
-    result = rb_crap.run_gate(ctx)
+    result = checked(rb_crap.run_gate(ctx), rb_crap.GATE)
     assert (result.ok, result.summary, result.findings) == (
         False,
         "1 methods, 1 above CRAP 2.5",
@@ -212,11 +212,6 @@ def test_line_delta_ignores_indented_equals() -> None:
 def test_method_end_line_defaults_to_start() -> None:
     assert rb_crap.method_end_line({1: 4}, 1) == 4
     assert rb_crap.method_end_line({1: 4}, 2) == 2
-
-
-def test_method_end_line_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^line$"):
-        rb_crap.method_end_line({}, None)  # type: ignore[arg-type]
 
 
 def test_body_touched_at_the_first_line() -> None:

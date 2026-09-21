@@ -58,8 +58,6 @@ def broken_lines(output: str) -> list[str]:
 
 
 def sliced_from(lines: list[str], start: int) -> list[str]:
-    if type(start) is not int:
-        raise TypeError("start")
     return lines[start:][:60]
 
 
@@ -68,7 +66,8 @@ def is_text(line: str) -> bool:
 
 
 def first_broken(lines: list[str]) -> int:
-    return next((i for i, line in enumerate(lines) if is_break(line)), 0)
+    found = [index for index, line in enumerate(lines) if is_break(line)]
+    return found[0] if found else 0
 
 
 def is_break(line: str) -> bool:

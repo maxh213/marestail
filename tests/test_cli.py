@@ -455,12 +455,6 @@ def test_claude_root(repo: Path, payload: dict[str, Any], expected: str | None) 
     assert cli.claude_root(payload) == (expected or repo)
 
 
-def test_hook_constants() -> None:
-    assert (cli.LOOP_START, cli.COUNTER_TTL, cli.EMPTY) == (0, 86400, "")
-    assert (cli.FOCUS_ENV, cli.SCOPE_ENV, cli.HARD_SCOPE) == ("MARESTAIL_FOCUS", "MARESTAIL_SCOPE", "hard")
-    assert (cli.STOP_EVENT, cli.COMPLETED, cli.END_TURN) == ("stop", "completed", "end_turn")
-
-
 def test_hook_verdict_honours_loop_count_and_status(gates: Callable[..., Recorder], repo: Path) -> None:
     gates(FAIL)
     config = config_module.load(repo)

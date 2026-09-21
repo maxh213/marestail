@@ -25,7 +25,7 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped(GATE, "no changed Java files")
     error = java.require_pom(ctx)
     if error:
-        return Result(GATE, False, error, [], 0.0)
+        return Result(GATE, False, error)
     files = java.files(ctx)
     if not files:
         return Result.skipped(GATE, "no Java sources")
@@ -106,13 +106,7 @@ def squash(text: str) -> str:
     return " ".join(text.split())[:200]
 
 
-def require_paths(classpath: object, classes: object) -> None:
-    if not isinstance(classpath, Path) or not isinstance(classes, Path):
-        raise TypeError("path")
-
-
 def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path, *, release: str | None) -> tuple[list[str], str | None]:
-    require_paths(classpath, classes)
     tools, error = java.pmd_classpath(ctx)
     if tools is None:
         return [], str(error)

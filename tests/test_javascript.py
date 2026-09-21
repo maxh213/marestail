@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from marestail import javascript
 from tests.conftest import make_context
 
@@ -31,12 +29,6 @@ def test_scan_custom_cwd(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(javascript, [(0, "")])
     javascript.scan(make_context(tmp_path, TS), "comments", ["a.ts"], cwd=tmp_path)
     assert fake.options == [{"cwd": tmp_path}]
-
-
-def test_scan_rejects_missing_context(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(javascript, [(0, "")])
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        javascript.scan(None, "comments", ["a.ts"], cwd=tmp_path)  # type: ignore[arg-type]
 
 
 def test_located_and_rel(tmp_path: Path) -> None:

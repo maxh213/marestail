@@ -56,7 +56,6 @@ WORKER_REPEAT_LIMIT = 3
 UNLIMITED = "unlimited"
 ENABLED = "enabled"
 ATTEMPT_CAP = 10000
-RUN_TYPE = "run"
 MISSING_OK = True
 GROK = "grok"
 SPACE = " "
@@ -119,7 +118,6 @@ PART = "part"
 TEXT = "text"
 TYPE_KEY = "type"
 EMPTY_STDOUT = ""
-KEY_ERROR = "key"
 TOKENS = "tokens"
 CONTENT = "content"
 COST_USD = "costUSD"
@@ -141,11 +139,6 @@ VERDICT_LINE = re.compile(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", re.IGNORE
 Verdict = tuple[str, str | None, str]
 Event = dict[str, Any]
 Spawned = subprocess.CompletedProcess[str] | tuple[int, str]
-
-
-def need(value: object, kind: type) -> None:
-    if type(value) is not kind:
-        raise TypeError(RUN_TYPE)
 
 
 def drop_missing(path: Path, missing_ok: bool = MISSING_OK) -> None:
@@ -189,7 +182,6 @@ class Run:
         return self.focus if self.hard else None
 
     def gates(self, tier: str) -> list[Result]:
-        need(tier, str)
         return run_gates(tier, self.scope_changed, None, self.focus, self.hard)
 
     @property
@@ -365,8 +357,6 @@ def run_judge_loop(state: Run, judge: Judge) -> bool:
 
 
 def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[bool | None, str]:
-    need(state, Run)
-    need(judge, Judge)
     verdict, target, report = run_judge(state, judge)
     if verdict == PASS:
         return True, report
@@ -414,8 +404,6 @@ def attempts(retries: int) -> Iterator[int]:
 
 
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
-    need(state, Run)
-    need(worker, Worker)
     before = head(state.config)
     streak: list[str] = []
     for attempt in attempts(state.retries):
@@ -458,8 +446,6 @@ def problem_shape(problems: str) -> str:
 
 
 def run_judge(state: Run, judge: Judge) -> Verdict:
-    need(state, Run)
-    need(judge, Judge)
     gate = gate_for(state, judge.tier)
     progress = JudgeProgress()
     for attempt in attempts(state.retries):
@@ -471,8 +457,6 @@ def run_judge(state: Run, judge: Judge) -> Verdict:
 
 
 def judged(state: Run, judge: Judge, gate: tuple[str, bool], progress: JudgeProgress, attempt: int) -> Verdict | None:
-    need(state, Run)
-    need(judge, Judge)
     report = state.next_report(judge.name)
     print(f"== {judge.name} ({report.stem}) attempt {attempt}")
     with measuring(state, judge) as session:
@@ -489,9 +473,6 @@ def has_author_round(left: int) -> bool:
 
 
 def prepare_perf(state: Run, judge: Judge, gate_ok: bool, session: perf_trees.Session | None, progress: JudgeProgress) -> None:
-    need(state, Run)
-    need(judge, Judge)
-    need(progress, JudgeProgress)
     if not gate_ok or session is None:
         return
     if has_author_round(progress.author_left):
@@ -528,8 +509,6 @@ def judge_attempt(
 
 
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
-    need(state, Run)
-    need(judge, Judge)
     trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
     prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus)
     before = head(state.config)
@@ -577,9 +556,6 @@ def gated_verdict(judge: Judge, report: Path, gate: tuple[str, bool], parsed: tu
 def settle_verdict(
     state: Run, judge: Judge, report: Path, outcome: Verdict, session: perf_trees.Session | None, before: str
 ) -> tuple[Verdict | None, str]:
-    need(state, Run)
-    need(judge, Judge)
-    need(before, str)
     problems = measured_problems(state, session, report, outcome)
     if problems:
         print(f"   {judge.name} verdict rejected; retrying")
@@ -604,9 +580,6 @@ def drop_scratch(state: Run) -> None:
 
 
 def commit_verdict(state: Run, judge: Judge, before: str, outcome: Verdict) -> None:
-    need(state, Run)
-    need(judge, Judge)
-    need(before, str)
     verdict, target, text = outcome
     stage_writes(state.config, judge_writes(judge))
     saved = drop_ignored_since(state.config, before)
@@ -624,9 +597,6 @@ def no_verdict_feedback(report: Path) -> str:
 
 
 def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback: str) -> str:
-    need(state, Run)
-    need(judge, Judge)
-    need(session, perf_trees.Session)
     for round_no in range(1, AUTHOR_ROUNDS + 1):
         note = state.folder / f"perf-author-{round_no}.md"
         if not author_round(state, judge, session, note, feedback):
@@ -651,7 +621,6 @@ def author_round(state: Run, judge: Judge, session: perf_trees.Session, note: Pa
 
 
 def fingerprints(config: Config, benches: list[str]) -> dict[str, str]:
-    need(config, Config)
     return {bench: perf_hygiene.fingerprint(config.root, bench) for bench in benches}
 
 
@@ -662,8 +631,6 @@ def record_staged(config: Config, message: str, role: str, label: str) -> None:
 
 
 def fill_samples(state: Run, session: perf_trees.Session) -> None:
-    need(state, Run)
-    need(session, perf_trees.Session)
     config = state.config
     benches = perf_review.bench_scripts(config)
     if not benches:
@@ -685,8 +652,6 @@ def drop_stale_samples(config: Config, stamps: dict[str, str]) -> None:
 
 
 def fill_bench(config: Config, records: list[Event], tree: perf_trees.Tree, bench: str, stamp: str, min_runs: int) -> None:
-    need(config, Config)
-    need(bench, str)
     have = sample_numbers(records, bench, tree.name, stamp)
     missing = min_runs - len(have)
     if missing <= 0:
@@ -712,7 +677,6 @@ def uses_database(records: list[Event], bench: str) -> bool:
 
 
 def bench_database(config: Config, records: list[Event], bench: str) -> tuple[perf_db.Database | None, bool]:
-    need(config, Config)
     if not uses_database(records, bench):
         return None, True
     database, problem = perf_db.for_run(config)
@@ -722,8 +686,6 @@ def bench_database(config: Config, records: list[Event], bench: str) -> tuple[pe
 
 
 def take_samples(config: Config, bench: str, tree: perf_trees.Tree, numbers: range, harness: tuple[perf_db.Database | None, str]) -> None:
-    need(config, Config)
-    need(bench, str)
     for number in numbers:
         problem = perf_samples.take_sample(config, bench, tree, number, harness)
         if problem:
@@ -788,16 +750,12 @@ def frozen_problems(state: Run, worker: Worker, report: Path, before: str, dirty
 
 
 def frozen_changes(config: Config, worker: Worker, before: str, touched: list[str]) -> list[str]:
-    need(config, Config)
-    need(worker, Worker)
     return [
         path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))
     ]
 
 
 def audit_problems(state: Run, worker: Worker, report: Path) -> list[str]:
-    need(state, Run)
-    need(worker, Worker)
     if worker.audit and report.exists():
         return audit.problems(state.config, state.task_name, report.read_text(), worker.name)
     return []
@@ -856,9 +814,16 @@ def config_change_section(report: Path) -> str | None:
 
 
 def revert(config: Config, before: str, paths: list[str], message: str) -> None:
-    run([GIT, CHECKOUT, before, DOUBLE_DASH, *paths], cwd=config.root)
-    run([GIT, ADD, ALL_FILES, DOUBLE_DASH, *paths], cwd=config.root)
-    run([GIT, COMMIT, QUIET, MESSAGE_FLAG, message], cwd=config.root)
+    for args in revert_commands(before, paths, message):
+        run(args, cwd=config.root)
+
+
+def revert_commands(before: str, paths: list[str], message: str) -> list[list[str]]:
+    return [
+        [GIT, CHECKOUT, before, DOUBLE_DASH, *paths],
+        [GIT, ADD, ALL_FILES, DOUBLE_DASH, *paths],
+        [GIT, COMMIT, QUIET, MESSAGE_FLAG, message],
+    ]
 
 
 def proposals_summary(state: Run) -> str:
@@ -907,7 +872,6 @@ def discard_edits(config: Config, keep: Path, writes: tuple[str, ...] = ()) -> N
 
 
 def restore_paths(config: Config, paths: list[str]) -> None:
-    need(config, Config)
     _, listed = run([GIT, LS_TREE, RECURSIVE, NAME_ONLY, HEAD_REF, DOUBLE_DASH, *paths], cwd=config.root)
     tracked = sorted(set(listed.splitlines()) & set(paths))
     untracked = sorted(set(paths) - set(tracked))
@@ -952,8 +916,6 @@ def saved_contents(config: Config, paths: list[str]) -> dict[str, bytes]:
 
 
 def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
-    need(config, Config)
-    need(before, str)
     paths = newly_tracked_ignored(config, before)
     saved = saved_contents(config, paths)
     if paths:
@@ -962,8 +924,6 @@ def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
 
 
 def untrack_ignored(config: Config, before: str, paths: list[str]) -> None:
-    need(config, Config)
-    need(before, str)
     print(f"   dropping gitignored files: {COMMA_JOIN.join(paths[:LIST_SHOW])}")
     run([GIT, RM, QUIET, CACHED, UNMATCHED, DOUBLE_DASH, *paths], cwd=config.root)
     if head(config) != before:
@@ -1058,7 +1018,6 @@ def archive_handoffs(state: Run) -> None:
 
 
 def head(config: Config) -> str:
-    need(config, Config)
     _, output = run([GIT, "rev-parse", HEAD_REF], cwd=config.root)
     return output.strip()
 
@@ -1329,8 +1288,6 @@ kimi_events = json_events
 
 
 def event_dict(event: Event, key: str) -> Event:
-    if type(key) is not str:
-        raise TypeError(KEY_ERROR)
     value = event.get(key)
     return value if isinstance(value, dict) else {}
 
@@ -1382,8 +1339,6 @@ def kilo_text(event: Event) -> str:
 
 
 def mapping_text(data: Event, key: str) -> str:
-    if type(key) is not str:
-        raise TypeError(KEY_ERROR)
     if key not in data:
         return EMPTY
     return str(data[key])
@@ -1596,14 +1551,7 @@ def grok_summary(output: str) -> str:
     return f"turns={turns} {token_info(tokens)}{text!r}".strip()
 
 
-def require_code(code: object) -> int:
-    if type(code) is not int:
-        raise TypeError(RUN_TYPE)
-    return code
-
-
 def grok_always_approve_locked(code: int, output: str) -> bool:
-    code = require_code(code)
     if code == 0:
         return False
     data = grok_parse_json(output)
@@ -1612,7 +1560,6 @@ def grok_always_approve_locked(code: int, output: str) -> bool:
 
 
 def rate_limited(code: int, output: str) -> bool:
-    code = require_code(code)
     try:
         data = json.loads(output)
     except json.JSONDecodeError:

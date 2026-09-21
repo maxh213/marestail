@@ -4,7 +4,7 @@ from typing import Any
 
 from marestail import rust
 from marestail.gates import rs_deps
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 LAYERS = [{"from": "src/domain", "forbid": ["src/web", "src/db/"]}]
 
@@ -36,21 +36,21 @@ def scanned_edges(root: Path) -> list[dict[str, Any]]:
 
 
 def test_no_sources(tmp_path: Path) -> None:
-    result = rs_deps.run_gate(make_context(tmp_path))
+    result = untimed(rs_deps.run_gate(make_context(tmp_path)), rs_deps.GATE)
     assert (result.gate, result.ok, result.summary) == ("rs.deps", True, "skipped: no rust sources")
 
 
 def test_scanner_failure(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake_run(rust, [(3, "crash")])
-    result = rs_deps.run_gate(make_context(tmp_path))
+    result = checked(rs_deps.run_gate(make_context(tmp_path)), rs_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "dependency scanner failed", ["rust scanner failed (deps): crash"])
 
 
 def test_reports_layers_and_cycles(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake = fake_run(rust, [(0, json.dumps(scanned_edges(tmp_path)))])
-    result = rs_deps.run_gate(make_context(tmp_path, {"rust": {"layers": LAYERS}}))
+    result = checked(rs_deps.run_gate(make_context(tmp_path, {"rust": {"layers": LAYERS}})), rs_deps.GATE)
     scanner = str(tmp_path / ".marestail" / rust.SCAN_BIN)
     sources = [str(tmp_path / "src/domain/user.rs"), str(tmp_path / "src/lib.rs")]
     assert fake.calls == [[scanner, "deps", "--root", str(tmp_path), *sources]]
@@ -66,7 +66,7 @@ def test_reports_layers_and_cycles(tmp_path: Path, fake_run: Any) -> None:
 def test_clean(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     fake_run(rust, [(0, json.dumps([edge("src/lib.rs", "src/domain/user.rs")]))])
-    result = rs_deps.run_gate(make_context(tmp_path))
+    result = checked(rs_deps.run_gate(make_context(tmp_path)), rs_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "layer contracts kept, no module cycles", [])
 
 
@@ -102,7 +102,7 @@ def test_run_gate_caps_findings(tmp_path: Path, fake_run: Any) -> None:
     setup_crate(tmp_path)
     many = [edge("src/domain/a.rs", "src/web/b.rs", n) for n in range(61)]
     fake_run(rust, [(0, json.dumps(many))])
-    result = rs_deps.run_gate(make_context(tmp_path, {"rust": {"layers": LAYERS}}))
+    result = checked(rs_deps.run_gate(make_context(tmp_path, {"rust": {"layers": LAYERS}})), rs_deps.GATE)
     assert len(result.findings) == 60
     assert result.findings[-1].startswith("src/domain/a.rs:59")
 

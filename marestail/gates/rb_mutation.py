@@ -11,7 +11,6 @@ from marestail.ruby import SKIP_DIRS, bundle, listify, relative
 from marestail.shell import run, tail
 
 GATE = "rb.mutation"
-MUTATION_DEFAULT = True
 RESULTS_DIR = Path(".mutant") / "results"
 DECLARATION = re.compile(r"^\s*(?:class|module)\s+([A-Z]\w*(?:::[A-Z]\w*)*)")
 MUTANT_KINDS = {"evil", "neutral", "noop"}
@@ -33,7 +32,7 @@ Failure = tuple[str, int, str, str]
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if mutation_off(ctx.ruby("mutation", MUTATION_DEFAULT)):
+    if mutation_off(ctx.ruby("mutation")):
         return Result.skipped(GATE, "disabled: [ruby] mutation = false")
     scope = ctx.mutation_files("ruby", ctx.ruby_root(), (".rb",))
     if scope.mode == "error":
@@ -42,8 +41,6 @@ def run_gate(ctx: Context) -> Result:
 
 
 def mutation_off(value: object) -> bool:
-    if type(value) is not bool:
-        raise TypeError("flag")
     return value is False
 
 
@@ -78,8 +75,6 @@ def mutate(ctx: Context, subjects: list[str], note: str, started: float) -> Resu
 
 
 def stdout_result(ctx: Context, code: int, output: str, started: float, note: str) -> Result:
-    if type(note) is not str:
-        raise TypeError("note")
     match = RESULTS_LINE.search(output)
     if not match:
         return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), elapsed(started))
@@ -95,8 +90,6 @@ def newest_report(created: set[Path]) -> dict[str, Any] | None:
 
 
 def session_result(ctx: Context, created: set[Path], output: str, started: float, note: str) -> Result:
-    if type(note) is not str:
-        raise TypeError("note")
     report = newest_report(created)
     if report is None:
         return Result(GATE, False, "mutant session report unreadable", tail(output), elapsed(started))
@@ -108,18 +101,14 @@ def list_field(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
     value = data[key]
-    if type(value) is not list:
-        raise TypeError("list")
-    return value
+    return value if isinstance(value, list) else EMPTY_LIST
 
 
 def text_field(data: dict[str, Any], key: str) -> str:
     if key not in data:
         return EMPTY
     value = data[key]
-    if type(value) is not str:
-        raise TypeError("text")
-    return value
+    return value if isinstance(value, str) else EMPTY
 
 
 def session_failures(report: dict[str, Any], ctx: Context) -> tuple[int, list[Failure]]:
@@ -155,8 +144,6 @@ def verdict(total: int, failures: list[Failure], output: str, started: float, no
 
 
 def with_note(summary: str, note: str) -> str:
-    if type(note) is not str:
-        raise TypeError("note")
     return f"{summary} {note}" if note else summary
 
 
@@ -192,19 +179,12 @@ def colons_from_right(text: str) -> list[int]:
     return [at for at in range(last, 0, -1) if text[at] == ":"]
 
 
-BUNDLE_EXEC = ["bundle", "exec"]
 BUNDLE = ["bundle"]
 
 
 def bundler(ctx: Context) -> list[str]:
-    prefix = exec_prefix(ctx.ruby("exec", BUNDLE_EXEC))
+    prefix = listify(ctx.ruby("exec"))
     return prefix[:-1] or BUNDLE
-
-
-def exec_prefix(value: object) -> list[str]:
-    if value is None:
-        raise TypeError("exec")
-    return listify(value)
 
 
 def sessions(root: Path) -> set[Path]:

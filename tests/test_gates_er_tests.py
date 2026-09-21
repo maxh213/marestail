@@ -9,7 +9,7 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates import _coverage, er_tests
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 COVERAGE = {
@@ -42,14 +42,14 @@ def eunit(code: int, output: str, coverage: dict[str, Any] | None = COVERAGE) ->
 
 
 def test_skips_without_sources(tmp_path: Path) -> None:
-    result = er_tests.run_gate(make_context(tmp_path))
+    result = untimed(er_tests.run_gate(make_context(tmp_path)), er_tests.GATE)
     assert shape(result) == ("er.tests", True, "skipped: no erlang sources under [erlang] sources (default src/)", [])
 
 
 def test_fails_without_tests(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.erl").write_text("")
-    result = er_tests.run_gate(make_context(tmp_path))
+    result = untimed(er_tests.run_gate(make_context(tmp_path)), er_tests.GATE)
     finding = "marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"
     assert shape(result) == ("er.tests", False, "no eunit test files", [finding])
     assert result.seconds == 0.0
@@ -71,7 +71,7 @@ def test_compile_failures(
     findings: list[str],
 ) -> None:
     monkeypatch.setattr(erlang, "compile_with_tests", lambda *args: failed)
-    assert shape(er_tests.run_gate(project(tmp_path))) == ("er.tests", False, summary, findings)
+    assert shape(checked(er_tests.run_gate(project(tmp_path)), er_tests.GATE)) == ("er.tests", False, summary, findings)
 
 
 @pytest.mark.parametrize(
@@ -93,19 +93,19 @@ def test_eunit_failures(
     findings: list[str],
 ) -> None:
     fake_run(erlang, eunit(code, output, coverage))
-    assert shape(er_tests.run_gate(project(tmp_path))) == ("er.tests", False, summary, findings)
+    assert shape(checked(er_tests.run_gate(project(tmp_path)), er_tests.GATE)) == ("er.tests", False, summary, findings)
 
 
 def test_stale_coverage_is_removed(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     ctx = project(tmp_path)
     (tmp_path / ".marestail" / "er-coverage.json").write_text("{}")
     fake_run(erlang, eunit(0, "", None))
-    assert er_tests.run_gate(ctx).summary == "no coverage report written"
+    assert checked(er_tests.run_gate(ctx), er_tests.GATE).summary == "no coverage report written"
 
 
 def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, eunit(0, "  All 12 tests passed.\n"))
-    result = er_tests.run_gate(project(tmp_path))
+    result = checked(er_tests.run_gate(project(tmp_path)), er_tests.GATE)
     summary = "12 passed, coverage 87.5%, 3 gaps (need 0)"
     assert shape(result) == ("er.tests", False, summary, ["src/a.erl:2 not covered", "src/b.erl:4 not covered", "src/b.erl:9 not covered"])
     work = tmp_path / ".marestail"
@@ -134,13 +134,18 @@ def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 
 def test_passes_when_covered(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(erlang, eunit(0, "  Test passed.\n", {"totals": {"percent_covered": 100}, "files": {"src/a.erl": {}}}))
-    assert shape(er_tests.run_gate(project(tmp_path))) == ("er.tests", True, "1 passed, coverage 100.0%, 0 gaps (need 0)", [])
+    assert shape(checked(er_tests.run_gate(project(tmp_path)), er_tests.GATE)) == (
+        "er.tests",
+        True,
+        "1 passed, coverage 100.0%, 0 gaps (need 0)",
+        [],
+    )
 
 
 def test_scoped_to_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(erlang, eunit(0, "no count"))
     ctx = project(tmp_path, scope_changed=True, changed={"src/b.erl"}, changed_lines_map={"src/b.erl": {9, 10}})
-    result = er_tests.run_gate(ctx)
+    result = checked(er_tests.run_gate(ctx), er_tests.GATE)
     assert shape(result) == ("er.tests", False, "? passed, coverage 87.5%, 1 gaps on changed files (need 0)", ["src/b.erl:9 not covered"])
 
 

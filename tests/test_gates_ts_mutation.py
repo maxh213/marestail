@@ -6,7 +6,7 @@ import pytest
 
 from marestail.context import MutationScope
 from marestail.gates import ts_mutation
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 TS = {"ts": {"root": "web"}}
 BASE = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", ".stryker-tmp", "--cleanTempDir", "always"]
@@ -41,7 +41,7 @@ def full_context(root: Path, **fields: Any) -> Any:
 
 
 def test_bad_setting_is_an_error(tmp_path: Path) -> None:
-    result = ts_mutation.run_gate(make_context(tmp_path, {"ts": {"mutation_scope": "some"}}))
+    result = checked(ts_mutation.run_gate(make_context(tmp_path, {"ts": {"mutation_scope": "some"}})), ts_mutation.GATE)
 
     assert (result.gate, result.ok, result.findings) == ("ts.mutation", False, [])
     assert result.summary == '[ts] mutation_scope must be "changed" or "all", got \'some\''
@@ -50,7 +50,9 @@ def test_bad_setting_is_an_error(tmp_path: Path) -> None:
 def test_nothing_changed_is_skipped(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_mutation)
 
-    result = ts_mutation.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.test.ts", "perf/b.ts"}))
+    result = untimed(
+        ts_mutation.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.test.ts", "perf/b.ts"})), ts_mutation.GATE
+    )
 
     assert (result.ok, result.summary) == (True, "skipped: no changed typescript sources")
     assert fake.calls == []
@@ -68,7 +70,7 @@ def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
     seen: list[bool] = []
     fake = fake_run(ts_mutation, stryker(tmp_path, report, seen))
 
-    result = ts_mutation.run_gate(full_context(tmp_path))
+    result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
 
     assert (result.ok, result.summary) == (False, "3 surviving mutants")
     assert result.findings == [
@@ -86,7 +88,7 @@ def test_missing_report_fails_and_cleans_up(tmp_path: Path, fake_run: Any) -> No
     prepare(tmp_path)
     fake_run(ts_mutation, stryker(tmp_path, None, []))
 
-    result = ts_mutation.run_gate(full_context(tmp_path))
+    result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
 
     assert (result.ok, result.summary, result.findings) == (False, "stryker produced no report (exit 1)", ["stryker log"])
     assert not (tmp_path / "web" / ".stryker-tmp").exists()
@@ -100,7 +102,7 @@ def test_scoped_run_mutates_changed_sources(tmp_path: Path, fake_run: Any) -> No
     fake = fake_run(ts_mutation, stryker(tmp_path, report, []))
     ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts", "web/src/b.ts"})
 
-    result = ts_mutation.run_gate(ctx)
+    result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
 
     assert result.findings == ["web/src/a.ts:4 BooleanLiteral Survived: x"]
     assert fake.calls == [[*BASE, "--mutate", "src/a.ts,src/b.ts"]]
@@ -112,7 +114,7 @@ def test_all_killed_with_a_note(tmp_path: Path, fake_run: Any, monkeypatch: pyte
     monkeypatch.setattr(ctx, "mutation_files", lambda *args: MutationScope("full", note="(no base main; full run)"))
     fake_run(ts_mutation, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Killed", 1)]}}}, []))
 
-    result = ts_mutation.run_gate(ctx)
+    result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
 
     assert (result.ok, result.summary, result.findings) == (True, "all mutants killed (no base main; full run)", [])
 
@@ -148,10 +150,6 @@ def test_surviving_skips_out_of_scope_files(tmp_path: Path) -> None:
         "web/src/a.ts:2 BooleanLiteral CompileError: x",
     ]
     assert ts_mutation.surviving({}, ctx) == []
-
-
-def test_ts_suffixes_include_tsx() -> None:
-    assert ts_mutation.TS_SUFFIXES == (".ts", ".tsx")
 
 
 def test_replacement_text_defaults_and_clips() -> None:

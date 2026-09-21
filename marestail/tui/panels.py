@@ -50,16 +50,12 @@ RUNNER_PREFIX = "runner: "
 KEEP_WS = False
 
 
-def as_false(flag: bool) -> bool:
-    return {False: False}[flag]
-
-
 class WrapKwargs(TypedDict):
     replace_whitespace: bool
     drop_whitespace: bool
 
 
-WRAP_FLAGS: WrapKwargs = {"replace_whitespace": as_false(KEEP_WS), "drop_whitespace": as_false(KEEP_WS)}
+WRAP_FLAGS: WrapKwargs = {"replace_whitespace": KEEP_WS, "drop_whitespace": KEEP_WS}
 
 
 @dataclass(frozen=True)
@@ -107,16 +103,8 @@ def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
-def int_attr(attr: int) -> int:
-    return {False: attr}[type(attr) is not int]
-
-
-def need_int(value: int) -> int:
-    return {True: value}[type(value) is int]
-
-
 def put(win: curses.window, y: int, x: int, text: str, attr: int) -> None:
-    apply_clip(win, clip_text(y, x, text, *win.getmaxyx()), int_attr(attr))
+    apply_clip(win, clip_text(y, x, text, *win.getmaxyx()), attr)
 
 
 def apply_clip(win: curses.window, clipped: tuple[int, int, str] | None, attr: int) -> None:
@@ -143,17 +131,9 @@ def offscreen(y: int, x: int, height: int, width: int) -> bool:
     return True in (y < 0, y >= height, x >= width)
 
 
-def keep_pos(y: int, x: int, text: str) -> tuple[int, int, str]:
-    return y, x, text
-
-
-def shift_neg(y: int, x: int, text: str) -> tuple[int, int, str]:
-    return y, 0, text[-{True: x}[x < 0] :]
-
-
 def shift_left(y: int, x: int, text: str) -> tuple[int, int, str]:
-    chosen = (shift_neg, keep_pos)[x >= 0]
-    return chosen(y, x, text)
+    dropped = max(0, -x)
+    return y, x + dropped, text[dropped:]
 
 
 def write_cell(win: curses.window, y: int, x: int, text: str, attr: int) -> None:
@@ -297,7 +277,7 @@ def task_label(task: str | None) -> str:
 
 
 def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, state: WatchState) -> None:
-    inner = need_int(rect.w - 4)
+    inner = rect.w - 4
     paint_bed_frame(win, rect, repo, selected, state, inner)
     draw_worker_row(win, rect.y + BED_WORKER_ROW, rect.x + 2, inner, repo, selected, state)
     row = draw_gate_row(win, rect.y + BED_GATE_ROW, rect.x + 2, inner, repo, state)
@@ -311,12 +291,12 @@ def paint_bed_frame(win: curses.window, rect: Rect, repo: RepoState, selected: b
 
 
 def put_tail(win: curses.window, row: int, x: int, inner: int, state: WatchState, offset: int, line: str) -> None:
-    put(win, row + offset, x, line[: need_int(inner)], state.theme.secondary)
+    put(win, row + offset, x, line[: inner], state.theme.secondary)
 
 
 def paint_tails(win: curses.window, row: int, x: int, inner: int, repo: RepoState, state: WatchState) -> None:
     tails = tail_lines_of(repo)
-    list(starmap(partial(put_tail, win, row, x, need_int(inner), state), enumerate(tails)))
+    list(starmap(partial(put_tail, win, row, x, inner, state), enumerate(tails)))
     draw_strip(win, row + len(tails), x, inner, repo.steps, state)
 
 
@@ -331,7 +311,7 @@ def paint_gate_row(win: curses.window, y: int, x: int, inner: int, repo: RepoSta
 
 def draw_gate_row(win: curses.window, y: int, x: int, inner: int, repo: RepoState, state: WatchState) -> int:
     chosen = (paint_gate_row, skip_gate_row)[repo.gate_activity is None]
-    return chosen(win, y, x, need_int(inner), repo, state)
+    return chosen(win, y, x, inner, repo, state)
 
 
 def worker_tails(worker: Worker | None) -> list[str]:
@@ -364,7 +344,7 @@ def paint_idle_plain(win: curses.window, y: int, x: int, width: int, repo: RepoS
 
 
 def paint_alive(win: curses.window, y: int, x: int, width: int, repo: RepoState, selected: bool, state: WatchState) -> None:
-    chosen = (paint_idle_plain, paint_idle_selected)[{True: selected}[type(selected) is bool]]
+    chosen = (paint_idle_plain, paint_idle_selected)[selected]
     chosen(win, y, x, width, repo, state)
 
 
@@ -415,7 +395,7 @@ def paint_busy_plain(win: curses.window, y: int, x: int, _width: int, worker: Wo
 def draw_busy_row(win: curses.window, y: int, x: int, width: int, worker: Worker, selected: bool, state: WatchState) -> None:
     head = f"{GLYPH_RUNNING} {worker.step.role} {worker.step.label} {fmt_elapsed(worker)} "
     chosen_tail = (marquee_summary, blank_tail)[bool(worker.tail_lines)]
-    tail = chosen_tail(worker, need_int(width) - len(head), state)
+    tail = chosen_tail(worker, width - len(head), state)
     chosen = (paint_busy_plain, paint_busy_selected)[selected]
     chosen(win, y, x, width, worker, state, head, tail)
 

@@ -7,7 +7,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import _cycles, cs_deps
 from marestail.report import Result
-from tests.conftest import gate_shape, make_context
+from tests.conftest import checked, gate_shape, make_context, untimed
 
 LAYERS = {
     "layers": [
@@ -83,7 +83,7 @@ def install(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) -> F
 
 
 def test_needs_layers_file(tmp_path: Path) -> None:
-    result = cs_deps.run_gate(project(tmp_path, None))
+    result = untimed(cs_deps.run_gate(project(tmp_path, None)), cs_deps.GATE)
     summary = "no .dotnet-layers.json; copy templates/dotnet-layers.json and name the layers"
     assert view(result) == ("cs.deps", False, summary, [".dotnet-layers.json:1 missing"])
     assert result.seconds == 0.0
@@ -92,37 +92,37 @@ def test_needs_layers_file(tmp_path: Path) -> None:
 def test_skips_without_sources(tmp_path: Path) -> None:
     ctx = project(tmp_path)
     (tmp_path / "cs" / "Domain" / "Order.cs").unlink()
-    assert view(cs_deps.run_gate(ctx)) == ("cs.deps", True, "skipped: no C# sources", [])
+    assert view(untimed(cs_deps.run_gate(ctx), cs_deps.GATE)) == ("cs.deps", True, "skipped: no C# sources", [])
 
 
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install(monkeypatch, (None, "C# scanner failed (deps): x"))
     ctx = project(tmp_path)
-    assert view(cs_deps.run_gate(ctx)) == ("cs.deps", False, "C# scanner failed (deps): x", [])
+    assert view(checked(cs_deps.run_gate(ctx), cs_deps.GATE)) == ("cs.deps", False, "C# scanner failed (deps): x", [])
     assert fake.calls == [("deps", [tmp_path / "cs" / "Domain" / "Order.cs"])]
     assert fake.contexts == [ctx]
 
 
 def test_reports_layer_breaks_and_cycles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, (DATA, None))
-    assert view(cs_deps.run_gate(project(tmp_path))) == ("cs.deps", False, "4 layer breaks", FINDINGS)
+    assert view(checked(cs_deps.run_gate(project(tmp_path)), cs_deps.GATE)) == ("cs.deps", False, "4 layer breaks", FINDINGS)
 
 
 def test_clean_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, ({"edges": [], "files": []}, None))
-    assert view(cs_deps.run_gate(project(tmp_path))) == ("cs.deps", True, "layer contracts kept", [])
+    assert view(checked(cs_deps.run_gate(project(tmp_path)), cs_deps.GATE)) == ("cs.deps", True, "layer contracts kept", [])
 
 
 def test_scoped_keeps_changed_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     install(monkeypatch, (DATA, None))
     ctx = project(tmp_path, scope_changed=True, changed={"cs/Data/Repo.cs"})
-    assert view(cs_deps.run_gate(ctx)) == ("cs.deps", False, "1 layer breaks", [FINDINGS[3]])
+    assert view(checked(cs_deps.run_gate(ctx), cs_deps.GATE)) == ("cs.deps", False, "1 layer breaks", [FINDINGS[3]])
 
 
 def test_caps_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     edges = [edge("cs/Domain/A.cs", "cs/Web/B.cs", line) for line in range(1, 71)]
     install(monkeypatch, ({"edges": edges, "files": []}, None))
-    result = cs_deps.run_gate(project(tmp_path))
+    result = checked(cs_deps.run_gate(project(tmp_path)), cs_deps.GATE)
     assert result.summary == "70 layer breaks"
     assert len(result.findings) == 60
     assert result.findings[-1] == "cs/Domain/A.cs:60 Domain must not depend on Web (Thing)"

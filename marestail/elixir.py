@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from marestail.context import CTX_ERROR, Context
+from marestail.context import Context
 from marestail.shell import run
 
 SCANNERS = Path(__file__).resolve().parent / "ex"
@@ -15,23 +15,21 @@ SCRIPTS = {"comments": COMMENTS, "complexity": COMPLEXITY, "deadcode": DEADCODE,
 EMPTY: list[str] = []
 IGNORE_MODULES = "--ignore-modules"
 IGNORE = "--ignore"
-PATH_ERROR = "path"
 
 
 def script(mode: str) -> Path:
     return SCRIPTS[mode]
 
 
-def scan(ctx: Context, mode: str, args: Sequence[Any], cwd: Path | None = None, timeout: int = 3600) -> tuple[int, str]:
-    if type(ctx) is not Context:
-        raise TypeError(CTX_ERROR)
-    working = ctx.elixir_root() if cwd is None else cwd
-    return run(["elixir", str(script(mode)), *map(str, args)], cwd=working, timeout=timeout)
+def scan(ctx: Context, mode: str, args: Sequence[Any], timeout: int = 3600) -> tuple[int, str]:
+    return scan_in(ctx.elixir_root(), mode, args, timeout)
+
+
+def scan_in(cwd: Path, mode: str, args: Sequence[Any], timeout: int = 3600) -> tuple[int, str]:
+    return run(["elixir", str(script(mode)), *map(str, args)], cwd=cwd, timeout=timeout)
 
 
 def deadcode_command(ctx: Context, out: Path) -> list[str]:
-    if not isinstance(out, Path):
-        raise TypeError(PATH_ERROR)
     command = ["mix", "run", "--no-start", str(DEADCODE), "--out", str(out)]
     return command + deadcode_flags(ctx)
 

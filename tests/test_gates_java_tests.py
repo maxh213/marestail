@@ -10,8 +10,8 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_tests
-from marestail.report import Result, result_seconds
-from tests.conftest import make_context
+from marestail.report import Result
+from tests.conftest import checked, make_context, untimed
 
 APP = "src/main/java/app/App.java"
 CORE = "src/main/java/app/core/Core.java"
@@ -92,7 +92,7 @@ def project(root: Path) -> None:
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
+    return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
 def fake_mvn(monkeypatch: pytest.MonkeyPatch, suites: list[str], jacoco: str | None, reply: tuple[int, str] = (0, "")) -> list[Any]:
@@ -113,7 +113,13 @@ def fake_mvn(monkeypatch: pytest.MonkeyPatch, suites: list[str], jacoco: str | N
 
 def test_needs_pom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = fake_mvn(monkeypatch, [], None)
-    assert fields(java_tests.run_gate(make_context(tmp_path))) == ("java.tests", False, java.require_pom(make_context(tmp_path)), [], 0.0)
+    assert fields(untimed(java_tests.run_gate(make_context(tmp_path)), java_tests.GATE)) == (
+        "java.tests",
+        False,
+        java.require_pom(make_context(tmp_path)),
+        [],
+        0.0,
+    )
     assert calls == []
 
 
@@ -125,7 +131,7 @@ def test_green_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         write(tmp_path / ".marestail/java-jacoco.exec", "old"),
     ]
     calls = fake_mvn(monkeypatch, [PASSING, PASSING], JACOCO, (0, "BUILD SUCCESS"))
-    result = java_tests.run_gate(make_context(tmp_path))
+    result = checked(java_tests.run_gate(make_context(tmp_path)), java_tests.GATE)
     assert fields(result) == ("java.tests", False, "4 passed, coverage 80.0%, 3 gaps (need 0)", GAPS, 0.75)
     data = tmp_path / ".marestail" / "java-jacoco.exec"
     plugin = "org.jacoco:jacoco-maven-plugin:0.8.15"
@@ -146,7 +152,13 @@ def test_scoped_run_with_configured_build(tmp_path: Path, monkeypatch: pytest.Mo
         changed={CORE},
         changed_lines_map={CORE: {2}},
     )
-    assert fields(java_tests.run_gate(ctx)) == ("java.tests", True, "2 passed, coverage 80.0%, 0 gaps on changed files (need 0)", [], 0.75)
+    assert fields(checked(java_tests.run_gate(ctx), java_tests.GATE)) == (
+        "java.tests",
+        True,
+        "2 passed, coverage 80.0%, 0 gaps on changed files (need 0)",
+        [],
+        0.75,
+    )
     assert calls[0][0] == "org.jacoco:jacoco-maven-plugin:0.8.99:prepare-agent"
     assert (tmp_path / "out" / "site" / "jacoco" / "jacoco.xml").exists()
 
@@ -172,13 +184,13 @@ def test_failed_runs(
 ) -> None:
     project(tmp_path)
     fake_mvn(monkeypatch, suites, JACOCO, reply)
-    assert fields(java_tests.run_gate(make_context(tmp_path))) == ("java.tests", False, summary, findings, 0.75)
+    assert fields(checked(java_tests.run_gate(make_context(tmp_path)), java_tests.GATE)) == ("java.tests", False, summary, findings, 0.75)
 
 
 def test_needs_jacoco_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     fake_mvn(monkeypatch, [PASSING], None, (0, "done"))
-    assert fields(java_tests.run_gate(make_context(tmp_path))) == (
+    assert fields(checked(java_tests.run_gate(make_context(tmp_path)), java_tests.GATE)) == (
         "java.tests",
         False,
         "no JaCoCo report; if the pom sets the surefire <argLine>, start it with @{argLine}",
@@ -191,7 +203,7 @@ def test_needs_covered_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     project(tmp_path)
     fake_mvn(monkeypatch, [PASSING], JACOCO, (0, "done"))
     ctx = make_context(tmp_path, {"java": {"coverage_exclude": ["src/main/java/app"]}})
-    assert fields(java_tests.run_gate(ctx)) == (
+    assert fields(checked(java_tests.run_gate(ctx), java_tests.GATE)) == (
         "java.tests",
         False,
         "coverage report names no source file; check [java] root, sources and coverage_exclude",
@@ -321,22 +333,10 @@ def test_java_file_name_strips_package_then_nested_class() -> None:
     assert java_tests.xml_attr(ET.fromstring("<x name='App.java'/>"), "name") == "App.java"
 
 
-def test_require_tag_rejects_none() -> None:
-    with pytest.raises(TypeError, match=r"^tag$"):
-        java_tests.require_tag(None)
-
-
 def test_package_files_uses_source_roots(tmp_path: Path) -> None:
     project(tmp_path)
     package = ET.fromstring('<package name="app"><sourcefile name="AppTest.java"><line nr="1" ci="1"/></sourcefile></package>')
     assert java_tests.package_files(make_context(tmp_path), package) == []
-
-
-def test_source_folders_rejects_missing_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(java, "source_roots", lambda ctx: None)
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^roots$"):
-        java_tests.source_folders(ctx)
 
 
 def test_line_gaps_keep_gated_lines() -> None:

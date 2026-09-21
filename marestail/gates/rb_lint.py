@@ -81,9 +81,7 @@ def list_field(data: dict[str, Any], key: str) -> list[Any]:
     if key not in data:
         return EMPTY_LIST
     value = data[key]
-    if type(value) is not list:
-        raise TypeError("list")
-    return value
+    return value if isinstance(value, list) else EMPTY_LIST
 
 
 def offense_line(rel: str, offense: dict[str, Any]) -> str:

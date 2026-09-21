@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from marestail.gates import docs
-from tests.conftest import make_context
+from tests.conftest import checked, make_context, untimed
 
 LEDGER = "| Route | Status |\n|---|---|\n| `/a` | Live |\n| `/old` | retired |\n| `/ghost` | live |\n| `/dead` | gone |\n"
 APP = 'app.route("/a")\n\n@app.route("/old")\nrouter.get("/new")\napp.route("/a")\n'
@@ -17,7 +17,7 @@ def write(root: Path, relative: str, text: str) -> Path:
 
 
 def test_gate_is_skipped_without_a_docs_section(tmp_path: Path) -> None:
-    result = docs.run_gate(make_context(tmp_path))
+    result = untimed(docs.run_gate(make_context(tmp_path)), "docs")
 
     assert (result.gate, result.ok, result.summary) == ("docs", True, "skipped: no [docs] section")
 
@@ -26,7 +26,7 @@ def test_clean_docs_pass(tmp_path: Path) -> None:
     write(tmp_path, "README.md", "Set API_KEY.\n")
     write(tmp_path, "src/app.py", 'os.getenv("API_KEY")\n')
 
-    result = docs.run_gate(make_context(tmp_path, {"docs": {}}))
+    result = checked(docs.run_gate(make_context(tmp_path, {"docs": {}})), "docs")
 
     assert (result.gate, result.ok, result.summary, result.findings) == ("docs", True, "docs match the code", [])
 
@@ -34,7 +34,7 @@ def test_clean_docs_pass(tmp_path: Path) -> None:
 def test_scoped_run_notes_the_global_gate(tmp_path: Path) -> None:
     write(tmp_path, "src/app.py", 'os.getenv("SECRET")\n')
 
-    result = docs.run_gate(make_context(tmp_path, {"docs": {}}, scope_changed=True))
+    result = checked(docs.run_gate(make_context(tmp_path, {"docs": {}}, scope_changed=True)), "docs")
 
     assert result.ok is False
     assert result.summary == "1 drift findings (global gate — scope: changed)"
@@ -154,7 +154,7 @@ def test_full_gate_orders_routes_env_then_paths(tmp_path: Path) -> None:
     write(tmp_path, "README.md", "| `/a` | live |\n\n`src/none.py`\n")
     write(tmp_path, "src/app.py", 'app.route("/b")\nos.getenv("NEW_VAR")\n')
 
-    result = docs.run_gate(make_context(tmp_path, {"docs": {"routes_file": "README.md", "path_prefixes": ["src/"]}}))
+    result = checked(docs.run_gate(make_context(tmp_path, {"docs": {"routes_file": "README.md", "path_prefixes": ["src/"]}})), "docs")
 
     assert result.summary == "4 drift findings"
     assert result.findings == [

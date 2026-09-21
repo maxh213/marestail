@@ -56,7 +56,7 @@ def command(ctx: Context, files: list[Path]) -> list[str]:
         "--jobs",
         jobs,
         *scoped,
-        *rust.configured_list(ctx.rust("mutation_args", rust.EMPTY)),
+        *rust.listify(ctx.rust("mutation_args")),
     ]
 
 
@@ -85,17 +85,11 @@ def survivors(viable: list[Outcome]) -> list[Outcome]:
     return [o for o in viable if o.get("summary") not in KILLED]
 
 
-def require_output(output: object) -> None:
-    if type(output) is not str:
-        raise TypeError("output")
-
-
 def mutation_summary(survived: list[Outcome], viable: list[Outcome]) -> str:
     return f"{len(survived)} of {len(viable)} mutants not killed" if survived else f"all {len(viable)} mutants killed"
 
 
 def verdict(ctx: Context, report: dict[str, Any], output: str, started: float) -> Result:
-    require_output(output)
     outcomes = report.get("outcomes", [])
     if baseline_failed(outcomes):
         return Result(GATE, False, "tests fail before any mutation", tail(output), elapsed(started))
@@ -117,7 +111,7 @@ def describe(ctx: Context, outcome: Outcome) -> str:
 
 
 def text_or_empty(value: object) -> str:
-    return value if type(value) is str else ""
+    return value if isinstance(value, str) else ""
 
 
 COLON_SPACE = ": "

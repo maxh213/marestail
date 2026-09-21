@@ -1,6 +1,5 @@
 import json
 import time
-from typing import Any
 
 import pytest
 
@@ -19,46 +18,12 @@ def test_skipped() -> None:
     assert Result.skipped("py.tests", "no python") == Result("py.tests", True, "skipped: no python", [], 0.0)
 
 
-def test_result_field_names() -> None:
-    assert (report.GATE_FIELD, report.SECONDS_FIELD, report.FINDINGS_FIELD) == ("gate", "seconds", "findings")
-
-
 def test_capped_keeps_sixty() -> None:
     findings = [str(n) for n in range(61)]
     kept = report.capped(findings)
     assert len(kept) == 60
     assert kept[-1] == "59"
     assert kept[0] == "0"
-
-
-def test_result_rejects_a_missing_gate() -> None:
-    missing: Any = None
-    with pytest.raises(TypeError, match=r"^gate$"):
-        Result(missing, True, "ok")
-
-
-def test_result_rejects_missing_seconds() -> None:
-    missing: Any = None
-    with pytest.raises(TypeError, match=r"^seconds$"):
-        Result("docs", True, "ok", [], missing)
-
-
-def test_result_rejects_omitted_seconds() -> None:
-    with pytest.raises(TypeError, match=r"^seconds$"):
-        Result("docs", True, "ok")
-
-
-def test_result_rejects_none_findings() -> None:
-    missing: Any = None
-    with pytest.raises(TypeError, match=r"^findings$"):
-        Result("docs", True, "ok", missing, 0.0)
-
-
-def test_render_one_rejects_missing_seconds() -> None:
-    result = Result("docs", True, "ok", [], 0.0)
-    result.seconds = None
-    with pytest.raises(TypeError, match=r"^seconds$"):
-        report.result_seconds(result)
 
 
 def test_render_one_passing() -> None:

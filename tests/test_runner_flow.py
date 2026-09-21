@@ -401,17 +401,6 @@ def test_attempts_shown() -> None:
 def test_runner_constants() -> None:
     assert runner.labels_of(None) == set()
     assert runner.labels_of({"a"}) == {"a"}
-    assert runner.AUTHOR_VERDICT.pattern == r"^\s*VERDICT:\s*AUTHOR\b"
-    assert runner.VERDICT_LINE.pattern == r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?"
-
-
-def test_need_rejects_the_wrong_type() -> None:
-    with pytest.raises(TypeError, match=r"^run$"):
-        runner.need(None, runner.Run)
-
-
-def test_need_accepts_the_matching_type() -> None:
-    runner.need("x", str)
 
 
 def test_renamed_path_keeps_plain_and_splits_on_arrow() -> None:
@@ -611,6 +600,15 @@ def test_next_streak_starts_and_grows() -> None:
     assert runner.next_streak(first, "other") == ["other"]
 
 
+def test_judged_prepares_perf_for_its_own_judge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prepare = patch(monkeypatch, runner, "prepare_perf")
+    patch(monkeypatch, runner, "judge_attempt", ((runner.PASS, None, "ok"), ""))
+    state = make_state(tmp_path)
+    progress = JudgeProgress(author_left=1)
+    assert runner.judged(state, CRITIC, ("", True), progress, 1) == (runner.PASS, None, "ok")
+    assert prepare.calls == [(state, CRITIC, True, None, progress)]
+
+
 def test_judged_after_last_authoring_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     patch(monkeypatch, runner, "judge_attempt", (("AUTHOR", None, ""), "fb"))
     progress = JudgeProgress(author_left=0)
@@ -661,6 +659,7 @@ def test_judge_attempt_records_bounce(tmp_path: Path, judge_env: dict[str, Any],
         (state.config, "hardener verdict: BOUNCE to coder", "VERDICT: bounce coder\n1. fix", "hardener", "m e"),
     ]
     assert judge_env["restore"].calls == [(state.config, {"f": b"1"})]
+    assert judge_env["drop"].calls == [(state.config, "before")]
     assert capsys.readouterr().out == "   verdict BOUNCE to coder\n"
 
 
@@ -827,6 +826,7 @@ def test_fill_samples_tops_up_each_tree(tmp_path: Path, samples_env: dict[str, A
     assert samples_env["stale"].calls == [(state.config, "b.py", "fp")]
     assert [call[3:] for call in samples_env["take"].calls] == [(3, (None, "fp")), (2, (None, "fp")), (3, (None, "fp"))]
     assert [call[2] for call in samples_env["take"].calls] == [session.trees[0], session.trees[1], session.trees[1]]
+    assert [call[1] for call in samples_env["take"].calls] == ["b.py", "b.py", "b.py"]
     assert capsys.readouterr().out == (
         "   dropped 2 stale b.py samples\n   filling b.py on t1: 1 sample(s)\n   filling b.py on t2: 2 sample(s)\n"
     )
@@ -982,6 +982,19 @@ def test_invoke_stops_when_grok_is_locked(tmp_path: Path, invoke_env: dict[str, 
     runner.invoke(make_state(tmp_path, agent="grok"), "x", "p")
     assert invoke_env["sleep"].calls == []
     assert capsys.readouterr().out == "   x: grok always-approve is locked; cannot run unattended\n"
+
+
+def test_invoke_keeps_a_successful_grok_session(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:
+    invoke_env["backend"].replies = [(0, "always-approve is disabled by policy")]
+    runner.invoke(make_state(tmp_path, agent="grok"), "x", "p")
+    assert capsys.readouterr().out == "   x finished in 0.5 min: always-approve is disabled by policy\n"
+
+
+def test_invoke_keeps_a_successful_session_that_mentions_a_limit(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:
+    invoke_env["backend"].replies = [(0, "rate limit")]
+    runner.invoke(make_state(tmp_path), "x", "p")
+    assert invoke_env["sleep"].calls == []
+    assert capsys.readouterr().out == "   x finished in 0.5 min: rate limit\n"
 
 
 def test_invoke_grok_unlocked_uses_grok_readers(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:

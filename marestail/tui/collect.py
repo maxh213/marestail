@@ -451,7 +451,7 @@ def collapse_rest(rest: str, _matched: re.Match[str] | None) -> str:
 
 def parsed_literal(text: str) -> str | None:
     with contextlib.suppress(ValueError, SyntaxError):
-        return collapse(str(ast.literal_eval({True: text}[type(text) is str])))
+        return collapse(str(ast.literal_eval(text)))
     return None
 
 
@@ -740,7 +740,7 @@ def min_elapsed(found: list[Process]) -> Process | None:
 
 
 def matching_agent(rows: list[ProcRow], real: Path) -> Process | None:
-    return min_elapsed(list(filter(partial(agent_under, {True: real}[isinstance(real, Path)]), agents_of(rows))))
+    return min_elapsed(list(filter(partial(agent_under, real), agents_of(rows))))
 
 
 def row_agent(pid: int, _ppid: int, elapsed: int, tokens: list[str]) -> Process | None:
@@ -943,7 +943,7 @@ def sonar_if_named(tokens: list[str], _names: list[str] | None = None) -> str | 
 
 def java_sonar(names: list[str], tokens: list[str]) -> str | None:
     chosen = (none_of, sonar_if_named)["java" in names]
-    return chosen({True: tokens}[type(tokens) is list])
+    return chosen(tokens)
 
 
 def maven_cmd(names: list[str]) -> bool:
@@ -972,7 +972,7 @@ def pmd_if_java(tokens: list[str], _names: list[str] | None = None) -> str | Non
 
 def pmd_gate(names: list[str], tokens: list[str]) -> str | None:
     chosen = (none_of, pmd_if_java)["java" in names]
-    return chosen({True: tokens}[type(tokens) is list])
+    return chosen(tokens)
 
 
 def named_tool(names: list[str]) -> str | None:

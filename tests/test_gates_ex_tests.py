@@ -9,7 +9,7 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_tests
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context
 
 Reply = tuple[int, str]
 COVERAGE = {
@@ -63,12 +63,12 @@ def test_failures(
     findings: list[str],
 ) -> None:
     fake_run(ex_tests, replies)
-    assert shape(ex_tests.run_gate(project(tmp_path, coverdata))) == ("ex.tests", False, summary, findings)
+    assert shape(checked(ex_tests.run_gate(project(tmp_path, coverdata)), ex_tests.GATE)) == ("ex.tests", False, summary, findings)
 
 
 def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(ex_tests, mix((0, "Finished\n6 passed\n0 failed\n")))
-    result = ex_tests.run_gate(project(tmp_path))
+    result = checked(ex_tests.run_gate(project(tmp_path)), ex_tests.GATE)
     assert shape(result) == (
         "ex.tests",
         False,
@@ -87,14 +87,19 @@ def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 def test_scoped_percent_on_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(ex_tests, mix((0, MIX_OUTPUT)))
     ctx = project(tmp_path, scope_changed=True, changed={"lib/b.ex"}, changed_lines_map={"lib/b.ex": {6}})
-    result = ex_tests.run_gate(ctx)
+    result = checked(ex_tests.run_gate(ctx), ex_tests.GATE)
     assert shape(result) == ("ex.tests", False, "? passed, coverage 60.0%, 1 gaps on changed lines (need 0)", ["lib/b.ex:6 not covered"])
 
 
 def test_clean_run(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     coverage = {"totals": {"percent_covered": 100.0}, "files": {"lib/a.ex": {"covered": 4, "total": 4}}}
     fake_run(ex_tests, mix((0, "Finished\n4 passed\n"), coverage=coverage))
-    assert shape(ex_tests.run_gate(project(tmp_path))) == ("ex.tests", True, "4 passed, coverage 100.0%, 0 gaps (need 0)", [])
+    assert shape(checked(ex_tests.run_gate(project(tmp_path)), ex_tests.GATE)) == (
+        "ex.tests",
+        True,
+        "4 passed, coverage 100.0%, 0 gaps (need 0)",
+        [],
+    )
 
 
 def test_scoped_percent(tmp_path: Path) -> None:

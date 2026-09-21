@@ -6,7 +6,7 @@ import pytest
 
 from marestail import javascript
 from marestail.gates import _coverage, ts_tests
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 TS = {"ts": {"root": "web"}}
 
@@ -37,12 +37,6 @@ def write_jest(root: Path, results: list[dict[str, Any]]) -> None:
 def test_chosen_runner_defaults_to_vitest(tmp_path: Path) -> None:
     assert ts_tests.chosen_runner(make_context(tmp_path)) == "vitest"
     assert ts_tests.chosen_runner(make_context(tmp_path, {"ts": {"runner": "jest"}})) == "jest"
-
-
-def test_chosen_runner_rejects_none(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path, {"ts": {"runner": None}})
-    with pytest.raises(TypeError, match=r"^runner$"):
-        ts_tests.chosen_runner(ctx)
 
 
 def test_vitest_command(tmp_path: Path) -> None:
@@ -90,7 +84,7 @@ def test_jest_command(tmp_path: Path, ts: dict[str, Any], globs: list[str]) -> N
 def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(ts_tests, [(1, "\n".join(f"line {n}" for n in range(40)))])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
     assert (result.gate, result.ok, result.summary) == ("ts.tests", False, "tests failed")
     assert result.findings == [f"line {n}" for n in range(10, 40)]
@@ -111,7 +105,7 @@ def test_jest_failure_reads_the_results(tmp_path: Path, fake_run: Any) -> None:
     )
     fake = fake_run(ts_tests, [(1, "raw")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, {"ts": {"root": "web", "runner": "jest"}}))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, {"ts": {"root": "web", "runner": "jest"}})), ts_tests.GATE)
 
     assert result.findings == ["web/a.test.ts:1 adds failed: boom", "web/b.test.ts:1 suite failed to run: Cannot find module"]
     assert fake.calls[0][0].endswith("jest")
@@ -120,7 +114,7 @@ def test_jest_failure_reads_the_results(tmp_path: Path, fake_run: Any) -> None:
 def test_jest_failure_without_results_shows_output(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(1, "raw failure")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, {"ts": {"runner": "jest"}}))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, {"ts": {"runner": "jest"}})), ts_tests.GATE)
 
     assert result.findings == ["raw failure"]
 
@@ -155,7 +149,7 @@ def test_first_line(text: str, expected: str) -> None:
 def test_uninstrumented_files_fail(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(0, "Failed to collect coverage from src/a.ts\nFailed to collect coverage from src/b.ts\n")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
     assert (result.ok, result.summary) == (False, "2 files could not be instrumented")
     assert result.findings == ["web/src/a.ts:1 not instrumented", "web/src/b.ts:1 not instrumented"]
@@ -164,7 +158,7 @@ def test_uninstrumented_files_fail(tmp_path: Path, fake_run: Any) -> None:
 def test_uninstrumented_files_out_of_scope_are_ignored(tmp_path: Path, fake_run: Any) -> None:
     fake_run(ts_tests, [(0, "Failed to collect coverage from src/a.ts\n")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS, scope_changed=True))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS, scope_changed=True)), ts_tests.GATE)
 
     assert (result.ok, result.summary) == (False, "no coverage report; check [ts] runner and sources")
 
@@ -175,7 +169,7 @@ def test_missing_coverage_fails(tmp_path: Path, fake_run: Any, coverage: dict[st
         write_coverage(tmp_path, coverage)
     fake_run(ts_tests, [(0, "Tests 3 passed")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
     assert (result.ok, result.summary, result.findings) == (False, "no coverage report; check [ts] runner and sources", ["Tests 3 passed"])
 
@@ -184,7 +178,7 @@ def test_full_coverage_passes(tmp_path: Path, fake_run: Any) -> None:
     write_coverage(tmp_path, {str(tmp_path / "web" / "a.ts"): coverage_entry({"1": 2}, {"1": [1, 1]})})
     fake_run(ts_tests, [(0, "noise\n      Tests  12 passed (12)\n")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
     assert (result.ok, result.summary, result.findings) == (True, "12 passed, 0 uncovered lines/branches (need 0)", [])
 
@@ -199,7 +193,7 @@ def test_uncovered_code_fails(tmp_path: Path, fake_run: Any) -> None:
     )
     fake_run(ts_tests, [(0, "")])
 
-    result = ts_tests.run_gate(make_context(tmp_path, TS))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
     assert (result.ok, result.summary) == (False, "? passed, 5 uncovered lines/branches (need 0)")
     assert result.findings == [

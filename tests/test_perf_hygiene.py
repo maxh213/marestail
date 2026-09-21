@@ -106,16 +106,6 @@ def test_discard_keeps_non_empty_scratch_directory(tmp_path: Path) -> None:
     assert (tmp_path / "perf/_data/table.csv").exists()
 
 
-def test_fingerprint_rejects_a_missing_root(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^root$"):
-        hygiene.checked_root(None)  # type: ignore[arg-type]
-
-
-def test_fingerprint_rejects_a_missing_bench(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^bench$"):
-        hygiene.checked_bench(None)  # type: ignore[arg-type]
-
-
 def test_kept_text_joins_with_newlines(tmp_path: Path) -> None:
     write(tmp_path, "perf/a.py", "one")
     write(tmp_path, "perf/b.py", "two")

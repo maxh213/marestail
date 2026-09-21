@@ -18,16 +18,12 @@ UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)
 GATE = "ts.tests"
 VITEST = "vitest"
 JEST = "jest"
-RUNNER_ERROR = "runner"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
 
 
 def chosen_runner(ctx: Context) -> str:
-    runner = ctx.ts("runner", VITEST)
-    if type(runner) is not str:
-        raise TypeError(RUNNER_ERROR)
-    return runner
+    return str(ctx.ts("runner", VITEST))
 
 
 def run_gate(ctx: Context) -> Result:

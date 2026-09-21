@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from marestail.gates import py_deps
-from tests.conftest import make_context
+from tests.conftest import checked, make_context
 
 BROKEN = """
 ╔══════╗
@@ -31,7 +31,7 @@ def make_package(root: Path) -> None:
 
 def test_contracts_kept(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(py_deps, [(0, "ok")])
-    result = py_deps.run_gate(make_context(tmp_path, {"python": {"root": "src"}}))
+    result = checked(py_deps.run_gate(make_context(tmp_path, {"python": {"root": "src"}})), py_deps.GATE)
     assert (result.gate, result.ok, result.summary, result.findings) == ("py.deps", True, "import contracts kept", [])
     assert fake.calls == [[f"{tmp_path}/.venv/bin/lint-imports", "--no-cache"]]
     assert fake.options == [{"cwd": tmp_path, "env": {"PYTHONPATH": str(tmp_path / "src")}, "timeout": 600}]
@@ -39,7 +39,7 @@ def test_contracts_kept(tmp_path: Path, fake_run: Any) -> None:
 
 def test_contracts_broken(tmp_path: Path, fake_run: Any) -> None:
     fake_run(py_deps, [(1, BROKEN)])
-    result = py_deps.run_gate(make_context(tmp_path))
+    result = checked(py_deps.run_gate(make_context(tmp_path)), py_deps.GATE)
     assert (result.ok, result.summary) == (False, "import contracts broken")
     assert result.findings == [
         "gates layer BROKEN",
@@ -52,14 +52,14 @@ def test_contracts_broken(tmp_path: Path, fake_run: Any) -> None:
 
 def test_scoped_without_marker_reports_everything(tmp_path: Path, fake_run: Any) -> None:
     fake_run(py_deps, [(1, "Error: no config\nmore")])
-    result = py_deps.run_gate(make_context(tmp_path, scope_changed=True))
+    result = checked(py_deps.run_gate(make_context(tmp_path, scope_changed=True)), py_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "import contracts broken", ["Error: no config", "more"])
 
 
 def test_scoped_violations(tmp_path: Path, fake_run: Any) -> None:
     make_package(tmp_path)
     fake_run(py_deps, [(1, BROKEN)])
-    result = py_deps.run_gate(make_context(tmp_path, scope_changed=True, changed={"pkg/gates/__init__.py"}))
+    result = checked(py_deps.run_gate(make_context(tmp_path, scope_changed=True, changed={"pkg/gates/__init__.py"})), py_deps.GATE)
     assert (result.ok, result.summary) == (False, "import contracts broken in scope")
     assert result.findings == ["- pkg.gates -> pkg.runner (l.3)", "- pkg.gone -> pkg.cli (l.9)"]
 
@@ -67,7 +67,7 @@ def test_scoped_violations(tmp_path: Path, fake_run: Any) -> None:
 def test_scoped_clean(tmp_path: Path, fake_run: Any) -> None:
     make_package(tmp_path)
     fake_run(py_deps, [(1, BROKEN.replace("pkg.gone", "pkg.other"))])
-    result = py_deps.run_gate(make_context(tmp_path, scope_changed=True, changed={"unrelated.py"}))
+    result = checked(py_deps.run_gate(make_context(tmp_path, scope_changed=True, changed={"unrelated.py"})), py_deps.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "import contracts kept in scope", [])
 
 
@@ -87,11 +87,6 @@ def test_module_paths(tmp_path: Path) -> None:
 )
 def test_broken_lines(output: str, expected: list[str]) -> None:
     assert py_deps.broken_lines(output) == expected
-
-
-def test_sliced_from_rejects_a_missing_start() -> None:
-    with pytest.raises(TypeError, match=r"^start$"):
-        py_deps.sliced_from(["a"], None)  # type: ignore[arg-type]
 
 
 def test_sliced_from_caps_at_sixty() -> None:

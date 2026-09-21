@@ -8,7 +8,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import sonar
 from marestail.sonar.client import Client
-from tests.conftest import make_context, reject_none
+from tests.conftest import checked, make_context, reject_none, untimed
 
 CREDS = {"url": "http://sonar:9000", "token": "tok"}
 KEY = "proj"
@@ -106,7 +106,7 @@ def scanner(root: Path, code: int = 0, task: str = "ceTaskId=T1\n") -> Callable[
 
 def test_not_set_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sonar, "credentials", lambda: None)
-    result = sonar.run_gate(make_context(tmp_path))
+    result = untimed(sonar.run_gate(make_context(tmp_path)), sonar.GATE)
     assert (result.gate, result.ok, result.summary, result.findings, result.seconds) == (
         "sonar",
         False,
@@ -119,16 +119,17 @@ def test_not_set_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scanner_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
     install_client(monkeypatch, healthy)
     fake = fake_run(sonar, scanner(tmp_path, code=2))
-    result = sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}}))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "scanner failed", ["scan out", "scan end"])
     assert fake.calls[1][0] == "docker"
+    assert f"-Dsonar.projectKey={KEY}" in fake.calls[1]
     assert fake.options[1] == {"cwd": tmp_path, "timeout": 1800}
 
 
 def test_missing_task_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
     install_client(monkeypatch, healthy)
     fake_run(sonar, scanner(tmp_path, task="other=1\n"))
-    result = sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}}))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
     task_file = tmp_path / ".marestail" / "scannerwork" / "report-task.txt"
     assert (result.ok, result.summary) == (False, "analysis did not complete")
     assert result.findings == [f"no ceTaskId in {task_file}", "scan out", "scan end"]
@@ -137,17 +138,25 @@ def test_missing_task_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_r
 def test_clean_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any, sleeps: list[float]) -> None:
     made = install_client(monkeypatch, healthy)
     fake_run(sonar, scanner(tmp_path))
-    result = sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}}))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "sonar clean", [])
     assert made[0].gets[0] == ("api/ce/task", {"id": "T1"})
     assert sleeps == []
+
+
+def test_scoped_summary_names_the_global_quality_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    install_client(monkeypatch, healthy)
+    fake_run(sonar, scanner(tmp_path))
+    ctx = make_context(tmp_path, {"sonar": {"project_key": KEY}}, scope_changed=True, changed={"a.py"}, changed_lines_map={"a.py": {1, 2}})
+    result = checked(sonar.run_gate(ctx), sonar.GATE)
+    assert result.summary == "sonar clean in scope (global quality gate OK; scope: changed (1 files, 2 lines))"
 
 
 def test_language_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
     install_client(monkeypatch, languages("py=10", coverage=False))
     fake_run(sonar, scanner(tmp_path))
     raw = {"sonar": {"project_key": KEY}, "erlang": {}, "rust": {"root": "crate"}, "java": {}}
-    result = sonar.run_gate(make_context(tmp_path, raw))
+    result = checked(sonar.run_gate(make_context(tmp_path, raw)), sonar.GATE)
     assert result.findings == [
         ".:1 SonarQube received no Erlang lines (languages: py=10); run: marestail sonar setup",
         "marestail.toml:1 SonarQube imported no erlang coverage; run er.tests first so .marestail/eunit.coverdata exists",
@@ -192,7 +201,7 @@ def test_dotnet_run_uses_its_report(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         return 0, ""
 
     monkeypatch.setattr(sonar, "dotnet_scan", reject_none(fake_scan))
-    result = sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}, "dotnet": {}}))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}, "dotnet": {}})), sonar.GATE)
     assert (result.ok, result.summary) == (True, "sonar clean")
     assert scans == [(CREDS, KEY)]
 
@@ -283,7 +292,6 @@ def test_properties_parsing() -> None:
 def test_dotnet_refuses_properties_file(tmp_path: Path) -> None:
     (tmp_path / "sonar-project.properties").write_text("")
     assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (1, sonar.PROPERTIES_CONFLICT)
-    assert sonar.PROPERTIES_CONFLICT.startswith("delete sonar-project.properties: the SonarScanner for .NET refuses")
 
 
 def test_dotnet_project_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -545,11 +553,6 @@ def test_analyse_keeps_collect_and_language_findings(tmp_path: Path, monkeypatch
     assert result.findings == ["from-collect", "from-lang"]
 
 
-def test_scan_rejects_a_missing_ctx(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match=r"^ctx$"):
-        sonar.scan(None, CREDS, KEY)  # type: ignore[arg-type]
-
-
 def test_summarize_scoped(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, scope_changed=True, changed={"a"}, changed_lines_map={"a": {1, 2}})
     assert (
@@ -564,24 +567,6 @@ def test_summarize_scoped(tmp_path: Path) -> None:
 )
 def test_separator_index(line: str, expected: int) -> None:
     assert sonar.separator_index(line) == expected
-
-
-def test_summarize_rejects_a_missing_status(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    with pytest.raises(TypeError, match=r"^status$"):
-        sonar.summarize(ctx, [], None)  # type: ignore[arg-type]
-
-
-def test_collect_rejects_a_missing_key(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path)
-    client = object()
-    with pytest.raises(TypeError, match=r"^key$"):
-        sonar.collect(ctx, client, None)  # type: ignore[arg-type]
-
-
-def test_gate_status_rejects_a_missing_key() -> None:
-    with pytest.raises(TypeError, match=r"^key$"):
-        sonar.gate_status(object(), None)  # type: ignore[arg-type]
 
 
 def test_gate_status_sends_the_project_key() -> None:

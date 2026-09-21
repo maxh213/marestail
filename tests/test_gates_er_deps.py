@@ -9,7 +9,7 @@ from marestail import erlang
 from marestail.context import Context
 from marestail.gates import cs_deps, er_deps
 from marestail.report import Result
-from tests.conftest import FakeRun, gate_shape, make_context
+from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
 HINT = "erlang unavailable: install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull erlang:27`"
 EDGES = [
@@ -47,7 +47,7 @@ def toolchain(edges: list[dict[str, Any]], scanner: tuple[int, str] | None = Non
 
 
 def test_skips_without_sources(tmp_path: Path) -> None:
-    result = er_deps.run_gate(make_context(tmp_path))
+    result = untimed(er_deps.run_gate(make_context(tmp_path)), er_deps.GATE)
     assert shape(result) == ("er.deps", True, "skipped: no erlang sources under [erlang] sources (default src/)", [])
 
 
@@ -62,19 +62,19 @@ def test_compile_failures(
     tmp_path: Path, fake_run: Callable[..., FakeRun], reply: tuple[int, str], summary: str, findings: list[str]
 ) -> None:
     fake_run(erlang, [reply])
-    assert shape(er_deps.run_gate(project(tmp_path))) == ("er.deps", False, summary, findings)
+    assert shape(checked(er_deps.run_gate(project(tmp_path)), er_deps.GATE)) == ("er.deps", False, summary, findings)
 
 
 def test_scanner_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     output = "\n".join(f"l{n}" for n in range(15))
     fake_run(erlang, toolchain([], (2, output)))
-    result = er_deps.run_gate(project(tmp_path))
+    result = checked(er_deps.run_gate(project(tmp_path)), er_deps.GATE)
     assert shape(result) == ("er.deps", False, "dependency scanner failed", [f"l{n}" for n in range(5, 15)])
 
 
 def test_reports_cycles(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(erlang, toolchain(EDGES))
-    result = er_deps.run_gate(project(tmp_path))
+    result = checked(er_deps.run_gate(project(tmp_path)), er_deps.GATE)
     assert shape(result) == ("er.deps", False, "1 dependency cycles", ["src/a.erl:2 dependency cycle: src/a.erl <-> src/b.erl"])
     ebin = tmp_path / ".marestail" / "er-deps-ebin"
     sources = [str(tmp_path / "src" / f"{name}.erl") for name in "abc"]
@@ -85,13 +85,13 @@ def test_reports_cycles(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> Non
 
 def test_acyclic(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake_run(erlang, toolchain([{"from": "a", "to": "b", "line": 1}]))
-    assert shape(er_deps.run_gate(project(tmp_path))) == ("er.deps", True, "dependency graph acyclic", [])
+    assert shape(checked(er_deps.run_gate(project(tmp_path)), er_deps.GATE)) == ("er.deps", True, "dependency graph acyclic", [])
 
 
 @pytest.mark.parametrize(("changed", "ok"), [({"src/a.erl"}, False), ({"src/b.erl"}, True)])
 def test_scoped_to_cycle_owner(tmp_path: Path, fake_run: Callable[..., FakeRun], changed: set[str], ok: bool) -> None:
     fake_run(erlang, toolchain(EDGES))
-    assert er_deps.run_gate(project(tmp_path, scope_changed=True, changed=changed)).ok is ok
+    assert checked(er_deps.run_gate(project(tmp_path, scope_changed=True, changed=changed)), er_deps.GATE).ok is ok
 
 
 def test_findings_are_capped(tmp_path: Path) -> None:

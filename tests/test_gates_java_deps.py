@@ -9,8 +9,8 @@ import pytest
 from marestail import java
 from marestail.context import Context
 from marestail.gates import java_deps
-from marestail.report import Result, result_seconds
-from tests.conftest import make_context, reject_none
+from marestail.report import Result
+from tests.conftest import checked, make_context, reject_none, untimed
 
 WEB = "src/main/java/app/web/Api.java"
 DOMAIN = "src/main/java/app/domain/Order.java"
@@ -68,13 +68,13 @@ def fake_scan(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) ->
 
 
 def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
-    return result.gate, result.ok, result.summary, result.findings, result_seconds(result)
+    return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
 def test_needs_layer_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path, None)
     seen = fake_scan(monkeypatch, (DATA, None))
-    result = java_deps.run_gate(make_context(tmp_path))
+    result = untimed(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)
     assert fields(result) == (
         "java.deps",
         False,
@@ -88,41 +88,59 @@ def test_needs_layer_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_skips_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".java-layers.json").write_text(json.dumps({"layers": []}))
     seen = fake_scan(monkeypatch, (DATA, None))
-    assert fields(java_deps.run_gate(make_context(tmp_path))) == ("java.deps", True, "skipped: no Java sources", [], 0.0)
+    assert fields(untimed(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)) == (
+        "java.deps",
+        True,
+        "skipped: no Java sources",
+        [],
+        0.0,
+    )
     assert seen == []
 
 
 def test_reports_scan_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     seen = fake_scan(monkeypatch, (None, "javac not found"))
-    assert fields(java_deps.run_gate(make_context(tmp_path))) == ("java.deps", False, "javac not found", [], 2.0)
+    assert fields(checked(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)) == ("java.deps", False, "javac not found", [], 2.0)
     assert seen == [("deps", [tmp_path / DOMAIN, tmp_path / REPO, tmp_path / WEB])]
 
 
 def test_reports_layer_breaks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     fake_scan(monkeypatch, (DATA, None))
-    assert fields(java_deps.run_gate(make_context(tmp_path))) == ("java.deps", False, "4 layer breaks", BREAKS, 2.0)
+    assert fields(checked(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)) == (
+        "java.deps",
+        False,
+        "4 layer breaks",
+        BREAKS,
+        2.0,
+    )
 
 
 def test_clean_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path, [{"from": "app.repo", "forbid": ["app.web"]}])
     fake_scan(monkeypatch, ({"files": DATA["files"], "edges": DATA["edges"][:2]}, None))
-    assert fields(java_deps.run_gate(make_context(tmp_path))) == ("java.deps", True, "layer contracts kept", [], 2.0)
+    assert fields(checked(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)) == (
+        "java.deps",
+        True,
+        "layer contracts kept",
+        [],
+        2.0,
+    )
 
 
 def test_scoped_run_keeps_changed_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     fake_scan(monkeypatch, (DATA, None))
     ctx = make_context(tmp_path, scope_changed=True, changed={WEB})
-    assert fields(java_deps.run_gate(ctx)) == ("java.deps", True, "layer contracts kept", [], 2.0)
+    assert fields(checked(java_deps.run_gate(ctx), java_deps.GATE)) == ("java.deps", True, "layer contracts kept", [], 2.0)
 
 
 def test_findings_are_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path, [{"from": "app.domain", "forbid": ["app.web"]}])
     edges = [{"from": DOMAIN, "to": WEB, "toPackage": "app.web", "symbol": "S", "line": n} for n in range(1, 62)]
     fake_scan(monkeypatch, ({"files": DATA["files"], "edges": edges}, None))
-    result = java_deps.run_gate(make_context(tmp_path))
+    result = checked(java_deps.run_gate(make_context(tmp_path)), java_deps.GATE)
     assert (result.summary, len(result.findings), result.findings[-1]) == (
         "61 layer breaks",
         60,

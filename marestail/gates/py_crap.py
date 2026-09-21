@@ -22,7 +22,7 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result(GATE, False, "no coverage data; py.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; py.tests must run first")
     code, output = run(radon_command(ctx), cwd=ctx.python_root())
     if code != 0:
         return Result(GATE, False, "radon failed", output.splitlines()[-10:], elapsed(started))

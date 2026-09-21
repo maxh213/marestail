@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, ruby, rust
 from marestail.gates import deadcode
-from tests.conftest import gate_shape, make_context, reject_none, required_timeout
+from tests.conftest import checked, gate_shape, make_context, reject_none, required_timeout
 
 VULTURE = "\n".join(
     [
@@ -20,7 +20,7 @@ PYTHON = {"python": {"sources": ["marestail"]}}
 
 
 def test_nothing_configured_passes(tmp_path: Path) -> None:
-    result = deadcode.run_gate(make_context(tmp_path))
+    result = checked(deadcode.run_gate(make_context(tmp_path)), "deadcode")
 
     assert gate_shape(result) == ("deadcode", True, "nothing unreachable", [])
 
@@ -28,7 +28,7 @@ def test_nothing_configured_passes(tmp_path: Path) -> None:
 def test_python_findings_through_the_gate(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(deadcode, [(3, VULTURE)])
 
-    result = deadcode.run_gate(make_context(tmp_path, PYTHON))
+    result = checked(deadcode.run_gate(make_context(tmp_path, PYTHON)), "deadcode")
 
     assert (result.ok, result.summary) == (False, "2 dead definitions")
     assert result.findings == ["marestail/a.py:3 unused function 'foo'", "marestail/b.py:12 unreachable code after 'return'"]
@@ -38,7 +38,7 @@ def test_python_findings_through_the_gate(tmp_path: Path, fake_run: Any) -> None
 def test_scoped_gate_keeps_findings_in_scope(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(3, VULTURE)])
 
-    result = deadcode.run_gate(make_context(tmp_path, PYTHON, scope_changed=True, changed={"marestail/b.py"}))
+    result = checked(deadcode.run_gate(make_context(tmp_path, PYTHON, scope_changed=True, changed={"marestail/b.py"})), "deadcode")
 
     assert result.findings == ["marestail/b.py:12 unreachable code after 'return'"]
 
@@ -166,19 +166,11 @@ def test_colons_from_left_includes_the_first_colon() -> None:
 def test_ignore_names_requires_a_list() -> None:
     assert deadcode.ignore_names([]) == []
     assert deadcode.ignore_names(["run_gate"]) == ["--ignore-names", "run_gate"]
-    with pytest.raises(TypeError, match=r"^names$"):
-        deadcode.ignore_names(None)  # type: ignore[arg-type]
 
 
 def test_as_name_list_requires_a_list() -> None:
     assert deadcode.as_name_list(["A"]) == ["A"]
-    with pytest.raises(TypeError, match=r"^names$"):
-        deadcode.as_name_list(None)
-
-
-def test_compile_problem_rejects_missing_output() -> None:
-    with pytest.raises(TypeError, match=r"^output$"):
-        deadcode.compile_problem(1, None)  # type: ignore[arg-type]
+    assert deadcode.as_name_list("A") == []
 
 
 def test_knip_missing_keys_are_empty() -> None:
@@ -311,6 +303,7 @@ def test_elixir_findings(tmp_path: Path, fake_run: Any) -> None:
     findings = deadcode.elixir_findings(make_context(tmp_path, {"elixir": {"root": "app"}}))
 
     assert findings == ["app/lib/a.ex:3 unused function A.go/1", "../../../outside.ex:4 unused function B.stop/0"]
+    assert fake.calls == [["mix", "run", "--no-start", str(elixir.DEADCODE), "--out", str(tmp_path / ".marestail" / "ex-deadcode.json")]]
     assert fake.options == [{"cwd": tmp_path / "app", "timeout": 900}]
 
 

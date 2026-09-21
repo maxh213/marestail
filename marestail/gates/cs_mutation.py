@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet
-from marestail.context import Context, live
+from marestail.context import Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -19,7 +19,6 @@ SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerato
 INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
 SLASH = "/"
 FILES = "files"
-PATH_ERROR = "path"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -81,7 +80,6 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
 
 
 def restore_failure(ctx: Context, started: float) -> Result | None:
-    ctx = live(ctx)
     code, output = dotnet.dotnet(ctx, ["tool", "restore"], timeout=900)
     if code == 0:
         return None
@@ -143,7 +141,6 @@ def missing(output: str, code: int) -> str:
 
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
-    product, tests, out = required_path(product), required_path(tests), required_path(out)
     prefix = dotnet.rel(ctx, ctx.dotnet_root()) + "/"
     excludes = [f"!**/{trim_slash_pattern(pattern, prefix)}" for pattern in dotnet.mutation_patterns(ctx)]
     includes = ["**/" + name.removeprefix(prefix) for name in targets]
@@ -163,12 +160,6 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "progress",
         *mutate(excludes + includes),
     ]
-
-
-def required_path(path: Path) -> Path:
-    if not isinstance(path, Path):
-        raise TypeError(PATH_ERROR)
-    return path
 
 
 def trim_slash_pattern(pattern: str, prefix: str) -> str:

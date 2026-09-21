@@ -6,7 +6,7 @@ import pytest
 
 from marestail.context import MutationScope
 from marestail.gates import py_mutation
-from tests.conftest import Clock, gate_shape, make_context
+from tests.conftest import Clock, checked, gate_shape, make_context, untimed
 
 FULL = {"python": {"mutation_scope": "all"}}
 
@@ -19,7 +19,7 @@ def write_meta(root: Path, name: str, codes: dict[str, Any]) -> None:
 
 def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(py_mutation)
-    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
+    result = checked(py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}})), py_mutation.GATE)
     assert gate_shape(result)[:3] == (
         "py.mutation",
         False,
@@ -28,16 +28,40 @@ def test_bad_setting(tmp_path: Path, fake_run: Any) -> None:
     assert fake.calls == []
 
 
+def test_bad_setting_reports_no_findings(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_mutation)
+    result = checked(py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}})), py_mutation.GATE)
+    assert result.findings == []
+
+
+def test_scoped_note_follows_the_summary(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pkg").mkdir()
+    monkeypatch.setattr(
+        "marestail.context.Context.mutation_files",
+        lambda self, *args: MutationScope("scoped", ["pkg/a.py"], note="(scoped to 1 file)"),
+    )
+
+    def mutmut(command: list[str]) -> tuple[int, str]:
+        write_meta(tmp_path, "m.meta", {"pkg.a.f__mutmut_1": 3})
+        return 0, ""
+
+    fake_run(py_mutation, mutmut)
+    result = checked(py_mutation.run_gate(make_context(tmp_path)), py_mutation.GATE)
+    assert result.summary == "all 1 mutants killed (scoped to 1 file)"
+
+
 def test_bad_setting_measures_elapsed(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_run(py_mutation)
     monkeypatch.setattr("marestail.gates.py_mutation.time.time", Clock())
-    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}}))
+    result = checked(py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "some"}})), py_mutation.GATE)
     assert result.seconds == 0.25
 
 
 def test_nothing_changed_skips(tmp_path: Path, fake_run: Any) -> None:
     fake = fake_run(py_mutation)
-    result = py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"tests/test_a.py", "perf/b.py"}))
+    result = untimed(
+        py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"tests/test_a.py", "perf/b.py"})), py_mutation.GATE
+    )
     assert gate_shape(result)[:3] == ("py.mutation", True, "skipped: no changed python sources")
     assert fake.calls == []
 
@@ -47,7 +71,9 @@ def test_mutmut_failure(tmp_path: Path, fake_run: Any) -> None:
     (tmp_path / "keep").mkdir()
     (tmp_path / "MUTANTS").mkdir()
     fake = fake_run(py_mutation, [(1, "boom\ncrashed")])
-    result = py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 8}}))
+    result = checked(
+        py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 8}})), py_mutation.GATE
+    )
     assert (result.ok, result.summary, result.findings) == (False, "mutmut failed", ["boom", "crashed"])
     assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "8"]]
     assert fake.options == [{"cwd": tmp_path, "timeout": 7200}]
@@ -58,7 +84,7 @@ def test_mutmut_failure(tmp_path: Path, fake_run: Any) -> None:
 
 def test_no_mutants_generated(tmp_path: Path, fake_run: Any) -> None:
     fake_run(py_mutation, [(1, "0 Mutants done")])
-    result = py_mutation.run_gate(make_context(tmp_path, FULL))
+    result = checked(py_mutation.run_gate(make_context(tmp_path, FULL)), py_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (False, "no mutants were generated", ["0 Mutants done"])
 
 
@@ -69,7 +95,7 @@ def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
         return 0, ""
 
     fake = fake_run(py_mutation, mutmut)
-    result = py_mutation.run_gate(make_context(tmp_path, FULL))
+    result = checked(py_mutation.run_gate(make_context(tmp_path, FULL)), py_mutation.GATE)
     assert result.findings == ["a.y__mutmut_1: suspicious", "b.x__mutmut_1: survived", "b.x__mutmut_3: not checked"]
     assert (result.ok, result.summary) == (False, "3 of 6 mutants not killed")
     assert fake.calls[0] == [f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "4"]
@@ -83,7 +109,7 @@ def test_scoped_run_filters_by_pattern(tmp_path: Path, fake_run: Any) -> None:
         return 0, ""
 
     fake = fake_run(py_mutation, mutmut)
-    result = py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"pkg/a.py"}))
+    result = checked(py_mutation.run_gate(make_context(tmp_path, scope_changed=True, changed={"pkg/a.py"})), py_mutation.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "all 1 mutants killed", [])
     assert fake.calls[0][:3] == [f"{tmp_path}/.venv/bin/mutmut", "run", "pkg.a.*"]
 
@@ -122,11 +148,6 @@ def test_nothing_to_mutate(scope: MutationScope, patterns: list[str], expected: 
 def test_mutant_prefix_strips_a_trailing_star() -> None:
     assert py_mutation.mutant_prefix("marestail.report.*") == "marestail.report."
     assert py_mutation.mutant_prefix("plain") == "plain"
-
-
-def test_mutation_summary_rejects_a_missing_note() -> None:
-    with pytest.raises(TypeError, match=r"^note$"):
-        py_mutation.mutation_summary(1, [], None)  # type: ignore[arg-type]
 
 
 def test_exit_codes_without_the_key(tmp_path: Path) -> None:
