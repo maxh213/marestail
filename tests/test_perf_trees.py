@@ -245,7 +245,12 @@ def test_add_notes_keeps_existing(capsys: pytest.CaptureFixture[str]) -> None:
 def test_add_tree_uses_the_temp_prefix(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
     original = tempfile.mkdtemp
-    monkeypatch.setattr(trees.tempfile, "mkdtemp", lambda prefix: seen.append(prefix) or original(prefix=prefix))
+
+    def mkdtemp(prefix: str) -> str:
+        seen.append(prefix)
+        return original(prefix=prefix)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
     fake = fake_run(trees, [(0, "")])
     session = trees.Session("t1")
     config = config_at(tmp_path)

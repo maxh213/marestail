@@ -9,7 +9,7 @@ from collections.abc import Callable
 from functools import partial
 from itertools import chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, TypeGuard, cast
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
@@ -63,7 +63,7 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return value
+    return cast(T, value)
 
 
 def empty_list(*_args: object) -> list[Any]:
@@ -486,7 +486,7 @@ def work_home() -> Path:
 
 def claude_homes() -> list[Path]:
     homes: tuple[Path | None, ...] = (Path.home() / CLAUDE_HOME, work_home(), expanded_env(CLAUDE_CONFIG_ENV))
-    return list(filter(present, homes))
+    return list(cast(list[Path], filter(None, homes)))
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
@@ -547,7 +547,7 @@ def transcript_lines(path: Path, window: int = TAIL_BYTES) -> list[str]:
     return decode_tail(read_tail(path, window), window)
 
 
-def assistant_dict(data: object) -> bool:
+def assistant_dict(data: object) -> TypeGuard[dict[str, object]]:
     return False not in (isinstance(data, dict), getattr(data, "get", none_of)("type") == "assistant")
 
 
@@ -557,7 +557,7 @@ def first_from(data: dict[str, object]) -> str | None:
 
 def assistant_block(data: object) -> str | None:
     chosen = (none_of, first_from)[assistant_dict(data)]
-    return chosen(data)
+    return chosen(cast(dict[str, object], data))
 
 
 def format_entry(line: str) -> str | None:
@@ -579,17 +579,17 @@ def list_or_empty(content: object) -> list[object]:
     return chosen(content)
 
 
+def is_dict(block: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(block, dict)
+
+
 def message_content(message: object) -> list[object]:
     chosen = (empty_list, dict_content)[isinstance(message, dict)]
-    return chosen(message)
+    return chosen(cast(dict[str, object], message))
 
 
 def first_block(content: list[object]) -> str | None:
     return next(filter(None, rendered_blocks(content)), None)
-
-
-def is_dict(block: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(block, dict)
 
 
 def rendered_blocks(content: list[object]) -> list[str | None]:
@@ -605,7 +605,7 @@ def prefix_text(prefix: str, text: str) -> str | None:
 
 
 def or_blank(value: object) -> str:
-    return {True: ""}.get(not value, value)
+    return cast(str, {True: ""}.get(not value, value))
 
 
 def nonempty(text: str) -> str | None:
@@ -664,7 +664,7 @@ def dict_fields(value: dict[str, object]) -> list[str]:
 
 def tool_fields(value: object) -> list[str]:
     chosen = (empty_list, dict_fields)[isinstance(value, dict)]
-    return chosen(value)
+    return chosen(cast(dict[str, object], value))
 
 
 def stripped_str(value: object) -> bool:
@@ -1096,7 +1096,7 @@ def run_git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str] | N
     return None
 
 
-def ok_git(out: subprocess.CompletedProcess[str] | None) -> bool:
+def ok_git(out: object) -> bool:
     return False not in (out is not None, getattr(out, "returncode", 1) == 0)
 
 
@@ -1139,11 +1139,11 @@ def dict_result(data: dict[str, object]) -> object:
 
 def result_field(data: object) -> object:
     chosen = (none_of, dict_result)[isinstance(data, dict)]
-    return chosen(data)
+    return chosen(cast(dict[str, object], data))
 
 
 def str_or_raw(result: object, raw: str) -> str:
-    return (raw, result)[isinstance(result, str)]
+    return cast(str, (raw, result)[isinstance(result, str)])
 
 
 def decoded_result(raw: str) -> str:

@@ -137,7 +137,12 @@ def install_setup(monkeypatch: pytest.MonkeyPatch, installed: list[bool]) -> lis
 
     monkeypatch.setattr(setup, "admin_client", admin_client)
     pending = list(installed)
-    monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: calls.append(f"plugin {admin}") or pending.pop(0))
+
+    def plugin_installed(admin: str) -> bool:
+        calls.append(f"plugin {admin}")
+        return pending.pop(0)
+
+    monkeypatch.setattr(setup, "erlang_plugin_installed", plugin_installed)
     return calls
 
 
@@ -246,7 +251,7 @@ def test_build_jar_clones_and_copies(
         removed.append(ignore_errors)
         original(path, ignore_errors=ignore_errors)
 
-    monkeypatch.setattr(setup.shutil, "rmtree", rmtree)
+    monkeypatch.setattr(shutil, "rmtree", rmtree)
     setup.build_jar()
     assert removed == [True]
     sha = setup.ERLANG_PLUGIN_SHA

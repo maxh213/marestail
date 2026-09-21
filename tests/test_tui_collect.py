@@ -644,15 +644,18 @@ def test_repo_shell_uses_git_line_args(tmp_path: Path, monkeypatch: Any) -> None
     assert state.head == "log -1 --format=%h%x20%s"
 
 
-def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
-    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+class Tracker:
+    def __init__(self, fn: Any = lambda *args, **kwargs: None) -> None:
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.fn = fn
 
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        calls.append((args, kwargs))
-        return fn(*args, **kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append((args, kwargs))
+        return self.fn(*args, **kwargs)
 
-    wrapped.calls = calls
-    return wrapped
+
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
+    return Tracker(fn)
 
 
 def test_collect_constants() -> None:

@@ -1,6 +1,6 @@
 import curses
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from marestail.tui import panels
 from marestail.tui.model import Fleet, Process, RepoState, Step, Worker
@@ -56,6 +56,10 @@ class FakeWin:
         if self.fail:
             raise curses.error("edge")
         self.cells.append((y, x, text, attr))
+
+
+def as_window(fake: FakeWin) -> curses.window:
+    return cast(curses.window, fake)
 
 
 def step(status: str = "running", verdict: str | None = None) -> Step:
@@ -400,15 +404,18 @@ def test_panel_helpers(tmp_path: Path) -> None:
     assert panel.built_for == 10
 
 
-def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
-    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+class Tracker:
+    def __init__(self, fn: Any = lambda *args, **kwargs: None) -> None:
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.fn = fn
 
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        calls.append((args, kwargs))
-        return fn(*args, **kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append((args, kwargs))
+        return self.fn(*args, **kwargs)
 
-    wrapped.calls = calls
-    return wrapped
+
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
+    return Tracker(fn)
 
 
 def test_panel_constants() -> None:
@@ -691,11 +698,11 @@ def test_fleet_panel_init_and_render(tmp_path: Path, monkeypatch: Any) -> None:
     watch = state_of(fleet)
     empty = tracker()
     monkeypatch.setattr(panels, "empty_fleet", empty)
-    panel.render(FakeWin(), Rect(0, 0, 10, 40), True, state_of())
+    panel.render(as_window(FakeWin()), Rect(0, 0, 10, 40), True, state_of())
     assert empty.calls
     beds = tracker()
     monkeypatch.setattr(FleetPanel, "render_beds", beds)
-    panel.render(FakeWin(), Rect(0, 0, 10, 40), True, watch)
+    panel.render(as_window(FakeWin()), Rect(0, 0, 10, 40), True, watch)
     assert beds.calls
 
 
@@ -704,7 +711,7 @@ def test_fleet_render_beds_passes_repos(tmp_path: Path, monkeypatch: Any) -> Non
     watch = state_of(Fleet(repos=[live], scanned_at=0))
     painted = tracker()
     monkeypatch.setattr(panels, "paint_beds", painted)
-    FleetPanel().render_beds(FakeWin(), Rect(0, 0, 20, 40), watch)
+    FleetPanel().render_beds(as_window(FakeWin()), Rect(0, 0, 20, 40), watch)
     assert painted.calls
     args = painted.calls[0][0]
     assert args[2] == [live]

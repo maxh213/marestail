@@ -5,7 +5,7 @@ import time
 from functools import partial
 from itertools import starmap
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, TypeGuard, cast
 
 from .collect import collect_fleet
 from .model import Fleet, RepoState
@@ -56,7 +56,7 @@ def skip(*_args: object, **_kwargs: object) -> Any:
 
 
 def surely[T](value: T | None) -> T:
-    return value
+    return cast(T, value)
 
 
 def is_code(value: int | None) -> TypeGuard[int]:
@@ -115,7 +115,8 @@ class WatchSession:
 
     def handle_key(self, key: int) -> int | None:
         chosen: Any = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
-        return chosen(self, key)
+        result: int | None = chosen(self, key)
+        return result
 
     def handle_idle(self, key: int) -> int | None:
         action: Any = IDLE_ACTIONS.get(key, skip)
@@ -147,8 +148,9 @@ class WatchSession:
         self.detail = None
 
     def handle_panel(self, key: int) -> int | None:
-        chosen: Any = PANEL_ACTIONS.get(self.panels[self.active].on_key(key, self.state), skip)
-        return chosen(self)
+        chosen: Any = PANEL_ACTIONS.get(cast(str, self.panels[self.active].on_key(key, self.state)), skip)
+        result: int | None = chosen(self)
+        return result
 
     def quit_watch(self) -> int:
         return 0
@@ -174,7 +176,8 @@ def detail_backs(detail: ConversationPanel | None, key: int, state: WatchState) 
 
 def key_action(detail: ConversationPanel | None, key: int, state: WatchState) -> str | None:
     action: Any = getattr(detail, "on_key", skip)
-    return action(key, state)
+    result: str | None = action(key, state)
+    return result
 
 
 def open_repo(session: WatchSession, repo: RepoState | None) -> None:

@@ -51,15 +51,18 @@ def reply(value: str | None) -> Any:
     return lambda key, state: value
 
 
-def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
-    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+class Tracker:
+    def __init__(self, fn: Any = lambda *args, **kwargs: None) -> None:
+        self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.fn = fn
 
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        calls.append((args, kwargs))
-        return fn(*args, **kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append((args, kwargs))
+        return self.fn(*args, **kwargs)
 
-    wrapped.calls = calls
-    return wrapped
+
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Tracker:
+    return Tracker(fn)
 
 
 def test_surely_keeps_missing_values() -> None:

@@ -187,7 +187,12 @@ def test_snapshot_with_database_rows(tmp_path: Path, fake_run: Callable[..., Fak
     fake = fake_run(review, [(0, "abc\n")])
     seen: list[Any] = []
     original = review.rows_cell
-    monkeypatch.setattr(review, "rows_cell", lambda cfg, used: seen.append((cfg, used)) or original(cfg, used))
+
+    def rows_cell(cfg: Any, used: bool) -> Any:
+        seen.append((cfg, used))
+        return original(cfg, used)
+
+    monkeypatch.setattr(review, "rows_cell", rows_cell)
     outcome = review.Review([], [item("t", "new")], True)
     snapshot = review.snapshot_for(config, session_with("head"), outcome)
     assert seen == [(config, True)]

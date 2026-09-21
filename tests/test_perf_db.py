@@ -10,8 +10,9 @@ from typing import Any
 
 import pytest
 
+from marestail import config as config_module
 from marestail.config import Config
-from marestail.perf import db, trees
+from marestail.perf import db, settings, trees
 from tests.conftest import FakeRun, Reply
 
 RUNNING = "{{.State.Running}}"
@@ -1039,7 +1040,12 @@ def test_golden_background(project: Path, monkeypatch: pytest.MonkeyPatch, capsy
     head = tree(project)
     activate(monkeypatch, {"head": head})
     seen: list[Any] = []
-    monkeypatch.setattr(db, "start_build", lambda database, chosen: seen.append((database, chosen)) or f"started {chosen.name}")
+
+    def start_build(database: Any, chosen: Any) -> str:
+        seen.append((database, chosen))
+        return f"started {chosen.name}"
+
+    monkeypatch.setattr(db, "start_build", start_build)
     assert db.command("golden", "head", False) == 0
     assert capsys.readouterr().out == "started head\n"
     assert seen[0][1] is head
@@ -1100,16 +1106,20 @@ def test_prepare_passes_the_real_objects(tmp_path: Path, monkeypatch: pytest.Mon
     config = perf_config(tmp_path, {"migrate": "m", "image": "postgres:15"})
     session = trees.Session("t", [tree(tmp_path)])
     seen: list[Any] = []
-    monkeypatch.setattr(trees, "write_trees", lambda cfg, chosen: seen.append(("write", cfg, chosen)))
-    monkeypatch.setattr(
-        db,
-        "build_database",
-        lambda cfg, section, rows, rows_source, image, image_source: (
-            seen.append(("database", cfg, section, rows, rows_source, image, image_source))
-            or make_db(tmp_path, rows=rows, rows_source=rows_source, image=image, image_source=image_source)
-        ),
-    )
-    monkeypatch.setattr(db, "build_all", lambda database, chosen: seen.append(("all", database, chosen)))
+
+    def write_trees(cfg: Any, chosen: Any) -> None:
+        seen.append(("write", cfg, chosen))
+
+    def build_database(cfg: Any, section: Any, rows: Any, rows_source: Any, image: Any, image_source: Any) -> db.Database:
+        seen.append(("database", cfg, section, rows, rows_source, image, image_source))
+        return make_db(tmp_path, rows=rows, rows_source=rows_source, image=image, image_source=image_source)
+
+    def build_all(database: Any, chosen: Any) -> None:
+        seen.append(("all", database, chosen))
+
+    monkeypatch.setattr(trees, "write_trees", write_trees)
+    monkeypatch.setattr(db, "build_database", build_database)
+    monkeypatch.setattr(db, "build_all", build_all)
     db.prepare(config, session)
     assert seen[0] == ("write", config, session)
     assert seen[1][0] == "database"
@@ -1125,7 +1135,12 @@ def test_prepare_passes_the_real_objects(tmp_path: Path, monkeypatch: pytest.Mon
 def test_rows_or_exit_uses_the_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = perf_config(tmp_path)
     seen: list[Config] = []
-    monkeypatch.setattr(db.settings, "effective_rows", lambda cfg: seen.append(cfg) or (4, "src"))
+
+    def effective_rows(cfg: Config) -> tuple[int, str]:
+        seen.append(cfg)
+        return 4, "src"
+
+    monkeypatch.setattr(settings, "effective_rows", effective_rows)
     assert db.rows_or_exit(config) == (4, "src")
     assert seen == [config]
 
@@ -1146,16 +1161,20 @@ def test_golden_looks_up_an_empty_tree_name(project: Path, monkeypatch: pytest.M
 
 def test_command_passes_the_loaded_config(project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     loaded: list[Config] = []
-    original = db.config_module.load
+    original = config_module.load
 
     def load(start: Path) -> Config:
         config = original(start)
         loaded.append(config)
         return config
 
-    monkeypatch.setattr(db.config_module, "load", load)
+    monkeypatch.setattr(config_module, "load", load)
     seen: list[Config] = []
-    monkeypatch.setattr(trees, "active", lambda config: seen.append(config) or None)
+
+    def active(config: Config) -> None:
+        seen.append(config)
+
+    monkeypatch.setattr(trees, "active", active)
     assert db.command("status", None, False) == 2
     assert seen == loaded
     assert loaded[0].root == project
@@ -1170,7 +1189,12 @@ def test_required_seed_uses_the_golden_name(tmp_path: Path, fake_run: Callable[.
     seed.write_text("insert")
     names: list[str] = []
     original = db.check_disk
-    monkeypatch.setattr(db, "check_disk", lambda chosen, name: names.append(name) or original(chosen, name))
+
+    def check_disk(chosen: Any, name: str) -> Any:
+        names.append(name)
+        return original(chosen, name)
+
+    monkeypatch.setattr(db, "check_disk", check_disk)
     assert db.required_seed(database, "g") == seed
     assert names == ["g"]
     assert db.required_seed(make_db(tmp_path, rows=1), "g") == seed

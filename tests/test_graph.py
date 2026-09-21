@@ -192,7 +192,7 @@ def test_rust_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 class FakeErlang:
     def __init__(self, erlc: tuple[int, str], escript: tuple[int, str]) -> None:
         self.replies = {"erlc": erlc, "escript": escript}
-        self.calls: list[tuple[Context | None, str, list[str]]] = []
+        self.calls: list[tuple[Context, str, list[str]]] = []
 
     def erlc(self, ctx: Context, args: list[str]) -> tuple[int, str]:
         self.calls.append((ctx, "erlc", args))
