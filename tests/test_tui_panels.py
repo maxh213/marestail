@@ -537,7 +537,7 @@ def test_put_tail_and_paint_tails(tmp_path: Path, monkeypatch: Any) -> None:
     panels.put_tail(short, 0, 0, 4, watch, 0, "hello-tail")
     assert any(cell[2] == "hell" for cell in short.cells)
     with pytest.raises(KeyError):
-        panels.need_int(None)
+        panels.need_int(None)  # type: ignore[arg-type]
     strip = tracker()
     monkeypatch.setattr(panels, "draw_strip", strip)
     live = make_repo(tmp_path, tail_lines=["t"])
