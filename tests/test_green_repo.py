@@ -1,5 +1,6 @@
 import argparse
 import ast
+import importlib
 import io
 import json
 import os
@@ -35,6 +36,7 @@ PASSING_SCRIPTS = [
     "test-sonar-worktree.py",
     "test-practices.py",
 ]
+PACKAGE = "marestail"
 PERF_FAIL_LINE = "verdict-commit-files: '' != 'perf/bench_x.py'"
 DOCKER_SCRIPT = "test-perf-db.py"
 DOCKER = "docker"
@@ -301,6 +303,67 @@ def test_only_the_perf_db_script_needs_docker() -> None:
     assert hermetic == []
     assert DOCKER in (ROOT / "tools" / DOCKER_SCRIPT).read_text()
     assert DOCKER_SCRIPT not in PASSING_SCRIPTS
+
+
+def import_from_nodes(source: str) -> list[ast.ImportFrom]:
+    return [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom)]
+
+
+def package_modules(node: ast.ImportFrom) -> dict[str, str]:
+    return {alias.asname or alias.name: f"{node.module}.{alias.name}" for alias in node.names}
+
+
+def script_module_aliases(source: str) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in import_from_nodes(source):
+        if str(node.module).startswith(PACKAGE):
+            aliases.update(package_modules(node))
+    return aliases
+
+
+def alias_attributes(node: ast.Attribute, aliases: dict[str, str]) -> list[tuple[str, str]]:
+    target = node.value
+    if not isinstance(target, ast.Name) or target.id not in aliases:
+        return []
+    return [(aliases[target.id], node.attr)]
+
+
+def script_attribute_uses(source: str) -> list[tuple[str, str]]:
+    aliases = script_module_aliases(source)
+    found: set[tuple[str, str]] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute):
+            found.update(alias_attributes(node, aliases))
+    return sorted(found)
+
+
+def test_the_docker_script_still_finds_every_package_name_it_uses() -> None:
+    source = (ROOT / "tools" / DOCKER_SCRIPT).read_text()
+    uses = script_attribute_uses(source)
+    missing = [f"{name}.{attr}" for name, attr in uses if not hasattr(importlib.import_module(name), attr)]
+    assert missing == []
+    assert {name for name, _ in uses} == set(script_module_aliases(source).values())
+    assert ("marestail.perf.db", "golden_meta") in uses
+
+
+def test_import_from_nodes_names_each_from_import_with_its_aliases() -> None:
+    nodes = import_from_nodes("from marestail.perf import db as perf_db, samples\nimport os\nfrom json import loads\n")
+    assert [str(node.module) for node in nodes] == ["marestail.perf", "json"]
+    assert package_modules(nodes[0]) == {"perf_db": "marestail.perf.db", "samples": "marestail.perf.samples"}
+
+
+def test_script_attribute_uses_ignores_names_the_script_never_imported() -> None:
+    source = "from marestail.perf import db as perf_db\nimport json\nperf_db.prune(json.loads(settings.ROWS_ENV))\n"
+    assert script_attribute_uses(source) == [("marestail.perf.db", "prune")]
+    assert script_module_aliases(source) == {"perf_db": "marestail.perf.db"}
+
+
+def test_alias_attributes_keeps_only_attributes_read_off_a_known_alias() -> None:
+    call = ast.parse("perf_db.prune(other.prune, pair[0].prune)")
+    attributes = [node for node in ast.walk(call) if isinstance(node, ast.Attribute)]
+    aliases = {"perf_db": "marestail.perf.db"}
+    found = [pair for node in attributes for pair in alias_attributes(node, aliases)]
+    assert found == [("marestail.perf.db", "prune")]
 
 
 @pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")

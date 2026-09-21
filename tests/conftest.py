@@ -39,7 +39,8 @@ class Clock:
 
 
 def gate_shape(result: Result) -> tuple[str, bool, str, list[str]]:
-    assert isinstance(result.gate, str) and result.gate
+    assert isinstance(result.gate, str)
+    assert result.gate
     assert result.seconds is not None
     assert result.seconds >= 0
     return result.gate, result.ok, result.summary, result.findings

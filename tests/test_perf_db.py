@@ -994,8 +994,9 @@ def test_prune(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 def test_prune_failure(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     database = make_db(tmp_path)
     fake_run(db, rules({"META.json": (0, json.dumps({"name": "x", "root": str(database.root)})), "rm -rf": (1, "busy")}))
+    nothing: set[str] = set()
     with pytest.raises(db.DatabaseError, match=r"^removing x failed \(exit 1\): busy$"):
-        db.prune(database, set())
+        db.prune(database, nothing)
 
 
 def test_down(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:

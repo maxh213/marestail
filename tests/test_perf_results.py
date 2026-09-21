@@ -174,8 +174,9 @@ def intervals_for(target: str) -> list[tuple[float, float] | None]:
 
 
 def test_measurements_for_seeds_the_bootstrap_from_the_target_name() -> None:
-    assert intervals_for("t") == [(-40.909090909, 170.0), (7.142857143, 84.210526316)]
-    assert intervals_for("t") == intervals_for("t")
+    first = intervals_for("t")
+    assert first == [(-40.909090909, 170.0), (7.142857143, 84.210526316)]
+    assert first == intervals_for("t")
     assert intervals_for("u") == [(-47.368421053, 178.571428571), (7.142857143, 90.909090909)]
 
 
