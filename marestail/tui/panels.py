@@ -35,6 +35,7 @@ BETWEEN_STEPS = "between steps"
 NO_CONVERSATION = "no conversation files found"
 IDLE_TEXT = "idle"
 NONE_TASK = "none"
+EMPTY = ""
 GATE_PREFIX = "⚒ gate: "
 IN_GATE = "in gate: "
 RUNNER_PREFIX = "runner: "
@@ -91,7 +92,7 @@ def surely(value: Any) -> Any:
 
 
 def first_text(*parts: str | None) -> str:
-    return next(filter(is_str, parts), "")
+    return next(filter(is_str, parts), EMPTY)
 
 
 def clamp(value: int, low: int, high: int) -> int:
@@ -428,7 +429,7 @@ def draw_strip(win: curses.window, y: int, x: int, width: int, steps: list[Step]
 
 
 def wrap_line(raw: str, width: int) -> list[str]:
-    return next(filter(None, (textwrap.wrap(raw, max(1, width), **WRAP_FLAGS), [""])))
+    return next(filter(None, (textwrap.wrap(raw, max(1, width), **WRAP_FLAGS), [EMPTY])))
 
 
 def plain_line(text: str) -> tuple[str, bool]:

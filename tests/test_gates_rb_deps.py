@@ -102,6 +102,18 @@ def test_relative(tmp_path: Path) -> None:
 def test_in_layer_and_forbidden_trim_slashes() -> None:
     assert rb_deps.in_layer("srcX/a.rb", "srcX") is True
     assert rb_deps.in_layer("srcX/a.rb", "srcX/") is True
+    assert rb_deps.layer_prefix("srcX") == "srcX/"
+    assert rb_deps.layer_prefix("srcX/") == "srcX/"
+    assert rb_deps.SLASH == "/"
     assert rb_deps.forbidden("srcX/a.rb", ["srcX"]) is True
     assert rb_deps.forbidden("srcX/a.rb", ["srcX/"]) is True
     assert rb_deps.forbidden("other.rb", ["srcX"]) is False
+
+
+def test_run_gate_caps_findings(tmp_path: Path, fake_run: Any) -> None:
+    write_sources(tmp_path)
+    many = [{"from": "a.rb", "to": "b.rb", "line": n, "constant": "B"} for n in range(61)]
+    fake_run(ruby, [(0, json.dumps(many))])
+    result = rb_deps.run_gate(make_context(tmp_path, {"ruby": {"ruby": "rb", "layers": [{"from": "a.rb", "forbid": ["b.rb"]}]}}))
+    assert len(result.findings) == 60
+    assert result.findings[-1].startswith("a.rb:59")

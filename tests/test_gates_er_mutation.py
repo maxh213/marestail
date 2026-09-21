@@ -205,8 +205,9 @@ def test_apply_cap(tmp_path: Path, cap: Any, count: int, skipped: int) -> None:
 
 
 def test_mutation_cap_rejects_none(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"erlang": {"mutation_max": None}})
     with pytest.raises(TypeError, match=r"^cap$"):
-        er_mutation.mutation_cap(make_context(tmp_path, {"erlang": {"mutation_max": None}}))
+        er_mutation.mutation_cap(ctx)
 
 
 def test_cap_value_keeps_an_int() -> None:

@@ -3,6 +3,7 @@ import time
 from dataclasses import asdict, dataclass, field
 
 MAX_FINDINGS_SHOWN = 40
+FINDING_CAP = 60
 GATE_FIELD = "gate"
 SECONDS_FIELD = "seconds"
 FINDINGS_FIELD = "findings"
@@ -10,6 +11,10 @@ FINDINGS_FIELD = "findings"
 
 def elapsed(started: float) -> float:
     return time.time() - started
+
+
+def capped(findings: list[str]) -> list[str]:
+    return findings[:FINDING_CAP]
 
 
 @dataclass

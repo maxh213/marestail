@@ -20,6 +20,13 @@ RESULTS_LINE = re.compile(r"^Results:\s*(\d+)$", re.MULTILINE)
 MAX_FINDINGS = 60
 INSTALL = 'add gem "mutant" and gem "mutant-rspec" to the Gemfile and run bundle install'
 REPLACE = "replace"
+COLON = ":"
+EMPTY = ""
+EMPTY_LIST: list[Any] = []
+SUBJECT_RESULTS = "subject_results"
+COVERAGE_RESULTS = "coverage_results"
+IDENTIFICATION = "identification"
+SOURCE_PATH = "source_path"
 
 Failure = tuple[str, int, str, str]
 
@@ -71,6 +78,8 @@ def mutate(ctx: Context, subjects: list[str], note: str, started: float) -> Resu
 
 
 def stdout_result(ctx: Context, code: int, output: str, started: float, note: str) -> Result:
+    if type(note) is not str:
+        raise TypeError("note")
     match = RESULTS_LINE.search(output)
     if not match:
         return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), elapsed(started))
@@ -85,7 +94,9 @@ def newest_report(created: set[Path]) -> dict[str, Any] | None:
     return report
 
 
-def session_result(ctx: Context, created: set[Path], output: str, started: float, note: str = "") -> Result:
+def session_result(ctx: Context, created: set[Path], output: str, started: float, note: str) -> Result:
+    if type(note) is not str:
+        raise TypeError("note")
     report = newest_report(created)
     if report is None:
         return Result(GATE, False, "mutant session report unreadable", tail(output), elapsed(started))
@@ -93,19 +104,37 @@ def session_result(ctx: Context, created: set[Path], output: str, started: float
     return verdict(total, failures, output, started, note)
 
 
+def list_field(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    if type(value) is not list:
+        raise TypeError("list")
+    return value
+
+
+def text_field(data: dict[str, Any], key: str) -> str:
+    if key not in data:
+        return EMPTY
+    value = data[key]
+    if type(value) is not str:
+        raise TypeError("text")
+    return value
+
+
 def session_failures(report: dict[str, Any], ctx: Context) -> tuple[int, list[Failure]]:
     total = 0
     failures: list[Failure] = []
-    for subject in report.get("subject_results", []):
-        total += len(subject.get("coverage_results", []))
+    for subject in list_field(report, SUBJECT_RESULTS):
+        total += len(list_field(subject, COVERAGE_RESULTS))
         failures.extend(subject_failures(subject, ctx))
     return total, failures
 
 
 def subject_failures(subject: dict[str, Any], ctx: Context) -> list[Failure]:
-    syntax, line = label(subject.get("identification", ""))
-    path = relative(subject.get("source_path", ""), ctx)
-    return [(path, line, syntax, mutation_kind(result)) for result in subject.get("coverage_results", []) if not killed(result)]
+    syntax, line = label(text_field(subject, IDENTIFICATION))
+    path = relative(text_field(subject, SOURCE_PATH), ctx)
+    return [(path, line, syntax, mutation_kind(result)) for result in list_field(subject, COVERAGE_RESULTS) if not killed(result)]
 
 
 def killed(result: dict[str, Any]) -> bool:
@@ -152,10 +181,10 @@ def identification(line: str) -> tuple[str, str, str] | None:
 
 
 def right_colon(text: str) -> tuple[str, str, str]:
-    index = text.rfind(":")
-    if index == -1:
-        return "", "", text
-    return text[:index], ":", text[index + 1 :]
+    if COLON not in text:
+        return EMPTY, EMPTY, text
+    index = text.rindex(COLON)
+    return text[:index], COLON, text[index + 1 :]
 
 
 def colons_from_right(text: str) -> list[int]:
@@ -224,7 +253,7 @@ def split_label(identification: str) -> list[str]:
     if not sep:
         return [identification]
     owner, _, path = right_colon(rest)
-    return [owner, path, line] if owner else [rest, "", line]
+    return [owner, path, line] if owner else [rest, EMPTY, line]
 
 
 def describe(path: str, line: int, syntax: str, kind: str, count: int) -> str:

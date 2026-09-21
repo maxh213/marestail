@@ -15,6 +15,23 @@ KEY = "proj"
 
 def test_failed_analysis_tail_length() -> None:
     assert sonar.FAILED_TAIL == 15
+    lines = "\n".join(f"line {n}" for n in range(20))
+    assert sonar.analysis_tail(lines) == [f"line {n}" for n in range(5, 20)]
+
+
+def test_coverage_and_duplication_scores() -> None:
+    assert sonar.coverage_score({}) == 100.0
+    assert sonar.coverage_score({sonar.COVERAGE: 50.0}) == 50.0
+    assert sonar.duplication_score({}) == 0.0
+    assert sonar.duplication_score({sonar.DUPLICATION: 0.5}) == 0.5
+    assert sonar.FULL_COVERAGE == 100.0
+    assert sonar.NO_DUPLICATION == 0.0
+
+
+def test_after_colon_uses_the_first_colon() -> None:
+    assert sonar.after_colon("a:b:c") == "b:c"
+    assert sonar.after_colon("plain") == "plain"
+    assert sonar.after_colon(":tail") == "tail"
 
 
 Responder = Callable[[str, dict[str, Any]], dict[str, Any]]
@@ -485,10 +502,26 @@ def test_scoped_duplication_without_components() -> None:
         ({}, []),
         ({"coverage": 100.0, "duplicated_lines_density": 0.0}, []),
         ({"coverage": 99.96}, ["sonar coverage 100.0% (need 100)"]),
+        ({"duplicated_lines_density": 0.5}, ["sonar duplication 0.5% (need 0)"]),
     ],
 )
 def test_measure_findings(values: dict[str, float], expected: list[str]) -> None:
     assert sonar.measure_findings(values) == expected
+
+
+def test_analyse_keeps_collect_and_language_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = make_context(tmp_path, {"sonar": {"project_key": KEY}})
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
+    monkeypatch.setattr(sonar, "collect", lambda *args: (["from-collect"], "OK"))
+    monkeypatch.setattr(sonar, "language_findings", lambda *args: ["from-lang"])
+    result = sonar.analyse(ctx, CREDS, 0.0)
+    assert result.findings == ["from-collect", "from-lang"]
+
+
+def test_scan_rejects_a_missing_ctx(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        sonar.scan(None, CREDS, KEY)  # type: ignore[arg-type]
 
 
 def test_summarize_scoped(tmp_path: Path) -> None:

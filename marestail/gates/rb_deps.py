@@ -5,7 +5,7 @@ from typing import Any
 
 from marestail.context import Context
 from marestail.gates._cycles import trim_slashes
-from marestail.report import Result, elapsed
+from marestail.report import Result, capped, elapsed
 from marestail.ruby import scan, scanned, sources
 
 GATE = "rb.deps"
@@ -30,7 +30,7 @@ def run_gate(ctx: Context) -> Result:
         return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], elapsed(started))
     findings = violations(scanned(output), load_layers(ctx), ctx)
     summary = f"{len(findings)} layer breaks" if findings else "layer contracts kept"
-    return Result(GATE, not findings, summary, findings[:60], elapsed(started))
+    return Result(GATE, not findings, summary, capped(findings), elapsed(started))
 
 
 def violations(edges: list[dict[str, Any]], layers: list[dict[str, Any]], ctx: Context) -> list[str]:
@@ -50,8 +50,15 @@ def breaks(src: str, dst: str, layer: dict[str, Any]) -> bool:
     return in_layer(src, layer["from"]) and forbidden(dst, layer["forbid"])
 
 
+SLASH = "/"
+
+
+def layer_prefix(layer: str) -> str:
+    return trim_slashes(layer) + SLASH
+
+
 def in_layer(src: str, layer: str) -> bool:
-    return src.startswith(trim_slashes(layer) + "/") or src.startswith(layer)
+    return src.startswith(layer_prefix(layer)) or src.startswith(layer)
 
 
 def forbidden(dst: str, bans: list[str]) -> bool:

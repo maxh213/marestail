@@ -134,5 +134,10 @@ def xml_text(value: str | None) -> str:
     return value if value is not None else EMPTY
 
 
+DOLLAR = "$"
+
+
 def before_dollar(text: str) -> str:
-    return text.split("$", 1)[0]
+    if DOLLAR not in text:
+        return text
+    return text[: text.index(DOLLAR)]

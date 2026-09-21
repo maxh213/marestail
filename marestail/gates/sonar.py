@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet, erlang, java, rust
-from marestail.context import Context
+from marestail.context import Context, live
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -93,13 +93,19 @@ def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
         return Result(GATE, False, "scanner failed", tail(output), elapsed(started))
     error = wait_for_analysis(client, task_file)
     if error:
-        return Result(GATE, False, "analysis did not complete", [error, *tail(output, FAILED_TAIL)], elapsed(started))
-    findings, status = collect(ctx, client, key)
-    findings += language_findings(ctx, client, key)
+        return Result(GATE, False, "analysis did not complete", [error, *analysis_tail(output)], elapsed(started))
+    collected, status = collect(ctx, client, key)
+    extra = language_findings(ctx, client, key)
+    findings = collected + extra
     return Result(GATE, not findings, summarize(ctx, findings, status), findings, elapsed(started))
 
 
+def analysis_tail(output: str) -> list[str]:
+    return tail(output, FAILED_TAIL)
+
+
 def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
+    ctx = live(ctx)
     key = require_key(key)
     if ctx.config.section("dotnet") is not None:
         code, output = dotnet_scan(ctx, creds, key)
@@ -118,6 +124,8 @@ def summarize(ctx: Context, findings: list[str], status: str) -> str:
 
 
 def scanner_command(ctx: Context, creds: Credentials, key: str) -> list[str]:
+    ctx = live(ctx)
+    key = require_key(key)
     return [*docker_arguments(ctx, creds), SCANNER_IMAGE, *scanner_properties(ctx, key)]
 
 
@@ -221,6 +229,7 @@ def separator_index(line: str) -> int:
 
 
 def dotnet_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str]:
+    ctx = live(ctx)
     key = require_key(key)
     if (ctx.root / PROPERTIES_FILE).exists():
         return 1, PROPERTIES_CONFLICT
@@ -421,10 +430,8 @@ def collect(ctx: Context, client: Client, key: str) -> tuple[list[str], str]:
     findings = reopened(ctx, client, key)
     if not ctx.scoped and status != "OK":
         findings.append(f"quality gate {status}")
-    findings += issues(ctx, client, key)
-    findings += hotspots(ctx, client, key)
-    findings += measures(ctx, client, key)
-    return findings, status
+    extra = issues(ctx, client, key) + hotspots(ctx, client, key) + measures(ctx, client, key)
+    return findings + extra, status
 
 
 def gate_status(client: Client, key: str) -> str:
@@ -433,7 +440,9 @@ def gate_status(client: Client, key: str) -> str:
 
 
 def after_colon(text: str) -> str:
-    return text.split(COLON, 1)[-1]
+    if COLON not in text:
+        return text
+    return text[text.index(COLON) + 1 :]
 
 
 def mapping_list(holder: dict[str, Any], key: str) -> list[Any]:
@@ -490,12 +499,30 @@ def metric_values(holder: dict[str, Any]) -> dict[str, float]:
     return {m["metric"]: float(m.get("value", 0)) for m in mapping_list(holder, "measures")}
 
 
+FULL_COVERAGE = 100.0
+NO_DUPLICATION = 0.0
+
+
+def coverage_score(values: dict[str, float]) -> float:
+    if COVERAGE not in values:
+        return FULL_COVERAGE
+    return values[COVERAGE]
+
+
+def duplication_score(values: dict[str, float]) -> float:
+    if DUPLICATION not in values:
+        return NO_DUPLICATION
+    return values[DUPLICATION]
+
+
 def measure_findings(values: dict[str, float]) -> list[str]:
     findings = []
-    if values.get(COVERAGE, 100.0) < 100.0:
-        findings.append(f"sonar coverage {values[COVERAGE]:.1f}% (need 100)")
-    if values.get(DUPLICATION, 0.0) > 0.0:
-        findings.append(duplication(values[DUPLICATION]))
+    coverage = coverage_score(values)
+    if coverage < FULL_COVERAGE:
+        findings.append(f"sonar coverage {coverage:.1f}% (need 100)")
+    density = duplication_score(values)
+    if density > NO_DUPLICATION:
+        findings.append(duplication(density))
     return findings
 
 

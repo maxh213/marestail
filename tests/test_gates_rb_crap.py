@@ -184,17 +184,32 @@ def test_score_and_describe(tmp_path: Path) -> None:
 def test_comment_prefix_stops_at_hash() -> None:
     assert rb_crap.comment_prefix("x # y # z") == "x "
     assert rb_crap.comment_prefix("hello") == "hello"
+    assert rb_crap.comment_prefix("# only") == ""
     assert rb_crap.HASH == "#"
     assert rb_crap.CRAP_POWER == 3
+    assert rb_crap.EQUALS == "="
+    assert rb_crap.EMPTY == ""
+
+
+def test_without_strings_strips_quoted_text() -> None:
+    assert rb_crap.without_strings('puts "end"') == "puts "
+    assert rb_crap.without_strings("x") == "x"
+
+
+def test_stripped_left_drops_leading_spaces() -> None:
+    assert rb_crap.stripped_left("  =begin") == "=begin"
+    assert rb_crap.stripped_left("=begin  ") == "=begin  "
 
 
 def test_boundary_ends_before_the_next_method() -> None:
     assert rb_crap.boundary([1, 5, 9], 0, 20) == 4
+    assert rb_crap.boundary([1, 5, 9], 1, 20) == 8
     assert rb_crap.boundary([1, 5, 9], 2, 20) == 20
 
 
 def test_line_delta_ignores_indented_equals() -> None:
     assert rb_crap.line_delta("  =begin") == 0
+    assert rb_crap.line_delta("  =begin end") == 0
     assert rb_crap.line_delta("x = 1") == 0
 
 

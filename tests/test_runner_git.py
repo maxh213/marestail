@@ -243,6 +243,27 @@ def test_fold_handoff_without_commits_records_one(repo: Path) -> None:
     assert last_message(repo) == "[m e] coder handoff\n\nbody\n\nBy coder."
 
 
+def test_fold_handoff_passes_used_into_stamped(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[set[str] | None] = []
+    real = runner.stamped
+
+    def spy(message: str, label: str, used: set[str] | None = None) -> str:
+        seen.append(used)
+        return real(message, label, used)
+
+    monkeypatch.setattr(runner, "stamped", spy)
+    config = Config(root=repo, raw={})
+    before = runner.head(config)
+    write(repo, "b.txt")
+    git(repo, "add", "b.txt")
+    git(repo, "-c", "user.name=Worker", "commit", "-q", "-m", "[other] first\n\nBy coder.")
+    report = write(repo, ".marestail/h/01-coder.md", "body")
+    runner.fold_handoff(config, "coder", report, before, LABEL, {"other"})
+    assert {"other"} in seen
+    assert None not in seen
+    assert last_message(repo).startswith("[other]")
+
+
 def test_fold_handoff_restamps_and_amends(repo: Path) -> None:
     config = Config(root=repo, raw={})
     before = runner.head(config)

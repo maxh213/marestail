@@ -196,6 +196,52 @@ def test_colons_from_right_include_a_trailing_colon() -> None:
 
 def test_right_colon_splits_from_the_end() -> None:
     assert rb_mutation.right_colon("a:b:c") == ("a:b", ":", "c")
+    assert rb_mutation.right_colon("x:y") == ("x", ":", "y")
+    assert rb_mutation.right_colon(":y") == ("", ":", "y")
+    assert rb_mutation.right_colon("a:") == ("a", ":", "")
+    assert rb_mutation.right_colon("abc") == ("", "", "abc")
+    assert rb_mutation.COLON == ":"
+    assert rb_mutation.EMPTY == ""
+
+
+def test_split_label_keeps_an_empty_path() -> None:
+    assert rb_mutation.split_label(":file.rb:12") == [":file.rb", "", "12"]
+    assert rb_mutation.split_label("plain") == ["plain"]
+
+
+def test_session_failures_defaults_missing_keys(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    assert rb_mutation.session_failures({}, ctx) == (0, [])
+    assert rb_mutation.list_field({}, rb_mutation.SUBJECT_RESULTS) == []
+
+
+def test_session_failures_rejects_a_non_list(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^list$"):
+        rb_mutation.session_failures({rb_mutation.SUBJECT_RESULTS: {}}, ctx)
+
+
+def test_subject_failures_defaults_missing_keys(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    assert rb_mutation.subject_failures({rb_mutation.COVERAGE_RESULTS: [SURVIVOR]}, ctx) == [(".", 0, "?", "evil")]
+    assert rb_mutation.subject_failures({}, ctx) == []
+
+
+def test_text_field_rejects_a_non_str() -> None:
+    with pytest.raises(TypeError, match=r"^text$"):
+        rb_mutation.text_field({rb_mutation.IDENTIFICATION: 1}, rb_mutation.IDENTIFICATION)
+
+
+def test_session_result_rejects_a_missing_note(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^note$"):
+        rb_mutation.session_result(ctx, set(), "out", 0.0, None)  # type: ignore[arg-type]
+
+
+def test_stdout_result_rejects_a_missing_note(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    with pytest.raises(TypeError, match=r"^note$"):
+        rb_mutation.stdout_result(ctx, 0, "Results: 1\n", 0.0, None)  # type: ignore[arg-type]
 
 
 def test_mutable_skips_vendor() -> None:

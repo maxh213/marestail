@@ -253,9 +253,12 @@ def test_describe_edge_cases(tmp_path: Path) -> None:
 def test_before_dollar_keeps_the_outer_class() -> None:
     assert java_mutation.before_dollar("a.b.Outer$Inner$X") == "a.b.Outer"
     assert java_mutation.before_dollar("Outer") == "Outer"
+    assert java_mutation.before_dollar("$Inner") == ""
+    assert java_mutation.before_dollar("a$b$c") == "a"
     assert java_mutation.xml_text(None) == ""
     assert java_mutation.xml_text("x") == "x"
     assert java_mutation.EMPTY == ""
+    assert java_mutation.DOLLAR == "$"
 
 
 def test_viable(tmp_path: Path) -> None:

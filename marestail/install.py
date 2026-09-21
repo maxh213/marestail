@@ -169,8 +169,17 @@ def trust_grok_folder(root: Path) -> None:
     folders = trusted_folders(store)
     if is_trusted(folders.get(key)):
         return
-    folders[key] = trust_entry()
+    folders[key] = require_entry(trust_entry())
     save_trusted_folders(store, key, folders)
+
+
+ENTRY_ERROR = "entry"
+
+
+def require_entry(entry: object) -> dict[str, Any]:
+    if type(entry) is not dict:
+        raise TypeError(ENTRY_ERROR)
+    return entry
 
 
 def trust_entry() -> dict[str, Any]:

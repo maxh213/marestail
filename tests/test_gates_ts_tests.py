@@ -34,6 +34,19 @@ def write_jest(root: Path, results: list[dict[str, Any]]) -> None:
     (root / ".marestail" / ts_tests.JEST_RESULTS).write_text(json.dumps({"testResults": results}))
 
 
+def test_chosen_runner_defaults_to_vitest(tmp_path: Path) -> None:
+    assert ts_tests.chosen_runner(make_context(tmp_path)) == "vitest"
+    assert ts_tests.chosen_runner(make_context(tmp_path, {"ts": {"runner": "jest"}})) == "jest"
+    assert ts_tests.VITEST == "vitest"
+    assert ts_tests.JEST == "jest"
+
+
+def test_chosen_runner_rejects_none(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"ts": {"runner": None}})
+    with pytest.raises(TypeError, match=r"^runner$"):
+        ts_tests.chosen_runner(ctx)
+
+
 def test_vitest_command(tmp_path: Path) -> None:
     assert ts_tests.vitest_command(make_context(tmp_path)) == [
         "npx",

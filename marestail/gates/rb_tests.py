@@ -193,8 +193,25 @@ def scoped_hits(coverage: dict[str, Any], ctx: Context) -> list[Any]:
     return [hits for file, data in coverage["files"].items() if ctx.in_scope(file) for hits in file_hits(file, data, ctx)]
 
 
+EXAMPLE = " example"
+UNKNOWN = "?"
+SPACE = " "
+
+
+def last_word(text: str) -> str:
+    if SPACE not in text:
+        return text
+    return text[text.rindex(SPACE) + 1 :]
+
+
+def example_count(line: str) -> str:
+    stripped = line.strip()
+    prefix = stripped[: stripped.index(EXAMPLE)] if EXAMPLE in stripped else stripped
+    return last_word(prefix)
+
+
 def count_examples(output: str) -> str:
     for line in reversed(output.splitlines()):
         if "example" in line and "failure" in line:
-            return line.strip().split(" example")[0].split()[-1]
-    return "?"
+            return example_count(line)
+    return UNKNOWN

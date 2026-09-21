@@ -265,3 +265,4 @@ def test_setup_needed_runs_to_the_end_without_a_next_heading() -> None:
     assert review.NEXT_HEADING == "\n## "
     assert review.setup_needed("## Setup needed\nkeep ## Setup needed extra\n## Next") == "keep ## Setup needed extra"
     assert review.setup_needed("## Setup needed\nfirst\n## Middle\n## Last") == "first"
+    assert review.setup_needed("## Setup needed extra\nkeep") == "extra\nkeep"

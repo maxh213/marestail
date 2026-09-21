@@ -326,9 +326,19 @@ def wait_ready(database: Database, name: str, timeout: int) -> None:
     raise DatabaseError(f"{name} was not ready after {timeout}s")
 
 
+COLON = ":"
+TAB = "\t"
+
+
+def after_last_colon(text: str) -> str:
+    if COLON not in text:
+        return text
+    return text[text.rindex(COLON) + 1 :]
+
+
 def host_port(database: Database, name: str) -> str:
     output = step(docker(database, "port", name, "5432/tcp"), f"docker port {name}")
-    return output.strip().splitlines()[0].rsplit(":", 1)[1]
+    return after_last_colon(output.strip().splitlines()[0])
 
 
 def psql(database: Database, container: str, sql: str) -> tuple[int, str]:
@@ -390,8 +400,14 @@ def schema_identity(database: Database, tree: trees.Tree) -> str:
     return "\n".join(migration_entries(listing, database.migrations))
 
 
+def after_tab(line: str) -> str:
+    if TAB not in line:
+        return line
+    return line[line.index(TAB) + 1 :]
+
+
 def migration_entries(listing: str, migrations: list[str]) -> list[str]:
-    return [line for line in listing.splitlines() if "\t" in line and matches_any(line.split("\t", 1)[1], migrations)]
+    return [line for line in listing.splitlines() if TAB in line and matches_any(after_tab(line), migrations)]
 
 
 def estimate_bytes(goldens: list[dict[str, Any]], rows: int, min_free_gb: float) -> int:

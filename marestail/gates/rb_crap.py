@@ -18,6 +18,8 @@ COVERAGE_JSON = RB_COVERAGE
 GATE = "rb.crap"
 CRAP_POWER = 3
 HASH = "#"
+EQUALS = "="
+EMPTY = ""
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
 OPENER = re.compile(r"^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b")
 BLOCK_DO = re.compile(r"\bdo\b(?:\s*\|[^|]*\|)?\s*$")
@@ -102,7 +104,10 @@ def body_touched(start: int, end: int, gated: set[int]) -> bool:
 
 
 def boundary(ordered: list[int], index: int, total: int) -> int:
-    return (ordered[index + 1] - 1) if index + 1 < len(ordered) else total
+    following = index + 1
+    if following < len(ordered):
+        return ordered[following] - 1
+    return total
 
 
 def method_ranges(text: str, starts: list[int]) -> dict[int, int]:
@@ -124,15 +129,25 @@ def opens(code: str) -> int:
     return 1 if OPENER.match(code) or BLOCK_DO.search(code) else 0
 
 
+def without_strings(line: str) -> str:
+    return STRING.sub(EMPTY, line)
+
+
+def stripped_left(code: str) -> str:
+    return code.lstrip()
+
+
 def line_delta(line: str) -> int:
-    code = comment_prefix(STRING.sub("", line))
-    if code.lstrip().startswith("="):
+    code = comment_prefix(without_strings(line))
+    if stripped_left(code).startswith(EQUALS):
         return 0
     return opens(code) - len(CLOSER.findall(code))
 
 
 def comment_prefix(line: str) -> str:
-    return line.split(HASH, 1)[0]
+    if HASH not in line:
+        return line
+    return line[: line.index(HASH)]
 
 
 def recorded_hits(line: int, lines: list[Any]) -> int | None:

@@ -16,14 +16,25 @@ relative_path = labelled
 JEST_RESULTS = "ts-tests.json"
 UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)
 GATE = "ts.tests"
+VITEST = "vitest"
+JEST = "jest"
+RUNNER_ERROR = "runner"
+
+
+def chosen_runner(ctx: Context) -> str:
+    runner = ctx.ts("runner", VITEST)
+    if type(runner) is not str:
+        raise TypeError(RUNNER_ERROR)
+    return runner
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    jest = ctx.ts("runner", "vitest") == "jest"
-    code, output = run(jest_command(ctx) if jest else vitest_command(ctx), cwd=ctx.ts_root(), timeout=1800)
+    runner = chosen_runner(ctx)
+    command = jest_command(ctx) if runner == JEST else vitest_command(ctx)
+    code, output = run(command, cwd=ctx.ts_root(), timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", failures(ctx, jest) or tail(output), elapsed(started))
+        return Result(GATE, False, "tests failed", failures(ctx, runner == JEST) or tail(output), elapsed(started))
     return passed(ctx, output, started)
 
 
@@ -53,7 +64,7 @@ def vitest_command(ctx: Context) -> list[str]:
     report_dir = ctx.work / COVERAGE_DIR
     return [
         "npx",
-        "vitest",
+        chosen_runner(ctx),
         "run",
         "--coverage.enabled=true",
         "--coverage.all=true",

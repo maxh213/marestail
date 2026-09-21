@@ -39,6 +39,13 @@ def test_first_text_skips_missing_and_keeps_a_string() -> None:
     assert collect.first_text("12s", "0m") == "12s"
     assert collect.first_text("", "later") == ""
     assert collect.first_text(None, None) == ""
+    assert collect.first_text() == ""
+    assert collect.EMPTY == ""
+
+
+def test_first_present_skips_missing() -> None:
+    assert collect.first_present((None, "x")) == "x"
+    assert collect.first_present((None, None)) is None
 
 
 def test_work_path(tmp_path: Path) -> None:

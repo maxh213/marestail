@@ -409,6 +409,15 @@ def test_host_port(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(db, [(0, "[::1]:32768\n0.0.0.0:9\n")])
     assert db.host_port(make_db(tmp_path), "box") == "32768"
     assert fake.calls == [["docker", "port", "box", "5432/tcp"]]
+    assert db.after_last_colon("0.0.0.0:9") == "9"
+    assert db.after_last_colon("plain") == "plain"
+    assert db.COLON == ":"
+
+
+def test_after_tab_takes_the_path() -> None:
+    assert db.after_tab("100644 blob abc\tperf/mig.sql") == "perf/mig.sql"
+    assert db.after_tab("no-tab") == "no-tab"
+    assert db.TAB == "\t"
 
 
 def test_host_port_failure_uses_the_label(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:

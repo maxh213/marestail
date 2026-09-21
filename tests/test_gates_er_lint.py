@@ -126,8 +126,9 @@ def test_batch_findings_clean_code_drops_parsed_lines(tmp_path: Path) -> None:
 
 
 def test_batch_findings_rejects_a_missing_code(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
     with pytest.raises(TypeError, match=r"^code$"):
-        er_lint.batch_findings(None, "src/a.erl:1: unused", make_context(tmp_path))  # type: ignore[arg-type]
+        er_lint.batch_findings(None, "src/a.erl:1: unused", ctx)  # type: ignore[arg-type]
 
 
 def test_erlang_suffixes_stay_lowercase() -> None:

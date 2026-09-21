@@ -91,6 +91,22 @@ def test_under() -> None:
     assert rs_deps.under("srcX/file", "srcX")
 
 
+def test_breaks_needs_both_ends() -> None:
+    layer = {"from": "src/db", "forbid": ["src/web"]}
+    assert rs_deps.breaks(edge("src/db/x.rs", "src/web/y.rs"), layer) is True
+    assert rs_deps.breaks(edge("src/other/x.rs", "src/web/y.rs"), layer) is False
+    assert rs_deps.breaks(edge("src/db/x.rs", "src/db/y.rs"), layer) is False
+
+
+def test_run_gate_caps_findings(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    many = [edge("src/domain/a.rs", "src/web/b.rs", n) for n in range(61)]
+    fake_run(rust, [(0, json.dumps(many))])
+    result = rs_deps.run_gate(make_context(tmp_path, {"rust": {"layers": LAYERS}}))
+    assert len(result.findings) == 60
+    assert result.findings[-1].startswith("src/domain/a.rs:59")
+
+
 def test_load_layers(tmp_path: Path) -> None:
     assert rs_deps.load_layers(make_context(tmp_path)) == []
     (tmp_path / ".rust-layers.json").write_text(json.dumps(LAYERS))

@@ -166,6 +166,7 @@ def test_relative_path(tmp_path: Path) -> None:
     [
         ("5 examples, 1 failure\nmore", "5"),
         ("Finished\n  7 examples, 0 failures, 2 pending  \n", "7"),
+        ("ran 7 examples, 0 failures", "7"),
         ("1 example, 0 failures", "1"),
         ("examples only\nno failure words", "?"),
         ("", "?"),
@@ -173,6 +174,15 @@ def test_relative_path(tmp_path: Path) -> None:
 )
 def test_count_examples(output: str, expected: str) -> None:
     assert rb_tests.count_examples(output) == expected
+
+
+def test_last_word_and_example_count() -> None:
+    assert rb_tests.last_word("7") == "7"
+    assert rb_tests.last_word("ran 7") == "7"
+    assert rb_tests.example_count("  ran 7 examples, 0 failures  ") == "7"
+    assert rb_tests.EXAMPLE == " example"
+    assert rb_tests.UNKNOWN == "?"
+    assert rb_tests.SPACE == " "
 
 
 def test_list_field_defaults_missing_keys() -> None:

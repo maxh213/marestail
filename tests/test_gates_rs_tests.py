@@ -79,9 +79,11 @@ def test_llvm_cov_missing(tmp_path: Path, fake_run: Any) -> None:
 
 
 def test_tests_fail(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(rust, [(101, "test a ... FAILED\n")])
+    fake = fake_run(rust, [(101, "test a ... FAILED\n")])
     result = rs_tests.run_gate(make_context(tmp_path))
     assert (result.ok, result.summary, result.findings) == (False, "tests failed", ["test a ... FAILED"])
+    assert fake.calls[0] == ["cargo", "llvm-cov", "--no-report"]
+    assert rs_tests.extra_args(make_context(tmp_path)) == []
 
 
 @pytest.mark.parametrize(("second", "flag"), [((1, "bad json\n"), "--json"), ((0, "no file"), "--json")])
@@ -153,6 +155,18 @@ def test_scoped_summary(tmp_path: Path, fake_run: Any) -> None:
 
 def test_line_percent_without_lines() -> None:
     assert rs_tests.line_percent({"a.rs": {"lines": {}, "regions": {}}}) == 100.0
+
+
+def test_lcov_line_records_hits(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    files: dict[str, rs_tests.Entry] = {}
+    current = rs_tests.lcov_line(ctx, files, None, "SF:src/lib.rs")
+    current = rs_tests.lcov_line(ctx, files, current, "DA:10,3,extra")
+    assert files["src/lib.rs"]["lines"]["10"] == 3
+    assert rs_tests.da_hits("DA:10,3,extra") == ("10", "3")
+    assert rs_tests.SF == "SF:"
+    assert rs_tests.DA == "DA:"
+    assert rs_tests.COMMA == ","
 
 
 def test_coverage_findings_orders_regions(tmp_path: Path) -> None:

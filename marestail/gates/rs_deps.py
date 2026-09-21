@@ -5,7 +5,7 @@ from typing import Any
 from marestail import rust
 from marestail.context import Context
 from marestail.gates._cycles import trim_slashes
-from marestail.report import Result, elapsed
+from marestail.report import Result, capped, elapsed
 
 GATE = "rs.deps"
 
@@ -23,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     relative = relative_edges(ctx, edges)
     findings = layer_findings(ctx, relative) + cycle_findings(ctx, relative)
     summary = f"{len(findings)} dependency breaks" if findings else "layer contracts kept, no module cycles"
-    return Result(GATE, not findings, summary, findings[:60], elapsed(started))
+    return Result(GATE, not findings, summary, capped(findings), elapsed(started))
 
 
 def relative_edges(ctx: Context, edges: list[Edge] | None) -> list[Edge]:

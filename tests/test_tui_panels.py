@@ -119,6 +119,9 @@ def test_put_and_clip() -> None:
     assert panels.int_attr(5) == 5
     assert panels.first_text("", "later") == ""
     assert panels.first_text(None, "later") == "later"
+    assert panels.first_text() == ""
+    assert panels.first_text(None) == ""
+    assert panels.EMPTY == ""
     assert panels.skip() is None
     assert panels.none_of("a") is None
     assert panels.present("a") is True

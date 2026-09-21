@@ -59,6 +59,9 @@ JACOCO = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <package name="app/core">
     <sourcefile name="Core.java"><line nr="2" mi="0" ci="5" mb="0" cb="0"/></sourcefile>
   </package>
+  <notpackage name="app">
+    <sourcefile name="App.java"><line nr="3" mi="0" ci="99" mb="0" cb="0"/></sourcefile>
+  </notpackage>
 </report>
 """
 APP_COVERAGE = {
@@ -307,13 +310,34 @@ def test_java_file_name_strips_package_then_nested_class() -> None:
     assert java_tests.java_file_name("a.b.c.Outer$Inner$X") == "Outer.java"
     assert java_tests.after_last("a.b.C", ".") == "C"
     assert java_tests.after_last("C", ".") == "C"
+    assert java_tests.after_last(".C", ".") == "C"
+    assert java_tests.after_last("ab.c", ".") == "c"
     assert java_tests.before_mark("Outer$Inner$X", "$") == "Outer"
+    assert java_tests.before_mark("$Inner", "$") == ""
+    assert java_tests.before_mark("plain", "$") == "plain"
     assert java_tests.xml_text(None) == ""
     assert java_tests.xml_text("x") == "x"
     assert java_tests.xml_attr(ET.fromstring("<x/>"), "name") == ""
     assert java_tests.xml_attr(ET.fromstring("<x name='App.java'/>"), "name") == "App.java"
     assert java_tests.PACKAGE == "package"
     assert java_tests.JAVA_SUFFIX == ".java"
+
+
+def test_require_tag_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^tag$"):
+        java_tests.require_tag(None)
+
+
+def test_package_files_uses_source_roots(tmp_path: Path) -> None:
+    project(tmp_path)
+    package = ET.fromstring('<package name="app"><sourcefile name="AppTest.java"><line nr="1" ci="1"/></sourcefile></package>')
+    assert java_tests.package_files(make_context(tmp_path), package) == []
+
+
+def test_source_folders_rejects_missing_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java, "source_roots", lambda ctx: None)
+    with pytest.raises(TypeError, match=r"^roots$"):
+        java_tests.source_folders(make_context(tmp_path))
 
 
 def test_line_gaps_keep_gated_lines() -> None:

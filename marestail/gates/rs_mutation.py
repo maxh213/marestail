@@ -120,5 +120,11 @@ def text_or_empty(value: object) -> str:
     return value if type(value) is str else ""
 
 
+COLON_SPACE = ": "
+
+
 def after_colon(name: str, function: str) -> str:
-    return name.split(": ", 1)[-1].removesuffix(f" in {function}")
+    rest = name
+    if COLON_SPACE in name:
+        rest = name[name.index(COLON_SPACE) + len(COLON_SPACE) :]
+    return rest.removesuffix(f" in {function}")

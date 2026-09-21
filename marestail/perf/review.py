@@ -149,6 +149,6 @@ def change_text(item: results.Classified) -> str:
 def setup_needed(text: str) -> str:
     if SETUP_NEEDED not in text:
         return ""
-    rest = text.split(SETUP_NEEDED, 1)[1]
+    rest = text[text.index(SETUP_NEEDED) + len(SETUP_NEEDED) :]
     body, _sep, _tail = rest.partition(NEXT_HEADING)
     return body.strip()

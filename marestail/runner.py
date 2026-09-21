@@ -973,9 +973,10 @@ def fold_handoff(config: Config, role: str, report: Path, before: str, label: st
     if head(config) == before:
         record_commit(config, f"{role} handoff", body, role, label)
         return
-    stamp_history(config, before, label, used)
+    labels = used if used is not None else set()
+    stamp_history(config, before, label, labels)
     _, original = run([GIT, LOG, "-1", "--format=%B"], cwd=config.root)
-    message = stamped(strip_byline(original, role), label, used) + f"\n\n{body}\n\nBy {role}."
+    message = stamped(strip_byline(original, role), label, labels) + f"\n\n{body}\n\nBy {role}."
     run([GIT, COMMIT, "--amend", ALLOW_EMPTY, "-q", "-m", message], cwd=config.root)
 
 

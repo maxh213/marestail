@@ -178,6 +178,12 @@ def test_merge_cursor_hook_passes_the_version_default(tmp_path: Path, monkeypatc
 def test_trust_entry_marks_the_folder_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", lambda: 9.7)
     assert install.trust_entry() == {install.TRUSTED: True, install.DECIDED: 9}
+    assert install.require_entry(install.trust_entry())["trusted"] is True
+
+
+def test_require_entry_rejects_none() -> None:
+    with pytest.raises(TypeError, match=r"^entry$"):
+        install.require_entry(None)
 
 
 def test_install_constants() -> None:

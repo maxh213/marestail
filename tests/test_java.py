@@ -83,8 +83,9 @@ def test_locate_rejects_a_missing_ctx(tmp_path: Path) -> None:
 
 
 def test_locate_rejects_a_non_str_package(tmp_path: Path) -> None:
+    ctx = ctx_at(tmp_path)
     with pytest.raises(TypeError, match=r"^path$"):
-        java.locate(ctx_at(tmp_path), 1, "App.java")  # type: ignore[arg-type]
+        java.locate(ctx, 1, "App.java")  # type: ignore[arg-type]
 
 
 def test_require_names_and_locate_folders(tmp_path: Path) -> None:

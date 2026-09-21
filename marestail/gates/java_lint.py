@@ -53,7 +53,7 @@ def lint(ctx: Context, files: list[Path], started: float) -> Result:
     findings = suppression_findings(ctx, files) + javac_findings(ctx, diagnostics)
     if compile_failed(diagnostics):
         return failure("does not compile", sorted(set(findings)), started)
-    pmd, error = pmd_findings(ctx, files, classpath, classes, release)
+    pmd, error = pmd_findings(ctx, files, classpath, classes, release=release)
     return finish(findings, pmd, error, started)
 
 
@@ -111,7 +111,7 @@ def require_paths(classpath: object, classes: object) -> None:
         raise TypeError("path")
 
 
-def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path, release: str | None) -> tuple[list[str], str | None]:
+def pmd_findings(ctx: Context, files: list[Path], classpath: Path, classes: Path, *, release: str | None) -> tuple[list[str], str | None]:
     require_paths(classpath, classes)
     tools, error = java.pmd_classpath(ctx)
     if tools is None:

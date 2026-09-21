@@ -42,6 +42,7 @@ CONV_MAX_LINES = 200
 NAMED_TOOLS = ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vitest", "jest", "tsc", "eslint")
 FIELD_KEYS = ("file_path", "command", "pattern")
 MODEL_FLAGS = frozenset({"--model", "-m"})
+EMPTY = ""
 
 ProcRow = tuple[int, int, int, list[str]]
 
@@ -79,7 +80,7 @@ def surely(value: Any) -> Any:
 
 
 def first_text(*parts: str | None) -> str:
-    return next(filter(is_str, parts), "")
+    return next(filter(is_str, parts), EMPTY)
 
 
 def empty_list(*_args: object) -> list[Any]:
@@ -87,7 +88,7 @@ def empty_list(*_args: object) -> list[Any]:
 
 
 def blank(*_args: object) -> str:
-    return ""
+    return EMPTY
 
 
 def false_of(*_args: object) -> bool:
@@ -413,7 +414,7 @@ def stamp_running(steps: list[Step], lines: list[str]) -> None:
 
 
 def last_text(lines: list[str]) -> str:
-    return next(filter(str.strip, reversed(lines)), "")
+    return next(filter(str.strip, reversed(lines)), EMPTY)
 
 
 def chosen_step(steps: list[Step], matched: re.Match[str]) -> Step | None:
@@ -667,7 +668,7 @@ BLOCK_RENDER: dict[str, Callable[[dict[str, object]], str | None]] = {
 
 
 def tool_detail(value: object) -> str:
-    return next(filter(None, tool_fields(value)), "")
+    return next(filter(None, tool_fields(value)), EMPTY)
 
 
 def has_field(value: dict[str, object], key: str) -> bool:
@@ -1085,7 +1086,7 @@ def is_model_flag(tokens: list[str], index: int) -> bool:
 
 
 def model_of(tokens: list[str]) -> str:
-    return next(map(partial(token_after, tokens), filter(partial(is_model_flag, tokens), range(max(0, len(tokens) - 1)))), "")
+    return next(map(partial(token_after, tokens), filter(partial(is_model_flag, tokens), range(max(0, len(tokens) - 1)))), EMPTY)
 
 
 def cwd_of(pid: int) -> Path | None:

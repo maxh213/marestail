@@ -129,11 +129,15 @@ def java_file_name(owner: str) -> str:
 
 
 def after_last(text: str, mark: str) -> str:
-    return text.rsplit(mark, 1)[-1]
+    if mark not in text:
+        return text
+    return text[text.rindex(mark) + 1 :]
 
 
 def before_mark(text: str, mark: str) -> str:
-    return text.split(mark, 1)[0]
+    if mark not in text:
+        return text
+    return text[: text.index(mark)]
 
 
 def xml_text(value: str | None) -> str:
@@ -145,17 +149,35 @@ def xml_attr(node: ET.Element, key: str) -> str:
     return value if value is not None else EMPTY
 
 
+def require_tag(tag: object) -> str:
+    if type(tag) is not str:
+        raise TypeError("tag")
+    return tag
+
+
+def package_nodes(report: ET.Element) -> list[ET.Element]:
+    return list(report.iter(require_tag(PACKAGE)))
+
+
+def source_folders(ctx: Context) -> list[Path]:
+    roots = java.source_roots(ctx)
+    if roots is None:
+        raise TypeError("roots")
+    return roots
+
+
 def normalise(ctx: Context, report: ET.Element) -> dict[str, Any]:
     files: dict[str, dict[str, Any]] = {}
-    for package in report.iter(PACKAGE):
+    for package in package_nodes(report):
         files.update(package_files(ctx, package))
     return {FILES: files, "totals": {"percent_covered": percent_covered(files)}}
 
 
 def package_files(ctx: Context, package: ET.Element) -> list[tuple[str, dict[str, Any]]]:
     found = []
+    roots = source_folders(ctx)
     for source in package.findall("sourcefile"):
-        path = java.locate(ctx, xml_attr(package, "name"), xml_attr(source, "name"), java.source_roots(ctx))
+        path = java.locate(ctx, xml_attr(package, "name"), xml_attr(source, "name"), roots)
         if path is not None and not java.coverage_excluded(ctx, java.rel(ctx, path)):
             found.append((java.rel(ctx, path), source_coverage(source)))
     return found

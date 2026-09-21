@@ -50,7 +50,7 @@ def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
 def test_pmd_findings_rejects_a_missing_path(tmp_path: Path) -> None:
     ctx = project(tmp_path)
     with pytest.raises(TypeError, match=r"^path$"):
-        java_lint.pmd_findings(ctx, [], tmp_path, None, None)  # type: ignore[arg-type]
+        java_lint.pmd_findings(ctx, [], tmp_path, None, release=None)  # type: ignore[arg-type]
 
 
 def test_require_paths_accepts_paths(tmp_path: Path) -> None:
@@ -164,6 +164,19 @@ def test_reports_pmd_error_with_unsorted_findings(tmp_path: Path, seams: Seams, 
     )
 
 
+def test_lint_passes_release_to_pmd(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
+    ctx = project(tmp_path)
+    fake = fake_run(java_lint, pmd_report({"files": []}))
+    java_lint.run_gate(ctx)
+    assert fake.calls[0][-2:] == ["--use-version", "java-17"]
+
+
+def test_pmd_findings_rejects_omitted_release(tmp_path: Path) -> None:
+    ctx = project(tmp_path)
+    with pytest.raises(TypeError):
+        java_lint.pmd_findings(ctx, [], tmp_path / "cp", tmp_path / "classes")  # type: ignore[call-arg]
+
+
 def test_clean_run(tmp_path: Path, seams: Seams, fake_run: Any) -> None:
     write(tmp_path / "pom.xml", "<project/>")
     write(tmp_path / APP, "package app;\nclass App {}\n")
@@ -275,7 +288,9 @@ def test_squash(text: str, expected: str) -> None:
 
 def run_pmd(tmp_path: Path, ctx: Context, release: str | None) -> tuple[list[str], str | None]:
     classes = tmp_path / "classes"
-    return java_lint.pmd_findings(ctx, [tmp_path / APP, tmp_path / TEST], tmp_path / ".marestail" / "java-classpath.txt", classes, release)
+    return java_lint.pmd_findings(
+        ctx, [tmp_path / APP, tmp_path / TEST], tmp_path / ".marestail" / "java-classpath.txt", classes, release=release
+    )
 
 
 def test_pmd_findings_command(tmp_path: Path, seams: Seams, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:

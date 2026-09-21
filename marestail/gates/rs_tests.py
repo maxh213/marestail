@@ -18,10 +18,14 @@ PASSED = re.compile(r"^test result: \w+\. (\d+) passed", re.MULTILINE)
 Entry = dict[str, dict[str, int]]
 
 
+def extra_args(ctx: Context) -> list[str]:
+    return rust.configured_list(ctx.rust("test_args", rust.EMPTY))
+
+
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     ignore = ignore_args(ctx)
-    code, output = rust.cargo(ctx, ["llvm-cov", "--no-report", *rust.listify(ctx.rust("test_args", []))], timeout=3600)
+    code, output = rust.cargo(ctx, ["llvm-cov", "--no-report", *extra_args(ctx)], timeout=3600)
     return test_failure(code, output, started) or report_failure(ctx, ignore, started) or coverage_result(ctx, output, started)
 
 
@@ -85,11 +89,25 @@ def merge_lcov(ctx: Context, files: dict[str, Entry]) -> None:
         current = lcov_line(ctx, files, current, line)
 
 
+SF = "SF:"
+DA = "DA:"
+COMMA = ","
+
+
+def da_hits(line: str) -> tuple[str, str]:
+    body = line[len(DA) :]
+    index = body.index(COMMA)
+    rest = body[index + 1 :]
+    if COMMA in rest:
+        rest = rest[: rest.index(COMMA)]
+    return body[:index], rest
+
+
 def lcov_line(ctx: Context, files: dict[str, Entry], current: Entry | None, line: str) -> Entry | None:
-    if line.startswith("SF:"):
-        return entry_for(files, rust.rel(ctx, line[3:]))
-    if line.startswith("DA:") and current is not None:
-        number, hits = line[3:].split(",")[:2]
+    if line.startswith(SF):
+        return entry_for(files, rust.rel(ctx, line[len(SF) :]))
+    if line.startswith(DA) and current is not None:
+        number, hits = da_hits(line)
         keep_max(current["lines"], number, int(hits))
     return current
 
