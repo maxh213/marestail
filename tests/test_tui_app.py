@@ -353,6 +353,7 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     scr_keys.keys = [ord("q")]
     monkeypatch.setattr(session.panels[0], "on_key", reply("quit"))
     assert app.run_session(session, as_window(scr_keys)) == 0
+    assert scr_keys.erased == 1
 
 
 def test_app_constants() -> None:
@@ -367,6 +368,7 @@ def test_app_constants() -> None:
     assert app.DETAIL_FOLLOW == " ⇊"
     assert app.HEADER == " M A R E S T A I L "
     assert app.TICK_MS == 125
+    assert app.SESSION_TICKS == 10000
     assert app.MIN_W == 70
     assert app.MIN_H == 20
 

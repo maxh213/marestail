@@ -20,7 +20,7 @@ def test_skipped() -> None:
 
 
 def test_result_field_names() -> None:
-    assert (report.GATE_FIELD, report.SECONDS_FIELD) == ("gate", "seconds")
+    assert (report.GATE_FIELD, report.SECONDS_FIELD, report.FINDINGS_FIELD) == ("gate", "seconds", "findings")
 
 
 def test_result_rejects_a_missing_gate() -> None:
@@ -38,6 +38,12 @@ def test_result_rejects_missing_seconds() -> None:
 def test_result_rejects_omitted_seconds() -> None:
     with pytest.raises(TypeError, match=r"^seconds$"):
         Result("docs", True, "ok")
+
+
+def test_result_rejects_none_findings() -> None:
+    missing: Any = None
+    with pytest.raises(TypeError, match=r"^findings$"):
+        Result("docs", True, "ok", missing, 0.0)
 
 
 def test_render_one_rejects_missing_seconds() -> None:

@@ -55,11 +55,8 @@ class Tarjan:
         self.work.append((node, iter(sorted(self.graph[node]))))
 
     def drain(self) -> None:
-        steps = 0
-        limit = drain_budget(len(self.graph))
-        while self.work:
-            steps += 1
-            if steps > limit:
+        for _ in range(drain_budget(len(self.graph))):
+            if not self.work:
                 return
             node, children = self.work[-1]
             child = next(children, None)

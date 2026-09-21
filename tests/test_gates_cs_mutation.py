@@ -43,6 +43,8 @@ class FakeDotnet:
         self.calls: list[tuple[list[str], dict[str, Any]]] = []
 
     def __call__(self, ctx: Any, args: list[str], **options: Any) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         self.calls.append((args, options))
         if args[0] == "tool":
             return self.restore
@@ -66,6 +68,7 @@ def test_reports_missing_projects(tmp_path: Path) -> None:
     result = cs_mutation.run_gate(make_context(tmp_path))
     assert result.ok is False
     assert result.summary.startswith("set [dotnet] project and test_project")
+    assert result.findings == []
 
 
 def test_needs_separate_test_project(tmp_path: Path) -> None:
@@ -212,5 +215,19 @@ def test_summary() -> None:
 
 def test_describe_defaults() -> None:
     assert cs_mutation.describe("A.cs", {"status": "Survived"}) == "A.cs:0 mutant Survived: "
+
+
+def test_trim_slash_pattern_only_strips_slashes() -> None:
+    assert cs_mutation.trim_slash_pattern("/XGen/", "cs/") == "XGen"
+    assert cs_mutation.trim_slash_pattern("cs/Gen/", "cs/") == "Gen"
+    assert cs_mutation.SLASH == "/"
+
+
+def test_precondition_reads_invalid_utf8(tmp_path: Path) -> None:
+    ctx = project(tmp_path)
+    product = tmp_path / "App" / "App.csproj"
+    product.write_bytes(b"<Project />\xff")
+    tests = tmp_path / "AppTests" / "AppTests.csproj"
+    assert cs_mutation.precondition(ctx, product, tests, 0.0) is None
     long = {"status": "Timeout", "mutatorName": "String", "replacement": "x" * 80, "location": {"start": {"line": 3}}}
     assert cs_mutation.describe("A.cs", long) == "A.cs:3 String Timeout: " + "x" * 60

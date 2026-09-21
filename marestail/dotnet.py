@@ -98,6 +98,7 @@ def dotnet(
     extra: dict[str, str] | None = None,
     program: str = DOTNET,
 ) -> tuple[int, str]:
+    ctx = live(ctx)
     folder = cwd or ctx.dotnet_root()
     variables = extra or {}
     return run(dotnet_bin(ctx, folder, network, variables, program) + args, cwd=folder, env={**env(ctx), **variables}, timeout=timeout)

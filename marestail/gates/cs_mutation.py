@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet
-from marestail.context import Context
+from marestail.context import Context, live
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -17,36 +17,37 @@ BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 SENTRY = re.compile(r'<PackageReference\s+Include="Sentry', re.IGNORECASE)
 SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerator>"
 INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
+SLASH = "/"
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     found = dotnet.project_pair(ctx)
     if isinstance(found, str):
-        return Result(GATE, False, found, [], 0.0)
-    blocked = precondition(ctx, *found)
+        return Result(GATE, False, found, [], elapsed(started))
+    blocked = precondition(ctx, *found, started)
     if blocked is not None:
         return blocked
     return scoped_run(ctx, found, started)
 
 
-def precondition(ctx: Context, product: Path, tests: Path) -> Result | None:
+def precondition(ctx: Context, product: Path, tests: Path, started: float) -> Result | None:
     if tests.resolve() == product.resolve():
         return Result(
             GATE,
             False,
             "stryker needs the tests in their own .csproj",
             [f"{dotnet.rel(ctx, product)}:1 holds both product and test code"],
-            0.0,
+            elapsed(started),
         )
-    csproj = product.read_text(errors="replace")
+    csproj = product.read_text(errors=dotnet.REPLACE)
     if SENTRY.search(csproj) and SENTRY_SWITCH not in csproj:
         return Result(
             GATE,
             False,
             "stryker cannot roll back mutants in Sentry's generated code",
             [f"{dotnet.rel(ctx, product)}:1 add {SENTRY_SWITCH} to a <PropertyGroup>"],
-            0.0,
+            elapsed(started),
         )
     return None
 
@@ -68,7 +69,7 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
     refused = restore_failure(ctx, started)
     if refused is not None:
         return refused
-    code, output = dotnet.dotnet(ctx, command(ctx, *pair, out, targets), timeout=7200)
+    code, output = dotnet.dotnet(ctx, command(ctx, pair[0], pair[1], out, targets), timeout=7200)
     report = out / REPORT
     if not report.exists():
         return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), elapsed(started))
@@ -76,6 +77,7 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
 
 
 def restore_failure(ctx: Context, started: float) -> Result | None:
+    ctx = live(ctx)
     code, output = dotnet.dotnet(ctx, ["tool", "restore"], timeout=900)
     if code == 0:
         return None
@@ -120,7 +122,7 @@ def missing(output: str, code: int) -> str:
 
 def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[str]) -> list[str]:
     prefix = dotnet.rel(ctx, ctx.dotnet_root()) + "/"
-    excludes = [f"!**/{pattern.strip('/').removeprefix(prefix)}" for pattern in dotnet.mutation_patterns(ctx)]
+    excludes = [f"!**/{trim_slash_pattern(pattern, prefix)}" for pattern in dotnet.mutation_patterns(ctx)]
     includes = ["**/" + name.removeprefix(prefix) for name in targets]
     return [
         "stryker",
@@ -138,6 +140,10 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "progress",
         *mutate(excludes + includes),
     ]
+
+
+def trim_slash_pattern(pattern: str, prefix: str) -> str:
+    return pattern.strip(SLASH).removeprefix(prefix)
 
 
 def mutate(patterns: list[str]) -> list[str]:

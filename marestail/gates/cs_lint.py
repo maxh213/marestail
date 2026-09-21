@@ -14,6 +14,8 @@ GATE = "cs.lint"
 MAX_LINES = 60
 ANALYSIS_LEVEL = "8.0"
 LEVELS = {"error", "warning"}
+COLON = ":"
+SARIF_VERSION = "2.1"
 SUPPRESSION = re.compile(r"#pragma\s+warning\s+disable|\[\s*SuppressMessage")
 
 
@@ -30,13 +32,20 @@ def run_gate(ctx: Context) -> Result:
 def analyse(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
     findings = suppression_findings(ctx)
     for project in dict.fromkeys(pair):
-        sarif = ctx.work / f"cs-lint-{project.stem}.sarif"
-        sarif.unlink(missing_ok=True)
-        code, output = dotnet.dotnet(ctx, build_args(project, sarif), timeout=900)
-        if not sarif.exists():
-            return no_sarif(ctx, project, (code, output), started)
-        findings += sarif_findings(ctx, sarif, project)
+        found = project_findings(ctx, project, findings, started)
+        if isinstance(found, Result):
+            return found
+        findings = found
     return verdict(sorted(set(findings)), started)
+
+
+def project_findings(ctx: Context, project: Path, findings: list[str], started: float) -> list[str] | Result:
+    sarif = ctx.work / f"cs-lint-{project.stem}.sarif"
+    sarif.unlink(missing_ok=True)
+    code, output = dotnet.dotnet(ctx, build_args(project, sarif), timeout=900)
+    if not sarif.exists():
+        return no_sarif(ctx, project, (code, output), started)
+    return findings + sarif_findings(ctx, sarif, project)
 
 
 def no_sarif(ctx: Context, project: Path, outcome: tuple[int, str], started: float) -> Result:
@@ -76,10 +85,19 @@ def suppression_findings(ctx: Context) -> list[str]:
     ]
 
 
+def mapping_text(data: dict[str, Any], key: str) -> str:
+    if key not in data:
+        return ""
+    return str(data[key])
+
+
 def sarif_findings(ctx: Context, sarif: Path, project: Path) -> list[str]:
     data = json.loads(sarif.read_text())
-    if not str(data.get("version", "")).startswith("2.1"):
-        return [f"{dotnet.rel(ctx, sarif)}:1 SARIF version {data.get('version')} is not 2.1; the ErrorLog comma must be escaped as %2c"]
+    version = mapping_text(data, "version")
+    if not version.startswith(SARIF_VERSION):
+        return [
+            f"{dotnet.rel(ctx, sarif)}:1 SARIF version {data.get('version')} is not {SARIF_VERSION}; the ErrorLog comma must be escaped as %2c"
+        ]
     return [found for result in data["runs"][0].get("results", []) for found in result_finding(ctx, result, project)]
 
 
@@ -95,8 +113,15 @@ def reportable(result: dict[str, Any], where: str, ctx: Context) -> bool:
     return result.get("level", "warning") in LEVELS and file_in_scope(where, ctx)
 
 
+def path_of_finding(where: str) -> str:
+    index = where.rfind(COLON)
+    if index < 0:
+        return where
+    return where[:index]
+
+
 def file_in_scope(where: str, ctx: Context) -> bool:
-    path = where.rsplit(":", 1)[0]
+    path = path_of_finding(where)
     return not path.endswith(".cs") or ctx.in_scope(path)
 
 

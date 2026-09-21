@@ -7,7 +7,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from marestail.context import Context
+from marestail.context import Context, live
 from marestail.gates._coverage import finding_file
 from marestail.report import Result, elapsed
 from marestail.shell import run
@@ -29,6 +29,10 @@ PYTHON_EXCLUDES = ["*/tests/*", "*/test/*", "*/mutants/*", "*/.venv/*", "*/__pyc
 TS_KINDS = ["files", "exports", "types"]
 ELIXIR_FAILED = "elixir dead code analysis failed"
 ERLANG_FAILED = "erlang dead code analysis failed"
+MISSING_CONFIDENCE = ""
+COLON = ":"
+NAMES_ERROR = "names"
+OUTPUT_ERROR = "output"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -79,11 +83,11 @@ def vulture_entry(line: str) -> tuple[str, str, str, str] | None:
 
 def without_confidence(line: str) -> str:
     body, _, tail = line.rpartition(" (")
-    return body if VULTURE_CONFIDENCE.fullmatch(tail) else ""
+    return body if VULTURE_CONFIDENCE.fullmatch(tail) else MISSING_CONFIDENCE
 
 
 def colons_from_left(text: str) -> list[int]:
-    return [at for at in range(1, len(text)) if text[at] == ":"]
+    return [at for at, char in enumerate(text) if at > 0 and char == COLON]
 
 
 def vulture_finding(entry: tuple[str, str, str, str], root: Path, ctx: Context) -> str:
@@ -108,6 +112,8 @@ def vulture_command(ctx: Context) -> list[str]:
 
 
 def ignore_names(names: list[str]) -> list[str]:
+    if type(names) is not list:
+        raise TypeError(NAMES_ERROR)
     return ["--ignore-names", ",".join(names)] if names else []
 
 
@@ -144,13 +150,18 @@ def issue_findings(issue: dict[str, Any], kinds: list[str], prefix: Path) -> lis
     return [describe(file, kind, item) for kind in kinds if kind != "files" for item in report_items(issue, kind)]
 
 
+def unused_kind(kind: str) -> str:
+    return kind[:-1] if kind.endswith("s") else kind
+
+
 def describe(file: Path, kind: str, item: Any) -> str:
     name = item.get("name", "") if isinstance(item, dict) else str(item)
     line = item.get("line", 0) if isinstance(item, dict) else 0
-    return f"{file}:{line} unused {kind.rstrip('s')} '{name}'"
+    return f"{file}:{line} unused {unused_kind(kind)} '{name}'"
 
 
 def ruby_findings(ctx: Context) -> list[str]:
+    ctx = live(ctx)
     if ctx.config.section("ruby") is None:
         return []
     from marestail.ruby import scan, sources
@@ -169,6 +180,7 @@ def ruby_report(code: int, output: str) -> list[str]:
 
 
 def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, **options: Any) -> list[str]:
+    ctx = live(ctx)
     files = module.sources(ctx)
     if not files:
         return []
@@ -209,6 +221,7 @@ def unused_function(label: str, entry: dict[str, Any]) -> str:
 def elixir_findings(ctx: Context) -> list[str]:
     from marestail import elixir
 
+    ctx = live(ctx)
     if ctx.config.section("elixir") is None:
         return []
     root = ctx.elixir_root()
@@ -230,6 +243,7 @@ def elixir_label(name: str, root: Path, ctx: Context) -> str:
 
 
 def erlang_findings(ctx: Context) -> list[str]:
+    ctx = live(ctx)
     if ctx.config.section("erlang") is None:
         return []
     from marestail import erlang
@@ -246,6 +260,8 @@ def erlang_findings(ctx: Context) -> list[str]:
 def compile_problem(code: int, output: str) -> str | None:
     from marestail import erlang
 
+    if type(output) is not str:
+        raise TypeError(OUTPUT_ERROR)
     return erlang.hint(code, output) or (failed(ERLANG_FAILED, output) if code != 0 else None)
 
 
@@ -265,11 +281,15 @@ def xref_entries(ctx: Context, sources: list[Path], entries: list[dict[str, Any]
     return [unused_function(labels.get(entry["module"], entry["module"]), entry) for entry in entries]
 
 
-def xref_args(ctx: Context, ebin: Path) -> list[str]:
-    from marestail import erlang
+def as_name_list(value: Any) -> list[str]:
+    if type(value) is not list:
+        raise TypeError(NAMES_ERROR)
+    return [str(part) for part in value]
 
+
+def xref_args(ctx: Context, ebin: Path) -> list[str]:
     beams = sorted(str(beam) for beam in ebin.glob("*.beam"))
-    ignore = erlang.listify(ctx.erlang("deadcode_ignore", []))
+    ignore = as_name_list(ctx.erlang("deadcode_ignore", []))
     return (["--ignore", ",".join(ignore)] if ignore else []) + beams
 
 

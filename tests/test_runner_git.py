@@ -73,6 +73,19 @@ def test_head_matches_git(repo: Path) -> None:
     assert runner.head(Config(root=repo, raw={})) == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_head_rejects_a_missing_config() -> None:
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.head(None)  # type: ignore[arg-type]
+
+
+def test_drop_ignored_since_rejects_missing_args(repo: Path) -> None:
+    config = Config(root=repo, raw={})
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.drop_ignored_since(None, "abc")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.drop_ignored_since(config, None)  # type: ignore[arg-type]
+
+
 def test_discard_edits_without_strays_does_nothing(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     keep = write(repo, "report.md")
     runner.discard_edits(Config(root=repo, raw={}), keep)
@@ -283,6 +296,7 @@ def test_file_diff(repo: Path) -> None:
         ("no section", None),
         ("intro\n## Config change\n  because \n## Next\nmore", "because"),
         ("## Config change\nall of it\n", "all of it"),
+        ("## Config change\nkeep\n## Config change\nlater", "keep"),
     ],
 )
 def test_config_change_section(tmp_path: Path, text: str | None, expected: str | None) -> None:

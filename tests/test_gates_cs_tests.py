@@ -78,6 +78,8 @@ class FakeDotnet:
         self.calls: list[list[str]] = []
 
     def __call__(self, ctx: Any, args: list[str]) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         self.calls.append(args)
         results = Path(args[7])
         assert not results.exists()
@@ -99,6 +101,7 @@ def test_reports_missing_projects(tmp_path: Path) -> None:
     result = cs_tests.run_gate(make_context(tmp_path))
     assert (result.gate, result.ok) == ("cs.tests", False)
     assert result.summary.startswith("set [dotnet] project and test_project")
+    assert result.findings == []
 
 
 def test_rejects_exclusion_attribute(tmp_path: Path) -> None:
@@ -332,3 +335,38 @@ def test_text_of() -> None:
     assert cs_tests.text_of(element, "t:Message") == "hi"
     assert cs_tests.text_of(element, "t:StackTrace") == ""
     assert cs_tests.text_of(element, "t:Missing") == ""
+
+
+def test_passed_attribute_without_passed() -> None:
+    counters = ET.fromstring("<Counters total='9' />")
+    assert cs_tests.passed_attribute(counters) == 0
+    assert cs_tests.passed_attribute(None) == 0
+    counters.set("passed", "4")
+    assert cs_tests.passed_attribute(counters) == 4
+
+
+def test_local_name_and_nested_trx() -> None:
+    assert cs_tests.local_name("t:Counters") == "Counters"
+    assert cs_tests.local_name("a:b:c") == "c"
+    assert cs_tests.local_name("plain") == "plain"
+    assert cs_tests.nested_trx(True, "body") == ".//body"
+    assert cs_tests.nested_trx(False, "body") == "body"
+    assert cs_tests.trx_path("t:ResultSummary/t:Counters") == "{*}ResultSummary/{*}Counters"
+    assert cs_tests.trx_path(".//t:UnitTestResult") == ".//{*}UnitTestResult"
+
+
+def test_trim_glob_only_strips_slashes() -> None:
+    assert cs_tests.trim_glob("/XGen/") == "XGen"
+    assert cs_tests.trim_glob("Gen") == "Gen"
+
+
+def test_existing_or_zero() -> None:
+    assert cs_tests.existing_or_zero({}, 3) == 0
+    assert cs_tests.existing_or_zero({3: 9}, 3) == 9
+
+
+def test_raise_to_keeps_the_higher_hit() -> None:
+    tables: dict[str, dict[Any, int]] = {}
+    cs_tests.raise_to(tables, "A.cs", 3, 2)
+    cs_tests.raise_to(tables, "A.cs", 3, 1)
+    assert tables == {"A.cs": {3: 2}}

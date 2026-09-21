@@ -54,6 +54,8 @@ def install(monkeypatch: pytest.MonkeyPatch, logs: dict[str, str | None], reply:
     calls: list[Any] = []
 
     def fake(ctx: Any, args: list[str], **options: Any) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         calls.append((args, options))
         stem = Path(args[1]).stem
         target = Path(args[10].removeprefix("-p:ErrorLog=").removesuffix("%2cversion=2.1"))
@@ -224,3 +226,33 @@ def test_location_outside_dotnet_root(tmp_path: Path) -> None:
 def test_file_in_scope(tmp_path: Path, where: str, expected: bool) -> None:
     ctx = make_context(tmp_path, scope_changed=True, changed={"App/A.cs"})
     assert cs_lint.file_in_scope(where, ctx) is expected
+
+
+def test_mapping_text_uses_a_blank_when_missing() -> None:
+    assert cs_lint.mapping_text({}, "version") == ""
+    assert cs_lint.mapping_text({"version": "2.1.0"}, "version") == "2.1.0"
+
+
+def test_path_of_finding_uses_the_last_colon() -> None:
+    assert cs_lint.path_of_finding("App/A:b.cs:3") == "App/A:b.cs"
+    assert cs_lint.path_of_finding("no-colon") == "no-colon"
+    assert cs_lint.COLON == ":"
+    assert cs_lint.SARIF_VERSION == "2.1"
+
+
+@pytest.mark.parametrize(
+    ("where", "expected"),
+    [("App/A:b.cs:3", True), ("App/B.cs:3", False)],
+)
+def test_file_in_scope_with_colon_in_the_path(tmp_path: Path, where: str, expected: bool) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, changed={"App/A:b.cs"})
+    assert cs_lint.file_in_scope(where, ctx) is expected
+
+
+def test_project_findings_returns_the_no_sarif_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, {"App": None}, (1, "broken"))
+    ctx = project(tmp_path)
+    started = 0.0
+    result = cs_lint.project_findings(ctx, tmp_path / "App" / "App.csproj", [], started)
+    assert isinstance(result, Result)
+    assert result.ok is False

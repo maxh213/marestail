@@ -3,7 +3,7 @@ import curses
 import locale
 import time
 from functools import partial
-from itertools import starmap
+from itertools import repeat, starmap
 from pathlib import Path
 from typing import Any, TypeGuard, cast
 
@@ -15,7 +15,7 @@ from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
 MIN_W = 70
 MIN_H = 20
 TICK_MS = 125
-NEVER = object()
+SESSION_TICKS = 10000
 REPOS_ATTR = "repos"
 KEY_LABEL = " key "
 BACK_ACTION = "back"
@@ -55,8 +55,8 @@ def skip(*_args: object, **_kwargs: object) -> Any:
     return None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
+def surely(value: Any) -> Any:
+    return value
 
 
 def is_code(value: int | None) -> TypeGuard[int]:
@@ -79,7 +79,7 @@ def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bo
 
 
 def run_session(session: "WatchSession", stdscr: curses.window) -> int:
-    return next(filter(is_code, iter(partial(session.tick, stdscr), NEVER)))
+    return next(filter(is_code, map(session.tick, repeat(stdscr, SESSION_TICKS))), 0)
 
 
 class WatchSession:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .collect import conversation_for, fmt_seconds
 from .model import Fleet, Process, RepoState, Step, Worker
@@ -38,6 +38,7 @@ NONE_TASK = "none"
 GATE_PREFIX = "⚒ gate: "
 IN_GATE = "in gate: "
 RUNNER_PREFIX = "runner: "
+KEEP_WS = False
 
 
 @dataclass(frozen=True)
@@ -69,8 +70,8 @@ def present[T](value: T | None) -> TypeGuard[T]:
     return value is not None
 
 
-def surely[T](value: T | None) -> T:
-    return cast(T, value)
+def surely(value: Any) -> Any:
+    return value
 
 
 def clamp(value: int, low: int, high: int) -> int:
@@ -402,8 +403,14 @@ def draw_strip(win: curses.window, y: int, x: int, width: int, steps: list[Step]
     list(map(partial(put_step, win, y, x, state), filter(partial(in_strip, width), enumerate(steps[-STRIP_STEPS:]))))
 
 
+def as_false(flag: bool) -> bool:
+    return {False: False}[flag]
+
+
 def wrap_line(raw: str, width: int) -> list[str]:
-    return next(filter(None, (textwrap.wrap(raw, max(1, width), replace_whitespace=False, drop_whitespace=False), [""])))
+    return next(
+        filter(None, (textwrap.wrap(raw, max(1, width), replace_whitespace=as_false(KEEP_WS), drop_whitespace=as_false(KEEP_WS)), [""]))
+    )
 
 
 def plain_line(text: str) -> tuple[str, bool]:

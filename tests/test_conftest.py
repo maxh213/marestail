@@ -45,16 +45,33 @@ def test_fake_run_copies_reply_lists(tmp_path: Path) -> None:
     assert fake(["cmd"], tmp_path) == (0, "")
 
 
-def test_fake_run_rejects_a_missing_cwd(tmp_path: Path) -> None:
+def test_fake_run_rejects_a_missing_cwd() -> None:
     fake = conftest.FakeRun([(0, "")])
     with pytest.raises(TypeError, match=r"^cwd$"):
         fake(["cmd"], None)  # type: ignore[arg-type]
+
+
+def test_fake_run_rejects_a_missing_timeout(tmp_path: Path) -> None:
+    fake = conftest.FakeRun([(0, "")])
     with pytest.raises(TypeError, match=r"^timeout$"):
         fake(["cmd"], tmp_path, timeout=None)
+
+
+def test_fake_run_rejects_a_none_command_part(tmp_path: Path) -> None:
+    fake = conftest.FakeRun([(0, "")])
     with pytest.raises(TypeError, match=r"^command$"):
         fake(["cmd", None], tmp_path)  # type: ignore[list-item]
+
+
+def test_check_fake_run_accepts_a_path(tmp_path: Path) -> None:
     conftest.check_fake_run(["cmd"], tmp_path, {})
+
+
+def test_reject_none_keeps_a_value() -> None:
     assert conftest.reject_none(lambda ctx: ctx)("x") == "x"
+
+
+def test_reject_none_rejects_none() -> None:
     with pytest.raises(TypeError, match=r"^ctx$"):
         conftest.reject_none(lambda ctx: ctx)(None)
 

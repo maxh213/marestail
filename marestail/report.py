@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 MAX_FINDINGS_SHOWN = 40
 GATE_FIELD = "gate"
 SECONDS_FIELD = "seconds"
+FINDINGS_FIELD = "findings"
 
 
 def elapsed(started: float) -> float:
@@ -22,6 +23,8 @@ class Result:
     def __post_init__(self) -> None:
         if not isinstance(self.gate, str):
             raise TypeError(GATE_FIELD)
+        if type(self.findings) is not list:
+            raise TypeError(FINDINGS_FIELD)
         if self.seconds is None:
             raise TypeError(SECONDS_FIELD)
 

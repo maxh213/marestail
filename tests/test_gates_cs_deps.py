@@ -165,6 +165,13 @@ def test_drain_gives_up_when_work_never_clears(monkeypatch: pytest.MonkeyPatch) 
     assert len(calls) == _cycles.drain_budget(2)
 
 
+def test_drain_stops_when_work_is_empty() -> None:
+    tarjan = _cycles.Tarjan({"a": set()})
+    tarjan.drain()
+    assert tarjan.work == []
+    assert tarjan.components == []
+
+
 def test_drain_budget_is_size_squared_plus_one() -> None:
     assert _cycles.drain_budget(0) == 1
     assert _cycles.drain_budget(1) == 2

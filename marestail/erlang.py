@@ -53,6 +53,7 @@ def docker_bin(ctx: Context, cwd: Path, program: str) -> list[str]:
 
 
 def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
+    ctx = live(ctx)
     cwd = cwd or ctx.erlang_root()
     return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=timeout)
 
@@ -108,6 +109,7 @@ def compile_with_tests(ctx: Context, sources: list[Path], tests: list[Path], ebi
 
 
 def rel(ctx: Context, path: str | Path) -> str:
+    ctx = live(ctx)
     try:
         return Path(path).resolve().relative_to(ctx.root.resolve()).as_posix()
     except ValueError:
@@ -145,6 +147,7 @@ def erl_files(root: Path, folders: Iterable[Path], pattern: str) -> list[Path]:
 
 
 def source_files(ctx: Context) -> list[Path]:
+    ctx = live(ctx)
     return sorted(path for path in erl_files(ctx.erlang_root(), source_dirs(ctx), "*.erl") if not path.name.endswith("_tests.erl"))
 
 

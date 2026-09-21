@@ -144,6 +144,16 @@ def test_rel(tmp_path: Path) -> None:
     assert erlang.rel(ctx, "/elsewhere/c.erl") == "/elsewhere/c.erl"
 
 
+def test_rel_rejects_a_missing_ctx() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        erlang.rel(None, "a.erl")  # type: ignore[arg-type]
+
+
+def test_source_files_rejects_a_missing_ctx() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        erlang.source_files(None)  # type: ignore[arg-type]
+
+
 def test_in_scope_findings(tmp_path: Path) -> None:
     findings = ["src/a.erl:3 bad", "src/b.erl:4 worse", "src/c.erl:1:2 extra"]
     assert erlang.in_scope_findings(make_context(tmp_path), findings) == findings

@@ -6,7 +6,7 @@ import pytest
 
 from marestail import dotnet, elixir, erlang, java, ruby, rust
 from marestail.gates import deadcode
-from tests.conftest import gate_shape, make_context
+from tests.conftest import gate_shape, make_context, reject_none
 
 VULTURE = "\n".join(
     [
@@ -145,6 +145,42 @@ def test_ts_findings_without_a_report(tmp_path: Path, fake_run: Any) -> None:
 )
 def test_describe(item: Any, expected: str) -> None:
     assert deadcode.describe(Path("f.ts"), "exports", item) == expected
+
+
+def test_unused_kind_strips_a_trailing_s() -> None:
+    assert deadcode.unused_kind("exports") == "export"
+    assert deadcode.unused_kind("x") == "x"
+
+
+def test_without_confidence_drops_unmatched_lines() -> None:
+    assert deadcode.without_confidence("no confidence") == ""
+    assert deadcode.without_confidence("a.py:1: unused function foo (80% confidence)") == "a.py:1: unused function foo"
+    assert deadcode.MISSING_CONFIDENCE == ""
+
+
+def test_colons_from_left_includes_the_first_colon() -> None:
+    assert deadcode.colons_from_left("a:b:c") == [1, 3]
+    assert deadcode.colons_from_left(":") == []
+    assert deadcode.colons_from_left("a:b") == [1]
+    assert deadcode.COLON == ":"
+
+
+def test_ignore_names_requires_a_list() -> None:
+    assert deadcode.ignore_names([]) == []
+    assert deadcode.ignore_names(["run_gate"]) == ["--ignore-names", "run_gate"]
+    with pytest.raises(TypeError, match=r"^names$"):
+        deadcode.ignore_names(None)  # type: ignore[arg-type]
+
+
+def test_as_name_list_requires_a_list() -> None:
+    assert deadcode.as_name_list(["A"]) == ["A"]
+    with pytest.raises(TypeError, match=r"^names$"):
+        deadcode.as_name_list(None)
+
+
+def test_compile_problem_rejects_missing_output() -> None:
+    with pytest.raises(TypeError, match=r"^output$"):
+        deadcode.compile_problem(1, None)  # type: ignore[arg-type]
 
 
 def test_knip_missing_keys_are_empty() -> None:
@@ -319,12 +355,17 @@ class FakeErlang:
         self.calls: list[Any] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(erlang, "source_files", lambda ctx: self.sources)
+        monkeypatch.setattr(erlang, "source_files", reject_none(lambda ctx: self.sources))
         monkeypatch.setattr(erlang, "fresh_dir", self.fresh_dir)
         monkeypatch.setattr(erlang, "erlc", self.erlc)
         monkeypatch.setattr(erlang, "escript", self.escript)
-        monkeypatch.setattr(erlang, "hint", lambda code, output: self.hint_text if code else None)
-        monkeypatch.setattr(erlang, "rel", lambda ctx, path: f"rel/{path.name}")
+        monkeypatch.setattr(erlang, "hint", self.hint)
+        monkeypatch.setattr(erlang, "rel", reject_none(lambda ctx, path: f"rel/{path.name}"))
+
+    def hint(self, code: int, output: str) -> str | None:
+        if output is None:
+            raise TypeError("output")
+        return self.hint_text if code else None
 
     def fresh_dir(self, path: Path) -> Path:
         self.calls.append(("fresh", path.name))
@@ -334,10 +375,14 @@ class FakeErlang:
         return self.ebin
 
     def erlc(self, ctx: Any, args: list[str], timeout: int) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         self.calls.append(("erlc", args, timeout))
         return self.compiled
 
     def escript(self, ctx: Any, script: str, args: list[str], timeout: int) -> tuple[int, str]:
+        if ctx is None:
+            raise TypeError("ctx")
         self.calls.append(("escript", script, args, timeout))
         return self.xref
 

@@ -167,6 +167,11 @@ def test_staged_project_creates_nested_work(tmp_path: Path) -> None:
     assert (ctx.work / dotnet.STAGE / dotnet.PROGRAM_CS).read_text() == "class P {}"
 
 
+def test_dotnet_rejects_a_missing_ctx() -> None:
+    with pytest.raises(TypeError, match=r"^ctx$"):
+        dotnet.dotnet(None, ["build"])  # type: ignore[arg-type]
+
+
 def test_dotnet_runs_in_root_by_default(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(dotnet, [(0, ""), (0, "done")])
     ctx = context(tmp_path, root="src")

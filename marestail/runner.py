@@ -55,6 +55,9 @@ GROK_APPROVE_LOCK = re.compile(
 WORKER_REPEAT_LIMIT = 3
 UNLIMITED = "unlimited"
 ENABLED = "enabled"
+ATTEMPT_CAP = 10000
+RUN_TYPE = "run"
+MISSING_OK = True
 GROK = "grok"
 SPACE = " "
 KILO_DEFAULT_MODEL = "kilo/stepfun/step-3.7-flash:free"
@@ -88,6 +91,7 @@ RM = "rm"
 CLEAN = "clean"
 EMPTY = ""
 NEWLINE = "\n"
+RENAME_MARK = " -> "
 HEAD_REF = "HEAD"
 TOKENS = "tokens"
 CONTENT = "content"
@@ -100,10 +104,17 @@ KIMI_TOKENS = ("input_tokens", "output_tokens")
 AUTHOR_AGAIN = "You asked for an authoring round; benches are editable again in the authoring phase."
 AUTHOR_DONE = "No authoring rounds left; benches stay frozen. Write PASS or BOUNCE with the benches as they are."
 BENCHES_CHANGED = "Benches changed in the previous authoring round; samples taken before the change were dropped."
+AUTHOR_VERDICT = re.compile(r"^\s*VERDICT:\s*AUTHOR\b", re.IGNORECASE | re.MULTILINE)
+VERDICT_LINE = re.compile(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", re.IGNORECASE)
 
 Verdict = tuple[str, str | None, str]
 Event = dict[str, Any]
 Spawned = subprocess.CompletedProcess[str] | tuple[int, str]
+
+
+def need(value: object, kind: type) -> None:
+    if type(value) is not kind:
+        raise TypeError(RUN_TYPE)
 
 
 @dataclass
@@ -138,6 +149,7 @@ class Run:
         return self.focus if self.hard else None
 
     def gates(self, tier: str) -> list[Result]:
+        need(tier, str)
         return run_gates(tier, self.scope_changed, None, self.focus, self.hard)
 
     @property
@@ -313,6 +325,8 @@ def run_judge_loop(state: Run, judge: Judge) -> bool:
 
 
 def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[bool | None, str]:
+    need(state, Run)
+    need(judge, Judge)
     verdict, target, report = run_judge(state, judge)
     if verdict == PASS:
         return True, report
@@ -320,7 +334,9 @@ def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[b
     if stop:
         print(stop)
         return False, report
-    return (None if rework(state, judge, target, report) else False), report
+    if rework(state, judge, target, report):
+        return None, report
+    return False, report
 
 
 def stall_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
@@ -345,16 +361,23 @@ def normalise_findings(report: str) -> list[str]:
     return [line for line in lines if re.match(r"^\d+\.", line)]
 
 
+def attempt_limit(retries: int) -> int:
+    return ATTEMPT_CAP if retries < 1 else retries
+
+
+def attempts_shown(retries: int) -> str:
+    return UNLIMITED if retries < 1 else str(retries)
+
+
 def attempts(retries: int) -> Iterator[int]:
-    n = 1
-    while retries <= 0 or n <= retries:
-        yield n
-        n += 1
+    yield from range(1, attempt_limit(retries) + 1)
 
 
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
+    need(state, Run)
+    need(worker, Worker)
     before = head(state.config)
-    previous, repeats = "", 0
+    previous, repeats = EMPTY, 0
     for attempt in attempts(state.retries):
         problems = worker_attempt(state, worker, feedback, attempt, before)
         if not problems:
@@ -393,17 +416,21 @@ def problem_shape(problems: str) -> str:
 
 
 def run_judge(state: Run, judge: Judge) -> Verdict:
+    need(state, Run)
+    need(judge, Judge)
     gate = gate_for(state, judge.tier)
     progress = JudgeProgress()
     for attempt in attempts(state.retries):
         outcome = judged(state, judge, gate, progress, attempt)
         if outcome is not None:
             return outcome
-    shown = UNLIMITED if state.retries <= 0 else str(state.retries)
+    shown = attempts_shown(state.retries)
     return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
 
 
 def judged(state: Run, judge: Judge, gate: tuple[str, bool], progress: JudgeProgress, attempt: int) -> Verdict | None:
+    need(state, Run)
+    need(judge, Judge)
     report = state.next_report(judge.name)
     print(f"== {judge.name} ({report.stem}) attempt {attempt}")
     with measuring(state, judge) as session:
@@ -416,6 +443,9 @@ def judged(state: Run, judge: Judge, gate: tuple[str, bool], progress: JudgeProg
 
 
 def prepare_perf(state: Run, judge: Judge, gate_ok: bool, session: perf_trees.Session | None, progress: JudgeProgress) -> None:
+    need(state, Run)
+    need(judge, Judge)
+    need(progress, JudgeProgress)
     if not gate_ok or session is None:
         return
     if progress.author_left > 0:
@@ -452,6 +482,8 @@ def judge_attempt(
 
 
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
+    need(state, Run)
+    need(judge, Judge)
     trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
     prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus)
     before = head(state.config)
@@ -474,7 +506,7 @@ def session_output(state: Run, report: Path) -> str:
 
 def asked_to_author(report: Path, blob: str) -> bool:
     combined = read_or_empty(report) + NEWLINE + blob
-    return bool(re.search(r"^\s*VERDICT:\s*AUTHOR\b", combined, re.IGNORECASE | re.MULTILINE))
+    return bool(AUTHOR_VERDICT.search(combined))
 
 
 def with_target(prefix: str, target: str | None) -> str:
@@ -499,6 +531,9 @@ def gated_verdict(judge: Judge, report: Path, gate: tuple[str, bool], parsed: tu
 def settle_verdict(
     state: Run, judge: Judge, report: Path, outcome: Verdict, session: perf_trees.Session | None, before: str
 ) -> tuple[Verdict | None, str]:
+    need(state, Run)
+    need(judge, Judge)
+    need(before, str)
     problems = measured_problems(state, session, report, outcome)
     if problems:
         print(f"   {judge.name} verdict rejected; retrying")
@@ -523,6 +558,9 @@ def drop_scratch(state: Run) -> None:
 
 
 def commit_verdict(state: Run, judge: Judge, before: str, outcome: Verdict) -> None:
+    need(state, Run)
+    need(judge, Judge)
+    need(before, str)
     verdict, target, text = outcome
     stage_writes(state.config, judge_writes(judge))
     saved = drop_ignored_since(state.config, before)
@@ -540,6 +578,9 @@ def no_verdict_feedback(report: Path) -> str:
 
 
 def author_phase(state: Run, judge: Judge, session: perf_trees.Session, feedback: str) -> str:
+    need(state, Run)
+    need(judge, Judge)
+    need(session, perf_trees.Session)
     for round_no in range(1, AUTHOR_ROUNDS + 1):
         note = state.folder / f"perf-author-{round_no}.md"
         if not author_round(state, judge, session, note, feedback):
@@ -564,6 +605,7 @@ def author_round(state: Run, judge: Judge, session: perf_trees.Session, note: Pa
 
 
 def fingerprints(config: Config, benches: list[str]) -> dict[str, str]:
+    need(config, Config)
     return {bench: perf_hygiene.fingerprint(config.root, bench) for bench in benches}
 
 
@@ -574,6 +616,8 @@ def record_staged(config: Config, message: str, role: str, label: str) -> None:
 
 
 def fill_samples(state: Run, session: perf_trees.Session) -> None:
+    need(state, Run)
+    need(session, perf_trees.Session)
     config = state.config
     benches = perf_review.bench_scripts(config)
     if not benches:
@@ -595,6 +639,8 @@ def drop_stale_samples(config: Config, stamps: dict[str, str]) -> None:
 
 
 def fill_bench(config: Config, records: list[Event], tree: perf_trees.Tree, bench: str, stamp: str, min_runs: int) -> None:
+    need(config, Config)
+    need(bench, str)
     have = sample_numbers(records, bench, tree.name, stamp)
     missing = min_runs - len(have)
     if missing <= 0:
@@ -620,6 +666,7 @@ def uses_database(records: list[Event], bench: str) -> bool:
 
 
 def bench_database(config: Config, records: list[Event], bench: str) -> tuple[perf_db.Database | None, bool]:
+    need(config, Config)
     if not uses_database(records, bench):
         return None, True
     database, problem = perf_db.for_run(config)
@@ -629,6 +676,8 @@ def bench_database(config: Config, records: list[Event], bench: str) -> tuple[pe
 
 
 def take_samples(config: Config, bench: str, tree: perf_trees.Tree, numbers: range, harness: tuple[perf_db.Database | None, str]) -> None:
+    need(config, Config)
+    need(bench, str)
     for number in numbers:
         problem = perf_samples.take_sample(config, bench, tree, number, harness)
         if problem:
@@ -655,7 +704,7 @@ def gate_for(state: Run, tier: str | None) -> tuple[str, bool]:
 
 def parse_verdict(report: Path, extra: str = EMPTY) -> tuple[str, str | None] | None:
     blob = read_or_empty(report) + NEWLINE + extra
-    match = re.search(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", blob, re.IGNORECASE)
+    match = VERDICT_LINE.search(blob)
     if not match:
         return None
     return match.group(1).upper(), known_target(match.group(2))
@@ -693,12 +742,16 @@ def frozen_problems(state: Run, worker: Worker, report: Path, before: str, dirty
 
 
 def frozen_changes(config: Config, worker: Worker, before: str, touched: list[str]) -> list[str]:
+    need(config, Config)
+    need(worker, Worker)
     return [
         path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))
     ]
 
 
 def audit_problems(state: Run, worker: Worker, report: Path) -> list[str]:
+    need(state, Run)
+    need(worker, Worker)
     if worker.audit and report.exists():
         return audit.problems(state.config, state.task_name, report.read_text(), worker.name)
     return []
@@ -739,12 +792,25 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     ]
 
 
+def after_marker(text: str, marker: str) -> str:
+    index = text.find(marker)
+    if index < 0:
+        return text
+    return text[index + len(marker) :]
+
+
+def until_heading(section: str) -> str:
+    index = section.find("\n## ")
+    if index < 0:
+        return section.strip()
+    return section[:index].strip()
+
+
 def config_change_section(report: Path) -> str | None:
     text = read_or_empty(report)
     if CONFIG_CHANGE not in text:
         return None
-    section = text.split(CONFIG_CHANGE, 1)[1]
-    return section.split("\n## ", 1)[0].strip()
+    return until_heading(after_marker(text, CONFIG_CHANGE))
 
 
 def revert(config: Config, before: str, paths: list[str], message: str) -> None:
@@ -772,7 +838,14 @@ def outside_work(path: str) -> bool:
 def changed_paths(config: Config, command: list[str]) -> list[str]:
     _, output = run(command, cwd=config.root)
     paths = [porcelain_path(line) for line in output.splitlines()]
-    return [path.split(" -> ")[-1].strip() for path in paths if outside_work(path)]
+    return [renamed_path(path) for path in paths if outside_work(path)]
+
+
+def renamed_path(path: str) -> str:
+    index = path.find(RENAME_MARK)
+    if index < 0:
+        return path.strip()
+    return path[index + len(RENAME_MARK) :].strip()
 
 
 def stray_edits(config: Config, keep_relative: str, writes: tuple[str, ...]) -> list[str]:
@@ -793,6 +866,7 @@ def discard_edits(config: Config, keep: Path, writes: tuple[str, ...] = ()) -> N
 
 
 def restore_paths(config: Config, paths: list[str]) -> None:
+    need(config, Config)
     _, listed = run([GIT, LS_TREE, "-r", NAME_ONLY, HEAD_REF, "--", *paths], cwd=config.root)
     tracked = sorted(set(listed.splitlines()) & set(paths))
     untracked = sorted(set(paths) - set(tracked))
@@ -801,7 +875,7 @@ def restore_paths(config: Config, paths: list[str]) -> None:
     if untracked:
         run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *untracked], cwd=config.root)
     for path in untracked:
-        (config.root / path).unlink(missing_ok=True)
+        (config.root / path).unlink(missing_ok=MISSING_OK)
 
 
 def written_paths(config: Config, writes: tuple[str, ...]) -> list[str]:
@@ -837,6 +911,8 @@ def saved_contents(config: Config, paths: list[str]) -> dict[str, bytes]:
 
 
 def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
+    need(config, Config)
+    need(before, str)
     paths = newly_tracked_ignored(config, before)
     saved = saved_contents(config, paths)
     if paths:
@@ -845,6 +921,8 @@ def drop_ignored_since(config: Config, before: str) -> dict[str, bytes]:
 
 
 def untrack_ignored(config: Config, before: str, paths: list[str]) -> None:
+    need(config, Config)
+    need(before, str)
     print(f"   dropping gitignored files: {', '.join(paths[:10])}")
     run([GIT, RM, "-q", CACHED, UNMATCHED, "--", *paths], cwd=config.root)
     if head(config) != before:
@@ -928,6 +1006,7 @@ def archive_handoffs(state: Run) -> None:
 
 
 def head(config: Config) -> str:
+    need(config, Config)
     _, output = run([GIT, "rev-parse", HEAD_REF], cwd=config.root)
     return output.strip()
 

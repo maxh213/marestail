@@ -359,10 +359,11 @@ def test_author_round_pins_config_session_and_note(tmp_path: Path, monkeypatch: 
 def test_judge_loop_stops_when_rework_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str | None, worked: bool, calls: int
 ) -> None:
-    patch(monkeypatch, runner, "run_judge", ("BOUNCE", target, "1. a"))
+    judged = patch(monkeypatch, runner, "run_judge", ("BOUNCE", target, "1. a"))
     worker = patch(monkeypatch, runner, "run_worker", worked)
     assert runner.run_judge_loop(make_state(tmp_path), CRITIC) is False
     assert len(worker.calls) == calls
+    assert len(judged.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -382,6 +383,18 @@ def test_attempts() -> None:
     assert list(runner.attempts(2)) == [1, 2]
     assert list(itertools.islice(runner.attempts(0), 4)) == [1, 2, 3, 4]
     assert list(itertools.islice(runner.attempts(-1), 2)) == [1, 2]
+    assert runner.attempt_limit(0) == runner.ATTEMPT_CAP
+    assert runner.attempt_limit(-1) == runner.ATTEMPT_CAP
+    assert runner.attempt_limit(3) == 3
+    assert list(runner.attempts(0))[-1] == runner.ATTEMPT_CAP
+    assert len(list(runner.attempts(0))) == runner.ATTEMPT_CAP
+
+
+def test_attempts_shown() -> None:
+    assert runner.attempts_shown(0) == "unlimited"
+    assert runner.attempts_shown(-1) == "unlimited"
+    assert runner.attempts_shown(1) == "1"
+    assert runner.attempts_shown(2) == "2"
 
 
 def test_runner_constants() -> None:
@@ -389,6 +402,34 @@ def test_runner_constants() -> None:
     assert runner.ENABLED == "enabled"
     assert runner.GROK == "grok"
     assert runner.SPACE == " "
+    assert runner.ATTEMPT_CAP == 10000
+    assert runner.RUN_TYPE == "run"
+    assert runner.MISSING_OK is True
+    assert runner.RENAME_MARK == " -> "
+    assert runner.AUTHOR_VERDICT.pattern == r"^\s*VERDICT:\s*AUTHOR\b"
+    assert runner.VERDICT_LINE.pattern == r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?"
+
+
+def test_need_rejects_the_wrong_type() -> None:
+    with pytest.raises(TypeError, match=r"^run$"):
+        runner.need(None, runner.Run)
+
+
+def test_need_accepts_the_matching_type() -> None:
+    runner.need("x", str)
+
+
+def test_renamed_path_keeps_plain_and_splits_on_arrow() -> None:
+    assert runner.renamed_path("src/a.py") == "src/a.py"
+    assert runner.renamed_path("old.py -> new.py") == "new.py"
+    assert runner.renamed_path("a -> b -> c") == "b -> c"
+
+
+def test_after_marker_and_until_heading() -> None:
+    assert runner.after_marker("pre## Config change\nbody\n## Next\n", runner.CONFIG_CHANGE) == "\nbody\n## Next\n"
+    assert runner.after_marker("nope", runner.CONFIG_CHANGE) == "nope"
+    assert runner.until_heading("body\n## Next\nrest") == "body"
+    assert runner.until_heading("only") == "only"
 
 
 @pytest.mark.parametrize(
@@ -504,6 +545,16 @@ def test_run_judge_retries_until_verdict(tmp_path: Path, monkeypatch: pytest.Mon
 def test_run_judge_gives_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     patch(monkeypatch, runner, "judge_attempt", (None, "again"))
     assert runner.run_judge(make_state(tmp_path, retries=2), CRITIC) == ("BOUNCE", None, "critic produced no verdict after 2 attempts")
+
+
+def test_run_judge_unlimited_shown_when_retries_are_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "attempts", lambda _retries: [1])
+    patch(monkeypatch, runner, "judge_attempt", (None, "again"))
+    assert runner.run_judge(make_state(tmp_path, retries=0), CRITIC) == (
+        "BOUNCE",
+        None,
+        "critic produced no verdict after unlimited attempts",
+    )
 
 
 def test_run_judge_perf_authoring_rounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_session: tuple[Session, list[str]]) -> None:

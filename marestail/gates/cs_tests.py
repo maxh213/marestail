@@ -9,7 +9,7 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from marestail import dotnet
-from marestail.context import Context
+from marestail.context import Context, live
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -55,6 +55,7 @@ def failed(message: str, output: str, started: float) -> Result:
 
 
 def run_tests(ctx: Context, pair: tuple[Path, Path], started: float) -> Result:
+    ctx = live(ctx)
     product, tests = pair
     results = ctx.work / RESULTS_DIR
     shutil.rmtree(results, ignore_errors=True)
@@ -98,7 +99,13 @@ def passed_run(ctx: Context, results: Path, output: str, started: float) -> Resu
 
 def passed_count(trx: Path) -> int:
     counters = ET.parse(trx).getroot().find(trx_path("t:ResultSummary/t:Counters"))
-    return int(counters.get("passed", 0)) if counters is not None else 0
+    return passed_attribute(counters)
+
+
+def passed_attribute(counters: ET.Element | None) -> int:
+    if counters is None or "passed" not in counters.attrib:
+        return 0
+    return int(counters.attrib["passed"])
 
 
 def coverage_run(ctx: Context, coverage: dict[str, Any], outcome: tuple[int, str], started: float) -> Result:
@@ -126,7 +133,7 @@ def attribute_findings(ctx: Context) -> list[str]:
 
 def write_runsettings(ctx: Context, product: Path, tests: Path) -> Path:
     root = ctx.dotnet_root().resolve()
-    excludes = [f"{root}/{pattern.strip('/')}" for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", []))]
+    excludes = [f"{root}/{trim_glob(pattern)}" for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", []))]
     if tests.parent != product.parent:
         excludes.append(f"{tests.parent.resolve()}/**/*.cs")
     include = str(tests.resolve() == product.resolve()).lower()
@@ -162,11 +169,26 @@ def text_of(result: ET.Element, tag: str) -> str:
     return (element.text or "").strip() if element is not None else ""
 
 
+def local_name(part: str) -> str:
+    index = part.rfind(":")
+    if index < 0:
+        return part
+    return part[index + 1 :]
+
+
 def trx_path(path: str) -> str:
     nested = path.startswith(".//")
-    names = [part.split(":")[-1] for part in path.removeprefix(".//").split("/")]
+    names = [local_name(part) for part in path.removeprefix(".//").split("/")]
     body = "/".join(ANY_XML_NAMESPACE + name for name in names)
-    return f".//{body}" if nested else body
+    return nested_trx(nested, body)
+
+
+def nested_trx(nested: bool, body: str) -> str:
+    return {True: f".//{body}", False: body}[nested]
+
+
+def trim_glob(pattern: str) -> str:
+    return pattern.strip("/")
 
 
 def normalise(ctx: Context, raw: dict[str, Any]) -> dict[str, Any]:
@@ -201,9 +223,15 @@ def methods_of(classes: dict[str, Any]) -> list[dict[str, Any]]:
     return [data for methods in classes.values() for data in methods.values()]
 
 
+def existing_or_zero(table: dict[Any, int], key: Any) -> int:
+    if key not in table:
+        return 0
+    return table[key]
+
+
 def raise_to(tables: dict[str, dict[Any, int]], relative: str, key: Any, hits: int) -> None:
     table = tables.setdefault(relative, {})
-    table[key] = max(table.get(key, 0), hits)
+    table[key] = max(existing_or_zero(table, key), hits)
 
 
 def merge(lines: dict[str, dict[Any, int]], branches: dict[str, dict[Any, int]], relative: str, data: dict[str, Any]) -> None:

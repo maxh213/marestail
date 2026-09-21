@@ -2,6 +2,8 @@ import curses
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from marestail.tui import panels
 from marestail.tui.model import Fleet, Process, RepoState, Step, Worker
 from marestail.tui.panels import (
@@ -605,6 +607,19 @@ def test_wrap_line_flags() -> None:
     assert wrap_line("  x", 10) == ["  x"]
     assert wrap_line("ab", 1) == ["a", "b"]
     assert wrap_line("abcd", 2) == ["ab", "cd"]
+    assert panels.KEEP_WS is False
+    assert panels.as_false(False) is False
+
+
+def test_as_false_rejects_none() -> None:
+    with pytest.raises(KeyError):
+        panels.as_false(None)  # type: ignore[arg-type]
+
+
+def test_shift_left_keeps_column_zero() -> None:
+    assert shift_left(1, 0, "ab") == (1, 0, "ab")
+    assert shift_left(1, -1, "ab") == (1, 0, "b")
+    assert shift_left(1, 2, "ab") == (1, 2, "ab")
 
 
 def test_section_lines_blank_and_flag() -> None:
