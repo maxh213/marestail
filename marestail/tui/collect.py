@@ -63,11 +63,11 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return (value,)[0]
+    return cast(T, (value,)[0])
 
 
 def first_text(*parts: str | None) -> str:
-    return next(filter(present, parts), "")
+    return cast(str, next(filter(present, parts), ""))
 
 
 def empty_list(*_args: object) -> list[Any]:
