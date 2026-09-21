@@ -44,6 +44,10 @@ STATEMENTS = "statements"
 PASS_THROUGHS = "pass_throughs"
 MODE = "depth"
 ELIXIR = "elixir"
+ELIXIR_SOURCES = "*.ex"
+ELIXIR_TEST_SUFFIX = "_test.exs"
+RUBY_SOURCES = "*.rb"
+RUBY_TEST_SUFFIX = "_spec.rb"
 
 
 @dataclass
@@ -286,7 +290,7 @@ def elixir_modules(config: Config) -> list[Module]:
     from marestail import elixir
 
     root = config.root / config.get(ELIXIR, "root", ".")
-    files = source_files(root, "*.ex", "_test.exs")
+    files = source_files(root, ELIXIR_SOURCES, ELIXIR_TEST_SUFFIX)
     if not files:
         return []
     code, output = elixir.scan(Context(config=config), "depth", files)
@@ -322,7 +326,7 @@ def ruby_modules(config: Config) -> list[Module]:
     from marestail.ruby import scan
 
     root = config.root / config.get("ruby", "root", ".")
-    files = source_files(root, "*.rb", "_spec.rb")
+    files = source_files(root, RUBY_SOURCES, RUBY_TEST_SUFFIX)
     if not files:
         return []
     code, output = scan(Context(config=config), MODE, files)

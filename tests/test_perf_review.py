@@ -53,7 +53,10 @@ def test_review_classifies_and_writes_results(tmp_path: Path) -> None:
         ("degraded", 100.0, "p50"),
         ("thin", 100.0, "p95"),
     ]
-    data = json.loads((tmp_path / "verdict.results.json").read_text())
+    raw = (tmp_path / "verdict.results.json").read_text()
+    data = json.loads(raw)
+    assert raw == json.dumps(data, indent=review.INDENT) + "\n"
+    assert review.INDENT == 2
     assert data["measurements"][0] | {"interval": None} == {
         "target": "t",
         "metric": "p50",
@@ -75,6 +78,7 @@ def test_review_classifies_and_writes_results(tmp_path: Path) -> None:
 def test_review_collects_every_kind_of_problem(tmp_path: Path) -> None:
     config = config_at(tmp_path, POLICY)
     make_bench(tmp_path)
+    make_bench(tmp_path, "bench_b")
     (tmp_path / "app.csproj").write_text("")
     (tmp_path / "perf" / "x.cs").write_text("")
     write_samples(config, [sample("baseline", "old", [10, 10])] * 2 + [sample("head", "old", [20, 20])] * 2)
@@ -83,6 +87,8 @@ def test_review_collects_every_kind_of_problem(tmp_path: Path) -> None:
     outcome = review.review(config, session_with("baseline", "head"), report, "PASS")
     assert outcome.used_db is False
     assert outcome.problems == [
+        "`perf/bench_b` has no samples on the baseline tree",
+        "`perf/bench_b` has no samples on the head tree",
         "`t` is degraded (+100.0% p50) but the verdict does not name it",
         "`perf/x.cs` would compile into app.csproj, because an SDK project at the repo root includes every .cs file below it; "
         "write this bench in another language",
@@ -97,6 +103,7 @@ def test_review_collects_every_kind_of_problem(tmp_path: Path) -> None:
         ([], []),
         (["b.csproj"], []),
         (["perf/x.txt"], []),
+        (["perf/x.cs"], []),
         (
             ["b.csproj", "a.csproj", "perf/z.cs", "perf/sub/y.cs"],
             [
@@ -144,15 +151,17 @@ def test_record_table_writes_and_stages(
     tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, ignored: int, staged: bool
 ) -> None:
     monkeypatch.setattr(time, "strftime", lambda _: "2026-01-02")
+    config = config_at(tmp_path)
     fake = fake_run(review, [(0, "abc1234\n"), (0, "pre5678\n"), (ignored, "")])
     outcome = review.Review([], [item("t", "degraded")], False)
-    review.record_table(config_at(tmp_path), session_with("head", table.PRE_MARESTAIL), outcome)
+    review.record_table(config, session_with("head", table.PRE_MARESTAIL), outcome)
     expected = [
         ["git", "rev-parse", "--short", "sha-head"],
         ["git", "rev-parse", "--short", "sha-pre-marestail"],
         ["git", "check-ignore", "-q", table.FILENAME],
     ]
     assert fake.calls == expected + ([["git", "add", "--", table.FILENAME]] if staged else [])
+    assert all(option["cwd"] is config.root for option in fake.options)
     loaded = table.load(tmp_path)
     assert loaded.columns == ["t p50"]
     assert [row["Commit"] for row in loaded.rows] == ["pre5678", "abc1234"]
@@ -160,12 +169,49 @@ def test_record_table_writes_and_stages(
 
 
 def test_snapshot_without_head_or_pre(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(time, "strftime", lambda _: "2026-01-02")
+    monkeypatch.setattr(time, "strftime", lambda pattern: {review.DATE: "2026-01-02"}[pattern])
+    config = config_at(tmp_path)
     fake = fake_run(review, [(0, " HEADSHA \n")])
     outcome = review.Review([], [item("t", "new")], False)
-    snapshot = review.snapshot_for(config_at(tmp_path), session_with("baseline"), outcome)
+    snapshot = review.snapshot_for(config, session_with("baseline"), outcome)
     assert fake.calls == [["git", "rev-parse", "--short", "HEAD"]]
+    assert fake.options[0]["cwd"] is config.root
+    assert review.DATE == "%Y-%m-%d"
     assert snapshot == table.Snapshot("task-1", "HEADSHA", "2026-01-02", table.EMPTY, None, outcome.classified)
+
+
+def test_snapshot_with_database_rows(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "strftime", lambda pattern: {review.DATE: "2026-01-02"}[pattern])
+    monkeypatch.delenv("MARESTAIL_PERF_DB_ROWS", raising=False)
+    config = config_at(tmp_path, {"perf": {"db": {"rows": 123}}})
+    fake = fake_run(review, [(0, "abc\n")])
+    seen: list[Any] = []
+    original = review.rows_cell
+    monkeypatch.setattr(review, "rows_cell", lambda cfg, used: seen.append((cfg, used)) or original(cfg, used))
+    outcome = review.Review([], [item("t", "new")], True)
+    snapshot = review.snapshot_for(config, session_with("head"), outcome)
+    assert seen == [(config, True)]
+    assert snapshot.rows == "123"
+    assert fake.options[0]["cwd"] is config.root
+
+
+def test_review_pass_without_benches_is_quiet(tmp_path: Path) -> None:
+    config = config_at(tmp_path, POLICY)
+    report = tmp_path / "verdict.md"
+    report.write_text("")
+    outcome = review.review(config, session_with("head"), report, "PASS")
+    assert outcome.problems == []
+    assert outcome.classified == []
+
+
+def test_review_empty_benches_still_asks_for_measurements(tmp_path: Path) -> None:
+    config = config_at(tmp_path, POLICY)
+    make_bench(tmp_path)
+    report = tmp_path / "verdict.md"
+    report.write_text("")
+    outcome = review.review(config, session_with("head"), report, "PASS")
+    assert "`perf/bench_a` has no samples on the head tree" in outcome.problems
+    assert "no measurements were taken" in outcome.problems[1]
 
 
 def test_rows_cell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,3 +257,6 @@ def test_changes_summary_with_nothing_changed() -> None:
 def test_setup_needed_runs_to_the_end_without_a_next_heading() -> None:
     assert review.setup_needed("## Setup needed\ninstall x\n### sub\nkeep") == "install x\n### sub\nkeep"
     assert review.setup_needed("nothing here") == ""
+    assert review.NEXT_HEADING == "\n## "
+    assert review.setup_needed("## Setup needed\nkeep ## Setup needed extra\n## Next") == "keep ## Setup needed extra"
+    assert review.setup_needed("## Setup needed\nfirst\n## Middle\n## Last") == "first"

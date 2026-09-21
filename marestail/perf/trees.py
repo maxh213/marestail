@@ -13,6 +13,10 @@ from marestail.shell import run, tail
 
 NO_PRE_MARESTAIL = "no commit before marestail.toml; skipping the pre-marestail row"
 CONTROL = "control"
+INDENT = 2
+TEMP_PREFIX = "marestail-perf-"
+FULL_HASH = "--format=%H"
+QUIET = "--quiet"
 
 
 @dataclass(frozen=True)
@@ -101,11 +105,11 @@ def archive_start(config: Config, task: str, destination: Path | None) -> None:
 def pre_marestail_commit(config: Config) -> tuple[str | None, str]:
     if table.load(config.root).rows:
         return None, ""
-    _, output = run(["git", "log", "--diff-filter=A", "--reverse", "--format=%H", "--", "marestail.toml"], cwd=config.root)
+    _, output = run(["git", "log", "--diff-filter=A", "--reverse", FULL_HASH, "--", "marestail.toml"], cwd=config.root)
     added = output.split()
     if not added:
         return None, NO_PRE_MARESTAIL
-    code, parent = run(["git", "rev-parse", "--verify", "--quiet", f"{added[0]}^"], cwd=config.root)
+    code, parent = run(["git", "rev-parse", "--verify", QUIET, f"{added[0]}^"], cwd=config.root)
     return (parent.strip(), "") if code == 0 else (None, NO_PRE_MARESTAIL)
 
 
@@ -143,7 +147,7 @@ def add_optional_trees(config: Config, session: Session, start: str, pre: str | 
 
 
 def add_tree(config: Config, session: Session, name: str, sha: str) -> None:
-    path = Path(tempfile.mkdtemp(prefix="marestail-perf-"))
+    path = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     session.trees.append(Tree(name, sha, path))
     code, output = run(["git", "worktree", "add", "--detach", str(path), sha], cwd=config.root)
     if code != 0:
@@ -165,7 +169,7 @@ def write_trees(config: Config, session: Session) -> None:
         "rows_source": session.rows_source,
         "trees": [{"tree": tree.name, "sha": tree.sha, "path": str(tree.path)} for tree in session.trees],
     }
-    trees_file(config).write_text(json.dumps(data, indent=2) + "\n")
+    trees_file(config).write_text(json.dumps(data, indent=INDENT) + "\n")
 
 
 def close(config: Config, session: Session) -> None:

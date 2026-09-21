@@ -39,23 +39,45 @@ def install(monkeypatch: pytest.MonkeyPatch, body: bytes) -> list[tuple[urllib.r
 
 def test_get_builds_query_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = install(monkeypatch, b'{"a": 1}')
+    assert Client("http://hostX/", "tok").url == "http://hostX"
     assert Client("http://host:9000/", "tok").get("api/x", k="v w", ps=5) == {"a": 1}
     request, timeout = seen[0]
     assert request.full_url == "http://host:9000/api/x?k=v+w&ps=5"
     assert request.get_method() == "GET"
+    assert request.method == "GET"
     assert request.data is None
+    assert request.has_header("Authorization")
     assert request.get_header("Authorization") == "Basic dG9rOg=="
-    assert timeout == 60
+    assert timeout == client.TIMEOUT
+    assert client.SLASH == "/"
+    assert client.AUTHORIZATION == "Authorization"
+    assert client.TIMEOUT == 60
 
 
 def test_post_sends_form_body_with_password(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = install(monkeypatch, b"  \n")
     assert Client("http://host", "admin", "pw").post("api/y", a="1", b="2") == {}
-    request, _ = seen[0]
+    request, timeout = seen[0]
     assert request.full_url == "http://host/api/y"
     assert request.get_method() == "POST"
+    assert request.method == "POST"
     assert request.data == b"a=1&b=2"
     assert request.get_header("Authorization") == "Basic YWRtaW46cHc="
+    assert timeout == 60
+
+
+def test_request_adds_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    keys: list[str] = []
+    original = urllib.request.Request.add_header
+
+    def add_header(self: urllib.request.Request, key: str, val: str) -> None:
+        keys.append(key)
+        original(self, key, val)
+
+    monkeypatch.setattr(urllib.request.Request, "add_header", add_header)
+    install(monkeypatch, b"{}")
+    Client("http://host", "t").get("api/z")
+    assert keys == [client.AUTHORIZATION]
 
 
 def test_http_error_exits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,6 +96,8 @@ def test_credentials_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     path = tmp_path / "cfg" / "marestail" / "sonar.json"
     monkeypatch.setattr(client, "CREDENTIALS", path)
     assert client.credentials() is None
+    client.save_credentials("http://u", "secret")
+    path.unlink()
     client.save_credentials("http://u", "secret")
     assert json.loads(path.read_text()) == {"url": "http://u", "token": "secret"}
     assert stat.S_IMODE(path.stat().st_mode) == 0o600

@@ -1,3 +1,5 @@
+import json
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -45,7 +47,9 @@ def test_recorded_and_active(tmp_path: Path) -> None:
         "trees": [{"tree": "head", "sha": "abc", "path": str(tmp_path)}],
     }
     assert trees.active(config) == {"head": trees.Tree("head", "abc", tmp_path)}
-    assert trees.trees_file(config).read_text().endswith("}\n")
+    text = trees.trees_file(config).read_text()
+    assert text == json.dumps(json.loads(text), indent=trees.INDENT) + "\n"
+    assert trees.INDENT == 2
 
 
 def test_close_removes_non_head_worktrees(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,6 +74,8 @@ def test_close_removes_non_head_worktrees(tmp_path: Path, fake_run: Callable[...
 def test_record_start_keeps_the_first_commit(git_repo: Path) -> None:
     config = config_at(git_repo)
     first = commit_file(git_repo, "a")
+    trees.record_start(config, "t1")
+    trees.start_file(config, "t1").unlink()
     trees.record_start(config, "t1")
     commit_file(git_repo, "b")
     trees.record_start(config, "t1")
@@ -227,6 +233,57 @@ def test_prompt_section_lists_trees_policy_and_notes(tmp_path: Path) -> None:
         "- note: first",
         "- note: second",
     ]
+
+
+def test_add_notes_keeps_existing(capsys: pytest.CaptureFixture[str]) -> None:
+    session = trees.Session("t1", notes=["kept"])
+    trees.add_notes(session, ("first", "second"))
+    assert session.notes == ["kept", "first", "second"]
+    assert capsys.readouterr().out == "   kept\n   first\n   second\n"
+
+
+def test_add_tree_uses_the_temp_prefix(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+    original = tempfile.mkdtemp
+    monkeypatch.setattr(trees.tempfile, "mkdtemp", lambda prefix: seen.append(prefix) or original(prefix=prefix))
+    fake = fake_run(trees, [(0, "")])
+    session = trees.Session("t1")
+    config = config_at(tmp_path)
+    trees.add_tree(config, session, "baseline", "abc")
+    assert seen == [trees.TEMP_PREFIX]
+    assert trees.TEMP_PREFIX == "marestail-perf-"
+    assert fake.calls == [["git", "worktree", "add", "--detach", str(session.trees[0].path), "abc"]]
+    assert fake.options[0]["cwd"] is config.root
+
+
+def test_add_tree_failed_worktree_joins_the_last_five_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    output = "\n".join(str(index) for index in range(8))
+    fake_run(trees, [(1, output)])
+    session = trees.Session("t1")
+    with pytest.raises(RuntimeError) as raised:
+        trees.add_tree(config_at(tmp_path), session, "baseline", "abc")
+    assert str(raised.value) == "git worktree add for the baseline tree at abc failed: 3 4 5 6 7"
+
+
+def test_add_tree_failed_setup_joins_the_last_ten_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    output = "\n".join(f"e{index}" for index in range(12))
+    fake_run(trees, [(0, ""), (1, output)])
+    session = trees.Session("t1")
+    trees.add_tree(config_at(tmp_path, setup="make seed"), session, "baseline", "abc")
+    assert session.notes == ["[perf] setup failed in the baseline tree (exit 1): e2 | e3 | e4 | e5 | e6 | e7 | e8 | e9 | e10 | e11"]
+
+
+def test_pre_marestail_git_flags(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(trees, [(0, "fullhash\n"), (0, "parent\n")])
+    config = config_at(tmp_path)
+    assert trees.pre_marestail_commit(config) == ("parent", "")
+    assert fake.calls == [
+        ["git", "log", "--diff-filter=A", "--reverse", trees.FULL_HASH, "--", "marestail.toml"],
+        ["git", "rev-parse", "--verify", trees.QUIET, "fullhash^"],
+    ]
+    assert trees.FULL_HASH == "--format=%H"
+    assert trees.QUIET == "--quiet"
+    assert all(option["cwd"] is config.root for option in fake.options)
 
 
 def test_prompt_section_minimal(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import accumulate, chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .collect import conversation_for, fmt_seconds
 from .model import Fleet, Process, RepoState, Step, Worker
@@ -29,6 +29,15 @@ BED_GAP = 1
 STRIP_STEPS = 12
 MARQUEE_PAUSE_TICKS = 12
 TAIL_ROWS = 3
+REPOS_ATTR = "repos"
+EMPTY_BEDS = "no beds found — waiting for pipelines"
+BETWEEN_STEPS = "between steps"
+NO_CONVERSATION = "no conversation files found"
+IDLE_TEXT = "idle"
+NONE_TASK = "none"
+GATE_PREFIX = "⚒ gate: "
+IN_GATE = "in gate: "
+RUNNER_PREFIX = "runner: "
 
 
 @dataclass(frozen=True)
@@ -61,7 +70,7 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return cast(T, value)
+    return value
 
 
 def clamp(value: int, low: int, high: int) -> int:
@@ -198,7 +207,7 @@ def is_worker_row(repo: RepoState) -> bool:
 
 
 def worker_rows(fleet: Fleet | None) -> list[RepoState]:
-    return list(filter(is_worker_row, getattr(fleet, "repos", [])))
+    return list(filter(is_worker_row, getattr(fleet, REPOS_ATTR, [])))
 
 
 def selected_repo(state: WatchState) -> RepoState | None:
@@ -252,7 +261,7 @@ def selected_border_attr(theme: Theme, selected: bool) -> int:
 
 
 def task_label(task: str | None) -> str:
-    return next(filter(None, (task, "none")))
+    return next(filter(None, (task, NONE_TASK)))
 
 
 def draw_bed(win: curses.window, rect: Rect, repo: RepoState, selected: bool, state: WatchState) -> None:
@@ -284,7 +293,7 @@ def skip_gate_row(_win: curses.window, y: int, _x: int, _inner: int, _repo: Repo
 
 
 def paint_gate_row(win: curses.window, y: int, x: int, inner: int, repo: RepoState, state: WatchState) -> int:
-    put(win, y, x, f"⚒ gate: {repo.gate_activity}"[:inner], state.theme.secondary)
+    put(win, y, x, f"{GATE_PREFIX}{repo.gate_activity}"[:inner], state.theme.secondary)
     return y + 1
 
 
@@ -311,7 +320,7 @@ def draw_busy_from_repo(win: curses.window, y: int, x: int, width: int, repo: Re
 
 
 def paint_dead(win: curses.window, y: int, x: int, _width: int, _repo: RepoState, _selected: bool, state: WatchState) -> None:
-    put(win, y, x, f"{GLYPH_IDLE} idle", state.theme.idle)
+    put(win, y, x, f"{GLYPH_IDLE} {IDLE_TEXT}", state.theme.idle)
 
 
 def paint_idle_selected(win: curses.window, y: int, x: int, width: int, repo: RepoState, _selected: bool, state: WatchState) -> None:
@@ -333,11 +342,11 @@ def draw_idle_row(win: curses.window, y: int, x: int, width: int, repo: RepoStat
 
 
 def in_gate_text(activity: str) -> str:
-    return f"in gate: {activity}"
+    return f"{IN_GATE}{activity}"
 
 
 def runner_text(activity: str) -> str:
-    return f"runner: {activity}"
+    return f"{RUNNER_PREFIX}{activity}"
 
 
 def gate_label_text(activity: str | None) -> str | None:
@@ -351,7 +360,7 @@ def runner_label_text(activity: str | None) -> str | None:
 
 
 def alive_label(repo: RepoState) -> str:
-    return surely(next(filter(present, (gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), "between steps"))))
+    return surely(next(filter(present, (gate_label_text(repo.gate_activity), runner_label_text(repo.runner_activity), BETWEEN_STEPS))))
 
 
 def marquee_summary(worker: Worker, width: int, state: WatchState) -> str:
@@ -422,7 +431,7 @@ def flatten_sections(sections: list[tuple[str, str]], width: int) -> list[tuple[
 
 
 def build_lines(sections: list[tuple[str, str]], width: int) -> list[tuple[str, bool]]:
-    return next(filter(None, (flatten_sections(sections, width), [("no conversation files found", False)])))
+    return next(filter(None, (flatten_sections(sections, width), [(NO_CONVERSATION, False)])))
 
 
 class Panel:
@@ -437,11 +446,11 @@ class Panel:
 
 
 def empty_repos(fleet: Fleet | None) -> bool:
-    return True in (fleet is None, not getattr(fleet, "repos", []))
+    return True in (fleet is None, not getattr(fleet, REPOS_ATTR, []))
 
 
 def empty_fleet(self: "FleetPanel", win: curses.window, rect: Rect, state: WatchState) -> None:
-    put(win, rect.y, rect.x + 2, "no beds found — waiting for pipelines", state.theme.secondary)
+    put(win, rect.y, rect.x + 2, EMPTY_BEDS, state.theme.secondary)
 
 
 def zero_index(_fleet: Fleet | None, _current: RepoState | None) -> int:
@@ -514,7 +523,7 @@ class FleetPanel(Panel):
         chosen(self, win, rect, state)
 
     def render_beds(self, win: curses.window, rect: Rect, state: WatchState) -> None:
-        repos = getattr(state.fleet, "repos", [])
+        repos = getattr(state.fleet, REPOS_ATTR, [])
         heights = list(map(bed_height, repos))
         current = selected_repo(state)
         self.top = fit_top(heights, self.top, index_or_zero(state.fleet, current), rect.h)
@@ -550,7 +559,7 @@ def same_root(root: Path, repo: RepoState) -> bool:
 
 
 def matching_repo(fleet: Fleet | None, root: Path) -> RepoState | None:
-    return next(filter(partial(same_root, root), getattr(fleet, "repos", [])), None)
+    return next(filter(partial(same_root, root), getattr(fleet, REPOS_ATTR, [])), None)
 
 
 def paint_line(win: curses.window, rect: Rect, state: WatchState, row: int, item: tuple[str, bool]) -> None:

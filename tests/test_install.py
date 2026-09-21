@@ -151,6 +151,32 @@ def test_merge_cursor_hook_adds_version_after_existing_keys(tmp_path: Path) -> N
     assert read_json(path) == {"hooks": {"stop": [{"command": "x"}, CURSOR_GATE]}, "version": 1}
 
 
+def test_install_constants() -> None:
+    assert install.VERSION == "version"
+    assert install.TRUSTED == "trusted"
+    assert install.DECIDED == "decided_at"
+    assert install.VERSION_DEFAULT == 1
+    assert install.EMPTY_MAP == {}
+    assert install.EMPTY_LIST == []
+
+
+def test_mapping_and_listed() -> None:
+    assert install.mapping({"hooks": {"stop": []}}, "hooks") == {"stop": []}
+    assert install.mapping({}, "hooks") == {}
+    assert install.listed({"stop": [1]}, "stop") == [1]
+    assert install.listed({}, "stop") == []
+    with pytest.raises(TypeError):
+        install.mapping({"hooks": 1}, "hooks")
+    with pytest.raises(TypeError):
+        install.listed({"stop": 1}, "stop")
+
+
+def test_add_template_stops_without_template_key() -> None:
+    settings: dict[str, Any] = {}
+    install.add_template_stops(settings, {}, "hooks", "Stop")
+    assert settings == {"hooks": {"Stop": []}}
+
+
 def test_merge_cursor_hook_keeps_version(tmp_path: Path) -> None:
     path = tmp_path / "hooks.json"
     path.write_text(json.dumps({"version": 2}))

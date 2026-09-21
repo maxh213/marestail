@@ -11,6 +11,11 @@ from marestail.shell import run
 
 PACKAGE = Path(__file__).resolve().parent
 CARGO_TOML = "Cargo.toml"
+SLASH = "/"
+EMPTY: list[str] = []
+CLIPPY = "clippy"
+ERROR_TAIL = 300
+DIGEST_JOIN = b""
 SCAN_DIR = PACKAGE / "rs" / "scan"
 SCAN_MANIFEST = PACKAGE / "rs" / "scan" / CARGO_TOML
 SCAN_BIN = Path("rs-scan") / "release" / "marestail-rs-scan"
@@ -30,6 +35,12 @@ INSTALL = {
 def listify(value: Any) -> list[str]:
     if value is None:
         return []
+    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
+
+
+def configured_list(value: Any) -> list[str]:
+    if value is None:
+        raise TypeError("list")
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
@@ -112,7 +123,7 @@ def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
 def exclude_patterns(ctx: Context, key: str) -> list[str]:
     prefix = rel(ctx, ctx.rust_root())
     prefix = "" if prefix == "." else prefix + "/"
-    return [prefix + pattern.strip("/") for pattern in listify(ctx.rust(key, []))]
+    return [prefix + pattern.strip(SLASH) for pattern in configured_list(ctx.rust(key, EMPTY))]
 
 
 def matches(relative: str, pattern: str) -> bool:
@@ -133,7 +144,7 @@ def scan_input(name: str) -> Path:
 
 
 def scanner_digest() -> str:
-    return hashlib.sha256(b"".join(scan_input(name).read_bytes() for name in SCAN_INPUTS)).hexdigest()
+    return hashlib.sha256(DIGEST_JOIN.join(scan_input(name).read_bytes() for name in SCAN_INPUTS)).hexdigest()
 
 
 def scanner_fresh(binary: Path, stamp: Path, digest: str) -> bool:
@@ -143,7 +154,7 @@ def scanner_fresh(binary: Path, stamp: Path, digest: str) -> bool:
 def build_error(code: int, output: str, binary: Path) -> str | None:
     if code == 0 and binary.exists():
         return None
-    return missing(code, output, "clippy") or f"rust scanner build failed: {output.strip()[-300:]}"
+    return missing(code, output, CLIPPY) or f"rust scanner build failed: {output.strip()[-ERROR_TAIL:]}"
 
 
 def staged_crate(ctx: Context) -> Path:
@@ -181,7 +192,7 @@ def uses_args(uses: list[Path] | None) -> list[str]:
 def run_scanner(ctx: Context, mode: str, args: list[str]) -> tuple[list[Any] | None, str | None]:
     code, output = run([str(ctx.work / SCAN_BIN), mode, *args], cwd=ctx.root, timeout=600)
     if code != 0:
-        return None, f"rust scanner failed ({mode}): {output.strip()[-300:]}"
+        return None, f"rust scanner failed ({mode}): {output.strip()[-ERROR_TAIL:]}"
     found: list[Any] = json.loads(output or "[]")
     return found, None
 

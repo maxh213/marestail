@@ -12,6 +12,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent / "erl"
 IMAGE = "erlang:27"
 INSTALL_HINT = f"install Erlang/OTP 25+ (erl, erlc, escript), or docker with `docker pull {IMAGE}`"
 UNAVAILABLE = f"erlang unavailable: {INSTALL_HINT}"
+TOOL_TIMEOUT = 600
+ERLC_TIMEOUT = 900
+PATH_SEP = ":"
+EMPTY = ""
 GENERATED_DIRS = {"_build", ".marestail", "node_modules", ".git"}
 NO_SOURCES = "no erlang sources under [erlang] sources (default src/)"
 NO_TESTS = "marestail.toml:1 no test files under [erlang] test_dirs (default test/, tests/) or *_tests.erl next to the sources"
@@ -48,16 +52,16 @@ def docker_bin(ctx: Context, cwd: Path, program: str) -> list[str]:
     return [*command, "-w", str(cwd), str(ctx.erlang("image", IMAGE)), program]
 
 
-def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, timeout: int = 600) -> tuple[int, str]:
+def tool(ctx: Context, program: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
     cwd = cwd or ctx.erlang_root()
     return run(erlang_bin(ctx, cwd, program) + args, cwd=cwd, timeout=timeout)
 
 
-def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, timeout: int = 600) -> tuple[int, str]:
+def escript(ctx: Context, script: str, args: list[str], cwd: Path | None = None, timeout: int = TOOL_TIMEOUT) -> tuple[int, str]:
     return tool(ctx, "escript", [str(SCRIPT_DIR / script), *args], cwd, timeout)
 
 
-def erlc(ctx: Context, args: list[str], cwd: Path | None = None, timeout: int = 900) -> tuple[int, str]:
+def erlc(ctx: Context, args: list[str], cwd: Path | None = None, timeout: int = ERLC_TIMEOUT) -> tuple[int, str]:
     return tool(ctx, "erlc", args, cwd, timeout)
 
 
@@ -74,7 +78,7 @@ def unavailable(code: int, output: str) -> bool:
 
 
 def program_missing(code: int, output: str) -> bool:
-    first = output.splitlines()[0] if output.strip() else ""
+    first = output.splitlines()[0] if output.strip() else EMPTY
     return code == 127 and ": not found (" in first
 
 
@@ -88,11 +92,11 @@ def trouble(code: int, output: str, message: str, lines: list[str] | None = None
 
 
 def compile_with_tests(ctx: Context, sources: list[Path], tests: list[Path], ebin: Path, test_ebin: Path) -> tuple[str, list[str]] | None:
-    code, output = erlc(ctx, ["+debug_info", "-o", str(fresh_dir(ebin)), *map(str, sources)], timeout=900)
+    code, output = erlc(ctx, ["+debug_info", "-o", str(fresh_dir(ebin)), *map(str, sources)])
     failed = trouble(code, output, "sources failed to compile")
     if failed:
         return failed
-    code, output = erlc(ctx, ["-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(fresh_dir(test_ebin)), *map(str, tests)], timeout=900)
+    code, output = erlc(ctx, ["-DTEST", "+debug_info", "-pa", str(ebin), "-o", str(fresh_dir(test_ebin)), *map(str, tests)])
     return ("tests failed to compile", tail(output)) if code != 0 else None
 
 
@@ -104,12 +108,12 @@ def rel(ctx: Context, path: str | Path) -> str:
 
 
 def in_scope_findings(ctx: Context, findings: list[str]) -> list[str]:
-    return [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
+    return [finding for finding in findings if ctx.in_scope(finding.partition(PATH_SEP)[0])]
 
 
 def fresh_dir(path: Path) -> Path:
     shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(parents=True)
     return path
 
 

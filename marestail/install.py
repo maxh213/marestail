@@ -37,6 +37,12 @@ GITIGNORE_GENERATED_LINES = [
     ".cursor/hooks.json",
 ]
 GATE_MARKER = "marestail gate"
+VERSION = "version"
+TRUSTED = "trusted"
+DECIDED = "decided_at"
+EMPTY_MAP: dict[str, Any] = {}
+EMPTY_LIST: list[Any] = []
+VERSION_DEFAULT = 1
 
 
 def install(target: Path, gitignore_generated: bool = False) -> None:
@@ -101,10 +107,24 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
+    found = data.get(key, EMPTY_MAP)
+    if not isinstance(found, dict):
+        raise TypeError("map")
+    return found
+
+
+def listed(data: dict[str, Any], key: str) -> list[Any]:
+    found = data.get(key, EMPTY_LIST)
+    if not isinstance(found, list):
+        raise TypeError("list")
+    return found
+
+
 def add_template_stops(settings: dict[str, Any], template: dict[str, Any], key: str, stop: str) -> None:
     stops = settings.setdefault(key, {}).setdefault(stop, [])
     if not any(GATE_MARKER in json.dumps(entry) for entry in stops):
-        stops.extend(template.get(key, {}).get(stop, []))
+        stops.extend(listed(mapping(template, key), stop))
 
 
 def merge_template_hook(path: Path, template: dict[str, Any], key: str) -> None:
@@ -128,7 +148,7 @@ def merge_grok_hook(path: Path) -> None:
 def merge_cursor_hook(path: Path) -> None:
     settings = read_json(path, {"version": 1, HOOKS: {}})
     template = read_template("cursor-hooks.json")
-    settings.setdefault("version", template.get("version", 1))
+    settings.setdefault(VERSION, template.get(VERSION, VERSION_DEFAULT))
     add_template_stops(settings, template, HOOKS, "stop")
     write_json(path, settings)
 
@@ -139,7 +159,7 @@ def trust_grok_folder(root: Path) -> None:
     folders = trusted_folders(store)
     if is_trusted(folders.get(key)):
         return
-    folders[key] = {"trusted": True, "decided_at": int(time.time())}
+    folders[key] = {TRUSTED: True, DECIDED: int(time.time())}
     save_trusted_folders(store, key, folders)
 
 
@@ -160,8 +180,8 @@ def is_trusted(entry: Any) -> bool:
 
 def folder_lines(path: str, meta: Any) -> list[str]:
     fields = meta if isinstance(meta, dict) else {}
-    trusted = fields.get("trusted", True)
-    decided = fields.get("decided_at", int(time.time()))
+    trusted = fields.get(TRUSTED, True)
+    decided = fields.get(DECIDED, int(time.time()))
     return [f"[folders.{json.dumps(path)}]", f"trusted = {str(bool(trusted)).lower()}", f"decided_at = {int(decided)}", ""]
 
 

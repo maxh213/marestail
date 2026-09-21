@@ -53,6 +53,10 @@ GROK_APPROVE_LOCK = re.compile(
     re.I,
 )
 WORKER_REPEAT_LIMIT = 3
+UNLIMITED = "unlimited"
+ENABLED = "enabled"
+GROK = "grok"
+SPACE = " "
 KILO_DEFAULT_MODEL = "kilo/stepfun/step-3.7-flash:free"
 KILO_DEFAULT_VARIANT = "high"
 AGENT_TIMEOUT = 4 * 3600
@@ -278,7 +282,7 @@ def skip_reason(state: Run, judge: Judge) -> str:
 
 
 def disabled(state: Run, judge: Judge) -> bool:
-    return judge.optional and state.config.get(judge.name, "enabled", True) is False
+    return judge.optional and state.config.get(judge.name, ENABLED, True) is False
 
 
 def without_guidance(state: Run, judge: Judge) -> bool:
@@ -384,7 +388,7 @@ def run_judge(state: Run, judge: Judge) -> Verdict:
         outcome = judged(state, judge, gate, progress, attempt)
         if outcome is not None:
             return outcome
-    shown = "unlimited" if state.retries <= 0 else str(state.retries)
+    shown = UNLIMITED if state.retries <= 0 else str(state.retries)
     return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
 
 
@@ -948,7 +952,7 @@ def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     started = time.time()
     code, output = run_backend(state, backend, prompt, prompt_file)
     (state.folder / f"{label}.json").write_text(output)
-    if backend == "grok" and grok_always_approve_locked(code, output):
+    if backend == GROK and grok_always_approve_locked(code, output):
         print(f"   {label}: grok always-approve is locked; cannot run unattended")
         return True
     limited, describe = outcome_readers(backend)
@@ -972,7 +976,7 @@ def routed(state: Run, prompt: str) -> tuple[str, str]:
 
 
 def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:
-    if backend == "grok":
+    if backend == GROK:
         return grok_run(state, prompt_file)
     if backend == "kilo":
         return kilo_run(state, prompt)
@@ -1003,7 +1007,7 @@ def resolve_agent(state: Run) -> str:
 
 
 def agent_label(state: Run) -> str:
-    return " ".join(part for part in (model_name(state), effort_name(state)) if part)
+    return SPACE.join(part for part in (model_name(state), effort_name(state)) if part)
 
 
 def model_name(state: Run) -> str:
@@ -1025,7 +1029,7 @@ def backend_effort(state: Run) -> str | None:
     backend = resolve_agent(state)
     if backend == "kilo":
         return kilo_variant(state)
-    if backend == "grok":
+    if backend == GROK:
         return grok_effort(state)
     return state.effort
 
@@ -1104,7 +1108,7 @@ def stdout_and_stderr(completed: subprocess.CompletedProcess[str]) -> str:
 
 def grok_run(state: Run, prompt_file: Path) -> tuple[int, str]:
     command = grok_command(state, prompt_file)
-    return session_result(spawn(command, state, {**os.environ, **GROK_ENV}, "", " ".join(command)), stdout_or_stderr)
+    return session_result(spawn(command, state, {**os.environ, **GROK_ENV}, "", SPACE.join(command)), stdout_or_stderr)
 
 
 def grok_command(state: Run, prompt_file: Path) -> list[str]:
@@ -1154,7 +1158,7 @@ def default_variant(state: Run) -> str | None:
 
 def kilo_run(state: Run, prompt: str) -> tuple[int, str]:
     command = kilo_command(state)
-    return session_result(spawn(command, state, os.environ, prompt, " ".join(command)), stdout_or_stderr)
+    return session_result(spawn(command, state, os.environ, prompt, SPACE.join(command)), stdout_or_stderr)
 
 
 def json_object(text: str) -> Event | None:
@@ -1211,14 +1215,14 @@ def summary_line(counts: dict[str, Any], cost: Any, text: str) -> str:
     if cost is not None:
         bits.append(cost_bit(cost))
     bits.append(repr(text))
-    return " ".join(bits)
+    return SPACE.join(bits)
 
 
 def kilo_rate_limited(code: int, output: str) -> bool:
     events = kilo_events(output)
     if not events:
         return limited_output(code, output)
-    blob = " ".join(kilo_errors(events))
+    blob = SPACE.join(kilo_errors(events))
     return bool(blob) and bool(LIMIT_PATTERN.search(blob))
 
 
@@ -1336,7 +1340,7 @@ def kimi_errors(events: list[Event]) -> list[str]:
 def kimi_rate_limited(code: int, output: str) -> bool:
     errors = kimi_errors(kimi_events(output))
     if errors:
-        return bool(LIMIT_PATTERN.search(" ".join(errors)))
+        return bool(LIMIT_PATTERN.search(SPACE.join(errors)))
     return limited_output(code, output)
 
 
@@ -1388,7 +1392,7 @@ def grok_failed(data: Event, code: int) -> bool:
 
 
 def grok_limit_text(data: Event, output: str) -> bool:
-    blob = " ".join(str(data.get(key, "")) for key in (MESSAGE, "text", "type", "stopReason"))
+    blob = SPACE.join(str(data.get(key, "")) for key in (MESSAGE, "text", "type", "stopReason"))
     return bool(GROK_LIMIT_PATTERN.search(blob) or GROK_LIMIT_PATTERN.search(output))
 
 

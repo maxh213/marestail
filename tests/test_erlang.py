@@ -137,10 +137,10 @@ def test_rel(tmp_path: Path) -> None:
 
 
 def test_in_scope_findings(tmp_path: Path) -> None:
-    findings = ["src/a.erl:3 bad", "src/b.erl:4 worse"]
+    findings = ["src/a.erl:3 bad", "src/b.erl:4 worse", "src/c.erl:1:2 extra"]
     assert erlang.in_scope_findings(make_context(tmp_path), findings) == findings
-    scoped = make_context(tmp_path, scope_changed=True, changed={"src/b.erl"})
-    assert erlang.in_scope_findings(scoped, findings) == ["src/b.erl:4 worse"]
+    scoped = make_context(tmp_path, scope_changed=True, changed={"src/b.erl", "src/c.erl"})
+    assert erlang.in_scope_findings(scoped, findings) == ["src/b.erl:4 worse", "src/c.erl:1:2 extra"]
 
 
 def test_fresh_dir(tmp_path: Path) -> None:
@@ -149,6 +149,46 @@ def test_fresh_dir(tmp_path: Path) -> None:
     (target / "old").write_text("x")
     assert erlang.fresh_dir(target) == target
     assert list(target.iterdir()) == []
+
+
+def test_fresh_dir_creates_missing_parents(tmp_path: Path) -> None:
+    target = tmp_path / "missing" / "child"
+    assert erlang.fresh_dir(target) == target
+    assert target.is_dir()
+
+
+def test_tool_docker_keeps_the_workdir(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(erlang, "host_erlang", lambda _ctx: False)
+    fake = fake_run(erlang, [(0, "")])
+    ctx = make_context(tmp_path, {"erlang": {"root": "app", "image": "erlang:27"}})
+    other = tmp_path / "work"
+    other.mkdir()
+    erlang.tool(ctx, "erl", ["-eval", "halt()."], cwd=other)
+    command = fake.calls[-1]
+    assert command[command.index("-w") + 1] == str(other)
+
+
+def test_tool_default_timeout_and_cwd(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(erlang, [(0, "")])
+    ctx = make_context(tmp_path, {"erlang": {"root": "app"}})
+    assert erlang.tool(ctx, "erl", ["-eval", "halt()."]) == (0, "")
+    assert fake.options == [{"cwd": tmp_path / "app", "timeout": erlang.TOOL_TIMEOUT}]
+
+
+def test_escript_uses_an_explicit_cwd(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(erlang, [(0, "")])
+    ctx = make_context(tmp_path, {"erlang": {"root": "app"}})
+    other = tmp_path / "other"
+    other.mkdir()
+    erlang.escript(ctx, "deps.escript", [], cwd=other)
+    assert fake.options == [{"cwd": other, "timeout": erlang.TOOL_TIMEOUT}]
+
+
+def test_erlang_constants() -> None:
+    assert erlang.TOOL_TIMEOUT == 600
+    assert erlang.ERLC_TIMEOUT == 900
+    assert erlang.PATH_SEP == ":"
+    assert erlang.EMPTY == ""
 
 
 def stub_erlc(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[list[str]]:

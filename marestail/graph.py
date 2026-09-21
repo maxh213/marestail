@@ -20,6 +20,9 @@ DEPS = "deps"
 EDGES = "edges"
 SYMBOL = "symbol"
 ERLANG_TAIL = 300
+HERE = "."
+EMPTY_JSON = "[]"
+LINE_JOIN = "\n"
 
 Sources = Callable[[Context], list[Path]]
 Body = Callable[[Context, list[Path]], str]
@@ -45,7 +48,7 @@ def render(config: Config) -> str:
 def python_graph(config: Config) -> str:
     if config.section("python") is None:
         return ""
-    root = config.root / config.get("python", "root", ".")
+    root = config.root / config.get("python", "root", HERE)
     packages = root_packages(config.root)
     python = config.root / config.get("python", "venv", ".venv") / "bin" / "python"
     _, output = run([str(python), "-c", PYTHON_GRAPH, *packages], cwd=root, env={"PYTHONPATH": str(root)})
@@ -63,7 +66,7 @@ def root_packages(root: Path) -> list[str]:
 def ts_graph(config: Config) -> str:
     if config.section("ts") is None:
         return ""
-    ts_root = config.root / config.get("ts", "root", ".")
+    ts_root = config.root / config.get("ts", "root", HERE)
     command = [
         "npx",
         "depcruise",
@@ -80,7 +83,7 @@ def ts_graph(config: Config) -> str:
 def elixir_graph(config: Config) -> str:
     if config.section("elixir") is None:
         return ""
-    root = config.root / config.get("elixir", "root", ".")
+    root = config.root / config.get("elixir", "root", HERE)
     _, output = run(["mix", "xref", "graph"], cwd=root)
     return "## Elixir modules\n" + kept_lines(output, "==>")
 
@@ -112,7 +115,7 @@ def ruby_body(ctx: Context, files: list[Path]) -> str:
 
     _, output = scan(ctx, DEPS, files, extra=[str(ctx.config.root)])
     try:
-        edges = json.loads(output or "[]")
+        edges = json.loads(output or EMPTY_JSON)
     except json.JSONDecodeError:
         return output.strip()
     return "\n".join(f"{edge.get('from')} -> {edge.get('to')} ({edge.get('constant')})" for edge in edges)
@@ -151,7 +154,7 @@ def rust_body(ctx: Context, files: list[Path]) -> str:
 def rust_lines(ctx: Context, edges: Any) -> str:
     from marestail import rust
 
-    return "\n".join(f"{rust.rel(ctx, edge['from'])} -> {rust.rel(ctx, edge['to'])} ({edge[SYMBOL]})" for edge in edges)
+    return LINE_JOIN.join(f"{rust.rel(ctx, edge['from'])} -> {rust.rel(ctx, edge['to'])} ({edge[SYMBOL]})" for edge in edges)
 
 
 def java_graph(config: Config) -> str:

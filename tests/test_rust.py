@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -142,8 +143,34 @@ def test_excluded(tmp_path: Path, root: str, relative: str, expected: bool) -> N
     assert rust.excluded(ctx, relative, "skip") is expected
 
 
-def test_excluded_without_patterns(tmp_path: Path) -> None:
-    assert rust.excluded(make_context(tmp_path), "src/a.rs", "source_exclude") is False
+def test_configured_list() -> None:
+    assert rust.configured_list([]) == []
+    assert rust.configured_list(["a", 2]) == ["a", "2"]
+    assert rust.configured_list("x") == ["x"]
+    with pytest.raises(TypeError):
+        rust.configured_list(None)
+
+
+def test_crates_finds_manifests(tmp_path: Path) -> None:
+    touch(tmp_path / "Cargo.toml")
+    touch(tmp_path / "sub" / "Cargo.toml")
+    touch(tmp_path / "target" / "Cargo.toml")
+    assert rust.crates(make_context(tmp_path)) == {tmp_path, tmp_path / "sub"}
+
+
+def test_staged_crate_creates_nested_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    scan = tmp_path / "scan"
+    touch(scan / "main.rs", "fn main() {}")
+    touch(scan / "Cargo.lock", "")
+    monkeypatch.setattr(rust, "SCAN_DIR", scan)
+    monkeypatch.setattr(rust, "SCAN_MANIFEST", tmp_path / "frozen" / "Cargo.toml")
+    touch(tmp_path / "frozen" / "Cargo.toml", "[package]\n")
+    ctx = make_context(tmp_path)
+    assert not ctx.work.exists()
+    first = rust.staged_crate(ctx)
+    again = rust.staged_crate(ctx)
+    assert first == again
+    assert (first / "main.rs").read_text() == "fn main() {}"
 
 
 def binary(root: Path) -> Path:
@@ -189,8 +216,14 @@ def test_build_scanner_failures(tmp_path: Path, fake_run: Any, reply: tuple[int,
 
 
 def test_scanner_digest_is_sha256() -> None:
-    assert len(rust.scanner_digest()) == 64
+    payload = rust.DIGEST_JOIN.join(rust.scan_input(name).read_bytes() for name in rust.SCAN_INPUTS)
+    assert rust.scanner_digest() == hashlib.sha256(payload).hexdigest()
     assert rust.SCAN_INPUTS == ("main.rs", "Cargo.toml", "Cargo.lock")
+    assert rust.CLIPPY == "clippy"
+    assert rust.ERROR_TAIL == 300
+    assert rust.SLASH == "/"
+    assert rust.EMPTY == []
+    assert rust.DIGEST_JOIN == b""
 
 
 def test_scan_input_uses_the_frozen_manifest() -> None:

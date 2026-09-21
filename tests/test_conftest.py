@@ -45,6 +45,14 @@ def test_fake_run_copies_reply_lists(tmp_path: Path) -> None:
     assert fake(["cmd"], tmp_path) == (0, "")
 
 
+def test_fake_run_rejects_a_missing_cwd(tmp_path: Path) -> None:
+    fake = conftest.FakeRun([(0, "")])
+    with pytest.raises(TypeError, match=r"^cwd$"):
+        fake(["cmd"], None)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match=r"^timeout$"):
+        fake(["cmd"], tmp_path, timeout=None)
+
+
 def test_git_try_show_toplevel() -> None:
     completed = conftest.git_try("rev-parse", "--show-toplevel")
     assert completed.returncode == 0

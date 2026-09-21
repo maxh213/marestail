@@ -1,4 +1,5 @@
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,17 @@ def test_package_dir(owner: str, folder: str) -> None:
 def test_output_tail() -> None:
     assert java.output_tail("  short \n") == "short"
     assert java.output_tail("x" * 10 + "y" * 300 + "\n") == "y" * 300
+    assert java.OUTPUT_TAIL == 300
+    assert java.NS_CLOSE == "}"
+    assert java.EMPTY == ""
+
+
+def test_pom_properties_strips_namespace() -> None:
+    properties = ET.Element("properties")
+    child = ET.SubElement(properties, "{http://maven.apache.org/POM/4.0.0}maven.compiler.release")
+    child.text = " 21 "
+    ET.SubElement(properties, "empty")
+    assert java.pom_properties(properties) == {"maven.compiler.release": "21", "empty": ""}
 
 
 def test_tool_prefers_configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from functools import partial
 from itertools import chain, starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
@@ -24,6 +24,21 @@ TAIL_STALE_S = 900
 TAIL_LIMIT = 3
 TAIL_CHARS = 90
 WORK = ".marestail"
+RUNS = "runs"
+HANDOFFS = "handoffs"
+LIVE = "live"
+STATUS_RUNNING = "running"
+STATUS_DONE = "done"
+ERRORS_IGNORE = "ignore"
+ERRORS_REPLACE = "replace"
+WORK_CONFIG_ENV = "DANDELION_CLAUDE_WORK_CONFIG_DIR"
+WORK_HOME_DEFAULT = "~/.claude-work"
+CLAUDE_CONFIG_ENV = "CLAUDE_CONFIG_DIR"
+CLAUDE_HOME = ".claude"
+PROMPT_SUFFIX = ".prompt.md"
+RESULT_SUFFIX = ".json"
+HANDOFF_SUFFIX = ".md"
+CONV_MAX_LINES = 200
 NAMED_TOOLS = ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vitest", "jest", "tsc", "eslint")
 FIELD_KEYS = ("file_path", "command", "pattern")
 MODEL_FLAGS = frozenset({"--model", "-m"})
@@ -48,7 +63,7 @@ def present[T](value: T | None) -> TypeGuard[T]:
 
 
 def surely[T](value: T | None) -> T:
-    return cast(T, value)
+    return value
 
 
 def empty_list(*_args: object) -> list[Any]:
@@ -149,7 +164,7 @@ def bind_running(state: RepoState, rows: list[ProcRow], real: Path) -> None:
 
 
 def last_if_running(steps: list[Step]) -> Step | None:
-    return {True: steps[-1]}.get(steps[-1].status == "running")
+    return {True: steps[-1]}.get(steps[-1].status == STATUS_RUNNING)
 
 
 def running_step(steps: list[Step]) -> Step | None:
@@ -201,7 +216,7 @@ def nonempty_lines(log_path: Path | None) -> list[str]:
 
 def read_ignore(log_path: Path) -> list[str]:
     with contextlib.suppress(OSError):
-        return log_path.read_text(errors="ignore").splitlines()
+        return log_path.read_text(errors=ERRORS_IGNORE).splitlines()
     return []
 
 
@@ -214,7 +229,7 @@ def collect_fleet(roots: list[Path]) -> Fleet:
 
 
 def add_live(sections: list[tuple[str, str]], live: list[str]) -> None:
-    sections.append(("live", "\n".join(live)))
+    sections.append((LIVE, "\n".join(live)))
 
 
 def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
@@ -253,7 +268,7 @@ def newest_name(candidates: list[Path]) -> str:
 
 
 def task_name(root: Path) -> str | None:
-    candidates = list_task_dirs(work_path(root, "handoffs")) + list_task_dirs(work_path(root, "runs"))
+    candidates = list_task_dirs(work_path(root, HANDOFFS)) + list_task_dirs(work_path(root, RUNS))
     chosen = (none_of, newest_name)[bool(candidates)]
     return chosen(candidates)
 
@@ -277,7 +292,7 @@ def newest_log(logs: list[Path]) -> Path:
 
 
 def latest_log(root: Path) -> Path | None:
-    logs = overnight_logs(work_path(root, "runs"))
+    logs = overnight_logs(work_path(root, RUNS))
     chosen = (none_of, newest_log)[bool(logs)]
     return chosen(logs)
 
@@ -300,7 +315,7 @@ def parse_log(path: Path) -> list[Step]:
 
 def read_lines(path: Path) -> list[str]:
     with contextlib.suppress(OSError):
-        return path.read_text(errors="replace").splitlines()
+        return path.read_text(errors=ERRORS_REPLACE).splitlines()
     return []
 
 
@@ -333,7 +348,7 @@ def new_step(matched: re.Match[str]) -> Step:
         role=matched.group(1),
         label=matched.group(2),
         attempt=int(matched.group(3)),
-        status="running",
+        status=STATUS_RUNNING,
         summary="",
         verdict=None,
         minutes=None,
@@ -364,7 +379,7 @@ def accept_verdict(steps: list[Step], line: str) -> None:
 
 
 def is_running_last(steps: list[Step]) -> bool:
-    return steps[-1].status == "running"
+    return steps[-1].status == STATUS_RUNNING
 
 
 def last_running(steps: list[Step]) -> bool:
@@ -390,7 +405,7 @@ def chosen_step(steps: list[Step], matched: re.Match[str]) -> Step | None:
 
 
 def complete_step(step: Step, matched: re.Match[str]) -> None:
-    step.status = "done"
+    step.status = STATUS_DONE
     step.minutes = float(matched.group(2))
     step.summary = summary_of(matched.group(3))
 
@@ -405,7 +420,7 @@ def finish_step(steps: list[Step], matched: re.Match[str]) -> None:
 
 
 def running_label(label: str, step: Step) -> bool:
-    return False not in (step.label == label, step.status == "running")
+    return False not in (step.label == label, step.status == STATUS_RUNNING)
 
 
 def running_named(steps: list[Step], label: str) -> Step | None:
@@ -448,7 +463,7 @@ def formatted_if(path: Path | None, max_lines: int, window: int) -> list[str]:
     return chosen(surely(path), max_lines, window)
 
 
-def transcript_conversation(root: Path, max_lines: int = 200, window: int = CONV_BYTES) -> list[str]:
+def transcript_conversation(root: Path, max_lines: int = CONV_MAX_LINES, window: int = CONV_BYTES) -> list[str]:
     return formatted_if(live_transcript(root), max_lines, window)
 
 
@@ -466,12 +481,12 @@ def expanded_env(name: str) -> Path | None:
 
 
 def work_home() -> Path:
-    return Path(next(filter(None, (os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR"), "~/.claude-work")))).expanduser()
+    return Path(next(filter(None, (os.environ.get(WORK_CONFIG_ENV), WORK_HOME_DEFAULT)))).expanduser()
 
 
 def claude_homes() -> list[Path]:
-    homes: tuple[Path | None, ...] = (Path.home() / ".claude", work_home(), expanded_env("CLAUDE_CONFIG_DIR"))
-    return cast(list[Path], list(filter(present, homes)))
+    homes: tuple[Path | None, ...] = (Path.home() / CLAUDE_HOME, work_home(), expanded_env(CLAUDE_CONFIG_ENV))
+    return list(filter(present, homes))
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
@@ -518,7 +533,7 @@ def empty_lines(_size: int, _raw: bytes | None, _window: int) -> list[str]:
 
 
 def split_tail(size: int, raw: bytes, window: int) -> list[str]:
-    lines = raw.decode(errors="replace").splitlines()
+    lines = raw.decode(errors=ERRORS_REPLACE).splitlines()
     return (lines, lines[1:])[size > window]
 
 
@@ -542,7 +557,7 @@ def first_from(data: dict[str, object]) -> str | None:
 
 def assistant_block(data: object) -> str | None:
     chosen = (none_of, first_from)[assistant_dict(data)]
-    return chosen(cast(dict[str, object], data))
+    return chosen(data)
 
 
 def format_entry(line: str) -> str | None:
@@ -561,12 +576,12 @@ def dict_content(message: dict[str, object]) -> list[object]:
 
 def list_or_empty(content: object) -> list[object]:
     chosen = (empty_list, ident)[isinstance(content, list)]
-    return cast(list[object], chosen(content))
+    return chosen(content)
 
 
 def message_content(message: object) -> list[object]:
     chosen = (empty_list, dict_content)[isinstance(message, dict)]
-    return chosen(cast(dict[str, object], message))
+    return chosen(message)
 
 
 def first_block(content: list[object]) -> str | None:
@@ -590,7 +605,7 @@ def prefix_text(prefix: str, text: str) -> str | None:
 
 
 def or_blank(value: object) -> str:
-    return cast(str, {True: ""}.get(not value, value))
+    return {True: ""}.get(not value, value)
 
 
 def nonempty(text: str) -> str | None:
@@ -649,7 +664,7 @@ def dict_fields(value: dict[str, object]) -> list[str]:
 
 def tool_fields(value: object) -> list[str]:
     chosen = (empty_list, dict_fields)[isinstance(value, dict)]
-    return chosen(cast(dict[str, object], value))
+    return chosen(value)
 
 
 def stripped_str(value: object) -> bool:
@@ -666,9 +681,9 @@ def worker_with_task(state: RepoState, step: Step, process: Process | None) -> W
     return Worker(
         step=step,
         process=process,
-        result_path=existing(base / "runs" / task / f"{step.label}.json"),
-        prompt_path=existing(base / "runs" / task / f"{step.label}.prompt.md"),
-        handoff_path=existing(base / "handoffs" / task / f"{step.label}.md"),
+        result_path=existing(base / RUNS / task / f"{step.label}{RESULT_SUFFIX}"),
+        prompt_path=existing(base / RUNS / task / f"{step.label}{PROMPT_SUFFIX}"),
+        handoff_path=existing(base / HANDOFFS / task / f"{step.label}{HANDOFF_SUFFIX}"),
     )
 
 
@@ -1100,7 +1115,7 @@ def git_line(root: Path, args: list[str]) -> str:
 
 def load_text(path: Path) -> str | None:
     with contextlib.suppress(OSError):
-        return path.read_text(errors="replace")
+        return path.read_text(errors=ERRORS_REPLACE)
     return None
 
 
@@ -1124,11 +1139,11 @@ def dict_result(data: dict[str, object]) -> object:
 
 def result_field(data: object) -> object:
     chosen = (none_of, dict_result)[isinstance(data, dict)]
-    return chosen(cast(dict[str, object], data))
+    return chosen(data)
 
 
 def str_or_raw(result: object, raw: str) -> str:
-    return (raw, cast(str, result))[isinstance(result, str)]
+    return (raw, result)[isinstance(result, str)]
 
 
 def decoded_result(raw: str) -> str:

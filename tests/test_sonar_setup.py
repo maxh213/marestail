@@ -59,7 +59,7 @@ def commands(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], dict[str,
 @pytest.fixture
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     jar = tmp_path / "cache" / "sha" / "sonar-erlang-plugin.jar"
-    monkeypatch.setattr(setup, "PLUGINS_DIR", tmp_path / "plugins")
+    monkeypatch.setattr(setup, "PLUGINS_DIR", tmp_path / "cfg" / "plugins")
     monkeypatch.setattr(setup, "JAR_CACHE", jar)
     return jar
 
@@ -74,7 +74,7 @@ def test_compose_passes_plugins_dir(commands: list[tuple[list[str], dict[str, An
     command, options = commands[0]
     assert command == ["docker", "compose", "-f", str(setup.COMPOSE), "down"]
     assert options["check"] is True
-    assert options["env"]["MARESTAIL_SONAR_PLUGINS"] == str(paths.parent.parent.parent / "plugins")
+    assert options["env"]["MARESTAIL_SONAR_PLUGINS"] == str(setup.PLUGINS_DIR)
     assert options["env"]["KEEP"] == "1"
     assert setup.COMPOSE.name == "docker-compose.yml"
 
@@ -94,6 +94,8 @@ def test_wait_until_up(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "sleep", slept.append)
     setup.wait_until_up("http://x")
     assert slept == [5, 5]
+    assert setup.ATTEMPTS == 120
+    assert setup.wait_until_up.__defaults__ == (setup.ATTEMPTS,)
 
 
 def test_wait_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +137,7 @@ def install_setup(monkeypatch: pytest.MonkeyPatch, installed: list[bool]) -> lis
 
     monkeypatch.setattr(setup, "admin_client", admin_client)
     pending = list(installed)
-    monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: pending.pop(0))
+    monkeypatch.setattr(setup, "erlang_plugin_installed", lambda admin: calls.append(f"plugin {admin}") or pending.pop(0))
     return calls
 
 
@@ -146,6 +148,7 @@ def test_setup_ready(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixt
     assert calls == [
         "up()",
         "admin Marestail-Admin-2026!",
+        "plugin Marestail-Admin-2026!",
         "ensure_project('Marestail-Admin-2026!', 'key', 'Name')",
         "ensure_credentials('Marestail-Admin-2026!',)",
     ]
@@ -156,8 +159,15 @@ def test_setup_restarts_for_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_SONAR_PASSWORD", "pw")
     calls = install_setup(monkeypatch, [False, True])
     setup.setup("key", "Name")
-    assert calls[:5] == ["up()", "admin pw", "compose('restart', 'sonarqube')", "wait_until_up('http://localhost:9000',)", "admin pw"]
-    assert calls[5] == "ensure_project('pw', 'key', 'Name')"
+    assert calls[:6] == [
+        "up()",
+        "admin pw",
+        "plugin pw",
+        "compose('restart', 'sonarqube')",
+        "wait_until_up('http://localhost:9000',)",
+        "admin pw",
+    ]
+    assert calls[6:8] == ["plugin pw", "ensure_project('pw', 'key', 'Name')"]
 
 
 def test_setup_fails_without_plugin(monkeypatch: pytest.MonkeyPatch, paths: Path) -> None:
@@ -165,6 +175,9 @@ def test_setup_fails_without_plugin(monkeypatch: pytest.MonkeyPatch, paths: Path
     with pytest.raises(SystemExit) as raised:
         setup.setup("key", "Name")
     assert str(raised.value) == f"erlang plugin did not load from {setup.PLUGINS_DIR}; check: docker logs marestail-sonarqube"
+    plugin_calls = [call for call in calls if call.startswith("plugin ")]
+    assert len(plugin_calls) == 2
+    assert "plugin None" not in plugin_calls
     assert not any(call.startswith("ensure") for call in calls)
 
 
@@ -188,7 +201,7 @@ def test_plugin_jar_copied_when_missing_or_stale(paths: Path) -> None:
 def test_plugin_jar_left_alone_when_current(paths: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths.parent.mkdir(parents=True)
     paths.write_bytes(b"same")
-    setup.PLUGINS_DIR.mkdir()
+    setup.PLUGINS_DIR.mkdir(parents=True)
     (setup.PLUGINS_DIR / "sonar-erlang-plugin.jar").write_bytes(b"same")
     monkeypatch.setattr(shutil, "copyfile", lambda *args: pytest.fail("copied"))
     setup.ensure_erlang_plugin_jar()
@@ -218,12 +231,24 @@ def test_cached_jar_build_without_output(paths: Path, monkeypatch: pytest.Monkey
 
 
 def test_build_jar_clones_and_copies(
-    paths: Path, commands: list[tuple[list[str], dict[str, Any]]], capsys: pytest.CaptureFixture[str]
+    paths: Path,
+    commands: list[tuple[list[str], dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     work = paths.parent / "src"
     work.mkdir(parents=True)
     (work / "stale").write_text("")
+    removed: list[bool] = []
+    original = shutil.rmtree
+
+    def rmtree(path: Path, ignore_errors: bool = False) -> None:
+        removed.append(ignore_errors)
+        original(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(setup.shutil, "rmtree", rmtree)
     setup.build_jar()
+    assert removed == [True]
     sha = setup.ERLANG_PLUGIN_SHA
     image = f"marestail-sonar-erlang:{sha[:12]}"
     assert [command for command, _ in commands] == [
@@ -238,15 +263,18 @@ def test_build_jar_clones_and_copies(
     assert not (work / "stale").exists()
     assert commands[3][1] == {"cwd": work, "check": True}
     assert commands[4][1] == {"check": True, "capture_output": True, "text": True}
+    assert all(options["check"] is True for _, options in commands)
     assert capsys.readouterr().out == f"building sonar-erlang-plugin.jar (sonar-erlang @{sha[:8]}, cached afterwards)\n"
 
 
 def test_build_jar_reuses_checkout_and_removes_container(paths: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (paths.parent / "src" / ".git").mkdir(parents=True)
-    seen: list[list[str]] = []
+    seen: list[tuple[list[str], dict[str, Any]]] = []
 
     def run(command: list[str], **options: Any) -> Completed:
-        seen.append(command)
+        seen.append((command, options))
+        if command[1] == "create":
+            shutil.rmtree(paths.parent.parent)
         if command[1] == "cp":
             raise subprocess.CalledProcessError(1, command)
         return Completed(" c2 ")
@@ -254,8 +282,9 @@ def test_build_jar_reuses_checkout_and_removes_container(paths: Path, monkeypatc
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(subprocess.CalledProcessError):
         setup.build_jar()
-    assert seen[0][:3] == ["git", "-C", str(paths.parent / "src")]
-    assert seen[-1] == ["docker", "rm", "c2"]
+    assert seen[0][0][:3] == ["git", "-C", str(paths.parent / "src")]
+    assert seen[-1][0] == ["docker", "rm", "c2"]
+    assert all(options["check"] is True for _, options in seen)
     assert paths.parent.is_dir()
 
 

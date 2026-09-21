@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import subprocess
@@ -641,3 +642,439 @@ def test_repo_shell_uses_git_line_args(tmp_path: Path, monkeypatch: Any) -> None
     assert (state.name, state.root, state.task, state.log_path) == (tmp_path.name, tmp_path, "task", tmp_path / "log")
     assert state.branch == "branch --show-current"
     assert state.head == "log -1 --format=%h%x20%s"
+
+
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return fn(*args, **kwargs)
+
+    wrapped.calls = calls
+    return wrapped
+
+
+def test_collect_constants() -> None:
+    assert collect.RUNS == "runs"
+    assert collect.HANDOFFS == "handoffs"
+    assert collect.LIVE == "live"
+    assert collect.STATUS_RUNNING == "running"
+    assert collect.STATUS_DONE == "done"
+    assert collect.ERRORS_IGNORE == "ignore"
+    assert collect.ERRORS_REPLACE == "replace"
+    assert collect.WORK_CONFIG_ENV == "DANDELION_CLAUDE_WORK_CONFIG_DIR"
+    assert collect.WORK_HOME_DEFAULT == "~/.claude-work"
+    assert collect.CLAUDE_CONFIG_ENV == "CLAUDE_CONFIG_DIR"
+    assert collect.CLAUDE_HOME == ".claude"
+    assert collect.PROMPT_SUFFIX == ".prompt.md"
+    assert collect.RESULT_SUFFIX == ".json"
+    assert collect.HANDOFF_SUFFIX == ".md"
+    assert collect.CONV_MAX_LINES == 200
+    signature = inspect.signature(collect.transcript_conversation)
+    assert signature.parameters["max_lines"].default == collect.CONV_MAX_LINES
+    assert signature.parameters["window"].default == collect.CONV_BYTES
+
+
+def test_self_repo_empty_and_list_dirs_files(tmp_path: Path) -> None:
+    (tmp_path / "file.txt").write_text("x")
+    (tmp_path / "child").mkdir()
+    assert collect.self_repo(tmp_path) == []
+    assert collect.list_dirs(tmp_path) == [tmp_path / "child"]
+    (tmp_path / collect.HANDOFFS).mkdir()
+    (tmp_path / collect.HANDOFFS / "note.txt").write_text("x")
+    (tmp_path / collect.HANDOFFS / "task").mkdir()
+    assert collect.list_task_dirs(tmp_path / collect.HANDOFFS) == [tmp_path / collect.HANDOFFS / "task"]
+
+
+def test_collect_repo_passes_real_path(tmp_path: Path, monkeypatch: Any) -> None:
+    live = tracker(lambda state, real, rows: None)
+    monkeypatch.setattr(collect, "attach_live", live)
+    monkeypatch.setattr(collect, "repo_shell", lambda root: repo(root))
+    monkeypatch.setattr(collect, "proc_rows", lambda: [])
+    monkeypatch.setattr(collect, "real_path", lambda root: root / "real")
+    collect.collect_repo(tmp_path)
+    assert live.calls[0][0][1] == tmp_path / "real"
+
+
+def test_repo_shell_passes_root(tmp_path: Path, monkeypatch: Any) -> None:
+    seen: list[tuple[Path, list[str]]] = []
+
+    def git_line(root: Path, args: list[str]) -> str:
+        seen.append((root, args))
+        return "x"
+
+    monkeypatch.setattr(collect, "git_line", git_line)
+    monkeypatch.setattr(collect, "latest_log", lambda root: None)
+    monkeypatch.setattr(collect, "task_name", lambda root: None)
+    collect.repo_shell(tmp_path)
+    assert seen[0][0] is tmp_path
+    assert seen[1][0] is tmp_path
+
+
+def test_attach_live_passes_real(tmp_path: Path, monkeypatch: Any) -> None:
+    state = repo(tmp_path, steps=[step()])
+    bind = tracker()
+    activity = tracker()
+    monkeypatch.setattr(collect, "bind_running", bind)
+    monkeypatch.setattr(collect, "attach_activity", activity)
+    monkeypatch.setattr(collect, "pipeline_pids", lambda rows, real: [1])
+    collect.attach_live(state, tmp_path, [])
+    assert bind.calls[0][0][2] is tmp_path
+    assert activity.calls[0][0][3] is tmp_path
+
+
+def test_pipeline_row_uses_pid(tmp_path: Path, monkeypatch: Any) -> None:
+    cwd = tracker(lambda pid: tmp_path)
+    monkeypatch.setattr(collect, "cwd_of", cwd)
+    row = (7, 0, 1, ["python", "cli.py", "run"])
+    assert collect.is_pipeline_row(tmp_path, row) is True
+    assert cwd.calls[0][0] == (7,)
+    rows = [row, (8, 0, 1, ["echo"])]
+    monkeypatch.setattr(collect, "cwd_of", lambda pid: tmp_path)
+    assert collect.pipeline_pids(rows, tmp_path) == [7]
+
+
+def test_set_worker_and_bind_running_pass_real(tmp_path: Path, monkeypatch: Any) -> None:
+    state = repo(tmp_path, steps=[step()])
+    built = tracker(lambda state, running, rows, real: collect.worker_without_task(state, running, None))
+    monkeypatch.setattr(collect, "build_worker", built)
+    collect.set_worker(state, step(), [], tmp_path)
+    assert built.calls[0][0][3] is tmp_path
+    bind_built = tracker(lambda state, running, rows, real: collect.worker_without_task(state, running, None))
+    monkeypatch.setattr(collect, "build_worker", bind_built)
+    collect.bind_running(state, [], tmp_path)
+    assert bind_built.calls[0][0][3] is tmp_path
+
+
+def test_attach_activity_passes_root(tmp_path: Path, monkeypatch: Any) -> None:
+    state = repo(tmp_path)
+    tails = tracker(lambda root: ["t"])
+    monkeypatch.setattr(collect, "transcript_tail", tails)
+    monkeypatch.setattr(collect, "gate_activity", lambda rows, pipeline: None)
+    collect.attach_activity(state, [], [1], tmp_path)
+    assert tails.calls[0][0] == (tmp_path,)
+    assert state.tail_lines == ["t"]
+
+
+def test_read_ignore_and_read_lines_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "log"
+    path.write_bytes(b"ok\xff\n")
+    assert collect.read_ignore(path) == ["ok"]
+    assert collect.read_lines(path) == ["ok\ufffd"]
+    loaded = collect.load_text(path)
+    assert loaded == "ok\ufffd\n"
+    raw = b"a\xffb"
+    assert collect.split_tail(3, raw, 10) == [raw.decode(errors=collect.ERRORS_REPLACE)]
+
+
+def test_collect_fleet_scanned_at(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(collect, "discover", lambda roots: [])
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 12.5)
+    fleet = collect.collect_fleet([tmp_path])
+    assert fleet.scanned_at == 12.5
+
+
+def test_add_live_and_conversation_root(tmp_path: Path, monkeypatch: Any) -> None:
+    sections: list[tuple[str, str]] = []
+    collect.add_live(sections, ["a", "b"])
+    assert sections == [(collect.LIVE, "a\nb")]
+    trans = tracker(lambda root: ["live"])
+    monkeypatch.setattr(collect, "transcript_conversation", trans)
+    monkeypatch.setattr(collect, "real_path", lambda root: root / "r")
+    collect.conversation_for(repo(tmp_path))
+    assert trans.calls[0][0] == (tmp_path / "r",)
+
+
+def test_task_name_uses_runs_dir(tmp_path: Path) -> None:
+    write(tmp_path / ".marestail" / collect.RUNS / "from-runs" / "x", "1")
+    assert collect.task_name(tmp_path) == "from-runs"
+
+
+def test_newest_log_uses_name_key(tmp_path: Path) -> None:
+    older = tmp_path / "overnight-a.log"
+    newer = tmp_path / "overnight-b.log"
+    older.write_text("a")
+    newer.write_text("b")
+    assert collect.newest_log([older, newer]) == newer
+    assert collect.newest_log([newer, older]) == newer
+
+
+def test_new_step_fields() -> None:
+    matched = collect.STEP_RE.match("== coder (01-coder) attempt 3")
+    assert matched is not None
+    created = collect.new_step(matched)
+    assert created.role == "coder"
+    assert created.label == "01-coder"
+    assert created.attempt == 3
+    assert created.status == collect.STATUS_RUNNING
+    assert created.summary == ""
+    assert created.verdict is None
+    assert created.minutes is None
+
+
+def test_last_text_skips_whitespace() -> None:
+    assert collect.last_text(["keep", "   "]) == "keep"
+    assert collect.last_text(["keep", "\t"]) == "keep"
+
+
+def test_chosen_step_uses_finish_label() -> None:
+    first = step("01-coder", "running")
+    second = step("02-critic", "running")
+    steps = [first, second]
+    matched = collect.FINISH_RE.match("  01-coder finished in 1.0 min: x")
+    assert matched is not None
+    assert collect.chosen_step(steps, matched) is first
+    named = collect.running_named(steps, "01-coder")
+    assert named is first
+
+
+def test_eval_quote_value_error() -> None:
+    matched = collect.QUOTED_RE.search(r" '\xzz'")
+    assert matched is not None
+    assert collect.eval_quote("", matched) == "\\xzz"
+    quoted = collect.QUOTED_RE.search(" 'ok'")
+    assert quoted is not None
+    assert collect.eval_quote("", quoted) == "ok"
+
+
+def test_transcript_tail_args(tmp_path: Path, monkeypatch: Any) -> None:
+    conv = tracker(lambda root, max_lines=0, window=0: ["x"])
+    monkeypatch.setattr(collect, "transcript_conversation", conv)
+    assert collect.transcript_tail(tmp_path) == ["x"]
+    assert conv.calls[0][0] == (tmp_path, collect.TAIL_LIMIT, collect.TAIL_BYTES)
+
+
+def test_formatted_if_passes_args(tmp_path: Path, monkeypatch: Any) -> None:
+    tail = tracker(lambda path, max_lines, window: ["a"])
+    monkeypatch.setattr(collect, "formatted_tail", tail)
+    path = tmp_path / "t.jsonl"
+    assert collect.formatted_if(path, 4, 9) == ["a"]
+    assert tail.calls[0][0] == (path, 4, 9)
+    live = tracker(lambda root: path)
+    formatted = tracker(lambda found, max_lines, window: ["z"])
+    monkeypatch.setattr(collect, "live_transcript", live)
+    monkeypatch.setattr(collect, "formatted_if", formatted)
+    assert collect.transcript_conversation(tmp_path, 3, 8) == ["z"]
+    assert live.calls[0][0] == (tmp_path,)
+    assert formatted.calls[0][0] == (path, 3, 8)
+
+
+def test_formatted_tail_passes_window(tmp_path: Path, monkeypatch: Any) -> None:
+    lines = tracker(lambda path, window: ['{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}'])
+    monkeypatch.setattr(collect, "transcript_lines", lines)
+    path = tmp_path / "a.jsonl"
+    assert collect.formatted_tail(path, 2, 77) == ["hi"]
+    assert lines.calls[0][0] == (path, 77)
+
+
+def test_expanded_env_default(monkeypatch: Any) -> None:
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    expanded = tracker(lambda value: Path(value))
+    monkeypatch.setattr(collect, "expand_var", expanded)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")
+    collect.expanded_env("CLAUDE_CONFIG_DIR")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/c")
+    assert collect.expanded_env("CLAUDE_CONFIG_DIR") == Path("/tmp/c")
+
+
+def test_work_home_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv(collect.WORK_CONFIG_ENV, "/tmp/work-config")
+    assert collect.work_home() == Path("/tmp/work-config")
+    monkeypatch.delenv(collect.WORK_CONFIG_ENV, raising=False)
+    assert collect.work_home() == Path(collect.WORK_HOME_DEFAULT).expanduser()
+
+
+def test_newest_fresh_mtime_key_and_stale(tmp_path: Path, monkeypatch: Any) -> None:
+    a = tmp_path / "a.jsonl"
+    b = tmp_path / "b.jsonl"
+    a.write_text("1")
+    b.write_text("2")
+    times = {a: 1.0, b: 5.0}
+    monkeypatch.setattr(collect, "dir_mtime", lambda path: times[path])
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 6.0)
+    assert collect.newest_fresh([a, b]) is b
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 5.0 + collect.TAIL_STALE_S)
+    assert collect.newest_fresh([b]) is b
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 5.0 + collect.TAIL_STALE_S + 0.1)
+    assert collect.newest_fresh([b]) is None
+
+
+def test_split_tail_boundary() -> None:
+    assert collect.split_tail(10, b"a\nb\n", 10) == ["a", "b"]
+    assert collect.split_tail(11, b"a\nb\n", 10) == ["b"]
+
+
+def test_rendered_blocks_skips_non_dict() -> None:
+    assert collect.rendered_blocks(["x", {"type": "text", "text": "hi"}]) == ["hi"]
+
+
+def test_worker_without_and_with_task_paths(tmp_path: Path) -> None:
+    process = Process(3, 4, "m", "claude")
+    running = step()
+    state = repo(tmp_path)
+    state.task = None
+    worker = collect.worker_without_task(state, running, process)
+    assert worker.step is running
+    assert worker.process is process
+    state.task = "t"
+    write(tmp_path / ".marestail" / collect.RUNS / "t" / f"01-coder{collect.RESULT_SUFFIX}", "{}")
+    write(tmp_path / ".marestail" / collect.RUNS / "t" / f"01-coder{collect.PROMPT_SUFFIX}", "p")
+    write(tmp_path / ".marestail" / collect.HANDOFFS / "t" / f"01-coder{collect.HANDOFF_SUFFIX}", "h")
+    with_task = collect.worker_with_task(state, running, process)
+    assert with_task.step is running
+    assert with_task.process is process
+    assert with_task.prompt_path is not None
+    assert with_task.handoff_path is not None
+    assert with_task.result_path is not None
+
+
+def test_build_worker_matching_agent(tmp_path: Path, monkeypatch: Any) -> None:
+    process = Process(9, 1, "m", "claude")
+    matched = tracker(lambda rows, real: process)
+    monkeypatch.setattr(collect, "matching_agent", matched)
+    state = repo(tmp_path)
+    state.task = None
+    worker = collect.build_worker(state, step(), [(1, 0, 1, ["claude"])], tmp_path)
+    assert matched.calls[0][0] == ([(1, 0, 1, ["claude"])], tmp_path)
+    assert worker.process is process
+
+
+def test_agent_under_uses_pid(tmp_path: Path, monkeypatch: Any) -> None:
+    cwd = tracker(lambda pid: tmp_path)
+    monkeypatch.setattr(collect, "cwd_of", cwd)
+    process = Process(11, 1, "m", "claude")
+    assert collect.agent_under(tmp_path, process) is True
+    assert cwd.calls[0][0] == (11,)
+
+
+def test_min_process_by_elapsed() -> None:
+    slow = Process(1, 9, "m", "claude")
+    fast = Process(2, 1, "m", "claude")
+    assert collect.min_process([slow, fast]) is fast
+    assert collect.min_process([fast, slow]) is fast
+
+
+def test_matching_agent_filters_under(tmp_path: Path, monkeypatch: Any) -> None:
+    inside = Process(1, 5, "m", "claude")
+    outside = Process(2, 1, "m", "claude")
+    monkeypatch.setattr(collect, "agents_of", lambda rows: [inside, outside])
+    monkeypatch.setattr(collect, "agent_under", lambda real, process: process is inside)
+    found = collect.matching_agent([], tmp_path)
+    assert found is inside
+
+
+def test_row_agent_passes_pid_elapsed() -> None:
+    process = collect.row_agent(4, 0, 8, ["claude"])
+    assert process == Process(pid=4, elapsed_s=8, model="", backend="claude")
+
+
+def test_run_ps_swallows_subprocess_error(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "marestail.tui.collect.subprocess.run",
+        lambda *args, **options: (_ for _ in ()).throw(subprocess.SubprocessError("no")),
+    )
+    assert collect.run_ps() == ""
+
+
+def test_ints_row_and_parse_ps_split() -> None:
+    row = collect.ints_row(["1", "2", "3", "python cli.py run extra"])
+    assert row == (1, 2, 3, ["python", "cli.py", "run", "extra"])
+    parsed = collect.parse_ps_line("10 20 30 python cli.py run")
+    assert parsed == (10, 20, 30, ["python", "cli.py", "run"])
+    long = collect.parse_ps_line("1 2 3 a b c d")
+    assert long == (1, 2, 3, ["a", "b", "c", "d"])
+
+
+def test_gate_text_uses_max_elapsed() -> None:
+    assert collect.gate_text([(1, "echo"), (5, "pytest")]) == "pytest 5s"
+    assert collect.gate_text([(5, "pytest"), (1, "echo")]) == "pytest 5s"
+
+
+def test_push_level_walks_children() -> None:
+    children = {1: [2], 2: [3]}
+    found: list[int] = []
+    collect.push_level(children, [1], found)
+    assert found == [1, 2, 3]
+
+
+def test_gate_hit_pid_default() -> None:
+    assert collect.gate_hit_pid({}, 1) == []
+    by_pid = {1: (4, ["pytest"])}
+    assert collect.gate_hit_pid(by_pid, 1) == [(4, "pytest")]
+
+
+def test_skipped_gate_backends() -> None:
+    assert collect.skipped_gate(["claude"], ["claude"]) is True
+    assert collect.skipped_gate(["echo"], ["echo"]) is False
+
+
+def test_java_pmd_eunit_pass_names() -> None:
+    assert collect.java_sonar(["java"], ["-Dsonar"]) == "sonar"
+    assert collect.pmd_gate(["java"], ["PmdCli"]) == "pmd"
+    assert collect.eunit_gate(["erlc"], []) == "eunit"
+    assert collect.eunit_gate([], ["beam.eunit"]) == "eunit"
+
+
+def test_docker_inner_index_and_flags() -> None:
+    tokens = ["docker", "compose", "run", "--rm", "svc", "pytest"]
+    assert collect.docker_inner(tokens) == "pytest"
+    assert collect.compose_run_target(tokens, 0) == "pytest"
+    short = ["docker", "compose", "run", "svc"]
+    assert collect.compose_run_target(short, 0) is None
+    assert collect.docker_inner(["echo", "compose", "run", "svc", "pytest"]) is None
+
+
+def test_time_fmt_boundaries() -> None:
+    assert collect.mins_fmt(3599) == "59m"
+    assert collect.mins_fmt(3600) is None
+    assert collect.hours_fmt(3600) == "1h00m"
+    assert collect.hours_fmt(3660) == "1h01m"
+    assert collect.hours_fmt(3661) == "1h01m"
+    assert collect.fmt_seconds(10) == "10s"
+    assert collect.fmt_seconds(120) == "2m"
+    assert collect.fmt_seconds(3600) == "1h00m"
+
+
+def test_model_of_empty_and_flag() -> None:
+    assert collect.model_of([]) == ""
+    assert collect.model_of(["--model", "opus"]) == "opus"
+    assert collect.model_of(["-m", "haiku"]) == "haiku"
+    assert collect.model_of(["--model"]) == ""
+
+
+def test_path_under_false_when_unrelated(tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    nested = tmp_path / "a"
+    nested.mkdir()
+    assert collect.path_under(nested, tmp_path) is True
+    assert collect.path_under(tmp_path, tmp_path) is True
+    assert collect.path_under(other, nested) is False
+
+
+def test_run_git_swallows_subprocess_error(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "marestail.tui.collect.subprocess.run",
+        lambda *args, **options: (_ for _ in ()).throw(subprocess.SubprocessError("no")),
+    )
+    assert collect.run_git(tmp_path, ["status"]) is None
+
+
+def test_ok_git_missing_returncode() -> None:
+    class Bare:
+        pass
+
+    assert collect.ok_git(Bare()) is False
+
+    class Zero:
+        returncode = 0
+
+    assert collect.ok_git(Zero()) is True
+
+
+def test_str_or_raw_and_result_field() -> None:
+    assert collect.str_or_raw("yes", "raw") == "yes"
+    assert collect.str_or_raw(1, "raw") == "raw"
+    assert collect.result_field({"result": "ok"}) == "ok"
+    assert collect.result_field(["no"]) is None

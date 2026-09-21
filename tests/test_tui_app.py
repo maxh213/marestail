@@ -1,4 +1,5 @@
 import curses
+import inspect
 import locale
 import time
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any, cast
 from marestail.tui import app
 from marestail.tui.model import Fleet, RepoState
 from marestail.tui.panels import ConversationPanel, FleetPanel, Rect, WatchState
-from marestail.tui.theme import mono_theme
+from marestail.tui.theme import GLYPH_FLOURISH, mono_theme
 
 
 class FakeScr:
@@ -17,9 +18,10 @@ class FakeScr:
         self.keys: list[int] = []
         self.erased = 0
         self.cells: list[tuple[int, int, str, int]] = []
+        self.timeouts: list[int | None] = []
 
-    def timeout(self, _ms: int) -> None:
-        return None
+    def timeout(self, ms: int) -> None:
+        self.timeouts.append(ms)
 
     def getch(self) -> int:
         return self.keys.pop(0) if self.keys else -1
@@ -49,6 +51,17 @@ def reply(value: str | None) -> Any:
     return lambda key, state: value
 
 
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return fn(*args, **kwargs)
+
+    wrapped.calls = calls
+    return wrapped
+
+
 def test_surely_keeps_missing_values() -> None:
     assert app.surely("x") == "x"
     assert app.surely(None) is None
@@ -74,6 +87,9 @@ def test_run_wraps(monkeypatch: Any) -> None:
     assert seen["locale"] == (locale.LC_ALL, "")
     assert seen["fn"] is app._main
     assert seen["args"] == (roots, 3.5, True)
+    signature = inspect.signature(app.run)
+    assert signature.parameters["refresh"].default == 2.0
+    assert signature.parameters["show_all"].default is False
 
 
 def test_session_keys(tmp_path: Path, monkeypatch: Any) -> None:
@@ -158,8 +174,10 @@ def test_main_returns_on_quit(tmp_path: Path, monkeypatch: Any) -> None:
 
 
 def test_hide_cursor(monkeypatch: Any) -> None:
-    monkeypatch.setattr("marestail.tui.app.curses.curs_set", lambda n: None)
+    seen: list[int] = []
+    monkeypatch.setattr("marestail.tui.app.curses.curs_set", lambda n: seen.append(n))
     app.hide_cursor()
+    assert seen == [0]
 
     def boom(n: int) -> None:
         raise curses.error("no")
@@ -193,8 +211,9 @@ def test_refresh_and_draw(tmp_path: Path, monkeypatch: Any) -> None:
     app.draw_footer(scr, 24, 80, None, watch)
     app.draw_header(scr, 80, watch)
     app.draw_legend(scr, 24, 80, watch)
+    monkeypatch.setattr("marestail.tui.app.time.strftime", lambda fmt: "12:00:00")
     assert "beds" in app.status_text(watch)
-    assert "0 beds" in app.status_text(WatchState(fleet=None, theme=mono_theme(), tick=0))
+    assert app.status_text(WatchState(fleet=None, theme=mono_theme(), tick=0)) == "0 beds · 0 workers · 12:00:00 "
 
 
 def cell_texts(screen: FakeScr) -> list[str]:
@@ -206,9 +225,9 @@ def test_draw_header_and_legend_write_labels(tmp_path: Path) -> None:
     header = FakeScr(24, 80)
     app.draw_header(as_window(header), 80, watch)
     texts = cell_texts(header)
-    assert any("M A R E S T A I L" in text for text in texts)
-    assert any("beds" in text for text in texts)
-    banner = next(cell for cell in header.cells if "M A R E S T A I L" in cell[2])
+    banner_text = f" {GLYPH_FLOURISH}{app.HEADER}{GLYPH_FLOURISH}"
+    assert banner_text in texts
+    banner = next(cell for cell in header.cells if cell[2] == banner_text)
     assert banner[0] == 0
     assert banner[1] == 0
     assert banner[3] == watch.theme.heading
@@ -219,14 +238,15 @@ def test_draw_header_and_legend_write_labels(tmp_path: Path) -> None:
     legend = FakeScr(24, 80)
     app.draw_legend(as_window(legend), 24, 80, watch)
     written = cell_texts(legend)
-    assert " key " in written
-    assert all(any(glyph in text and meaning in text for text in written) for glyph, meaning in app.LEGEND)
-    key = next(cell for cell in legend.cells if cell[2] == " key ")
+    assert app.KEY_LABEL in written
+    for glyph, meaning in app.LEGEND:
+        assert app.legend_row((glyph, meaning)) in written
+    key = next(cell for cell in legend.cells if cell[2] == app.KEY_LABEL)
     rows = [app.legend_row(item) for item in app.LEGEND]
-    inner = max(len(row) for row in [*rows, " key "])
+    inner = max(len(row) for row in [*rows, app.KEY_LABEL])
     top = max(1, (24 - len(rows) - 2) // 2)
     left = max(0, (80 - inner - 2) // 2)
-    assert key[:3] == (top, left + 2, " key ")
+    assert key[:3] == (top, left + 2, app.KEY_LABEL)
     assert key[3] == watch.theme.heading
 
 
@@ -271,11 +291,12 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert len(fleet.repos) == 1
     app.keep_all_repos(fleet)
     assert app.legend_row(("⚘", "run")) == " ⚘  run"
-    assert "select" in app.fleet_hints(None)
+    assert app.fleet_hints(None) == app.FLEET_HINT
     detail = ConversationPanel(repo(tmp_path))
-    assert app.detail_hints(detail).startswith("j/k")
+    detail.follow = False
+    assert app.detail_hints(detail) == app.DETAIL_HINT
     detail.follow = True
-    assert "⇊" in app.detail_hints(detail)
+    assert app.detail_hints(detail) == app.DETAIL_HINT + app.DETAIL_FOLLOW
     watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
     app.set_fleet(watch, fleet)
     assert watch.fleet is fleet
@@ -285,7 +306,8 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     empty, error = app.collected_fleet([tmp_path], True)
     assert empty is None
     assert error is not None
-    assert error.startswith("collect failed:")
+    assert error == f"{app.COLLECT_PREFIX}{RuntimeError('x')}"[: app.ERROR_WIDTH]
+    assert error.startswith(app.COLLECT_PREFIX)
     box = app.Caught()
     with box:
         pass
@@ -314,8 +336,8 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     app.put_error(scr, 10, 10, WatchState(fleet=None, theme=mono_theme(), tick=0, error="e"))
     session.legend = True
     app.legend_put(scr, Rect(0, 0, 5, 20), session.state, 0, " row")
-    assert "select" in app.footer_hints(None)
-    assert "j/k" in app.footer_hints(detail)
+    assert app.footer_hints(None) == app.FLEET_HINT
+    assert app.footer_hints(detail) == app.DETAIL_HINT + app.DETAIL_FOLLOW
     session.detail = ConversationPanel(repo(tmp_path))
     session.sync_detail()
     session.open_from_panel()
@@ -330,3 +352,341 @@ def test_app_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     scr_keys.keys = [ord("q")]
     monkeypatch.setattr(session.panels[0], "on_key", reply("quit"))
     assert app.run_session(session, as_window(scr_keys)) == 0
+
+
+def test_app_constants() -> None:
+    assert app.REPOS_ATTR == "repos"
+    assert app.KEY_LABEL == " key "
+    assert app.BACK_ACTION == "back"
+    assert app.COLLECT_PREFIX == "collect failed: "
+    assert app.ERROR_WIDTH == 60
+    assert app.TIME_FMT == "%H:%M:%S"
+    assert app.FLEET_HINT == "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
+    assert app.DETAIL_HINT == "j/k scroll · PgUp/PgDn · q back"
+    assert app.DETAIL_FOLLOW == " ⇊"
+    assert app.HEADER == " M A R E S T A I L "
+    assert app.TICK_MS == 125
+    assert app.MIN_W == 70
+    assert app.MIN_H == 20
+
+
+def test_main_records_timeout_and_session_args(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "hide_cursor", lambda: None)
+    seen: dict[str, Any] = {}
+
+    def run_session(session: app.WatchSession, stdscr: curses.window) -> int:
+        seen["session"] = session
+        seen["stdscr"] = stdscr
+        return 0
+
+    monkeypatch.setattr(app, "run_session", run_session)
+    scr = FakeScr()
+    win = as_window(scr)
+    roots = [tmp_path]
+    assert app._main(win, roots, 1.5, False) == 0
+    assert scr.timeouts == [app.TICK_MS]
+    assert seen["stdscr"] is win
+    session = seen["session"]
+    assert session.roots is roots
+    assert session.refresh == 1.5
+    assert session.show_all is False
+
+
+def test_watch_session_init_fields(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    roots = [tmp_path]
+    session = app.WatchSession(roots, 2.5, False)
+    assert session.roots is roots
+    assert session.refresh == 2.5
+    assert session.show_all is False
+    assert session.collected == 0.0
+    assert session.legend is False
+    assert session.active == 0
+    assert session.detail is None
+    assert session.state.tick == 0
+
+
+def test_tick_passes_detail(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    monkeypatch.setattr(app, "refresh_fleet", lambda *args: None)
+    session = app.WatchSession([tmp_path], 100.0, True)
+    session.collected = time.monotonic()
+    session.detail = ConversationPanel(repo(tmp_path))
+    drawn = tracker()
+    monkeypatch.setattr(app, "draw", drawn)
+    scr = FakeScr()
+    scr.keys = [-1]
+    assert session.tick(as_window(scr)) is None
+    assert drawn.calls[0][0][2] is session.detail
+    assert drawn.calls[0][0][4] is session.legend
+
+
+def test_maybe_refresh_boundary_and_now(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 2.0, True)
+    monkeypatch.setattr("marestail.tui.app.time.monotonic", lambda: 10.0)
+    refreshed = tracker()
+    monkeypatch.setattr(app.WatchSession, "refresh_now", refreshed)
+    session.collected = 8.0
+    session.maybe_refresh()
+    assert refreshed.calls == [((session, 10.0), {})]
+    refreshed.calls.clear()
+    session.collected = 8.0
+    session.refresh = 2.1
+    session.maybe_refresh()
+    assert refreshed.calls == []
+
+
+def test_refresh_now_passes_session_fields(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    fleet_calls = tracker()
+    monkeypatch.setattr(app, "refresh_fleet", fleet_calls)
+    synced = tracker()
+    session.detail = ConversationPanel(repo(tmp_path))
+    monkeypatch.setattr(session.detail, "sync", synced)
+    session.refresh_now(9.5)
+    assert fleet_calls.calls == [((session.roots, session.state, session.show_all), {})]
+    assert synced.calls == [((session.state.fleet,), {})]
+    assert session.collected == 9.5
+
+
+def test_handle_key_uses_detail_and_key(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.detail = ConversationPanel(repo(tmp_path))
+    keys = tracker(lambda key, state: "handled")
+    monkeypatch.setattr(session.detail, "on_key", keys)
+    assert session.handle_key(ord("j")) is None
+    assert keys.calls[0][0] == (ord("j"), session.state)
+    assert session.detail is not None
+
+
+def test_handle_nav_passes_key(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    panel_keys = tracker(lambda key, state: None)
+    monkeypatch.setattr(session.panels[0], "on_key", panel_keys)
+    assert session.handle_nav(ord("z")) is None
+    assert panel_keys.calls[0][0] == (ord("z"), session.state)
+
+
+def test_cycle_panel_steps_one(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.panels = [FleetPanel(), FleetPanel(), FleetPanel()]
+    session.active = 0
+    session.cycle_panel(ord("\t"))
+    assert session.active == 1
+    session.cycle_panel(ord("\t"))
+    assert session.active == 2
+    session.cycle_panel(ord("\t"))
+    assert session.active == 0
+
+
+def test_handle_detail_uses_key_and_state(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.detail = ConversationPanel(repo(tmp_path))
+    keys = tracker(lambda key, state: "back")
+    monkeypatch.setattr(session.detail, "on_key", keys)
+    assert session.handle_detail(ord("q")) is None
+    assert keys.calls[0][0] == (ord("q"), session.state)
+    assert session.detail is None
+
+
+def test_handle_panel_forwards_key_state(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    keys = tracker(lambda key, state: "open")
+    monkeypatch.setattr(session.panels[0], "on_key", keys)
+    session.state.fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
+    assert session.handle_panel(ord("x")) is None
+    assert keys.calls[0][0] == (ord("x"), session.state)
+    assert session.detail is not None
+
+
+def test_detail_backs_and_key_action(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    detail = ConversationPanel(repo(tmp_path))
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    keys = tracker(lambda key, state: "back")
+    monkeypatch.setattr(detail, "on_key", keys)
+    assert app.detail_backs(detail, ord("q"), watch) is True
+    assert keys.calls[0][0] == (ord("q"), watch)
+    assert app.key_action(detail, ord("q"), watch) == "back"
+    assert app.BACK_ACTION == "back"
+
+
+def test_bump_tick_increments(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "init_theme", mono_theme)
+    session = app.WatchSession([tmp_path], 1.0, True)
+    session.state.tick = 4
+    session.bump_tick()
+    assert session.state.tick == 5
+
+
+def test_caught_starts_empty() -> None:
+    box = app.Caught()
+    assert box.error is None
+
+
+def test_refresh_fleet_clamps_selected(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0, selected=0)
+    monkeypatch.setattr(app, "collect_fleet", lambda roots: Fleet(repos=[], scanned_at=0))
+    app.refresh_fleet([tmp_path], watch, True)
+    assert watch.selected == 0
+    watch.selected = 9
+    live = repo(tmp_path)
+    monkeypatch.setattr(app, "collect_fleet", lambda roots: Fleet(repos=[live], scanned_at=0))
+    app.refresh_fleet([tmp_path], watch, True)
+    assert watch.selected == 0
+
+
+def test_refresh_fleet_passes_roots(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    seen: list[list[Path]] = []
+
+    def collect(roots: list[Path]) -> Fleet:
+        seen.append(roots)
+        return Fleet(repos=[], scanned_at=0)
+
+    monkeypatch.setattr(app, "collect_fleet", collect)
+    roots = [tmp_path]
+    app.refresh_fleet(roots, watch, True)
+    assert seen == [roots]
+    fleet, error = app.collected_fleet(roots, True)
+    assert error is None
+    assert fleet is not None
+
+
+def test_collected_fleet_clips_error(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(app, "collect_fleet", lambda roots: (_ for _ in ()).throw(RuntimeError("e" * 80)))
+    empty, error = app.collected_fleet([tmp_path], True)
+    assert empty is None
+    assert error is not None
+    assert len(error) == app.ERROR_WIDTH
+    assert error == f"{app.COLLECT_PREFIX}{'e' * 80}"[:60]
+    assert len(f"{app.COLLECT_PREFIX}{'e' * 80}") > 60
+
+
+def test_draw_passes_detail(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    body = tracker()
+    monkeypatch.setattr(app, "draw_body", body)
+    monkeypatch.setattr("marestail.tui.app.curses.doupdate", lambda: None)
+    detail = ConversationPanel(repo(tmp_path))
+    scr = FakeScr(24, 80)
+    app.draw(as_window(scr), FleetPanel(), detail, watch, True)
+    args = body.calls[0][0]
+    assert args[2] is detail
+    assert args[5:] == (24, 80)
+    assert scr.erased == 1
+
+
+def test_draw_body_size_boundary(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    frames = tracker()
+    small = tracker()
+    monkeypatch.setattr(app, "draw_frame", frames)
+    monkeypatch.setattr(app, "draw_too_small", small)
+    panel = FleetPanel()
+    detail = ConversationPanel(repo(tmp_path))
+    scr = as_window(FakeScr(app.MIN_H, app.MIN_W))
+    app.draw_body(scr, panel, detail, watch, False, app.MIN_H, app.MIN_W)
+    assert frames.calls
+    assert frames.calls[0][0][2] is detail
+    assert small.calls == []
+    frames.calls.clear()
+    app.draw_body(scr, panel, detail, watch, False, app.MIN_H, app.MIN_W - 1)
+    assert small.calls
+    assert small.calls[0][0][2] is detail
+    small.calls.clear()
+    app.draw_body(scr, panel, detail, watch, False, app.MIN_H - 1, app.MIN_W)
+    assert small.calls
+
+
+def test_draw_too_small_cell(tmp_path: Path) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    scr = FakeScr(10, 10)
+    notice = f"resize to at least {app.MIN_W}x{app.MIN_H}"
+    app.draw_too_small(as_window(scr), FleetPanel(), None, watch, False, 10, 10)
+    x = max(0, (10 - len(notice)) // 2)
+    assert scr.cells == [(10 // 2, x, notice[: 10 - x], watch.theme.heading)]
+    narrow = FakeScr(9, 4)
+    app.draw_too_small(as_window(narrow), FleetPanel(), None, watch, False, 9, 4)
+    assert narrow.cells[0][0] == 9 // 2
+    assert narrow.cells[0][1] == 0
+    assert narrow.cells[0][2] == notice[:4]
+    assert narrow.cells[0][3] == watch.theme.heading
+
+
+def test_draw_frame_rect_and_detail(tmp_path: Path, monkeypatch: Any) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    panel = FleetPanel()
+    rendered = tracker()
+    monkeypatch.setattr(panel, "render", rendered)
+    footer = tracker()
+    monkeypatch.setattr(app, "draw_footer", footer)
+    header = tracker()
+    monkeypatch.setattr(app, "draw_header", header)
+    scr = as_window(FakeScr(24, 80))
+    app.draw_frame(scr, panel, None, watch, False, 24, 80)
+    rect = rendered.calls[0][0][1]
+    assert (rect.y, rect.x, rect.h, rect.w) == (2, 0, 21, 80)
+    assert rendered.calls[0][0][2] is True
+    assert footer.calls[0][0][3] is None
+    detail = ConversationPanel(repo(tmp_path))
+    detail_render = tracker()
+    monkeypatch.setattr(detail, "render", detail_render)
+    app.draw_frame(scr, panel, detail, watch, False, 24, 80)
+    assert footer.calls[-1][0][3] is detail
+    assert detail_render.calls[0][0][2] is True
+
+
+def test_legend_put_and_draw_legend_geometry(tmp_path: Path) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
+    scr = FakeScr(24, 80)
+    app.legend_put(as_window(scr), Rect(4, 6, 10, 30), watch, 2, " row")
+    assert scr.cells == [(7, 7, " row", watch.theme.secondary)]
+    legend = FakeScr(5, 8)
+    app.draw_legend(as_window(legend), 5, 8, watch)
+    rows = list(map(app.legend_row, app.LEGEND))
+    inner = max(map(len, [*rows, app.KEY_LABEL]))
+    top = max(1, (5 - len(rows) - 2) // 2)
+    left = max(0, (8 - inner - 2) // 2)
+    key = next(cell for cell in legend.cells if cell[2] == app.KEY_LABEL)
+    assert key == (top, left + 2, app.KEY_LABEL, watch.theme.heading)
+    assert any(cell[3] == watch.theme.border_focus for cell in legend.cells)
+
+
+def test_header_status_attr(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr("marestail.tui.app.time.strftime", lambda fmt: "01:02:03")
+    assert app.TIME_FMT == "%H:%M:%S"
+    fleet = Fleet(repos=[repo(tmp_path)], scanned_at=0)
+    watch = WatchState(fleet=fleet, theme=mono_theme(), tick=0)
+    status = app.status_text(watch)
+    assert status == "1 beds · 1 workers · 01:02:03 "
+    header = FakeScr(24, 80)
+    app.draw_header(as_window(header), 80, watch)
+    status_cell = next(cell for cell in header.cells if cell[2] == status)
+    assert status_cell == (0, 80 - len(status), status, watch.theme.secondary)
+
+
+def test_footer_and_error_cells(tmp_path: Path) -> None:
+    watch = WatchState(fleet=None, theme=mono_theme(), tick=0, error="boom")
+    detail = ConversationPanel(repo(tmp_path))
+    detail.follow = False
+    footer = FakeScr(24, 80)
+    app.draw_footer(as_window(footer), 24, 80, detail, watch)
+    hints = next(cell for cell in footer.cells if cell[2] == app.DETAIL_HINT)
+    assert hints == (23, 1, app.DETAIL_HINT, watch.theme.secondary)
+    err = next(cell for cell in footer.cells if cell[2] == "boom")
+    assert err == (23, 80 - 4 - 1, "boom", watch.theme.bounced)
+    only = FakeScr(10, 20)
+    app.put_error(as_window(only), 10, 20, watch)
+    assert only.cells == [(9, 15, "boom", watch.theme.bounced)]
+    none = FakeScr(24, 80)
+    app.draw_footer(as_window(none), 24, 80, None, WatchState(fleet=None, theme=mono_theme(), tick=0))
+    assert none.cells == [(23, 1, app.FLEET_HINT, mono_theme().secondary)]

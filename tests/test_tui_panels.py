@@ -39,7 +39,7 @@ from marestail.tui.panels import (
     worker_rows,
     wrap_line,
 )
-from marestail.tui.theme import GLYPH_FLOURISH, HEAVY, ROUND, mono_theme
+from marestail.tui.theme import GLYPH_FLOURISH, GLYPH_IDLE, GLYPH_RUNNING, GLYPH_SECTION, HEAVY, ROUND, mono_theme
 
 
 class FakeWin:
@@ -398,3 +398,411 @@ def test_panel_helpers(tmp_path: Path) -> None:
     panel.take_repo(live)
     panel.ensure_lines(10)
     assert panel.built_for == 10
+
+
+def tracker(fn: Any = lambda *args, **kwargs: None) -> Any:
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return fn(*args, **kwargs)
+
+    wrapped.calls = calls
+    return wrapped
+
+
+def test_panel_constants() -> None:
+    assert panels.REPOS_ATTR == "repos"
+    assert panels.EMPTY_BEDS == "no beds found — waiting for pipelines"
+    assert panels.BETWEEN_STEPS == "between steps"
+    assert panels.NO_CONVERSATION == "no conversation files found"
+    assert panels.IDLE_TEXT == "idle"
+    assert panels.NONE_TASK == "none"
+    assert panels.GATE_PREFIX == "⚒ gate: "
+    assert panels.IN_GATE == "in gate: "
+    assert panels.RUNNER_PREFIX == "runner: "
+    assert panels.BED_H == 5
+    assert panels.BED_GAP == 1
+    assert panels.STRIP_STEPS == 12
+    assert panels.TAIL_ROWS == 3
+
+
+def test_clipped_zero_width() -> None:
+    assert panels.clipped(0, 5, "abc", 5) is None
+    assert panels.clipped(0, 5, "abc", 6) == (0, 5, "a")
+    assert panels.shift_left(0, 0, "ab") == (0, 0, "ab")
+
+
+def test_paint_box_side_range() -> None:
+    box: Any = FakeWin(10, 20)
+    paint_box(box, Rect(1, 2, 4, 6), ROUND, 7)
+    side_ys = sorted(cell[0] for cell in box.cells if cell[2] == ROUND.side)
+    assert side_ys == [2, 2, 3, 3]
+
+
+def test_draw_box_passes_attr() -> None:
+    win: Any = FakeWin(10, 20)
+    draw_box(win, Rect(0, 0, 3, 5), ROUND, 9)
+    assert all(cell[3] == 9 for cell in win.cells)
+
+
+def test_scrolled_text_boundaries() -> None:
+    assert panels.scrolled_text("ab", 5, 0) == "ab"
+    assert panels.scrolled_text("abcdef", 3, 0) == "abc"
+    assert panels.scrolled_text("", 0, 0) == ""
+    assert panels.fit_or_scroll("abc", 3, 0) == "abc"
+    assert panels.fit_or_scroll("abcd", 3, 0) == "abc"
+    assert panels.pick_marquee(1) is panels.fit_or_scroll
+    assert panels.pick_marquee(0) is panels.blank_marquee
+
+
+def test_fmt_elapsed_zero_minutes() -> None:
+    worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None)
+    worker.step.minutes = 0
+    assert fmt_elapsed(worker) == "0m"
+
+
+def test_bed_height_and_span() -> None:
+    live = make_repo(Path("/x"), alive=True, tail_lines=["a", "b"])
+    assert bed_height(live) == panels.BED_H + 0 + 2
+    live.gate_activity = "g"
+    assert bed_height(live) == panels.BED_H + 1 + 2
+    assert bed_span([3, 4, 5], 0, 1) == 3 + 4 + panels.BED_GAP
+    assert bed_span([3, 4, 5], 1, 2) == 4 + 5 + panels.BED_GAP
+    assert panels.placed([5, 5], 1, 11, 0) is True
+    assert panels.placed([5, 5], 1, 10, 0) is False
+    assert fit_top([8, 8, 8], 1, 2, 20) == 1
+
+
+def test_draw_bed_positions(tmp_path: Path) -> None:
+    win: Any = FakeWin(20, 40)
+    live = make_repo(tmp_path, alive=True, gate_activity="g", tail_lines=["tail-line"])
+    watch = state_of()
+    rect = Rect(2, 4, 10, 30)
+    draw_bed(win, rect, live, False, watch)
+    worker_cells = [cell for cell in win.cells if cell[0] == 4 and cell[1] == 6]
+    assert worker_cells
+    gate_cells = [cell for cell in win.cells if cell[2].startswith("⚒ gate:")]
+    assert gate_cells
+    assert gate_cells[0][1] == 6
+    tail_cells = [cell for cell in win.cells if cell[2].startswith("tail-line")]
+    assert tail_cells
+    assert tail_cells[0][1] == 6
+
+
+def test_paint_bed_frame_attr(tmp_path: Path) -> None:
+    win: Any = FakeWin(10, 30)
+    live = make_repo(tmp_path)
+    watch = state_of()
+    panels.paint_bed_frame(win, Rect(0, 0, 6, 20), live, True, watch, 16)
+    assert any(cell[3] == watch.theme.border_focus for cell in win.cells)
+
+
+def test_put_tail_and_paint_tails(tmp_path: Path, monkeypatch: Any) -> None:
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    panels.put_tail(win, 3, 2, 10, watch, 1, "hello-tail")
+    assert (4, 2, "hello-tail", watch.theme.secondary) in win.cells
+    strip = tracker()
+    monkeypatch.setattr(panels, "draw_strip", strip)
+    live = make_repo(tmp_path, tail_lines=["t"])
+    panels.paint_tails(win, 5, 3, 12, live, watch)
+    assert strip.calls[0][0] == (win, 6, 3, 12, live.steps, watch)
+
+
+def test_paint_and_draw_gate_row(tmp_path: Path) -> None:
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    live = make_repo(tmp_path, gate_activity="pytest")
+    assert panels.paint_gate_row(win, 2, 4, 20, live, watch) == 3
+    assert (2, 4, "⚒ gate: pytest", watch.theme.secondary) in win.cells
+    idle = make_repo(tmp_path)
+    assert panels.draw_gate_row(win, 7, 1, 8, idle, watch) == 7
+    busy = make_repo(tmp_path, gate_activity="g")
+    assert panels.draw_gate_row(win, 8, 1, 8, busy, watch) == 9
+
+
+def test_idle_and_busy_attrs(tmp_path: Path) -> None:
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    live = make_repo(tmp_path, alive=True)
+    panels.paint_dead(win, 0, 1, 10, live, False, watch)
+    assert (0, 1, f"{GLYPH_IDLE} idle", watch.theme.idle) in win.cells
+    panels.paint_idle_selected(win, 1, 0, 20, live, True, watch)
+    selected = [cell for cell in win.cells if cell[0] == 1]
+    idle_text = f"{GLYPH_RUNNING} {alive_label(live)}"
+    assert selected[0][3] == watch.theme.selected
+    assert selected[0][2] == idle_text.ljust(20)[:20]
+    assert selected[0][2] != idle_text.rjust(20)[:20]
+    panels.paint_idle_plain(win, 2, 0, 10, live, False, watch)
+    plain = [cell for cell in win.cells if cell[0] == 2]
+    assert plain[0][3] == watch.theme.worker
+    panels.paint_alive(win, 3, 0, 10, live, True, watch)
+    alive_sel = [cell for cell in win.cells if cell[0] == 3]
+    assert alive_sel[0][3] == watch.theme.selected
+    worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None)
+    panels.paint_busy_selected(win, 4, 0, 8, worker, watch, "ab", "cd")
+    busy_sel = [cell for cell in win.cells if cell[0] == 4]
+    assert busy_sel[0][2] == "abcd".ljust(8)[:8]
+    assert busy_sel[0][2] != "abcd".rjust(8)[:8]
+    assert busy_sel[0][3] == watch.theme.selected
+    panels.paint_busy_plain(win, 5, 2, 20, worker, watch, "HEAD ", "TAIL")
+    heads = [cell for cell in win.cells if cell[0] == 5 and cell[2] == "HEAD "]
+    tails = [cell for cell in win.cells if cell[0] == 5 and cell[2] == "TAIL"]
+    assert heads[0][1] == 2
+    assert tails[0][1] == 7
+    assert tails[0][3] == watch.theme.secondary
+
+
+def test_draw_busy_row_tail_choice(tmp_path: Path) -> None:
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None, tail_lines=["x"])
+    panels.draw_busy_row(win, 0, 0, 60, worker, False, watch)
+    assert all(cell[2].find("hello") < 0 for cell in win.cells)
+    worker.tail_lines = []
+    panels.draw_busy_row(win, 1, 0, 60, worker, False, watch)
+    assert any("hello" in cell[2] for cell in win.cells)
+
+
+def test_in_strip_and_put_step(tmp_path: Path) -> None:
+    assert panels.in_strip(3, (1, step())) is True
+    assert panels.in_strip(2, (1, step())) is False
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    running = step("running")
+    panels.put_step(win, 2, 5, watch, (2, running))
+    glyph = [cell for cell in win.cells if cell[0] == 2]
+    assert glyph[0][1] == 9
+    assert glyph[0][2] == GLYPH_RUNNING
+    assert glyph[0][3] == watch.theme.worker
+    bounced = step("done", "BOUNCE")
+    panels.put_step(win, 3, 1, watch, (1, bounced))
+    bounced_cell = [cell for cell in win.cells if cell[0] == 3]
+    assert bounced_cell[0][1] == 3
+    assert bounced_cell[0][2] != glyph[0][2]
+
+
+def test_draw_strip_limits_and_slice(tmp_path: Path) -> None:
+    win: Any = FakeWin(10, 10)
+    watch = state_of()
+    steps = [step() for _ in range(20)]
+    draw_strip(win, 0, 0, 4, steps, watch)
+    assert len([cell for cell in win.cells if cell[0] == 0]) == 2
+    draw_strip(win, 1, 0, 100, steps, watch)
+    assert len([cell for cell in win.cells if cell[1] == 0 and cell[0] == 1]) == 1
+
+
+def test_wrap_line_flags() -> None:
+    assert wrap_line("a  b", 10) == ["a  b"]
+    assert wrap_line("  x", 10) == ["  x"]
+    assert wrap_line("ab", 1) == ["a", "b"]
+    assert wrap_line("abcd", 2) == ["ab", "cd"]
+
+
+def test_section_lines_blank_and_flag() -> None:
+    lines = panels.section_lines("prompt", "hi", 10)
+    assert lines[-1] == ("", False)
+    assert lines[0] == (f"{GLYPH_SECTION} prompt", True)
+    assert panels.section_lines_for(8, "prompt", "body")[0] == (f"{GLYPH_SECTION} prompt", True)
+
+
+def test_panel_on_key_calls_skip(monkeypatch: Any) -> None:
+    watch = state_of()
+    skipped = tracker()
+    monkeypatch.setattr(panels, "skip", skipped)
+    assert Panel().on_key(7, watch) is None
+    assert skipped.calls[0][0] == (7, watch)
+
+
+def test_empty_repos_and_empty_fleet(tmp_path: Path) -> None:
+    live = make_repo(tmp_path)
+    assert panels.empty_repos(None) is True
+    assert panels.empty_repos(Fleet(repos=[], scanned_at=0)) is True
+    assert panels.empty_repos(Fleet(repos=[live], scanned_at=0)) is False
+    win: Any = FakeWin(10, 80)
+    watch = state_of()
+    panels.empty_fleet(FleetPanel(), win, Rect(3, 5, 8, 60), watch)
+    assert any(cell[0] == 3 and cell[1] == 7 and cell[2].startswith("no beds found") for cell in win.cells)
+
+
+def test_index_or_zero_uses_current(tmp_path: Path) -> None:
+    a = make_repo(tmp_path / "a")
+    b = make_repo(tmp_path / "b")
+    fleet = Fleet(repos=[a, b], scanned_at=0)
+    assert panels.index_or_zero(fleet, b) == 1
+    assert panels.index_or_zero(None, b) == 0
+
+
+def test_bed_fits_and_visible_beds() -> None:
+    rect = Rect(0, 0, 5, 10)
+    assert panels.bed_fits(rect, (0, 4)) is True
+    assert panels.bed_fits(rect, (0, 5)) is False
+    visible = panels.visible_beds(Rect(0, 0, 12, 10), [5, 5, 5], 0)
+    assert visible[0][0] == 0
+    assert len(visible) >= 1
+    sliced = panels.visible_beds(Rect(0, 0, 12, 10), [5, 5], 1)
+    assert sliced[0][0] == 1
+
+
+def test_paint_one_bed_selected_flag(tmp_path: Path, monkeypatch: Any) -> None:
+    drawn = tracker()
+    monkeypatch.setattr(panels, "draw_bed", drawn)
+    live = make_repo(tmp_path)
+    other = make_repo(tmp_path / "o")
+    win: Any = FakeWin()
+    watch = state_of()
+    panels.paint_one_bed(win, Rect(0, 0, 20, 40), [live, other], [5, 5], live, watch, 0, 2)
+    assert live in drawn.calls[0][0]
+    assert True in drawn.calls[0][0]
+    panels.paint_one_bed(win, Rect(0, 0, 20, 40), [live, other], [5, 5], live, watch, 1, 2)
+    assert other in drawn.calls[1][0]
+    assert False in drawn.calls[1][0]
+    beds = tracker()
+    monkeypatch.setattr(panels, "paint_one_bed", beds)
+    panels.paint_beds(win, Rect(0, 0, 20, 40), [live], [5], 0, live, watch)
+    assert live in beds.calls[0][0]
+
+
+def test_move_up_down_boundaries() -> None:
+    watch = state_of()
+    watch.selected = 0
+    assert panels.move_up(watch, 3, 0) == "handled"
+    assert watch.selected == 0
+    watch.selected = 2
+    assert panels.move_up(watch, 3, 0) == "handled"
+    assert watch.selected == 1
+    watch.selected = 0
+    assert panels.move_down(watch, 0, 0) == "handled"
+    assert watch.selected == 0
+    watch.selected = 0
+    assert panels.move_down(watch, 3, 0) == "handled"
+    assert watch.selected == 1
+    watch.selected = 2
+    assert panels.move_down(watch, 3, 0) == "handled"
+    assert watch.selected == 2
+
+
+def test_fleet_panel_init_and_render(tmp_path: Path, monkeypatch: Any) -> None:
+    panel = FleetPanel()
+    assert panel.top == 0
+    live = make_repo(tmp_path)
+    fleet = Fleet(repos=[live], scanned_at=0)
+    watch = state_of(fleet)
+    empty = tracker()
+    monkeypatch.setattr(panels, "empty_fleet", empty)
+    panel.render(FakeWin(), Rect(0, 0, 10, 40), True, state_of())
+    assert empty.calls
+    beds = tracker()
+    monkeypatch.setattr(FleetPanel, "render_beds", beds)
+    panel.render(FakeWin(), Rect(0, 0, 10, 40), True, watch)
+    assert beds.calls
+
+
+def test_fleet_render_beds_passes_repos(tmp_path: Path, monkeypatch: Any) -> None:
+    live = make_repo(tmp_path)
+    watch = state_of(Fleet(repos=[live], scanned_at=0))
+    painted = tracker()
+    monkeypatch.setattr(panels, "paint_beds", painted)
+    FleetPanel().render_beds(FakeWin(), Rect(0, 0, 20, 40), watch)
+    assert painted.calls
+    args = painted.calls[0][0]
+    assert args[2] == [live]
+    assert live in args
+
+
+def test_matching_repo_filters_root(tmp_path: Path) -> None:
+    a = make_repo(tmp_path / "a")
+    b = make_repo(tmp_path / "b")
+    fleet = Fleet(repos=[a, b], scanned_at=0)
+    assert matching_repo(fleet, b.root) is b
+    assert matching_repo(fleet, tmp_path / "missing") is None
+    assert matching_repo(None, b.root) is None
+
+
+def test_paint_line_coords_and_attr() -> None:
+    win: Any = FakeWin(10, 40)
+    watch = state_of()
+    panels.paint_line(win, Rect(2, 3, 8, 20), watch, 1, ("hello", False))
+    assert win.cells == [(4, 3, "hello", 0)]
+    panels.paint_line(win, Rect(2, 3, 8, 20), watch, 0, ("HEAD", True))
+    assert (3, 3, "HEAD", watch.theme.heading) in win.cells
+
+
+def test_scroll_handlers_values() -> None:
+    live = make_repo(Path("/x"))
+    panel = ConversationPanel(live)
+    panel.follow = True
+    panel.scroll = 5
+    panel.page = 3
+    assert panels.run_scroll(panel, panels.scroll_home) == "handled"
+    assert panel.scroll == 0
+    panel.scroll = 5
+    panel.follow = True
+    panels.scroll_up(panel)
+    assert panel.follow is False
+    assert panel.scroll == 4
+    panel.scroll = 5
+    panels.scroll_down(panel)
+    assert panel.scroll == 6
+    panel.follow = True
+    panel.scroll = 10
+    panel.page = 3
+    panels.scroll_page_up(panel)
+    assert panel.follow is False
+    assert panel.scroll == 7
+    panel.scroll = 10
+    panels.scroll_page_down(panel)
+    assert panel.scroll == 13
+    panel.follow = True
+    panels.scroll_home(panel)
+    assert panel.follow is False
+    assert panel.scroll == 0
+
+
+def test_conversation_init_and_sync(tmp_path: Path, monkeypatch: Any) -> None:
+    live = make_repo(tmp_path)
+    panel = ConversationPanel(live)
+    assert panel.follow is True
+    assert panel.scroll == 0
+    assert panel.page == 1
+    assert panel.built_for == -1
+    assert panel.lines == []
+    assert panel.repo is live
+    other = make_repo(tmp_path / "o")
+    other.root = tmp_path
+    apply = tracker()
+    monkeypatch.setattr(panels, "apply_repo", apply)
+    panel.sync(Fleet(repos=[other], scanned_at=0))
+    assert apply.calls[0][0][1] is other
+    panel.take_repo(other)
+    assert panel.repo is other
+    assert panel.built_for == -1
+
+
+def test_conversation_render_geometry(tmp_path: Path, monkeypatch: Any) -> None:
+    live = make_repo(tmp_path)
+    panel = ConversationPanel(live)
+    panel.sections = [("prompt", "hello world")]
+    win: Any = FakeWin(10, 20)
+    watch = state_of()
+    panel.render(win, Rect(1, 2, 5, 12), True, watch)
+    assert panel.page == 4
+    heading = [cell for cell in win.cells if cell[0] == 1]
+    assert heading[0][1] == 2
+    assert heading[0][3] == watch.theme.heading
+    assert panel.built_for == 11
+    panel.follow = False
+    panel.scroll = 0
+    panel.lines = [("a", False)]
+    panel.page = 3
+    panel.place_scroll()
+    assert panel.scroll == 0
+    panel.lines = []
+    panel.page = 2
+    panel.place_scroll()
+    assert panel.scroll == 0
+    ensured = tracker(lambda width: None)
+    monkeypatch.setattr(panel, "ensure_lines", ensured)
+    panel.render(win, Rect(0, 0, 4, 10), True, watch)
+    assert ensured.calls[0][0] == (9,)

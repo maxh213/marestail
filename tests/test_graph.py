@@ -17,8 +17,13 @@ def config(root: Path, raw: dict[str, Any] | None = None) -> Config:
     return make_context(root, raw).config
 
 
-def sources(files: list[Path]) -> Callable[[Context], list[Path]]:
-    return lambda ctx: files
+def sources(files: list[Path], seen: list[Context] | None = None) -> Callable[[Context], list[Path]]:
+    def collect(ctx: Context) -> list[Path]:
+        if seen is not None:
+            seen.append(ctx)
+        return files
+
+    return collect
 
 
 def test_render_without_sections_is_empty(tmp_path: Path) -> None:
@@ -94,31 +99,37 @@ def test_edge_lines() -> None:
 
 def test_scanned_graph(tmp_path: Path) -> None:
     seen: list[tuple[Context, list[Path]]] = []
+    collected: list[Context] = []
 
     def body(ctx: Context, files: list[Path]) -> str:
         seen.append((ctx, files))
         return "edges"
 
     cfg = config(tmp_path, {"lang": {}})
-    assert graph.scanned_graph(cfg, "lang", "Lang", sources([tmp_path]), body) == "## Lang modules\nedges"
+    assert graph.scanned_graph(cfg, "lang", "Lang", sources([tmp_path], collected), body) == "## Lang modules\nedges"
     assert seen[0][0].config == cfg
     assert seen[0][1] == [tmp_path]
+    assert collected[0].config == cfg
     assert graph.scanned_graph(cfg, "lang", "Lang", sources([]), body) == ""
     assert graph.scanned_graph(cfg, "missing", "Lang", sources([tmp_path]), body) == ""
     assert len(seen) == 1
+    assert graph.HERE == "."
+    assert graph.EMPTY_JSON == "[]"
+    assert graph.LINE_JOIN == "\n"
 
 
 def test_ruby_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, list[Path], list[str] | None]] = []
+    calls: list[tuple[Context, str, list[Path], list[str] | None]] = []
 
     def scan(ctx: Context, mode: str, files: list[Path], extra: list[str] | None = None) -> tuple[int, str]:
-        calls.append((mode, files, extra))
+        calls.append((ctx, mode, files, extra))
         return 0, json.dumps([{"from": "A", "to": "B", "constant": "B"}, {"from": "C"}])
 
     monkeypatch.setattr(ruby, "sources", sources([tmp_path / "a.rb"]))
     monkeypatch.setattr(ruby, "scan", scan)
     assert graph.ruby_graph(config(tmp_path, {"ruby": {}})) == "## Ruby modules\nA -> B (B)\nC -> None (None)"
-    assert calls == [("deps", [tmp_path / "a.rb"], [str(tmp_path)])]
+    assert calls[0][0].config.root == tmp_path
+    assert calls[0][1:] == ("deps", [tmp_path / "a.rb"], [str(tmp_path)])
 
 
 @pytest.mark.parametrize(("output", "expected"), [("", "## Ruby modules\n"), (" not json \n", "## Ruby modules\nnot json")])
@@ -135,17 +146,18 @@ def test_ruby_graph_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.parametrize(("module", "section", "heading"), [(dotnet, "dotnet", "C#"), (java, "java", "Java")])
 def test_deps_graphs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: Any, section: str, heading: str) -> None:
-    calls: list[tuple[str, list[Path]]] = []
+    calls: list[tuple[Context, str, list[Path]]] = []
 
     def scan(ctx: Context, mode: str, files: list[Path]) -> tuple[dict[str, Any], None]:
-        calls.append((mode, files))
+        calls.append((ctx, mode, files))
         return {"files": [], "edges": EDGES}, None
 
     monkeypatch.setattr(module, "sources", sources([tmp_path / "a"]))
     monkeypatch.setattr(module, "scan", scan)
     render = getattr(graph, f"{module.__name__.rsplit('.', 1)[1]}_graph")
     assert render(config(tmp_path, {section: {}})) == f"## {heading} modules\nA -> B (s)\nB -> C (t)"
-    assert calls == [("deps", [tmp_path / "a"])]
+    assert calls[0][0].config.root == tmp_path
+    assert calls[0][1:] == ("deps", [tmp_path / "a"])
 
 
 @pytest.mark.parametrize(("module", "section", "heading"), [(dotnet, "dotnet", "C#"), (java, "java", "Java")])
@@ -157,17 +169,18 @@ def test_deps_graph_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, modu
 
 
 def test_rust_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, list[Path], list[str] | None]] = []
+    calls: list[tuple[Context, str, list[Path], list[str] | None]] = []
 
     def scan(ctx: Context, mode: str, files: list[Path], extra: list[str] | None = None) -> tuple[list[dict[str, str]], None]:
-        calls.append((mode, files, extra))
+        calls.append((ctx, mode, files, extra))
         return [{"from": str(tmp_path / "src" / "a.rs"), "to": "src/b.rs", "symbol": "B"}], None
 
     monkeypatch.setattr(rust, "sources", sources([tmp_path / "a.rs"]))
     monkeypatch.setattr(rust, "scan", scan)
     cfg = config(tmp_path, {"rust": {}})
     assert graph.rust_graph(cfg) == "## Rust modules\nsrc/a.rs -> src/b.rs (B)"
-    assert calls == [("deps", [tmp_path / "a.rs"], ["--root", str(Context(config=cfg).rust_root())])]
+    assert calls[0][0].config is cfg
+    assert calls[0][1:] == ("deps", [tmp_path / "a.rs"], ["--root", str(Context(config=cfg).rust_root())])
 
 
 def test_rust_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,16 +192,16 @@ def test_rust_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 class FakeErlang:
     def __init__(self, erlc: tuple[int, str], escript: tuple[int, str]) -> None:
         self.replies = {"erlc": erlc, "escript": escript}
-        self.calls: list[tuple[str, list[str]]] = []
+        self.calls: list[tuple[Context | None, str, list[str]]] = []
 
     def erlc(self, ctx: Context, args: list[str]) -> tuple[int, str]:
-        self.calls.append(("erlc", args))
+        self.calls.append((ctx, "erlc", args))
         (Path(args[2]) / "b.beam").write_text("")
         (Path(args[2]) / "a.beam").write_text("")
         return self.replies["erlc"]
 
     def escript(self, ctx: Context, script: str, args: list[str]) -> tuple[int, str]:
-        self.calls.append((script, args))
+        self.calls.append((ctx, script, args))
         return self.replies["escript"]
 
 
@@ -206,10 +219,10 @@ def test_erlang_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ebin.mkdir(parents=True)
     (ebin / "stale.beam").write_text("")
     assert graph.erlang_graph(config(tmp_path, {"erlang": {}})) == "## Erlang modules\nA -> B (f/1)\nB -> C (g/0)"
-    assert fake.calls == [
-        ("erlc", ["+debug_info", "-o", str(ebin), str(tmp_path / "a.erl"), str(tmp_path / "b.erl")]),
-        ("deps.escript", [str(ebin / "a.beam"), str(ebin / "b.beam")]),
-    ]
+    assert fake.calls[0][0].config.root == tmp_path
+    assert fake.calls[0][1:] == ("erlc", ["+debug_info", "-o", str(ebin), str(tmp_path / "a.erl"), str(tmp_path / "b.erl")])
+    assert fake.calls[1][0].config.root == tmp_path
+    assert fake.calls[1][1:] == ("deps.escript", [str(ebin / "a.beam"), str(ebin / "b.beam")])
 
 
 @pytest.mark.parametrize(

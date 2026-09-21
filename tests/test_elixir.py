@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from marestail import elixir
 from tests.conftest import make_context
 
@@ -28,6 +30,21 @@ def test_scan_custom_cwd(tmp_path: Path, fake_run: Any) -> None:
     assert fake.options == [{"cwd": tmp_path, "timeout": 3600}]
 
 
+def test_elixir_constants() -> None:
+    assert elixir.EMPTY == []
+    assert elixir.IGNORE_MODULES == "--ignore-modules"
+    assert elixir.IGNORE == "--ignore"
+
+
+def test_joined_and_option() -> None:
+    assert elixir.joined("--ignore", []) == []
+    assert elixir.joined("--ignore", ["A", "B"]) == ["--ignore", "A,B"]
+    assert elixir.option("--preset", None) == []
+    assert elixir.option("--preset", "phoenix") == ["--preset", "phoenix"]
+    with pytest.raises(TypeError):
+        elixir.joined("--ignore", None)
+
+
 def test_deadcode_flags(tmp_path: Path) -> None:
     out = tmp_path / "out.json"
     empty = elixir.deadcode_command(make_context(tmp_path), out)
@@ -51,3 +68,4 @@ def test_project_files(tmp_path: Path) -> None:
     assert elixir.project_files(ctx, tmp_path / "app", ["app/lib/b.ex", "app/lib/a.ex", "app/lib/zz.ex"]) == ["lib/a.ex", "lib/b.ex"]
     assert elixir.project_files(ctx, tmp_path, ["app/lib/a.ex", "lib/a.ex"]) == ["app/lib/a.ex"]
     assert elixir.strip_prefix("lib/a.ex", Path(".")) == Path("lib/a.ex")
+    assert elixir.strip_prefix("app/lib/a.ex", Path("other")) == Path("app/lib/a.ex")

@@ -52,6 +52,10 @@ class FakeRun:
         self.options: list[dict[str, Any]] = []
 
     def __call__(self, command: list[str], cwd: Path, **options: Any) -> Reply:
+        if cwd is None:
+            raise TypeError("cwd")
+        if options.get("timeout") is None and "timeout" in options:
+            raise TypeError("timeout")
         self.calls.append(list(command))
         self.options.append({"cwd": cwd, **options})
         if callable(self.replies):

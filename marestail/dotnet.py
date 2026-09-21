@@ -23,6 +23,10 @@ IMAGE = "mcr.microsoft.com/dotnet/sdk:8.0"
 DOTNET = "dotnet"
 COVERAGE_JSON = "cs-coverage.json"
 COVERAGE_EXCLUDE = "coverage_exclude"
+MUTATION_EXCLUDE = "mutation_exclude"
+SLASH = "/"
+EMPTY: list[str] = []
+REPLACE = "replace"
 GENERATED_DIRS = {"obj", "bin", ".marestail", "node_modules", "Migrations"}
 GENERATED_SUFFIXES = (".g.cs", ".Designer.cs", ".AssemblyInfo.cs")
 TEST_SUFFIXES = ("Tests.cs", "Test.cs")
@@ -35,6 +39,12 @@ PROJECTS: dict[str, tuple[Path | None, Path | None]] = {}
 def listify(value: Any) -> list[str]:
     if value is None:
         return []
+    return [str(part) for part in value] if isinstance(value, list) else [str(value)]
+
+
+def configured_list(value: Any) -> list[str]:
+    if value is None:
+        raise TypeError("list")
     return [str(part) for part in value] if isinstance(value, list) else [str(value)]
 
 
@@ -144,7 +154,9 @@ def test_project(ctx: Context) -> Path | None:
     candidates = named_csprojs(ctx, True)
     if len(candidates) == 1:
         return candidates[0]
-    return project(ctx) if not candidates else None
+    if candidates:
+        return None
+    return project(ctx)
 
 
 def cached_projects(ctx: Context) -> tuple[Path | None, Path | None]:
@@ -172,8 +184,14 @@ def projects(ctx: Context) -> tuple[Path | None, Path | None, str | None]:
 
 def project_pair(ctx: Context) -> tuple[Path, Path] | str:
     product, tests, error = projects(ctx)
-    if product is None or tests is None:
+    if error is not None:
         return str(error)
+    return paths_or_raise(product, tests)
+
+
+def paths_or_raise(product: Path | None, tests: Path | None) -> tuple[Path, Path]:
+    if product is None or tests is None:
+        raise TypeError("pair")
     return product, tests
 
 
@@ -209,7 +227,7 @@ def in_scope(ctx: Context, paths: list[Path]) -> list[Path]:
 
 
 def matching_lines(path: Path, predicate: Callable[[str], object]) -> list[int]:
-    return [number for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1) if predicate(line)]
+    return [number for number, line in enumerate(path.read_text(errors=REPLACE).splitlines(), start=1) if predicate(line)]
 
 
 def root_prefix(ctx: Context) -> str:
@@ -227,16 +245,16 @@ def matches_any(relative: str, patterns: list[str]) -> bool:
 
 def coverage_excluded(ctx: Context, relative: str) -> bool:
     prefix = root_prefix(ctx)
-    return matches_any(relative, [prefix + pattern.strip("/") for pattern in listify(ctx.dotnet(COVERAGE_EXCLUDE, []))])
+    return matches_any(relative, [prefix + pattern.strip(SLASH) for pattern in configured_list(ctx.dotnet(COVERAGE_EXCLUDE, EMPTY))])
 
 
 def mutation_patterns(ctx: Context) -> list[str]:
-    return listify(ctx.dotnet("mutation_exclude", [])) or listify(ctx.dotnet(COVERAGE_EXCLUDE, []))
+    return configured_list(ctx.dotnet(MUTATION_EXCLUDE, EMPTY)) or configured_list(ctx.dotnet(COVERAGE_EXCLUDE, EMPTY))
 
 
 def mutation_excluded(ctx: Context, relative: str) -> bool:
     prefix = root_prefix(ctx)
-    return matches_any(relative, [p if p.startswith(prefix) else prefix + p.strip("/") for p in mutation_patterns(ctx)])
+    return matches_any(relative, [p if p.startswith(prefix) else prefix + p.strip(SLASH) for p in mutation_patterns(ctx)])
 
 
 def load_coverage(ctx: Context) -> dict[str, Any] | None:

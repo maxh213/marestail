@@ -5,7 +5,7 @@ import time
 from functools import partial
 from itertools import starmap
 from pathlib import Path
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard
 
 from .collect import collect_fleet
 from .model import Fleet, RepoState
@@ -16,6 +16,16 @@ MIN_W = 70
 MIN_H = 20
 TICK_MS = 125
 NEVER = object()
+REPOS_ATTR = "repos"
+KEY_LABEL = " key "
+BACK_ACTION = "back"
+COLLECT_PREFIX = "collect failed: "
+ERROR_WIDTH = 60
+TIME_FMT = "%H:%M:%S"
+FLEET_HINT = "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
+DETAIL_HINT = "j/k scroll · PgUp/PgDn · q back"
+DETAIL_FOLLOW = " ⇊"
+HEADER = " M A R E S T A I L "
 LEGEND = [
     ("⚘", "running: worker, gate, or runner work"),
     ("✿", "step done"),
@@ -46,7 +56,7 @@ def skip(*_args: object, **_kwargs: object) -> Any:
 
 
 def surely[T](value: T | None) -> T:
-    return cast(T, value)
+    return value
 
 
 def is_code(value: int | None) -> TypeGuard[int]:
@@ -105,7 +115,7 @@ class WatchSession:
 
     def handle_key(self, key: int) -> int | None:
         chosen: Any = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
-        return cast(int | None, chosen(self, key))
+        return chosen(self, key)
 
     def handle_idle(self, key: int) -> int | None:
         action: Any = IDLE_ACTIONS.get(key, skip)
@@ -137,8 +147,8 @@ class WatchSession:
         self.detail = None
 
     def handle_panel(self, key: int) -> int | None:
-        chosen: Any = PANEL_ACTIONS.get(cast(str, self.panels[self.active].on_key(key, self.state)), skip)
-        return cast(int | None, chosen(self))
+        chosen: Any = PANEL_ACTIONS.get(self.panels[self.active].on_key(key, self.state), skip)
+        return chosen(self)
 
     def quit_watch(self) -> int:
         return 0
@@ -159,12 +169,12 @@ def detail_handler(detail: ConversationPanel | None) -> object:
 
 
 def detail_backs(detail: ConversationPanel | None, key: int, state: WatchState) -> bool:
-    return False not in (detail is not None, key_action(detail, key, state) == "back")
+    return False not in (detail is not None, key_action(detail, key, state) == BACK_ACTION)
 
 
 def key_action(detail: ConversationPanel | None, key: int, state: WatchState) -> str | None:
     action: Any = getattr(detail, "on_key", skip)
-    return cast(str | None, action(key, state))
+    return action(key, state)
 
 
 def open_repo(session: WatchSession, repo: RepoState | None) -> None:
@@ -190,7 +200,7 @@ def collected_fleet(roots: list[Path], show_all: bool) -> tuple[Fleet | None, st
     box = Caught()
     with box:
         return filtered_fleet(collect_fleet(roots), show_all), None
-    return None, f"collect failed: {box.error}"[:60]
+    return None, f"{COLLECT_PREFIX}{box.error}"[:ERROR_WIDTH]
 
 
 def apply_fleet(state: WatchState, result: tuple[Fleet | None, str | None]) -> None:
@@ -268,22 +278,22 @@ def legend_put(win: curses.window, rect: Rect, state: WatchState, index: int, ro
 
 def draw_legend(win: curses.window, height: int, width: int, state: WatchState) -> None:
     rows = list(map(legend_row, LEGEND))
-    inner = max(map(len, [*rows, " key "]))
+    inner = max(map(len, [*rows, KEY_LABEL]))
     rect = Rect(max(1, (height - len(rows) - 2) // 2), max(0, (width - inner - 2) // 2), len(rows) + 2, inner + 2)
     draw_box(win, rect, ROUND, state.theme.border_focus)
-    put(win, rect.y, rect.x + 2, " key ", state.theme.heading)
+    put(win, rect.y, rect.x + 2, KEY_LABEL, state.theme.heading)
     list(starmap(partial(legend_put, win, rect, state), enumerate(rows)))
 
 
 def draw_header(win: curses.window, width: int, state: WatchState) -> None:
-    put(win, 0, 0, f" {GLYPH_FLOURISH} M A R E S T A I L {GLYPH_FLOURISH}", state.theme.heading)
+    put(win, 0, 0, f" {GLYPH_FLOURISH}{HEADER}{GLYPH_FLOURISH}", state.theme.heading)
     status = status_text(state)
     put(win, 0, width - len(status), status, state.theme.secondary)
     put(win, 1, 0, vine(width), state.theme.border)
 
 
 def status_text(state: WatchState) -> str:
-    return f"{len(getattr(state.fleet, 'repos', []))} beds · {len(worker_rows(state.fleet))} workers · {time.strftime('%H:%M:%S')} "
+    return f"{len(getattr(state.fleet, REPOS_ATTR, []))} beds · {len(worker_rows(state.fleet))} workers · {time.strftime(TIME_FMT)} "
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:
@@ -298,11 +308,11 @@ def put_error(win: curses.window, height: int, width: int, state: WatchState) ->
 
 
 def fleet_hints(_detail: ConversationPanel | None) -> str:
-    return "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
+    return FLEET_HINT
 
 
 def detail_hints(detail: ConversationPanel) -> str:
-    return "j/k scroll · PgUp/PgDn · q back" + ("", " ⇊")[detail.follow]
+    return DETAIL_HINT + ("", DETAIL_FOLLOW)[detail.follow]
 
 
 def footer_hints(detail: ConversationPanel | None) -> str:

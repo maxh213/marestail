@@ -29,6 +29,16 @@ LANGUAGES = "ncloc_language_distribution"
 PAGE = 500
 FINISHED = {"SUCCESS": None, "FAILED": "analysis FAILED", "CANCELED": "analysis CANCELED"}
 BENCHMARKS = "perf/**"
+EQUALS = "="
+COLON = ":"
+SLASH = "/"
+COMMA = ","
+LINE = "line"
+COMPONENT = "component"
+PATH_KEY = "path"
+KEY = "key"
+EMPTY = ""
+EMPTY_LIST: list[str] = []
 DOTNET_EXCLUSIONS = [
     "**/node_modules/**",
     "**/.next/**",
@@ -193,7 +203,7 @@ def property_entry(line: str) -> tuple[str, str] | None:
 
 
 def separator_index(line: str) -> int:
-    return min((index for index in (line.find("="), line.find(":")) if index >= 0), default=-1)
+    return min((index for index in (line.find(EQUALS), line.find(COLON)) if index >= 0), default=-1)
 
 
 def dotnet_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str]:
@@ -272,7 +282,7 @@ def settings(ctx: Context) -> dict[str, str]:
 def coverage_exclusions(ctx: Context) -> str:
     prefix = dotnet.rel(ctx, ctx.dotnet_root())
     prefix = "" if prefix == "." else prefix + "/"
-    return ",".join(prefix + pattern.strip("/") for pattern in dotnet.listify(ctx.dotnet("coverage_exclude", [])))
+    return COMMA.join(prefix + pattern.strip(SLASH) for pattern in dotnet.configured_list(ctx.dotnet("coverage_exclude", EMPTY_LIST)))
 
 
 def report_paths(ctx: Context) -> dict[str, str]:
@@ -403,7 +413,7 @@ def gate_status(client: Client, key: str) -> str:
 
 
 def issue_path(component: dict[str, Any]) -> str:
-    path: str = component.get("component", "").split(":", 1)[-1]
+    path: str = component.get(COMPONENT, EMPTY).split(COLON, 1)[-1]
     return path
 
 
@@ -415,14 +425,14 @@ def reopened(ctx: Context, client: Client, key: str) -> list[str]:
 
 def reopen(client: Client, issue: dict[str, Any]) -> str:
     client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
-    where = f"{issue_path(issue)}:{issue.get('line', 0)}"
+    where = f"{issue_path(issue)}:{issue.get(LINE, 0)}"
     return f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties"
 
 
 def issues(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, resolved="false", ps=PAGE)
     return [
-        f"{issue_path(issue)}:{issue.get('line', 0)} {issue['severity']} {issue['rule']}: {issue['message']}"
+        f"{issue_path(issue)}:{issue.get(LINE, 0)} {issue['severity']} {issue['rule']}: {issue['message']}"
         for issue in data.get("issues", [])
         if ctx.in_scope(issue_path(issue))
     ]
@@ -431,7 +441,7 @@ def issues(ctx: Context, client: Client, key: str) -> list[str]:
 def hotspots(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/hotspots/search", project=key, status="TO_REVIEW", ps=PAGE)
     return [
-        f"{issue_path(hotspot)}:{hotspot.get('line', 0)} hotspot: {hotspot['message']}"
+        f"{issue_path(hotspot)}:{hotspot.get(LINE, 0)} hotspot: {hotspot['message']}"
         for hotspot in data.get("hotspots", [])
         if ctx.in_scope(issue_path(hotspot))
     ]
@@ -473,5 +483,5 @@ def scoped_duplication(ctx: Context, client: Client, key: str) -> list[str]:
 
 
 def component_path(component: dict[str, Any]) -> str:
-    path: str = component.get("path") or component.get("key", "").split(":", 1)[-1]
+    path: str = component.get(PATH_KEY) or component.get(KEY, EMPTY).split(COLON, 1)[-1]
     return path

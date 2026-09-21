@@ -491,3 +491,32 @@ def test_summarize_scoped(tmp_path: Path) -> None:
         sonar.summarize(ctx, ["x"], "ERROR") == "1 sonar findings in scope (global quality gate ERROR; scope: changed (1 files, 2 lines))"
     )
     assert sonar.summarize(make_context(tmp_path), [], "ERROR") == "sonar clean"
+
+
+def test_sonar_constants() -> None:
+    assert sonar.EQUALS == "="
+    assert sonar.COLON == ":"
+    assert sonar.SLASH == "/"
+    assert sonar.COMMA == ","
+    assert sonar.LINE == "line"
+    assert sonar.COMPONENT == "component"
+    assert sonar.PATH_KEY == "path"
+    assert sonar.KEY == "key"
+    assert sonar.EMPTY == ""
+    assert sonar.EMPTY_LIST == []
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [("a=b", 1), ("a:b", 1), ("ab", -1), ("a=b:c", 1), (":x", 0), ("=x", 0)],
+)
+def test_separator_index(line: str, expected: int) -> None:
+    assert sonar.separator_index(line) == expected
+
+
+def test_issue_and_component_paths() -> None:
+    assert sonar.issue_path({"component": "proj:src/A.cs"}) == "src/A.cs"
+    assert sonar.issue_path({}) == ""
+    assert sonar.component_path({"path": "src/A.cs"}) == "src/A.cs"
+    assert sonar.component_path({"key": "proj:src/B.cs"}) == "src/B.cs"
+    assert sonar.component_path({}) == ""

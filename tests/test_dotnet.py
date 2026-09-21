@@ -36,6 +36,21 @@ def test_listify(value: Any, expected: list[str]) -> None:
     assert dotnet.listify(value) == expected
 
 
+@pytest.mark.parametrize(("value", "expected"), [([], []), ([1, "a"], ["1", "a"]), (3, ["3"]), ("x", ["x"])])
+def test_configured_list(value: Any, expected: list[str]) -> None:
+    assert dotnet.configured_list(value) == expected
+
+
+def test_configured_list_rejects_none() -> None:
+    with pytest.raises(TypeError) as raised:
+        dotnet.configured_list(None)
+    assert str(raised.value) == "list"
+
+
+def test_dotnet_constants() -> None:
+    assert (dotnet.SLASH, dotnet.REPLACE, dotnet.EMPTY, dotnet.MUTATION_EXCLUDE) == ("/", "replace", [], "mutation_exclude")
+
+
 def test_env_creates_homes(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     assert dotnet.env(ctx) == {
@@ -116,6 +131,40 @@ def test_docker_skips_marestail_mount_inside_root(tmp_path: Path, monkeypatch: p
     assert command[7] == "-e"
     assert "--network" not in command
     assert command[-3:] == [str(tmp_path), dotnet.IMAGE, "dotnet"]
+
+
+def test_dotnet_can_join_the_host_network(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(dotnet, [(127, ""), (0, "ok")])
+    ctx = context(tmp_path, image="img:1")
+    assert dotnet.dotnet(ctx, ["build"], network=True) == (0, "ok")
+    assert "--network" in fake.calls[-1]
+    assert "host" in fake.calls[-1]
+
+
+def test_dotnet_default_stays_off_the_host_network(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(dotnet, [(127, ""), (0, "ok")])
+    ctx = context(tmp_path, image="img:1")
+    assert dotnet.dotnet(ctx, ["build"], extra={"K": "v"}) == (0, "ok")
+    command = fake.calls[-1]
+    assert "--network" not in command
+    assert "-e" in command
+    assert "K=v" in command
+    assert "-w" in command
+    assert command[command.index("-w") + 1] == str(tmp_path)
+
+
+def test_staged_project_creates_nested_work(tmp_path: Path) -> None:
+    source = tmp_path / "Program.cs"
+    project = tmp_path / "Scan.csproj"
+    source.write_text("class P {}")
+    project.write_text(APP)
+    ctx = context(tmp_path)
+    ctx.work.rmdir()
+    first = dotnet.staged_project(ctx, source, project)
+    assert first.is_file()
+    again = dotnet.staged_project(ctx, source, project)
+    assert again == first
+    assert (ctx.work / dotnet.STAGE / dotnet.PROGRAM_CS).read_text() == "class P {}"
 
 
 def test_dotnet_runs_in_root_by_default(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
@@ -218,6 +267,23 @@ def test_ambiguous_projects(tmp_path: Path) -> None:
     assert dotnet.test_project(ctx) is None
 
 
+def test_two_test_projects_do_not_fall_back_to_the_product(tmp_path: Path) -> None:
+    write(tmp_path, {"App.csproj": APP, "ATests.csproj": APP, "BTests.csproj": APP})
+    ctx = context(tmp_path)
+    assert dotnet.project(ctx) == tmp_path / "App.csproj"
+    assert dotnet.test_project(ctx) is None
+
+
+def test_paths_or_raise(tmp_path: Path) -> None:
+    path = tmp_path / "App.csproj"
+    assert dotnet.paths_or_raise(path, path) == (path, path)
+    with pytest.raises(TypeError) as raised:
+        dotnet.paths_or_raise(None, path)
+    assert str(raised.value) == "pair"
+    with pytest.raises(TypeError):
+        dotnet.paths_or_raise(path, None)
+
+
 def test_projects_found_and_cached(tmp_path: Path) -> None:
     write(tmp_path, {"App/App.csproj": APP, "AppTests/AppTests.csproj": APP})
     ctx = context(tmp_path)
@@ -297,6 +363,12 @@ def test_matching_lines(tmp_path: Path) -> None:
     assert dotnet.matching_lines(tmp_path / "A.cs", lambda line: "bad" in line) == [2, 4]
 
 
+def test_matching_lines_replaces_invalid_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "A.cs"
+    path.write_bytes(b"ok\n\xffbad\n")
+    assert dotnet.matching_lines(path, lambda line: "bad" in line) == [2]
+
+
 @pytest.mark.parametrize(("root", "expected"), [(".", ""), ("src/cs", "src/cs/")])
 def test_root_prefix(tmp_path: Path, root: str, expected: str) -> None:
     assert dotnet.root_prefix(context(tmp_path, root=root)) == expected
@@ -314,7 +386,10 @@ def test_coverage_excluded(tmp_path: Path, relative: str, expected: bool) -> Non
 def test_coverage_excluded_accepts_a_string(tmp_path: Path) -> None:
     ctx = context(tmp_path, coverage_exclude="Gen")
     assert dotnet.coverage_excluded(ctx, "Gen/A.cs") is True
-    assert dotnet.coverage_excluded(context(tmp_path), "Gen/A.cs") is False
+    blank = context(tmp_path)
+    assert dotnet.coverage_excluded(blank, "Gen/A.cs") is False
+    assert dotnet.coverage_excluded(blank, "None") is False
+    assert dotnet.coverage_excluded(blank, "/") is False
 
 
 def test_mutation_patterns_fall_back_to_coverage(tmp_path: Path) -> None:
@@ -413,7 +488,7 @@ def test_build_scanner_builds_and_stamps(tmp_path: Path, monkeypatch: pytest.Mon
             str(out),
         ]
     ]
-    assert fake.options[0]["cwd"] == ctx.root
+    assert fake.options[0]["cwd"] is ctx.root
     assert fake.options[0]["timeout"] == 900
     assert (out / "stamp").read_text() == dotnet.scanner_digest()
     assert dotnet.build_scanner(ctx) is None
@@ -469,7 +544,7 @@ def test_scan_returns_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake
     dll = ctx.work / "cs-scan" / dotnet.SCAN_DLL
     assert fake.calls == [["dotnet", str(dll), "deps", "--root", str(tmp_path), "--out", str(out), f"@{listing}"]]
     assert fake.options[0]["timeout"] == 600
-    assert fake.options[0]["cwd"] == tmp_path
+    assert fake.options[0]["cwd"] is tmp_path
 
 
 def test_scan_reports_scanner_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
@@ -480,8 +555,17 @@ def test_scan_reports_scanner_failure(tmp_path: Path, monkeypatch: pytest.Monkey
     assert dotnet.scan(ctx, "dead", []) == (None, "C# scanner failed (dead): crash")
 
 
+def test_scan_reports_missing_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
+    scanner_dir(tmp_path, monkeypatch)
+    ctx = context(tmp_path)
+    fresh_scanner(ctx)
+    fake_run(dotnet, [(127, "")])
+    assert dotnet.scan(ctx, "dead", []) == (None, f"dotnet unavailable: {dotnet.INSTALL_HINT}")
+
+
 def test_scan_reports_build_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
     scanner_dir(tmp_path, monkeypatch)
     fake = fake_run(dotnet, [(127, "")])
     assert dotnet.scan(context(tmp_path), "deps", []) == (None, f"dotnet unavailable: {dotnet.INSTALL_HINT}")
+    assert fake.calls[0][1] == "build"
     assert len(fake.calls) == 1

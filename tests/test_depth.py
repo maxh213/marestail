@@ -295,6 +295,14 @@ def test_elixir_modules_empty_and_failing(tmp_path: Path, fake_run: Callable[...
 def test_source_files(tmp_path: Path) -> None:
     write(tmp_path, {"b.rb": "", "a.rb": "", "a_spec.rb": "", "spec/c.rb": "", "d.py": ""})
     assert depth.source_files(tmp_path, "*.rb", "_spec.rb") == [tmp_path / "a.rb", tmp_path / "b.rb"]
+    assert depth.source_files(tmp_path, depth.RUBY_SOURCES, depth.RUBY_TEST_SUFFIX) == [tmp_path / "a.rb", tmp_path / "b.rb"]
+
+
+def test_language_globs() -> None:
+    assert depth.ELIXIR_SOURCES == "*.ex"
+    assert depth.ELIXIR_TEST_SUFFIX == "_test.exs"
+    assert depth.RUBY_SOURCES == "*.rb"
+    assert depth.RUBY_TEST_SUFFIX == "_spec.rb"
 
 
 def fake_erlang(monkeypatch: pytest.MonkeyPatch, files: list[Path], reply: tuple[int, str]) -> list[Any]:
@@ -376,7 +384,7 @@ def fake_scanner(monkeypatch: pytest.MonkeyPatch, module: Any, files: list[Path]
     monkeypatch.setattr(module, "sources", sources)
 
     def scan(ctx: Context, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
-        calls.append((mode, paths))
+        calls.append((ctx, mode, paths))
         return reply
 
     monkeypatch.setattr(module, "scan", scan)
@@ -387,7 +395,7 @@ def test_dotnet_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     config = Config(root=tmp_path, raw={"dotnet": {}})
     calls = fake_scanner(monkeypatch, dotnet, [Path("A.cs")], ([ITEM], None))
     assert depth.dotnet_modules(config) == [TARGETED]
-    assert calls == [Context(config=config), ("depth", [Path("A.cs")])]
+    assert calls == [Context(config=config), (Context(config=config), "depth", [Path("A.cs")])]
 
 
 def test_dotnet_modules_empty_and_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -409,7 +417,7 @@ def test_rust_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rust, "rel", rel)
     expected = Module("crate/src/A.x", ["A.f"], 9, ["crate/src/A.x:4 f only forwards its arguments to g"])
     assert depth.rust_modules(config) == [expected]
-    assert calls == [Context(config=config), ("depth", [Path("lib.rs")]), Context(config=config)]
+    assert calls == [Context(config=config), (Context(config=config), "depth", [Path("lib.rs")]), Context(config=config)]
 
 
 def test_rust_modules_empty_and_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -424,7 +432,7 @@ def test_java_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = Config(root=tmp_path, raw={"java": {}})
     calls = fake_scanner(monkeypatch, java, [Path("A.java")], ([ITEM, ITEM], ""))
     assert depth.java_modules(config) == [TARGETED, TARGETED]
-    assert calls == [Context(config=config), ("depth", [Path("A.java")])]
+    assert calls == [Context(config=config), (Context(config=config), "depth", [Path("A.java")])]
     fake_scanner(monkeypatch, java, [], ([ITEM], None))
     assert depth.java_modules(config) == []
 

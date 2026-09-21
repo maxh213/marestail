@@ -48,6 +48,10 @@ BUILD_TIMEOUT = 6 * 3600
 READY_TIMEOUT = 120
 INIT_TIMEOUT = 600
 GIB = 1024**3
+EMPTY = ""
+ALIVE = 0
+POLL = 0.05
+META_TIME = "%Y-%m-%dT%H:%M:%S%z"
 NOT_CONFIGURED = "configure [perf.db] migrate in marestail.toml"
 REFLINK_FAILED = "reflink copy failed: the Docker data root must be on a reflink-capable filesystem such as btrfs or XFS"
 CLI = Path(__file__).resolve().parents[1] / "cli.py"
@@ -114,7 +118,7 @@ class Database:
 def build_database(config: Config, section: dict[str, Any], rows: int, rows_source: str, image: str, image_source: str) -> Database:
     return Database(
         root=config.root,
-        migrate=str(section.get(MIGRATE, "")),
+        migrate=str(section.get(MIGRATE, EMPTY)),
         url_env=str(section.get("url_env", "DATABASE_URL")),
         rows=rows,
         rows_source=rows_source,
@@ -318,7 +322,7 @@ def wait_ready(database: Database, name: str, timeout: int) -> None:
         if "is not running" in output:
             _, logs = docker(database, "logs", "--tail", "20", name)
             raise DatabaseError(f"{name} stopped before it was ready: {' | '.join(tail(logs, 5))}")
-        time.sleep(0.05)
+        time.sleep(POLL)
     raise DatabaseError(f"{name} was not ready after {timeout}s")
 
 
@@ -451,7 +455,7 @@ def process_alive(pid: object) -> bool:
     if not isinstance(pid, int):
         return False
     try:
-        os.kill(pid, 0)
+        os.kill(pid, ALIVE)
     except OSError:
         return False
     return True
@@ -600,7 +604,7 @@ def finalise_golden(database: Database, name: str) -> None:
         "rows": database.rows,
         BYTES: int(output.strip().splitlines()[-1]),
         IMAGE: database.image,
-        "built_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "built_at": time.strftime(META_TIME),
     }
     step(files(database, f"cat > {final}/META.json && touch {final}/READY", stdin=json.dumps(meta) + "\n"), "writing META.json")
 

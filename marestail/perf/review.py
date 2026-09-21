@@ -10,6 +10,9 @@ from marestail.shell import run
 
 CHANGED = ("degraded", "improved", "removed")
 SETUP_NEEDED = "## Setup needed"
+DATE = "%Y-%m-%d"
+INDENT = 2
+NEXT_HEADING = "\n## "
 
 
 @dataclass(frozen=True)
@@ -73,7 +76,7 @@ def bench_scripts(config: Config) -> list[str]:
 
 def write_results(report: Path, classified: list[results.Classified]) -> None:
     data = {"measurements": [asdict(item.measurement) | {"status": item.status, "change": item.change} for item in classified]}
-    report.with_suffix(".results.json").write_text(json.dumps(data, indent=2) + "\n")
+    report.with_suffix(".results.json").write_text(json.dumps(data, indent=INDENT) + "\n")
 
 
 def record_table(config: Config, session: trees.Session, outcome: Review) -> None:
@@ -89,7 +92,7 @@ def snapshot_for(config: Config, session: trees.Session, outcome: Review) -> tab
     return table.Snapshot(
         task=session.task,
         commit=short(config, head.sha if head else "HEAD"),
-        date=time.strftime("%Y-%m-%d"),
+        date=time.strftime(DATE),
         rows=rows_cell(config, outcome.used_db),
         pre_commit=short(config, pre.sha) if pre else None,
         classified=outcome.classified,
@@ -146,4 +149,6 @@ def change_text(item: results.Classified) -> str:
 def setup_needed(text: str) -> str:
     if SETUP_NEEDED not in text:
         return ""
-    return text.split(SETUP_NEEDED, 1)[1].split("\n## ", 1)[0].strip()
+    rest = text.split(SETUP_NEEDED, 1)[1]
+    body, _sep, _tail = rest.partition(NEXT_HEADING)
+    return body.strip()

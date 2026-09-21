@@ -162,3 +162,19 @@ def test_theme_dispatch_helpers(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(theme, "color_theme", boom)
     assert theme.try_color().colors is False
+
+
+def test_theme_constants_and_running_attr() -> None:
+    assert theme.STATUS_RUNNING == "running"
+    assert theme.VERDICT_BOUNCE == "BOUNCE"
+    assert theme.VERDICT_PASS == "PASS"
+    mono = theme.mono_theme()
+    assert theme.step_attr(mono, "running", "BOUNCE") == mono.worker
+    assert theme.step_attr(mono, "running", "PASS") == mono.worker
+    assert theme.step_glyph("running", "BOUNCE") == theme.GLYPH_RUNNING
+    assert theme.verdict_glyph("BOUNCE") == theme.GLYPH_BOUNCED
+    assert theme.verdict_glyph(None) == theme.GLYPH_DONE
+    assert theme.vine(1) == theme.full_vine(1)
+    assert theme.vine(1) != ""
+    assert theme.vine(0) == ""
+    assert theme.VINE_SEGMENT == "─∙❧"

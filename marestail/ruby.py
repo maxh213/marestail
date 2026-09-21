@@ -9,6 +9,8 @@ SCRIPT = Path(__file__).resolve().parent / "rb" / "scan.rb"
 MARESTAIL_ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "ruby:3.2-slim"
 SKIP_DIRS = {"vendor", "spec", "test", "tmp", "log", "node_modules", ".git", "coverage"}
+SOURCES_KEY = "sources"
+DEFAULT_FOLDERS = ["app", "lib"]
 
 
 def listify(value: Any) -> list[str]:
@@ -74,5 +76,5 @@ def kept_source(ctx: Context, path: Path) -> bool:
 
 def sources(ctx: Context) -> list[Path]:
     root = ctx.ruby_root()
-    folders = ctx.ruby("sources", ["app", "lib"])
+    folders = ctx.ruby(SOURCES_KEY, DEFAULT_FOLDERS)
     return sorted(path for folder in folders for path in (root / folder).rglob("*.rb") if kept_source(ctx, path))

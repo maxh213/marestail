@@ -25,6 +25,9 @@ INSTALL = {
 }
 MISSING_TOOL = 127
 STAMP = "stamp"
+NS_CLOSE = "}"
+EMPTY = ""
+OUTPUT_TAIL = 300
 
 
 def listify(value: Any) -> list[str]:
@@ -53,7 +56,7 @@ def package_dir(owner: str) -> str:
 
 
 def output_tail(output: str) -> str:
-    return output.strip()[-300:]
+    return output.strip()[-OUTPUT_TAIL:]
 
 
 def tool(ctx: Context, name: str) -> str:
@@ -126,7 +129,7 @@ def pom_release(path: Path) -> str | None:
 
 
 def pom_properties(properties: ET.Element) -> dict[str, str]:
-    return {element.tag.split("}", 1)[-1]: (element.text or "").strip() for element in properties}
+    return {element.tag.split(NS_CLOSE, 1)[-1]: (element.text or EMPTY).strip() for element in properties}
 
 
 def resolve_property(values: dict[str, str], key: str) -> str:

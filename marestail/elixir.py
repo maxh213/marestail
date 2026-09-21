@@ -12,6 +12,9 @@ DEADCODE = SCANNERS / "deadcode.exs"
 DEPTH = SCANNERS / "depth.exs"
 COVERAGE = SCANNERS / "coverage.exs"
 SCRIPTS = {"comments": COMMENTS, "complexity": COMPLEXITY, "deadcode": DEADCODE, "depth": DEPTH, "coverage": COVERAGE}
+EMPTY: list[str] = []
+IGNORE_MODULES = "--ignore-modules"
+IGNORE = "--ignore"
 
 
 def script(mode: str) -> Path:
@@ -29,8 +32,8 @@ def deadcode_command(ctx: Context, out: Path) -> list[str]:
 
 def deadcode_flags(ctx: Context) -> list[str]:
     flags = option("--preset", ctx.elixir("preset"))
-    flags += joined("--ignore-modules", ctx.elixir("deadcode_ignore_modules", []))
-    return flags + joined("--ignore", ctx.elixir("deadcode_ignore", []))
+    flags += joined(IGNORE_MODULES, ctx.elixir("deadcode_ignore_modules", EMPTY))
+    return flags + joined(IGNORE, ctx.elixir("deadcode_ignore", EMPTY))
 
 
 def option(flag: str, value: Any) -> list[str]:
@@ -38,7 +41,8 @@ def option(flag: str, value: Any) -> list[str]:
 
 
 def joined(flag: str, values: Any) -> list[str]:
-    return [flag, ",".join(values)] if values else []
+    parts = list(values)
+    return [flag, ",".join(parts)] if parts else []
 
 
 def project_files(ctx: Context, root: Path, files: list[str]) -> list[str]:
@@ -49,6 +53,7 @@ def project_files(ctx: Context, root: Path, files: list[str]) -> list[str]:
 
 def strip_prefix(path: str, prefix: Path) -> Path:
     relative = Path(path)
-    if str(prefix) == ".":
+    try:
+        return relative.relative_to(prefix)
+    except ValueError:
         return relative
-    return relative.relative_to(prefix)

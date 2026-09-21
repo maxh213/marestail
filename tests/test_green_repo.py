@@ -404,7 +404,12 @@ PACKAGE_MUTANTS = [
     "marestail.changes.*",
     "marestail.cli.*",
     "marestail.context.*",
+    "marestail.depth.*",
+    "marestail.dotnet.*",
+    "marestail.elixir.*",
+    "marestail.erlang.*",
     "marestail.freeze.*",
+    "marestail.graph.*",
     "marestail.prompts.*",
     "marestail.report.*",
     "marestail.shell.*",
@@ -427,11 +432,11 @@ def test_this_package_kills_its_own_mutants() -> None:
     if restricted_path() or os.environ.get("MARESTAIL_HERMETIC") == "1":
         pytest.skip("mutmut needs a writable tree and a normal pytest")
     completed = subprocess.run(
-        [sys.executable, "-m", "mutmut", "run", *PACKAGE_MUTANTS, "--max-children", "1"],
+        [sys.executable, "-m", "mutmut", "run", *PACKAGE_MUTANTS, "--max-children", "4"],
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=1800,
     )
     total, survivors = py_mutation.surviving(make_context(ROOT), PACKAGE_MUTANTS)
     assert total > 0, completed.stdout + completed.stderr

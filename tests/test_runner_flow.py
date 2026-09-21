@@ -92,7 +92,13 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     monkeypatch.setenv("MARESTAIL_SCOPE", "unset")
     monkeypatch.setenv("MARESTAIL_FOCUS", "unset")
     config = Config(root=tmp_path, raw={"agent": {"model": "cfg-model", "effort": "cfg-effort"}})
-    monkeypatch.setattr(config_module, "load", lambda start: config)
+    seen_load: list[Path] = []
+
+    def load(start: Path) -> Config:
+        seen_load.append(start)
+        return config
+
+    monkeypatch.setattr(config_module, "load", load)
     seen: dict[str, Any] = {
         "require": patch(monkeypatch, dandelion, "require"),
         "start": patch(monkeypatch, perf_trees, "record_start"),
@@ -106,6 +112,8 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
         return 7
 
     monkeypatch.setattr(runner, "run_steps", steps)
+    seen["load"] = seen_load
+    seen["config"] = config
     return seen
 
 
@@ -119,6 +127,7 @@ def test_run_pipeline_uses_config_defaults(pipeline_env: dict[str, Any], capsys:
     assert [step.name for step in pipeline_env["window"]] == ["coder", "cleaner"]
     assert pipeline_env["auto"] is True
     assert pipeline_env["start"].calls == [(state.config, "t")]
+    assert pipeline_env["load"] == [Path.cwd()]
     assert os.environ["MARESTAIL_SCOPE"] == "unset"
     assert capsys.readouterr().out == "\nperf changes\n"
 
@@ -128,11 +137,19 @@ def test_run_pipeline_routes_and_scopes(pipeline_env: dict[str, Any], capsys: py
     state = pipeline_env["state"]
     assert (state.model, state.effort, state.route) == (None, None, "dandelion/route")
     assert pipeline_env["require"].calls == [()]
+    assert pipeline_env["resolve"].calls[0][0] is pipeline_env["config"]
     assert pipeline_env["resolve"].calls[0][1] == {"src/a.py"}
+    assert pipeline_env["hook"].calls[0][0] is pipeline_env["config"]
     assert (state.scope_changed, state.hard, state.focus) == (True, False, {"src/a.py", "src/hook.py"})
     assert os.environ["MARESTAIL_SCOPE"] == "changed"
     assert os.environ["MARESTAIL_FOCUS"] == os.pathsep.join(["src/a.py", "src/hook.py"])
     assert capsys.readouterr().out == "\n"
+
+
+def test_run_pipeline_keeps_the_agent(pipeline_env: dict[str, Any]) -> None:
+    runner.run_pipeline(Path("t.md"), None, None, True, "opus", 3, agent="claude")
+    assert pipeline_env["state"].agent == "claude"
+    assert pipeline_env["state"].retries == 3
 
 
 def test_run_pipeline_hard_scope_and_explicit_effort(pipeline_env: dict[str, Any]) -> None:
@@ -149,9 +166,15 @@ def test_run_pipeline_hard_scope_and_explicit_effort(pipeline_env: dict[str, Any
             {"model": "dandelion/route", "agent": "grok"},
             "--model dandelion/route picks the backend and effort before every session; drop --agent and --effort",
         ),
-        ({"model": "dandelion/route-best", "effort": "high"}, "--model dandelion/route-best picks the backend and effort"),
+        (
+            {"model": "dandelion/route-best", "effort": "high"},
+            "--model dandelion/route-best picks the backend and effort before every session; drop --agent and --effort",
+        ),
         ({"model": "x", "scope": "all", "focus": ["a.py"]}, "--focus cannot be combined with --scope all"),
-        ({"model": "x", "scope": "hard"}, "--scope hard needs at least one focus path"),
+        (
+            {"model": "x", "scope": "hard"},
+            "--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml",
+        ),
     ],
 )
 def test_run_pipeline_rejects_bad_flags(
@@ -160,8 +183,9 @@ def test_run_pipeline_rejects_bad_flags(
     patch(monkeypatch, runner, "resolve_focus", set())
     patch(monkeypatch, runner, "hook_focus", set())
     arguments = {"task": Path("t.md"), "start": None, "stop": None, "auto": True, "retries": 1, **kwargs}
-    with pytest.raises(SystemExit, match=message.replace("[", r"\[")):
+    with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(**arguments)
+    assert str(raised.value) == message
 
 
 def test_run_pipeline_all_scope_without_focus(pipeline_env: dict[str, Any]) -> None:
@@ -214,6 +238,7 @@ def test_run_step_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     ("judge", "raw", "guidance", "expected"),
     [
         (PERF, {"perf": {"enabled": False}}, False, "perf disabled in marestail.toml; skipping\n"),
+        (PERF, {"perf": {}}, False, ""),
         (PERF, {"perf": {"enabled": True}}, False, ""),
         (PERF, {}, False, ""),
         (CRITIC, {"critic": {"enabled": False}}, False, ""),
@@ -227,10 +252,11 @@ def test_run_step_judge(
     loop = patch(monkeypatch, runner, "run_judge_loop", "looped")
     (tmp_path / "guidance").mkdir()
     (tmp_path / "guidance" / ("g.md" if guidance else "g.txt")).write_text("g")
-    outcome = runner.run_step(make_state(tmp_path, raw=raw), judge)
+    state = make_state(tmp_path, raw=raw)
+    outcome = runner.run_step(state, judge)
     assert capsys.readouterr().out == expected
     assert outcome == (True if expected else "looped")
-    assert len(loop.calls) == (0 if expected else 1)
+    assert loop.calls == ([] if expected else [(state, judge)])
 
 
 def test_judge_loop_passes_after_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -321,9 +347,17 @@ def test_normalise_findings() -> None:
 
 
 def test_attempts() -> None:
+    assert list(runner.attempts(1)) == [1]
     assert list(runner.attempts(2)) == [1, 2]
     assert list(itertools.islice(runner.attempts(0), 4)) == [1, 2, 3, 4]
     assert list(itertools.islice(runner.attempts(-1), 2)) == [1, 2]
+
+
+def test_runner_constants() -> None:
+    assert runner.UNLIMITED == "unlimited"
+    assert runner.ENABLED == "enabled"
+    assert runner.GROK == "grok"
+    assert runner.SPACE == " "
 
 
 @pytest.mark.parametrize(

@@ -11,6 +11,7 @@ from marestail.sonar.client import Client, credentials, save_credentials
 
 COMPOSE = Path(__file__).resolve().parent / "docker-compose.yml"
 DEFAULT_URL = "http://localhost:9000"
+ATTEMPTS = 120
 DOCKER = "docker"
 GIT = "git"
 ADMIN = "admin"
@@ -38,7 +39,7 @@ def compose(*args: str) -> None:
     subprocess.run([DOCKER, "compose", "-f", str(COMPOSE), *args], env=env, check=True)
 
 
-def wait_until_up(url: str, attempts: int = 120) -> None:
+def wait_until_up(url: str, attempts: int = ATTEMPTS) -> None:
     for _ in range(attempts):
         if status(url) == "UP":
             return

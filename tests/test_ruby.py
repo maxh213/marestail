@@ -15,6 +15,11 @@ def test_listify(value: Any, expected: list[str]) -> None:
     assert ruby.listify(value) == expected
 
 
+def test_source_defaults() -> None:
+    assert ruby.SOURCES_KEY == "sources"
+    assert ruby.DEFAULT_FOLDERS == ["app", "lib"]
+
+
 def test_bundle_default_and_configured(tmp_path: Path) -> None:
     assert ruby.bundle(make_context(tmp_path), "rspec") == ["bundle", "exec", "rspec"]
     ctx = make_context(tmp_path, {"ruby": {"exec": ["bin/exec"]}})
@@ -84,3 +89,12 @@ def test_relative(tmp_path: Path) -> None:
 
 def test_skip_dirs() -> None:
     assert sorted(ruby.SKIP_DIRS) == [".git", "coverage", "log", "node_modules", "spec", "test", "tmp", "vendor"]
+
+
+def test_sources_uses_app_and_lib(tmp_path: Path) -> None:
+    for name in ("app/a.rb", "lib/b.rb", "spec/c.rb", "other/d.rb"):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    found = ruby.sources(make_context(tmp_path))
+    assert found == [tmp_path / "app" / "a.rb", tmp_path / "lib" / "b.rb"]
