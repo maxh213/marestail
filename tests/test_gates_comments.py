@@ -331,6 +331,7 @@ def test_has_docstring_shapes() -> None:
     assert comments.has_docstring(comments.parsed("class A:\n    pass\n")) is False
     assert comments.has_docstring(comments.parsed("1\n")) is False
     assert comments.has_docstring(comments.parsed("def f(:\n")) is False
+    assert comments.has_docstring(None) is False
 
 
 def test_ruby_payload() -> None:

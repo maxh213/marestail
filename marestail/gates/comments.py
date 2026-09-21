@@ -112,7 +112,7 @@ def docstrings(text: str) -> list[int]:
     return [node.body[0].lineno for node in documentable(tree) if has_docstring(node)]
 
 
-def has_docstring(node: ast.AST) -> bool:
+def has_docstring(node: ast.AST | None) -> bool:
     body = getattr(node, "body", None)
     if not body:
         return False

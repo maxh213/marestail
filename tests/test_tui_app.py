@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from marestail.tui import app
 from marestail.tui.model import Fleet, RepoState
-from marestail.tui.panels import ConversationPanel, FleetPanel, Rect, WatchState
+from marestail.tui.panels import ConversationPanel, FleetPanel, Rect, WatchState, draw_box
 from marestail.tui.theme import GLYPH_FLOURISH, mono_theme
 
 
@@ -677,13 +677,12 @@ def test_legend_put_and_draw_legend_geometry(tmp_path: Path) -> None:
 def test_draw_legend_box_on_odd_width(tmp_path: Path, monkeypatch: Any) -> None:
     watch = WatchState(fleet=None, theme=mono_theme(), tick=0)
     boxes: list[Rect] = []
-    original = app.draw_box
 
     def capture(win: Any, rect: Rect, *args: Any) -> None:
         boxes.append(rect)
-        original(win, rect, *args)
+        draw_box(win, rect, *args)
 
-    monkeypatch.setattr(app, "draw_box", capture)
+    monkeypatch.setattr("marestail.tui.app.draw_box", capture)
     legend = FakeScr(24, 81)
     app.draw_legend(as_window(legend), 24, 81, watch)
     rows = list(map(app.legend_row, app.LEGEND))
