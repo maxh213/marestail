@@ -14,6 +14,9 @@ from marestail.runner import (
     agent_command,
     agent_label,
     grok_command,
+    hermes_command,
+    hermes_rate_limited,
+    hermes_summary,
     junie_command,
     junie_rate_limited,
     junie_summary,
@@ -193,6 +196,99 @@ def junie_backend() -> None:
     expect("junie-summary-tail", junie_summary("plain text failure"), "plain text failure")
 
 
+def hermes_backend() -> None:
+    expect(
+        "hermes-command",
+        hermes_command(state("hermes"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "-m",
+            "mymodel",
+        ],
+    )
+    expect(
+        "hermes-command-no-model",
+        hermes_command(state("hermes", model=None), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+        ],
+    )
+    expect(
+        "hermes-command-effort-only",
+        hermes_command(state("hermes", model=None, effort="xhigh"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "--reasoning",
+            "xhigh",
+        ],
+    )
+    expect("hermes-resolve", resolve_agent(state("hermes", model=None)), "hermes")
+    expect(
+        "hermes-config-backend",
+        resolve_agent(state(None, model=None, raw={"agent": {"backend": "hermes"}})),
+        "hermes",
+    )
+    verified = (
+        '{"type":"system","subtype":"init","model":"x-ai/grok-4.6","session_id":"20260918_151301_be7c1c","timestamp":1789740781416}\n'
+        '{"type":"tool_use","name":"terminal","input":{"command":"git status --short"},"timestamp":1789740714068}\n'
+        '{"type":"tool_result","name":"terminal","output":"{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}","duration_ms":218,"is_error":false,"timestamp":1789740714290}\n'
+        '{"type":"text","text":"pong","timestamp":1789740800465}\n'
+        '{"type":"result","session_id":"20260918_151301_be7c1c","exit_code":0,"text":"pong","tokens":{"input":14851,"output":1,"total":14980,"cache_read":128,"cache_write":0},"duration_ms":19100,"timestamp":1789740800516}'
+    )
+    expect("hermes-summary", hermes_summary(verified), 'tokens=14980 "pong"')
+    expect("hermes-not-limited", hermes_rate_limited(0, verified), False)
+    expect(
+        "hermes-credits-exhausted",
+        hermes_rate_limited(
+            2,
+            '{"type":"result","exit_code":2,"error":"Subscription credits are exhausted. Top up/renew credits, then retry.","text":""}',
+        ),
+        True,
+    )
+    expect("hermes-insufficient-credits", hermes_rate_limited(2, "insufficient_credits"), True)
+    expect("hermes-no-usable-credits", hermes_rate_limited(2, "no_usable_credits"), True)
+    expect("hermes-subscription-expired", hermes_rate_limited(2, "subscription_expired"), True)
+    expect("hermes-subscription-required", hermes_rate_limited(2, "subscription_required"), True)
+    expect("hermes-spend-cap", hermes_rate_limited(2, "member_spend_cap_exceeded"), True)
+    expect("hermes-rate-limit", hermes_rate_limited(2, "rate limit exceeded"), True)
+    expect("hermes-unknown-reasoning", hermes_rate_limited(2, "Unknown --reasoning 'ultrahigh'"), False)
+    expect("hermes-quota-ok", hermes_rate_limited(0, "the quota gate passed"), False)
+    expect("hermes-summary-tail", hermes_summary("plain text failure"), "plain text failure")
+
+
 def env_overrides() -> None:
     keys = [
         "MARESTAIL_AGENT",
@@ -205,6 +301,7 @@ def env_overrides() -> None:
         "MARESTAIL_GROK_EFFORT",
         "MARESTAIL_KIMI",
         "MARESTAIL_JUNIE",
+        "MARESTAIL_HERMES",
     ]
     previous = {key: os.environ.get(key) for key in keys}
     try:
@@ -236,6 +333,10 @@ def env_overrides() -> None:
         expect("junie-binary", junie_command(state("junie", model=None))[0], "/opt/junie")
         os.environ["MARESTAIL_AGENT"] = "junie"
         expect("env-agent-junie", resolve_agent(state(None, model=None)), "junie")
+        os.environ["MARESTAIL_HERMES"] = "/opt/hermes"
+        expect("hermes-binary", hermes_command(state("hermes"), PROMPT)[0], "/opt/hermes")
+        os.environ["MARESTAIL_AGENT"] = "hermes"
+        expect("env-agent-hermes", resolve_agent(state(None, model=None)), "hermes")
     finally:
         restore(keys, previous)
     expect("config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kilo"}})), "kilo")
@@ -271,6 +372,31 @@ def labels() -> None:
         "junie-effort-unflagged",
         junie_command(state("junie", effort="xhigh")),
         ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
+    )
+    expect("label-hermes", agent_label(state("hermes")), "mymodel")
+    expect("label-hermes-no-model", agent_label(state("hermes", model=None)), "hermes")
+    expect("label-hermes-effort", agent_label(state("hermes", effort="xhigh")), "mymodel xhigh")
+    expect(
+        "hermes-effort-flag",
+        hermes_command(state("hermes", effort="xhigh"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "-m",
+            "mymodel",
+            "--reasoning",
+            "xhigh",
+        ],
     )
     expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")
@@ -347,6 +473,8 @@ def verdict_parse() -> None:
     expect("verdict-from-json", parsed, ("PASS", None))
     parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"role":"assistant","content":"VERDICT: BOUNCE coder"}')
     expect("verdict-from-kimi-json", parsed, ("BOUNCE", "coder"))
+    parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"result","text":"VERDICT: BOUNCE coder"}')
+    expect("verdict-from-hermes-result", parsed, ("BOUNCE", "coder"))
 
 
 if __name__ == "__main__":
@@ -354,6 +482,7 @@ if __name__ == "__main__":
     kilo_defaults()
     kimi_backend()
     junie_backend()
+    hermes_backend()
     env_overrides()
     labels()
     kilo_output()

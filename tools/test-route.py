@@ -67,6 +67,7 @@ def parses_every_line() -> None:
         "grok-4.6 grok": ("grok", "grok-4.6", None, {}),
         "grok-4.6 xhigh grok": ("grok", "grok-4.6", "xhigh", {}),
         "kimi-k3-max cursor": ("cursor", "kimi-k3-max", None, {}),
+        "x-ai/grok-4.6 xhigh hermes": ("hermes", "x-ai/grok-4.6", "xhigh", {}),
     }
     for line, wanted in cases.items():
         expect(f"parse {line}", parsed(line), wanted)

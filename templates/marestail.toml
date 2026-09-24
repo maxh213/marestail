@@ -2,7 +2,7 @@
 base = "origin/master"
 
 # [agent]
-# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi | junie
+# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi | junie | hermes
 # model = "claude-opus-5"  # or dandelion/route / dandelion/route-best: ask dandelion before every session, which picks backend, model and effort
 # effort = "high"  # reasoning effort or variant; stamped on every commit
 

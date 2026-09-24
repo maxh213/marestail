@@ -1058,7 +1058,22 @@ def test_gate_hit_pid_default() -> None:
 def test_skipped_gate_backends() -> None:
     assert collect.skipped_gate(["claude"], ["claude"]) is True
     assert collect.skipped_gate(["junie"], ["junie"]) is True
+    assert collect.skipped_gate(["hermes"], ["hermes"]) is True
     assert collect.skipped_gate(["echo"], ["echo"]) is False
+
+
+def test_backend_of_detects_hermes_cli() -> None:
+    assert collect.backend_of(["python", "-m", "hermes_cli.main", "chat"]) == "hermes"
+    assert collect.backend_of(["python", "-m", "hermes_cli.main"]) == "hermes"
+    assert collect.backend_of(["hermes"]) == "hermes"
+    assert collect.backend_of(["python", "-m", "other"]) is None
+
+
+def test_normalise_backend_maps_hermes_cli() -> None:
+    assert collect.normalise_backend("hermes_cli.main") == "hermes"
+    assert collect.normalise_backend("hermes_cli") == "hermes"
+    assert collect.normalise_backend("hermes") == "hermes"
+    assert collect.normalise_backend("claude") == "claude"
 
 
 def test_java_pmd_eunit_pass_names() -> None:

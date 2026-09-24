@@ -22,9 +22,17 @@ AGENT_VARS = (
     "MARESTAIL_KILO_VARIANT",
     "MARESTAIL_KIMI",
     "MARESTAIL_JUNIE",
+    "MARESTAIL_HERMES",
 )
 CLAUDE_BASE = ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
 KILO_BASE = ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model"]
+HERMES_VERIFIED = (
+    '{"type":"system","subtype":"init","model":"x-ai/grok-4.6","session_id":"20260918_151301_be7c1c","timestamp":1789740781416}\n'
+    '{"type":"tool_use","name":"terminal","input":{"command":"git status --short"},"timestamp":1789740714068}\n'
+    '{"type":"tool_result","name":"terminal","output":"{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}","duration_ms":218,"is_error":false,"timestamp":1789740714290}\n'
+    '{"type":"text","text":"pong","timestamp":1789740800465}\n'
+    '{"type":"result","session_id":"20260918_151301_be7c1c","exit_code":0,"text":"pong","tokens":{"input":14851,"output":1,"total":14980,"cache_read":128,"cache_write":0},"duration_ms":19100,"timestamp":1789740800516}'
+)
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +52,9 @@ def make_state(root: Path = Path("/work"), raw: dict[str, Any] | None = None, **
         ({"agent": "Grok"}, {"agent": {"backend": "kimi"}}, "kilo", "grok"),
         ({}, {"agent": {"backend": "kimi"}}, "Kilo", "kilo"),
         ({}, {"agent": {"backend": "Kimi"}}, "", "kimi"),
+        ({}, {"agent": {"backend": "hermes"}}, "", "hermes"),
+        ({"agent": "hermes"}, {}, "", "hermes"),
+        ({}, {}, "hermes", "hermes"),
         ({}, {}, "", "claude"),
     ],
 )
@@ -62,6 +73,10 @@ def test_resolve_agent(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], 
         ({"agent": "kilo", "model": "other"}, "other"),
         ({"agent": "grok", "effort": "max"}, "grok max"),
         ({"agent": "grok"}, "grok"),
+        ({"agent": "hermes"}, "hermes"),
+        ({"agent": "hermes", "model": "mymodel"}, "mymodel"),
+        ({"agent": "hermes", "effort": "xhigh"}, "hermes xhigh"),
+        ({"agent": "hermes", "model": "mymodel", "effort": "xhigh"}, "mymodel xhigh"),
         ({}, "claude"),
     ],
 )
@@ -197,6 +212,40 @@ def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     monkeypatch.setenv("MARESTAIL_JUNIE", "/opt/junie")
     assert runner.junie_command(make_state(agent="junie"))[0] == "/opt/junie"
+
+
+def test_hermes_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt = Path("/work/p.md")
+    base = [
+        "hermes",
+        "chat",
+        "--query-file",
+        str(prompt.resolve()),
+        "--oneshot",
+        "-Q",
+        "--format",
+        "stream-json",
+        "--yolo",
+        "--accept-hooks",
+        "--max-turns",
+        "1000",
+    ]
+    assert runner.hermes_command(make_state(agent="hermes"), prompt) == base
+    assert runner.hermes_command(make_state(agent="hermes", model="m", effort="e"), prompt) == [*base, "-m", "m", "--reasoning", "e"]
+    monkeypatch.setenv("MARESTAIL_HERMES", "/bin/h")
+    assert runner.hermes_command(make_state(agent="hermes"), prompt)[0] == "/bin/h"
+
+
+def test_hermes_run_passes_empty_stdin_and_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (0, "out", "err"))
+    assert runner.hermes_run(make_state(root=Path("/repo"), agent="hermes"), Path("/work/p.md")) == (0, "out")
+    call = fake.calls[0]
+    assert call["command"] == runner.hermes_command(make_state(agent="hermes"), Path("/work/p.md"))
+    assert call["input"] == ""
+    assert call["cwd"] == Path("/repo")
+    assert call["env"] is os.environ
+    fake = install_subprocess(monkeypatch, (2, "", "subscription_expired"))
+    assert runner.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (2, "subscription_expired")
 
 
 def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -649,12 +698,55 @@ def test_junie_usage(data: Any, expected: tuple[int, int, float]) -> None:
 
 
 @pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, HERMES_VERIFIED, False),
+        (2, HERMES_VERIFIED, False),
+        (2, "insufficient_credits", True),
+        (2, "no_usable_credits", True),
+        (2, "subscription_expired", True),
+        (2, "subscription_required", True),
+        (2, "member_spend_cap_exceeded", True),
+        (2, "rate limit exceeded", True),
+        (2, "Subscription credits are exhausted. Top up/renew credits, then retry.", True),
+        (
+            2,
+            '{"type":"result","exit_code":2,"error":"Subscription credits are exhausted. Top up/renew credits, then retry.","text":""}',
+            True,
+        ),
+        (2, "Unknown --reasoning 'ultrahigh'", False),
+        (0, "the quota gate passed", False),
+        (1, "plain text failure", False),
+    ],
+)
+def test_hermes_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert runner.hermes_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (HERMES_VERIFIED, 'tokens=14980 "pong"'),
+        (
+            '{"type":"result","text":"' + "word " * 60 + '","tokens":{"total":7}}',
+            'tokens=7 "word word word word word word word word word word word word word word word word word word word word "',
+        ),
+        ("not json", "not json"),
+        ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
+    ],
+)
+def test_hermes_summary(output: str, expected: str) -> None:
+    assert runner.hermes_summary(output) == expected
+
+
+@pytest.mark.parametrize(
     ("backend", "readers"),
     [
         ("grok", (runner.grok_rate_limited, runner.grok_summary)),
         ("kilo", (runner.kilo_rate_limited, runner.kilo_summary)),
         ("kimi", (runner.kimi_rate_limited, runner.kimi_summary)),
         ("junie", (runner.junie_rate_limited, runner.junie_summary)),
+        ("hermes", (runner.hermes_rate_limited, runner.hermes_summary)),
         ("claude", (runner.rate_limited, runner.summary)),
         ("agy", (runner.rate_limited, runner.summary)),
     ],
@@ -679,10 +771,12 @@ def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "kilo_run", make_run("kilo", "p"))
     monkeypatch.setattr(runner, "kimi_run", make_run("kimi", prompt))
     monkeypatch.setattr(runner, "junie_run", make_run("junie", "p"))
+    monkeypatch.setattr(runner, "hermes_run", make_run("hermes", prompt))
     assert runner.run_backend(state, "grok", "p", prompt) == (1, f"grok {prompt}")
     assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
     assert runner.run_backend(state, "kimi", "p", prompt) == (1, f"kimi {prompt}")
     assert runner.run_backend(state, "junie", "p", prompt) == (1, "junie p")
+    assert runner.run_backend(state, "hermes", "p", prompt) == (1, f"hermes {prompt}")
 
 
 def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
@@ -693,3 +787,7 @@ def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
     assert fake.options == [
         {"cwd": Path("/repo"), "stdin": "p", "timeout": 14400, "env": {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "K": "v"}}
     ]
+
+
+def test_parse_verdict_from_hermes_result() -> None:
+    assert runner.parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"result","text":"VERDICT: BOUNCE coder"}') == ("BOUNCE", "coder")

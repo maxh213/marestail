@@ -13,7 +13,7 @@ from typing import Any, TypeGuard
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
-BACKENDS = frozenset({"claude", "grok", "agy", "cursor-agent", "kilo", "kimi", "junie"})
+BACKENDS = frozenset({"claude", "grok", "agy", "cursor-agent", "kilo", "kimi", "junie", "hermes"})
 STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")
@@ -1095,7 +1095,11 @@ def in_backends(name: str) -> bool:
 
 
 def backend_of(tokens: list[str]) -> str | None:
-    return next(filter(in_backends, map(os.path.basename, tokens)), None)
+    return next(filter(in_backends, map(normalise_backend, map(os.path.basename, tokens))), None)
+
+
+def normalise_backend(name: str) -> str:
+    return name.replace("hermes_cli.main", "hermes").replace("hermes_cli", "hermes")
 
 
 def is_model_flag(tokens: list[str], index: int) -> bool:

@@ -64,6 +64,12 @@ KILO_DEFAULT_VARIANT = "high"
 JUNIE = "junie"
 JUNIE_SUMMARY_WIDTH = 100
 JUNIE_LIMIT_PATTERN = re.compile(r"Your balance is exhausted|InsufficientAccountBalance|insufficient\s+balance", re.IGNORECASE)
+HERMES = "hermes"
+HERMES_SUMMARY_WIDTH = 100
+HERMES_LIMIT_PATTERN = re.compile(
+    r"insufficient_credits|Subscription credits are exhausted|no_usable_credits|subscription_expired|subscription_required|member_spend_cap_exceeded",
+    re.IGNORECASE,
+)
 AGENT_TIMEOUT = 4 * 3600
 AUTHOR_ROUNDS = 3
 SUMMARY_WIDTH = 120
@@ -1080,8 +1086,8 @@ def routed(state: Run, prompt: str) -> tuple[str, str]:
 
 
 def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:
-    if backend in (GROK, "kimi"):
-        return {GROK: grok_run, "kimi": kimi_run}[backend](state, prompt_file)
+    if backend in (GROK, "kimi", HERMES):
+        return {GROK: grok_run, "kimi": kimi_run, HERMES: hermes_run}[backend](state, prompt_file)
     if backend in ("kilo", JUNIE):
         return {"kilo": kilo_run, JUNIE: junie_run}[backend](state, prompt)
     return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=AGENT_TIMEOUT, env=agent_env(state))
@@ -1093,6 +1099,7 @@ def outcome_readers(backend: str) -> tuple[Callable[[int, str], bool], Callable[
         "kilo": (kilo_rate_limited, kilo_summary),
         "kimi": (kimi_rate_limited, kimi_summary),
         JUNIE: (junie_rate_limited, junie_summary),
+        HERMES: (hermes_rate_limited, hermes_summary),
     }
     return readers.get(backend, (rate_limited, summary))
 
@@ -1564,6 +1571,62 @@ def junie_errors_limited(data: Event | None) -> bool:
 
 def junie_error_limited(error: Any) -> bool:
     return isinstance(error, dict) and junie_limit_match(str(error.get("message")))
+
+
+hermes_events = json_events
+
+
+def hermes_command(state: Run, prompt_file: Path) -> list[str]:
+    command = [
+        os.environ.get("MARESTAIL_HERMES", HERMES),
+        "chat",
+        "--query-file",
+        str(prompt_file.resolve()),
+        "--oneshot",
+        "-Q",
+        "--format",
+        "stream-json",
+        "--yolo",
+        "--accept-hooks",
+        "--max-turns",
+        "1000",
+    ]
+    return command + optional_flag("-m", state.model) + optional_flag("--reasoning", state.effort)
+
+
+def hermes_run(state: Run, prompt_file: Path) -> tuple[int, str]:
+    command = hermes_command(state, prompt_file)
+    return session_result(spawn(command, state, os.environ, "", command[0]), stdout_and_stderr)
+
+
+def hermes_result(events: list[Event]) -> Event:
+    for event in events:
+        if event.get(TYPE_KEY) == RESULT:
+            return event
+    return {}
+
+
+def hermes_limit_match(text: str) -> bool:
+    return bool(HERMES_LIMIT_PATTERN.search(text) or LIMIT_PATTERN.search(text))
+
+
+def hermes_rate_limited(code: int, output: str) -> bool:
+    if code == 0:
+        return False
+    result = hermes_result(hermes_events(output))
+    if HERMES_LIMIT_PATTERN.search(str(result.get(ERROR) or "")):
+        return True
+    return hermes_limit_match(output)
+
+
+def hermes_summary(output: str) -> str:
+    events = hermes_events(output)
+    result = hermes_result(events)
+    if not result:
+        return output_tail(output)
+    tokens = event_dict(result, TOKENS).get("total")
+    text = str(result.get("text") or "").replace("\n", " ")[:HERMES_SUMMARY_WIDTH]
+    return f'tokens={tokens} "{text}"'
 
 
 def grok_parse_json(output: str) -> Event | None:
