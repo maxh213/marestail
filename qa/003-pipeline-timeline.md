@@ -13,12 +13,13 @@
    `marestail run tasks/t.md --from hardener --to hardener --auto --retries 1`
    with a stub that writes `VERDICT: PASS`.
    Expected: `gate_for` / `state.gates` invoked once before attempts (not per attempt); every reused attempt step has `gate` containing `{"name": "sonar", "seconds": 41.0, "ok": false}`; `"verdict": "BOUNCE"` (not PASS); `agent` present.
-6. With a stub that writes `VERDICT: AUTHOR` on the first perf attempt then `VERDICT: PASS` on the next, run `marestail run tasks/t.md --from perf --to perf --auto --retries 2` (gate ok so AUTHOR is not overwritten).
-   Expected: first timeline step has `"verdict": "AUTHOR"` and is appended when that session ends; a later step follows even though `judged` returned None for AUTHOR.
+6. In `tools/test-timeline.py`, seed a temp repo like `tools/test-perf.py` (`readme_first=True`, `perf_trees.record_start`), force `JudgeProgress.author_left` to start at `0` (so `prepare_perf` skips `author_phase`), and use an agent stub that writes `VERDICT: AUTHOR` on the first invoke then `VERDICT: PASS` on the second; run `run_judge(state(root, retries=2), find("perf"))`.
+   Expected: `timeline.json` has a step with `"verdict": "AUTHOR"` before a later step with `"verdict": "PASS"`; the AUTHOR step was appended when that session ended even though `judged` returned None.
 7. With `MARESTAIL_LIMIT_WAIT_SECONDS=0` and a stub claude whose first session prints only `{"is_error": true, "result": "rate limit exceeded"}` (exit 0) and whose second prints normal success JSON and does the coder work, run:
    `marestail run tasks/t.md --from coder --to coder --auto --retries 1`
    Expected: step `waits` includes `{"reason": "rate-limit", "seconds": 0}`; stdout still has `rate limited; waiting`.
-8. With `MARESTAIL_LIMIT_WAIT_SECONDS=0`, `--model dandelion/route`, stub dandelion plan `1 none` then `0 claude-opus-5 high claude`, stub claude succeeds.
+8. With `MARESTAIL_LIMIT_WAIT_SECONDS=0`, `MARESTAIL_DANDELION` stub plan `1 none` then `0 claude-opus-5 high claude` (same shape as `tools/test-route.py`), `MARESTAIL_CLAUDE` / STUB_PLAN `code` and features/qa pre-seeded, run:
+   `marestail run tasks/t.md --from coder --to coder --auto --retries 1 --model dandelion/route`
    Expected: step `waits` includes `{"reason": "dandelion-unrouted", "seconds": 0}`; stdout still has `dandelion/route:`.
 9. In a temp repo pre-seeded with features/qa matching the stub coder Audit lines, with STUB_PLAN `code bad-audit` then `code`, run:
    `marestail run tasks/t.md --from coder --to coder --auto --retries 2`

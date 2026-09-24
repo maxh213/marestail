@@ -41,9 +41,9 @@ Feature: Durable per-step pipeline timeline
 
   Scenario: a dandelion-unrouted wait then success records a waits entry
     Given `MARESTAIL_LIMIT_WAIT_SECONDS` is 0
-    And `--model dandelion/route` with a stub dandelion whose first `route` prints `none` (exit 1) and whose second prints `claude-opus-5 high claude`
-    And a stub claude that then succeeds
-    When a worker attempt completes
+    And `MARESTAIL_DANDELION` is a stub like `tools/test-route.py` stub_dandelion whose plan lines are `1 none` then `0 claude-opus-5 high claude`
+    And `MARESTAIL_CLAUDE` / STUB_PLAN `code` with features/qa pre-seeded so the coder session succeeds after routing
+    When I run `marestail run tasks/t.md --from coder --to coder --auto --retries 1 --model dandelion/route`
     Then that step's `waits` contains `{"reason": "dandelion-unrouted", "seconds": 0}`
     And stdout still contains a line matching `dandelion/route:`
 
@@ -72,7 +72,7 @@ Feature: Durable per-step pipeline timeline
     And a passing judge step has `"verdict": "PASS"`
     And a bounce with target has `"verdict": "BOUNCE specifier"` (string: verdict, space, target; no object)
     And a gate-forced bounce with no target has `"verdict": "BOUNCE"`
-    And an AUTHOR attempt (perf stub writes `VERDICT: AUTHOR`) has `"verdict": "AUTHOR"` and still appends a timeline step when the session ends (even though `judged` returns None and the attempt loop continues)
+    And an AUTHOR attempt has `"verdict": "AUTHOR"` and still appends a timeline step when the session ends (even though `judged` returns None and the attempt loop continues): `tools/test-timeline.py` seeds trees like `tools/test-perf.py` (`readme_first`, `perf_trees.record_start`), forces `JudgeProgress.author_left` to start at 0 so `prepare_perf` skips `author_phase`, runs `run_judge(state(root, retries=2), find("perf"))` with an agent stub that writes `VERDICT: AUTHOR` then `VERDICT: PASS`, and asserts the AUTHOR step appears in `timeline.json` before the next attempt's step
     And `verdict` is omitted for workers
     And `done` is the handoff's first paragraph if present, else the first commit subject, else `agent.summary`
 
