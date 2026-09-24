@@ -552,6 +552,11 @@ def test_readme_documents_hermes() -> None:
     assert "--format stream-json" in paragraph
 
 
+def test_templates_list_hermes() -> None:
+    text = (ROOT / "templates" / "marestail.toml").read_text()
+    assert '# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi | junie | hermes' in text
+
+
 def comments_in(path: Path) -> list[str]:
     tokens = tokenize.generate_tokens(io.StringIO(path.read_text()).readline)
     return [f"{path}:{token.start[0]}" for token in tokens if token.type == tokenize.COMMENT and not token.string.startswith("#!")]
