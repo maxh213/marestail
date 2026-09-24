@@ -28,6 +28,7 @@ Feature: Durable per-step pipeline timeline
     When I run `marestail run tasks/t.md --from hardener --to hardener --auto --retries 1` with a stub that writes `VERDICT: PASS`
     Then `gate_for` still ran once before the attempt loop (gate behaviour unchanged)
     And every timeline step for that judge round that reuses the shared result has `gate` containing `{"name": "sonar", "seconds": 41.0, "ok": false}`
+    And that step's `"verdict"` is `"BOUNCE"` (gated_verdict forces bounce; do not copy the stub's PASS line)
     And `agent` is present when a session ran
     And Sonar's FAIL is in the timeline even though it printed on stdout before `== hardener`
 
@@ -62,11 +63,14 @@ Feature: Durable per-step pipeline timeline
     And those names are listed in freeze so a worker commit that touches them is rejected or reverted
 
   Scenario: schema fields for every attempt
-    Then every timeline step includes, in order: id, role, attempt, started_at, ended_at, gate, waits, commits, files, done
+    Then every timeline step's keys appear in this order when present: id, role, attempt, started_at, ended_at, gate, waits, agent, verdict, commits, files, done
+    And `agent` sits after `waits` and before `verdict` when the attempt invoked a session
+    And `verdict` sits after `agent` (or after `waits` if `agent` is omitted) and before `commits` when the role is a judge
     And `agent` is omitted only when the attempt never invoked a session (unlimited-retry exhaustion with no session)
     And a passing judge step has `"verdict": "PASS"`
     And a bounce with target has `"verdict": "BOUNCE specifier"` (string: verdict, space, target; no object)
     And a gate-forced bounce with no target has `"verdict": "BOUNCE"`
+    And an AUTHOR attempt (perf stub writes `VERDICT: AUTHOR`) has `"verdict": "AUTHOR"` and still appends a timeline step when the session ends (even though `judged` returns None and the attempt loop continues)
     And `verdict` is omitted for workers
     And `done` is the handoff's first paragraph if present, else the first commit subject, else `agent.summary`
 
