@@ -9,6 +9,11 @@ Feature: Bring marestail itself through its own gate
     And the Python virtualenv at ".venv" is active and has the dev dependencies installed
 
   Scenario: full-tier gate passes for the Python package
+    # py.mutation's mutant total omits marestail/gates/__init__.py: mutmut names those mutants
+    # marestail.gates.x_*, which the gate's marestail.gates.__init__.* pattern never matches, so they
+    # stay unchecked and drop out of both the total and the survivors. That is marestail's own
+    # behaviour, unchanged from origin/main and out of scope for this refactor; the package's own
+    # mutation self-test strips __init__ from its patterns, so those mutants are killed there.
     When I run "marestail gate --tier full"
     Then the exit code is 0
     And the output ends with the line "GATE PASSED"
@@ -135,6 +140,13 @@ Feature: Bring marestail itself through its own gate
     And stderr contains "https://github.com/maxh213/dandelion"
 
   Scenario: existing diagnostic scripts keep passing
+    # tools/test-route.py checks marestail's route parser against dandelion's own route table.
+    # Unset, MARESTAIL_DANDELION_SRC falls back to ~/workspace/dandelion/src/domain/route.ts, another
+    # project's working tree, which has since added a 'junie' provider marestail has no backend for,
+    # so the script exits 1 there. origin/main carries the same fallback and fails identically, so
+    # that is the external checkout drifting, not a regression; the fixture keeps this row self-contained.
+    Given "MARESTAIL_DANDELION_SRC" points at a route-table fixture built from marestail's own
+      backend names, so no row here depends on another project's working tree
     When I run each of the following directly with "python3":
       | script                         |
       | tools/test-agent-backends.py   |
@@ -144,9 +156,26 @@ Feature: Bring marestail itself through its own gate
       | tools/test-route.py            |
       | tools/test-scope-hard.py       |
       | tools/test-sonar-worktree.py   |
-      | tools/test-perf-db.py          |
       | tools/test-practices.py        |
     Then each script exits 0 and its last line of output contains "ok"
+    And "tools/test-route.py" also prints a line matching "^dandelion source: \d+ route lines parse$"
+
+  Scenario: the docker-backed diagnostic script keeps passing, proved by hand
+    # tools/test-perf-db.py is the one tools/test-*.py that needs a live docker daemon: it shells
+    # `docker run`/`docker exec` and boots a real postgres:16. No test under tests/ may run it. The
+    # hermetic scenario above puts no docker on PATH, and where docker is present the script follows
+    # daemon state (it once failed "db-samples-exit: 1 != 0" and passed unchanged on the next run),
+    # so running it from pytest would make py.tests nondeterministic. QA step 27 runs it by hand.
+    Given a live docker daemon that can run "postgres:16"
+    When I run "python3 tools/test-perf-db.py"
+    Then the exit code is 0 and the last line of output contains "ok"
+    And no test under "tests/" runs this script
+
+  Scenario: the hermetic suite pins the docker-backed script's contract with the package
+    When I statically check every marestail name and call in "tools/test-perf-db.py"
+    Then every name it reads off a marestail module still exists
+    And every call binds against that function's real signature, so this refactor cannot rename a
+      parameter, change an arity, or add a keyword-only argument without the check failing
 
   Scenario: tools/test-perf.py fails exactly as it does before the refactor
     # Its stub agent predates the two-phase perf step (commit 41f77a0) and crashes in the author phase;

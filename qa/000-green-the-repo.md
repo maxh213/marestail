@@ -35,9 +35,23 @@
     Expected: `exit=127` and the `dandelion is not installed` hint; `route` forwards `--help` to dandelion instead of answering it.  
     Then `./bin/marestail graph; echo "exit=$?"`  
     Expected: `exit=0`, first line `## Python modules`, followed by grimp's `TypeError: build_graph() missing 1 required positional argument: 'package_name'` traceback, exactly as before the refactor (this repo keeps its root packages in `.importlinter`, which `graph` does not read).
-17. For each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-perf-db.py`, `tools/test-practices.py`:  
+17. First build a dandelion route-table fixture, so the route check reads marestail's own backend names instead of another project's working tree:  
+    ```
+    python3 - > /tmp/marestail-route-fixture.ts <<'EOF'
+    from marestail import route
+    names = sorted(route.BACKENDS)
+    accounts = "\n".join(f"  {{ id: '{n}', ...CLAUDE_LINES }}," for n in names)
+    print("const CLAUDE_LINES = { standard: 'claude-opus-5 high', max: 'claude-opus-5 max' }")
+    print(f"const ACCOUNTS = [\n{accounts}\n]")
+    print("const ROUTES = [{ providers: [" + ", ".join(f"'{n}'" for n in names) + "], line: 'claude-opus-5 medium' }]")
+    EOF
+    export MARESTAIL_DANDELION_SRC=/tmp/marestail-route-fixture.ts
+    ```
+    Then for each script in `tools/test-agent-backends.py`, `tools/test-audit.py`, `tools/test-csproj-additions.py`, `tools/test-drop-ignored.py`, `tools/test-route.py`, `tools/test-scope-hard.py`, `tools/test-sonar-worktree.py`, `tools/test-practices.py`:  
     `python3 <script>`  
-    Expected: each exits `0` and the last line of output contains `ok`.  
+    Expected: each exits `0` and the last line of output contains `ok`; `tools/test-route.py` also prints `dandelion source: <N> route lines parse`.  
+    Without that fixture `tools/test-route.py` falls back to `~/workspace/dandelion/src/domain/route.ts` and exits `1` with `dandelion route picked 'junie', which marestail has no backend for`. `origin/main` fails identically, so that is the external checkout drifting, not a regression; `tools/` is out of scope to edit.  
+    `tools/test-perf-db.py` is not in this list: it needs a live docker daemon, so it is step 27.  
     Then `python3 tools/test-perf.py; echo "exit=$?"`  
     Expected: exits `1` with last output line `verdict-commit-files: '' != 'perf/bench_x.py'`, exactly as before the refactor (its stub agent predates the two-phase perf step; `tools/` is out of scope).
 18. `grep -R -E "#[^!]|\"\"\"|'''" marestail/ --include='*.py' | grep -v '^Binary' || true`  
@@ -59,3 +73,7 @@
     Expected: exits `0`, ends with `GATE PASSED`; result lines are the nine fast gates of step 23 without `sonar`, and no `qa` line (marestail.toml has no `[qa]` section, so the gate is dropped).
 26. In the output of steps 23 to 25, find the `py.runtime` line.  
     Expected: `[ok  ] py.runtime     skipped: nothing declares the interpreter that ships  (0.0s)`.
+27. Docker-gated, run by hand only. `tools/test-perf-db.py` is the one `tools/test-*.py` script that needs a live docker daemon: it shells `docker run`/`docker exec` and boots a real `postgres:16`.  
+    With docker running: `python3 tools/test-perf-db.py; echo "exit=$?"`  
+    Expected: `exit=0` and the last line of output contains `ok`.  
+    With docker stopped or unavailable, skip this step, and do not add a test under `tests/` that runs the script. Step 21 runs the suite with no docker on PATH, and where docker is present the script's result follows daemon state (it once failed `db-samples-exit: 1 != 0` and passed unchanged on the next run), so running it from pytest would make `py.tests` nondeterministic. What the suite pins instead, hermetically, is the script's contract with the package: every marestail name it reads still exists, and every call it makes binds against that function's real signature, so a renamed parameter, a changed arity or a new keyword-only argument fails.
