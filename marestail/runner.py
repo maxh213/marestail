@@ -1563,7 +1563,7 @@ def junie_errors_limited(data: Event | None) -> bool:
 
 
 def junie_error_limited(error: Any) -> bool:
-    return isinstance(error, dict) and junie_limit_match(str(error.get("message") or ""))
+    return isinstance(error, dict) and junie_limit_match(str(error.get("message")))
 
 
 def grok_parse_json(output: str) -> Event | None:

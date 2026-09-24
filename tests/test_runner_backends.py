@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,8 @@ def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "--model=m",
         "--effort=high",
     ]
+    assert runner.junie_command(make_state(agent="junie", model="m", effort="low"))[-1] == "--effort=low"
+    assert runner.junie_command(make_state(agent="junie", model="m", effort="medium"))[-1] == "--effort=medium"
     assert runner.junie_command(make_state(agent="junie", model="m", effort="xhigh")) == [
         "junie",
         "--skip-update-check",
@@ -210,6 +213,13 @@ def test_junie_run_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) ->
     fake = install_subprocess(monkeypatch, (1, "out", "err"))
     assert runner.junie_run(make_state(agent="junie"), "p") == (1, "out\nerr")
     assert fake.calls[0]["input"] == json.dumps({"task": "p"})
+
+
+def test_junie_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert runner.junie_run(make_state(agent="junie"), "p") == (127, "junie: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    assert runner.junie_run(make_state(agent="junie"), "p") == (124, "junie: timed out after 14400s")
 
 
 class FakeSubprocess:
@@ -596,6 +606,7 @@ JUNIE_VERIFIED_OUTPUT = '{"sessionId":"s","taskName":"t","result":"### Summary\\
         (1, "Junie failed with the message: Invalid model: no-such-model-xyz", False),
         (0, "the quota gate passed", False),
         (0, JUNIE_VERIFIED_OUTPUT, False),
+        (1, '{"result": "ok"}', False),
         (1, "plain error", False),
         (1, '{"errors":["not a dict"]}', False),
         (1, '{"errors":[{}]}', False),
@@ -614,6 +625,7 @@ def test_junie_rate_limited(code: int, output: str, expected: bool) -> None:
             JUNIE_VERIFIED_OUTPUT,
             "calls=48 tokens=423279 cost=$0.08 '### Summary - pong  ### Changes - No files were created or modified as requested.  ### Verification '",
         ),
+        ('{"llmUsage": []}', "calls=0 tokens=0 cost=$0.00 ''"),
         ("not json", "not json"),
         ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
     ],
@@ -655,13 +667,17 @@ def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
     prompt = Path("/f")
 
-    def make_run(name: str, arg: str) -> tuple[int, str]:
-        return 1, f"{name} {arg}"
+    def make_run(name: str, arg: str) -> Callable[[Run, Any], tuple[int, str]]:
+        def run_fn(s: Run, p: Any) -> tuple[int, str]:
+            assert s is state
+            return 1, f"{name} {arg}"
 
-    monkeypatch.setattr(runner, "grok_run", lambda s, p: make_run("grok", str(p)))
-    monkeypatch.setattr(runner, "kilo_run", lambda s, p: make_run("kilo", p))
-    monkeypatch.setattr(runner, "kimi_run", lambda s, p: make_run("kimi", str(p)))
-    monkeypatch.setattr(runner, "junie_run", lambda s, p: make_run("junie", p))
+        return run_fn
+
+    monkeypatch.setattr(runner, "grok_run", make_run("grok", str(prompt)))
+    monkeypatch.setattr(runner, "kilo_run", make_run("kilo", "p"))
+    monkeypatch.setattr(runner, "kimi_run", make_run("kimi", str(prompt)))
+    monkeypatch.setattr(runner, "junie_run", make_run("junie", "p"))
     assert runner.run_backend(state, "grok", "p", prompt) == (1, "grok /f")
     assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
     assert runner.run_backend(state, "kimi", "p", prompt) == (1, "kimi /f")
