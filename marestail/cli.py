@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
+from marestail import route as route_module
 from marestail.context import hook_focus
 from marestail.report import Result, render, to_json
 
@@ -37,7 +38,7 @@ TREE = "--tree"
 TUI_APP = "marestail.tui.app"
 SCOPE_CHOICES = ("all", "changed", "hard")
 TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
-AGENT_CHOICES = ("claude", "agy", "grok", "cursor", "kilo", "kimi")
+AGENT_CHOICES = tuple(dict.fromkeys(route_module.BACKENDS.values()))
 HELP_TASK = "path to the task file"
 HELP_GATE_SCOPE = "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths"
 HELP_RUN_SCOPE = (
@@ -48,8 +49,8 @@ HELP_RUN_SCOPE = (
 HELP_FOCUS = "add a file or directory to the gate scope (repeatable); implies --scope changed"
 HELP_MODEL = "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
 HELP_RETRIES = "attempts per role; 0 means unlimited (default)"
-HELP_EFFORT = "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant); stamped on every commit"
-HELP_AGENT = "agent backend (claude, agy, grok, cursor, kilo, or kimi)"
+HELP_EFFORT = "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok: reasoning effort; kilo: variant; junie: low|medium|high); stamped on every commit"
+HELP_AGENT = f"agent backend ({', '.join(AGENT_CHOICES[:-1])}, or {AGENT_CHOICES[-1]})"
 HELP_ONLY = "comma separated gate names"
 HELP_HOOK = "behave as a Claude Code Stop hook"
 HELP_GITIGNORE = "add the files marestail generates to the target's .gitignore"
