@@ -667,20 +667,21 @@ def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
     prompt = Path("/f")
 
-    def make_run(name: str, arg: str) -> Callable[[Run, Any], tuple[int, str]]:
+    def make_run(name: str, arg: Any) -> Callable[[Run, Any], tuple[int, str]]:
         def run_fn(s: Run, p: Any) -> tuple[int, str]:
             assert s is state
+            assert p == arg
             return 1, f"{name} {arg}"
 
         return run_fn
 
-    monkeypatch.setattr(runner, "grok_run", make_run("grok", str(prompt)))
+    monkeypatch.setattr(runner, "grok_run", make_run("grok", prompt))
     monkeypatch.setattr(runner, "kilo_run", make_run("kilo", "p"))
-    monkeypatch.setattr(runner, "kimi_run", make_run("kimi", str(prompt)))
+    monkeypatch.setattr(runner, "kimi_run", make_run("kimi", prompt))
     monkeypatch.setattr(runner, "junie_run", make_run("junie", "p"))
-    assert runner.run_backend(state, "grok", "p", prompt) == (1, "grok /f")
+    assert runner.run_backend(state, "grok", "p", prompt) == (1, f"grok {prompt}")
     assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
-    assert runner.run_backend(state, "kimi", "p", prompt) == (1, "kimi /f")
+    assert runner.run_backend(state, "kimi", "p", prompt) == (1, f"kimi {prompt}")
     assert runner.run_backend(state, "junie", "p", prompt) == (1, "junie p")
 
 
