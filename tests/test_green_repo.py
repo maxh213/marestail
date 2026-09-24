@@ -329,6 +329,17 @@ def test_diagnostic_scripts_cover_junie(script_env: dict[str, str]) -> None:
     assert SOURCE_LINE.search(route_completed.stdout) is not None
 
 
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+def test_diagnostic_scripts_cover_hermes(script_env: dict[str, str]) -> None:
+    for name in ("test-agent-backends.py", "test-route.py"):
+        completed = run_tools_script(name, script_env)
+        assert completed.returncode == 0
+        assert "ok" in last_line(completed.stdout + completed.stderr)
+        assert "hermes" in (ROOT / "tools" / name).read_text()
+    route_completed = run_tools_script(ROUTE_SCRIPT, script_env)
+    assert SOURCE_LINE.search(route_completed.stdout) is not None
+
+
 def test_only_the_perf_db_script_needs_docker() -> None:
     hermetic = [name for name in PASSING_SCRIPTS if DOCKER in (ROOT / "tools" / name).read_text()]
     assert hermetic == []
