@@ -34,8 +34,8 @@ Feature: Durable per-step pipeline timeline
 
   Scenario: a rate-limit then success records a waits entry
     Given `MARESTAIL_LIMIT_WAIT_SECONDS` is 0
-    And the stub agent's first session exits rate-limited and the second succeeds
-    When a worker attempt completes
+    And a stub claude whose first session prints only `{"is_error": true, "result": "rate limit exceeded"}` (exit 0; matches `backends.rate_limited`) and whose second session prints normal success JSON and does the coder work
+    When I run `marestail run tasks/t.md --from coder --to coder --auto --retries 1`
     Then that step's `waits` contains `{"reason": "rate-limit", "seconds": 0}`
     And stdout still contains `rate limited; waiting`
 
@@ -48,13 +48,15 @@ Feature: Durable per-step pipeline timeline
     And stdout still contains a line matching `dandelion/route:`
 
   Scenario: two attempts append two steps that never disagree
-    When the same role runs attempt 1 then attempt 2
+    Given a temp repo pre-seeded with features/qa matching the stub coder Audit lines (as after a successful specify)
+    When I run `marestail run tasks/t.md --from coder --to coder --auto --retries 2` with STUB_PLAN lines `code bad-audit` then `code` (first session leaves verify failing; second commits + handoff)
     Then `timeline.json` has `"steps"` of length 2 with `attempt` 1 then 2
     And `timeline.md` has exactly two `##` sections
     And after each attempt the markdown sections and JSON steps list the same ids in the same order
 
   Scenario: overnight summary embeds the task timeline
-    When `tools/overnight.sh tasks/t.md` finishes a run that wrote `.marestail/runs/t/timeline.md`
+    Given a temp repo with `MARESTAIL_CLAUDE` pointing at `tools/stub-claude`, STUB_PLAN line `code`, and features/qa pre-seeded so the coder window exits 0
+    When `START_FROM=coder STOP_AT=coder tools/overnight.sh tasks/t.md` finishes (STOP_AT is a role name, not a freestyle token)
     Then `.marestail/runs/overnight-<stamp>.md` still has the `### tasks/t.md` section with exit, HEAD, and the existing grep lines
     And under that section it also includes the contents of that task's `timeline.md` (or a heading naming `timeline.md` plus a step `id` from the run)
 
