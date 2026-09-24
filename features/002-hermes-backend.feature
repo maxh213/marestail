@@ -125,10 +125,13 @@ Feature: Hermes backend
     Then the backend is "hermes"
 
   Scenario: hermes is listed in the backend registry
-    When I inspect "marestail/tui/collect.py"
-    Then "BACKENDS" contains "hermes"
+    When I inspect "marestail.backends.BACKENDS"
+    Then it contains "hermes"
+    When I inspect "marestail.route.BACKENDS"
+    Then "hermes" maps to "hermes" with no account env
     When I inspect "templates/marestail.toml"
     Then the commented backend list includes "hermes"
+    And tests/test_green_repo.py asserts that template line lists hermes
 
   Scenario: README documents hermes
     When I read "README.md"

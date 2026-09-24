@@ -21,8 +21,15 @@
    Expected: lists `--from`, `--to`, `--auto`, `--scope`, `--focus`, `--model`, `--retries`, `--effort`, `--agent` in this order.
 5. `grep -E '# backend = "claude"  # claude \| agy \| grok \| cursor \| kilo \| kimi \| junie \| hermes' templates/marestail.toml`
    Expected: one match.
-6. `grep -E '"hermes"' marestail/tui/collect.py`
-   Expected: one match in the `BACKENDS` frozenset.
+6. Verify the canonical registries list hermes:
+   ```
+   python3 - <<'PY'
+   from marestail import backends, route
+   assert "hermes" in backends.BACKENDS
+   assert route.BACKENDS["hermes"] == "hermes"
+   PY
+   ```
+   Expected: exit code `0`, no output.
 7. Verify the watch TUI classifies a `python -m hermes_cli.main` process as hermes:
    ```
    python3 - <<'PY'
@@ -49,7 +56,8 @@
     from pathlib import Path
     os.environ["MARESTAIL_HERMES"] = "/opt/hermes"
     from marestail.config import Config
-    from marestail.runner import Run, hermes_command, resolve_agent, agent_label
+    from marestail.backends import hermes_command
+    from marestail.runner import Run, resolve_agent, agent_label
     state = Run(config=Config(root=Path("/work"), raw={}), task=Path("/work/t.md"), model="x-ai/grok-4.6", retries=0, agent="hermes", effort="xhigh")
     assert resolve_agent(state) == "hermes"
     assert agent_label(state) == "x-ai/grok-4.6 xhigh"
@@ -65,7 +73,7 @@
 14. Verify the hermes summary line from the verified output and that it truncates at 100 characters:
     ```
     python3 - <<'PY'
-    from marestail.runner import hermes_summary
+    from marestail.backends import hermes_summary
     output = '{"type": "system", "subtype": "init", "model": "x-ai/grok-4.6", "session_id": "20260918_151301_be7c1c", "timestamp": 1789740781416}\n{"type": "tool_use", "name": "terminal", "input": {"command": "git status --short"}, "timestamp": 1789740714068}\n{"type": "tool_result", "name": "terminal", "output": "{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}", "duration_ms": 218, "is_error": false, "timestamp": 1789740714290}\n{"type": "text", "text": "pong", "timestamp": 1789740800465}\n{"type": "result", "session_id": "20260918_151301_be7c1c", "exit_code": 0, "text": "pong", "tokens": {"input": 14851, "output": 1, "total": 14980, "cache_read": 128, "cache_write": 0}, "duration_ms": 19100, "timestamp": 1789740800516}'
     assert hermes_summary(output) == 'tokens=14980 "pong"', hermes_summary(output)
     text = "word " * 30
@@ -77,7 +85,7 @@
 15. Verify hermes rate-limit detection, including the shared LIMIT_PATTERN and all six entitlement strings:
     ```
     python3 - <<'PY'
-    from marestail.runner import hermes_rate_limited
+    from marestail.backends import hermes_rate_limited
     assert hermes_rate_limited(2, '{"type": "result", "exit_code": 2, "error": "Subscription credits are exhausted. Top up/renew credits, then retry."}') is True
     assert hermes_rate_limited(2, 'stderr prefix\ninsufficient_credits\nstderr suffix') is True
     assert hermes_rate_limited(2, 'no_usable_credits') is True
@@ -93,7 +101,7 @@
 16. Verify non-JSON hermes output falls back to its tail and is not treated as rate limited on exit 0:
     ```
     python3 - <<'PY'
-    from marestail.runner import hermes_rate_limited, hermes_summary
+    from marestail.backends import hermes_rate_limited, hermes_summary
     assert hermes_summary("plain text failure") == "plain text failure"
     assert hermes_rate_limited(1, "plain text failure") is False
     assert hermes_rate_limited(0, "plain text ok") is False
@@ -109,3 +117,6 @@
     PY
     ```
     Expected: exit code `0`, no output.
+18. Confirm a pytest pins the template backend comment:
+    `grep -n 'templates/marestail.toml' tests/test_green_repo.py` and that the matching test asserts the hermes comment line.
+    Expected: a test (e.g. `test_templates_list_hermes`) that fails if hermes is dropped from `templates/marestail.toml`.
