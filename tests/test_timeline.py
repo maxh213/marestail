@@ -139,19 +139,15 @@ def test_commit_entry() -> None:
     assert runner.commit_entry("abc\0subject") == {"hash": "abc", "subject": "subject"}
 
 
-def test_reset_and_note_wait(tmp_path: Path) -> None:
+def test_reset_and_note_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = Run(config=Config(root=tmp_path, raw={}), task=tmp_path / "t.md", model=None, retries=1)
     state.attempt_agent = {"backend": "claude"}
     state.attempt_waits = [{"reason": "rate-limit", "seconds": 0}]
     runner.reset_attempt(state)
     assert state.attempt_agent is None
     assert state.attempt_waits == []
-    previous = runner.LIMIT_WAIT_SECONDS
-    runner.LIMIT_WAIT_SECONDS = 0
-    try:
-        runner.note_wait(state, "rate-limit")
-    finally:
-        runner.LIMIT_WAIT_SECONDS = previous
+    monkeypatch.setattr(runner, "LIMIT_WAIT_SECONDS", 0)
+    runner.note_wait(state, "rate-limit")
     assert state.attempt_waits == [{"reason": "rate-limit", "seconds": 0}]
 
 

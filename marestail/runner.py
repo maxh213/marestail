@@ -488,11 +488,10 @@ def judged(state: Run, judge: Judge, gate: tuple[str, bool, list[Result]], progr
     with measuring(state, judge) as session:
         prepare_perf(state, judge, gate[1], session, progress)
         outcome, progress.feedback = judge_attempt(state, judge, report, gate, session, progress.feedback)
+    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(outcome))
     if outcome is not None and outcome[0] == AUTHOR:
-        record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], timeline.verdict_text(AUTHOR, None))
         progress.author_requested()
         return None
-    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(outcome))
     return outcome
 
 

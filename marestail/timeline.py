@@ -104,9 +104,7 @@ def render_section(step: dict[str, Any]) -> str:
 
 
 def format_value(value: Any) -> str:
-    if isinstance(value, list):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, dict):
+    if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False)
     return " ".join(str(value).split())
 
@@ -117,12 +115,12 @@ def render_markdown(steps: list[dict[str, Any]]) -> str:
 
 def write_files(folder: Path, task: str, steps: list[dict[str, Any]]) -> None:
     ensure_dir(folder)
-    document = {"task": task, "steps": steps}
-    (folder / JSON_NAME).write_text(json.dumps(document, indent=2) + "\n")
+    (folder / JSON_NAME).write_text(json.dumps({"task": task, "steps": steps}, indent=2) + "\n")
     (folder / MD_NAME).write_text(render_markdown(steps))
 
 
 def append_step(folder: Path, task: str, step: dict[str, Any]) -> None:
     document = load_document(folder, task)
-    document["steps"].append(step)
-    write_files(folder, task, document["steps"])
+    steps = document["steps"]
+    steps.append(step)
+    write_files(folder, task, steps)
