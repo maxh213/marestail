@@ -62,6 +62,7 @@ def parses_every_line() -> None:
         "claude-fable-5-1 max claude-work": ("claude", "claude-fable-5-1", "max", work),
         "gemini-3.1-pro-high medium agy": ("agy", "gemini-3.1-pro-high", "medium", {}),
         "gemini-3.8-flash-high high agy": ("agy", "gemini-3.8-flash-high", "high", {}),
+        "gemini-3.8-flash high junie": ("junie", "gemini-3.8-flash", "high", {}),
         "kimi-code/kimi-for-coding-highspeed kimi": ("kimi", "kimi-code/kimi-for-coding-highspeed", None, {}),
         "grok-4.6 grok": ("grok", "grok-4.6", None, {}),
         "grok-4.6 xhigh grok": ("grok", "grok-4.6", "xhigh", {}),
@@ -104,6 +105,20 @@ def dandelion_source_lines() -> list[str]:
     return lines
 
 
+def parse_source_line(line: str) -> None:
+    choice = route.parse(line)
+    expect(f"source {line} model", line.startswith(choice.model + " "), True)
+
+
+def parsed_source_count(lines: list[str]) -> int:
+    count = 0
+    for line in lines:
+        if line.split()[-1] in route.BACKENDS:
+            parse_source_line(line)
+            count += 1
+    return count
+
+
 def matches_dandelion_source() -> None:
     if not DANDELION_ROUTES.exists():
         print(f"skipping dandelion source check: no {DANDELION_ROUTES}")
@@ -111,10 +126,7 @@ def matches_dandelion_source() -> None:
     lines = dandelion_source_lines()
     if len(lines) < 12:
         raise SystemExit(f"dandelion source: found only {lines!r}; the route table format changed")
-    for line in lines:
-        choice = route.parse(line)
-        expect(f"source {line} model", line.startswith(choice.model + " "), True)
-    print(f"dandelion source: {len(lines)} route lines parse")
+    print(f"dandelion source: {parsed_source_count(lines)} route lines parse")
 
 
 def stub_dandelion(folder: Path) -> None:

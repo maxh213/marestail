@@ -59,7 +59,7 @@ marestail gate --scope hard --focus app/services/payments.py   # only that file,
 marestail route              # the subscription to use now, from dandelion route; marestail route --high for route --high
 marestail graph              # module dependency graph, for the architect and for you
 marestail depth              # prints, per module, the number of public symbols, the number of statements, and the ratio between them, marking wide-and-thin modules as shallow and files over 300 lines as long.
-marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo|kimi / MARESTAIL_AGENT
+marestail run tasks/001.md   # Claude (default), or --agent agy|grok|cursor|kilo|kimi|junie / MARESTAIL_AGENT
 marestail run tasks/001.md --model claude-opus-5 --effort high   # both are stamped on every commit
 marestail run tasks/001.md --scope changed --focus write-to-api/Services   # soft scope: gates cover the diff plus the focused paths; workers may still edit anything, and it joins the diff
 marestail run tasks/001.md --scope hard --focus src/render/terminal.ts   # hard scope: gates cover only that file, and roles leave the rest alone
@@ -67,13 +67,13 @@ marestail run tasks/001.md --model dandelion/route        # ask dandelion route 
 marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route --high before every session
 ```
 
-`--effort` names the reasoning effort for the run and every backend carries it in the commit stamp. Claude takes it as `--effort` (`low`, `medium`, `high`, `xhigh`, `max`), agy as `--effort` (`low`, `medium`, `high`), Grok as `--reasoning-effort`, Kilo as `--variant`. Cursor has no flag for it: it goes inside the model, `--model 'claude-opus-4-8[context=1m,effort=high]'`, and `--effort` there only labels the commits. Kimi has no flag for it either, so `--effort` only labels the commits. `[agent] effort` in `marestail.toml` sets the default; `MARESTAIL_GROK_EFFORT` and `MARESTAIL_KILO_VARIANT` still work for those two.
+`--effort` names the reasoning effort for the run and every backend carries it in the commit stamp. Claude takes it as `--effort` (`low`, `medium`, `high`, `xhigh`, `max`), agy as `--effort` (`low`, `medium`, `high`), Grok as `--reasoning-effort`, Kilo as `--variant`, Junie as `--effort` (`low`, `medium`, `high`). Cursor has no flag for it: it goes inside the model, `--model 'claude-opus-4-8[context=1m,effort=high]'`, and `--effort` there only labels the commits. Kimi has no flag for it either, so `--effort` only labels the commits. `[agent] effort` in `marestail.toml` sets the default; `MARESTAIL_GROK_EFFORT` and `MARESTAIL_KILO_VARIANT` still work for those two.
 
 ## Routing
 
 [dandelion](https://github.com/maxh213/dandelion) watches the usage windows of your AI subscriptions and names the one to use now. `marestail route` runs `dandelion route` with the same arguments and exit code (`marestail route --high` runs `dandelion route --high`); when dandelion is not installed it says where to get it and exits 127.
 
-`--model dandelion/route` (or `[agent] model = "dandelion/route"`) asks `dandelion route` before every agent session, and `--model dandelion/route-best` asks `dandelion route --high`. dandelion prints `<model> [effort] <account>`, and that session runs on the account's backend with that model and effort: `claude` and `claude-work` run claude (`claude-work` with `CLAUDE_CONFIG_DIR` set to `DANDELION_CLAUDE_WORK_CONFIG_DIR`, default `~/.claude-work`), and `agy`, `kimi`, `grok` and `cursor` run their own CLIs. Each session is stamped with the model and effort it ran on, and the log shows the line dandelion printed. A session that hits a rate limit asks dandelion again before retrying, so it can move to another subscription; when dandelion prints `none`, the runner waits and asks again, like any other rate limit. The backend and effort come from dandelion, so `--agent` and `--effort` cannot be combined with these models, and `[agent] effort` is ignored. `MARESTAIL_DANDELION` names a different dandelion binary.
+`--model dandelion/route` (or `[agent] model = "dandelion/route"`) asks `dandelion route` before every agent session, and `--model dandelion/route-best` asks `dandelion route --high`. dandelion prints `<model> [effort] <account>`, and that session runs on the account's backend with that model and effort: `claude` and `claude-work` run claude (`claude-work` with `CLAUDE_CONFIG_DIR` set to `DANDELION_CLAUDE_WORK_CONFIG_DIR`, default `~/.claude-work`), and `agy`, `kimi`, `grok`, `cursor` and `junie` run their own CLIs. Each session is stamped with the model and effort it ran on, and the log shows the line dandelion printed. A session that hits a rate limit asks dandelion again before retrying, so it can move to another subscription; when dandelion prints `none`, the runner waits and asks again, like any other rate limit. The backend and effort come from dandelion, so `--agent` and `--effort` cannot be combined with these models, and `[agent] effort` is ignored. `MARESTAIL_DANDELION` names a different dandelion binary.
 
 ## Overnight
 
@@ -82,6 +82,8 @@ marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route 
 Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
 
 Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, JSONL on stdout; the `-p` text only points at the prompt file under `.marestail/runs/<task>/`, because a full worker prompt is longer than one argv entry allows (128 KB); `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
+
+Junie pipeline runs (`--agent junie`) use `junie --skip-update-check --input-format=json --output-format=json -p <repo root> --model=<model> --effort=<effort>`, with the prompt sent on stdin as one JSON object `{"task": "<prompt>"}`; `--model` is passed only when the run has a model, and `--effort` only for `low`, `medium` or `high`. A judge `VERDICT:` line inside the JSON `result` still counts. Junie has no command Stop hook; the runner's four-hour cap is the timeout.
 
 `install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
 
@@ -150,6 +152,7 @@ Every variable marestail reads. The `docs` gate ignores common ones such as `HOM
 | `MARESTAIL_KILO` | kilo binary (default `kilo`) |
 | `MARESTAIL_KILO_VARIANT` | Kilo variant when `--effort` is not given |
 | `MARESTAIL_KIMI` | kimi binary (default `kimi`) |
+| `MARESTAIL_JUNIE` | junie binary (default `junie`) |
 | `MARESTAIL_DANDELION` | dandelion binary (default `dandelion`) |
 | `DANDELION_CLAUDE_WORK_CONFIG_DIR` | config directory for the `claude-work` account (default `~/.claude-work`) |
 | `CLAUDE_CONFIG_DIR` | set to the directory above for `claude-work` sessions |

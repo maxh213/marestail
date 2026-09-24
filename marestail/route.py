@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO = "https://github.com/maxh213/dandelion"
 MODES = {"dandelion/route": (), "dandelion/route-best": ("--high",)}
-BACKENDS = {"claude": "claude", "claude-work": "claude", "agy": "agy", "kimi": "kimi", "grok": "grok", "cursor": "cursor"}
+BACKENDS = {"claude": "claude", "claude-work": "claude", "agy": "agy", "kimi": "kimi", "grok": "grok", "cursor": "cursor", "junie": "junie"}
 NO_ROUTE = "none"
 TIMEOUT_SECONDS = 300
 

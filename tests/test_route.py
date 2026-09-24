@@ -138,6 +138,8 @@ def test_interpret(result: subprocess.CompletedProcess[str], expected: tuple[Cho
         ("m low agy", Choice("m low agy", "agy", "m", "low", {})),
         ("m grok", Choice("m grok", "grok", "m", None, {})),
         ("m cursor", Choice("m cursor", "cursor", "m", None, {})),
+        ("gemini-3.8-flash high junie", Choice("gemini-3.8-flash high junie", "junie", "gemini-3.8-flash", "high", {})),
+        ("gemini-3.8-flash junie", Choice("gemini-3.8-flash junie", "junie", "gemini-3.8-flash", None, {})),
     ],
 )
 def test_parse(line: str, expected: Choice) -> None:
@@ -156,7 +158,7 @@ def test_parse_claude_work(monkeypatch: pytest.MonkeyPatch) -> None:
         ("a b c claude", "dandelion route printed 'a b c claude'; expected `<model> [effort] <provider>`"),
         (
             "gpt high codex",
-            "dandelion route picked 'codex', which marestail has no backend for; it knows claude, claude-work, agy, kimi, grok, cursor",
+            "dandelion route picked 'codex', which marestail has no backend for; it knows claude, claude-work, agy, kimi, grok, cursor, junie",
         ),
     ],
 )

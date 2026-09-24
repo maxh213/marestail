@@ -13,7 +13,7 @@ from typing import Any, TypeGuard
 
 from .model import Fleet, Process, RepoState, Step, Worker
 
-BACKENDS = frozenset({"claude", "grok", "agy", "cursor-agent", "kilo", "kimi"})
+BACKENDS = frozenset({"claude", "grok", "agy", "cursor-agent", "kilo", "kimi", "junie"})
 STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 FINISH_RE = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min: (.*)$")
 VERDICT_RE = re.compile(r"^\s+verdict (\S+)")

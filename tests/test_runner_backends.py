@@ -20,6 +20,7 @@ AGENT_VARS = (
     "MARESTAIL_KILO",
     "MARESTAIL_KILO_VARIANT",
     "MARESTAIL_KIMI",
+    "MARESTAIL_JUNIE",
 )
 CLAUDE_BASE = ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
 KILO_BASE = ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model"]
@@ -98,6 +99,11 @@ def test_agent_env_for_claude_and_others() -> None:
             ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "m"],
         ),
         ({"agent": "kilo"}, [*KILO_BASE, runner.KILO_DEFAULT_MODEL, "--variant", "high"]),
+        (
+            {"agent": "junie", "model": "m", "effort": "high"},
+            ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work", "--model=m", "--effort=high"],
+        ),
+        ({"agent": "junie"}, ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work"]),
     ],
 )
 def test_agent_command(fields: dict[str, Any], expected: list[str]) -> None:
@@ -108,9 +114,11 @@ def test_agent_command_binaries_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("MARESTAIL_CLAUDE", "/bin/c")
     monkeypatch.setenv("MARESTAIL_AGY", "/bin/a")
     monkeypatch.setenv("MARESTAIL_CURSOR", "/bin/u")
+    monkeypatch.setenv("MARESTAIL_JUNIE", "/bin/j")
     assert runner.agent_command(make_state())[0] == "/bin/c"
     assert runner.agent_command(make_state(agent="agy"))[0] == "/bin/a"
     assert runner.agent_command(make_state(agent="cursor"))[0] == "/bin/u"
+    assert runner.agent_command(make_state(agent="junie"))[0] == "/bin/j"
 
 
 def test_grok_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,6 +162,54 @@ def test_kimi_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_KIMI", "/bin/k")
     assert runner.kimi_command(make_state(model="m"), prompt)[-2:] == ["-m", "m"]
     assert runner.kimi_command(make_state(model="m"), prompt)[0] == "/bin/k"
+
+
+def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert runner.junie_command(make_state(agent="junie", model="m", effort="high")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+        "--model=m",
+        "--effort=high",
+    ]
+    assert runner.junie_command(make_state(agent="junie", model="m", effort="xhigh")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+        "--model=m",
+    ]
+    assert runner.junie_command(make_state(agent="junie")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+    ]
+    monkeypatch.setenv("MARESTAIL_JUNIE", "/opt/junie")
+    assert runner.junie_command(make_state(agent="junie"))[0] == "/opt/junie"
+
+
+def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (0, '{"result":"ok"}', "err"))
+    assert runner.junie_run(make_state(root=Path("/repo"), agent="junie"), "the prompt") == (0, '{"result":"ok"}')
+    call = fake.calls[0]
+    assert call["command"] == runner.junie_command(make_state(root=Path("/repo"), agent="junie"))
+    assert json.loads(call["input"]) == {"task": "the prompt"}
+    assert call["cwd"] == Path("/repo")
+    assert call["env"] is os.environ
+
+
+def test_junie_run_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (1, "out", "err"))
+    assert runner.junie_run(make_state(agent="junie"), "p") == (1, "out\nerr")
+    assert fake.calls[0]["input"] == json.dumps({"task": "p"})
 
 
 class FakeSubprocess:
@@ -527,12 +583,66 @@ def test_turns_summary_prefers_result_over_response() -> None:
     assert "other" not in text
 
 
+JUNIE_VERIFIED_OUTPUT = '{"sessionId":"s","taskName":"t","result":"### Summary\\n- pong\\n\\n### Changes\\n- No files were created or modified as requested.\\n\\n### Verification\\n- Verified that the repository remains empty and untouched.","changes":[],"llmUsage":[{"model":"gemini-3.8-flash","calls":17,"cost":0.06395658750000001,"inputTokens":91729,"cacheInputTokens":261869,"cacheCreateTokens":0,"outputTokens":10527},{"model":"gpt-5.4-nano","calls":13,"cost":0.01091355,"inputTokens":44499,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":1611},{"model":"gpt-4.1-mini-2025-04-14","calls":16,"cost":0.004483599999999999,"inputTokens":10037,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":293},{"model":"gpt-4.1-2025-04-14","calls":1,"cost":0.0015019999999999999,"inputTokens":743,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":2},{"model":"gemini-3.5-flash-lite","calls":1,"cost":4.9225E-4,"inputTokens":1969,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":0}]}'
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (1, "Your balance is exhausted.", True),
+        (1, '{"errors":[{"level":"ERROR","message":"InsufficientAccountBalance"}]}', True),
+        (1, "insufficient balance", True),
+        (1, "rate limit exceeded", True),
+        (1, "Junie failed with the message: Invalid model: no-such-model-xyz", False),
+        (0, "the quota gate passed", False),
+        (0, JUNIE_VERIFIED_OUTPUT, False),
+        (1, "plain error", False),
+        (1, '{"errors":["not a dict"]}', False),
+        (1, '{"errors":[{}]}', False),
+        (1, '{"errors":[{"message":"rate limit exceeded"}]}', True),
+        (1, '{"errors":[{"message":"rate\\u0020limit exceeded"}]}', True),
+    ],
+)
+def test_junie_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert runner.junie_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            JUNIE_VERIFIED_OUTPUT,
+            "calls=48 tokens=423279 cost=$0.08 '### Summary - pong  ### Changes - No files were created or modified as requested.  ### Verification '",
+        ),
+        ("not json", "not json"),
+        ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
+    ],
+)
+def test_junie_summary(output: str, expected: str) -> None:
+    assert runner.junie_summary(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"llmUsage": [{"calls": 2, "inputTokens": 10, "cacheInputTokens": 5, "outputTokens": 3, "cost": 1.5}]}, (2, 18, 1.5)),
+        ({"llmUsage": [{}, {"calls": None, "inputTokens": None, "cost": None}]}, (0, 0, 0.0)),
+        ({"llmUsage": ["not a dict", {"calls": 1, "inputTokens": 2, "outputTokens": 3, "cost": 0.1}]}, (1, 5, 0.1)),
+        ("not a dict", (0, 0, 0.0)),
+        ({}, (0, 0, 0.0)),
+    ],
+)
+def test_junie_usage(data: Any, expected: tuple[int, int, float]) -> None:
+    assert runner.junie_usage(data) == expected
+
+
 @pytest.mark.parametrize(
     ("backend", "readers"),
     [
         ("grok", (runner.grok_rate_limited, runner.grok_summary)),
         ("kilo", (runner.kilo_rate_limited, runner.kilo_summary)),
         ("kimi", (runner.kimi_rate_limited, runner.kimi_summary)),
+        ("junie", (runner.junie_rate_limited, runner.junie_summary)),
         ("claude", (runner.rate_limited, runner.summary)),
         ("agy", (runner.rate_limited, runner.summary)),
     ],
@@ -541,32 +651,27 @@ def test_outcome_readers(backend: str, readers: tuple[Any, Any]) -> None:
     assert runner.outcome_readers(backend) == readers
 
 
-def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
-    seen: list[tuple[str, object, object]] = []
-
-    def grok_run(state: object, path: object) -> tuple[int, str]:
-        seen.append(("grok", state, path))
-        return 1, f"grok {path}"
-
-    def kilo_run(state: object, prompt: object) -> tuple[int, str]:
-        seen.append(("kilo", state, prompt))
-        return 2, f"kilo {prompt}"
-
-    def kimi_run(state: object, path: object) -> tuple[int, str]:
-        seen.append(("kimi", state, path))
-        return 3, f"kimi {path}"
-
-    monkeypatch.setattr(runner, "grok_run", grok_run)
-    monkeypatch.setattr(runner, "kilo_run", kilo_run)
-    monkeypatch.setattr(runner, "kimi_run", kimi_run)
-    fake = fake_run(runner, [(4, "claude out")])
+def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
     prompt = Path("/f")
+
+    def make_run(name: str, arg: str) -> tuple[int, str]:
+        return 1, f"{name} {arg}"
+
+    monkeypatch.setattr(runner, "grok_run", lambda s, p: make_run("grok", str(p)))
+    monkeypatch.setattr(runner, "kilo_run", lambda s, p: make_run("kilo", p))
+    monkeypatch.setattr(runner, "kimi_run", lambda s, p: make_run("kimi", str(p)))
+    monkeypatch.setattr(runner, "junie_run", lambda s, p: make_run("junie", p))
     assert runner.run_backend(state, "grok", "p", prompt) == (1, "grok /f")
-    assert runner.run_backend(state, "kilo", "p", prompt) == (2, "kilo p")
-    assert runner.run_backend(state, "kimi", "p", prompt) == (3, "kimi /f")
-    assert runner.run_backend(state, "claude", "p", prompt) == (4, "claude out")
-    assert seen == [("grok", state, prompt), ("kilo", state, "p"), ("kimi", state, prompt)]
+    assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
+    assert runner.run_backend(state, "kimi", "p", prompt) == (1, "kimi /f")
+    assert runner.run_backend(state, "junie", "p", prompt) == (1, "junie p")
+
+
+def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
+    fake = fake_run(runner, [(4, "claude out")])
+    state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
+    assert runner.run_backend(state, "claude", "p", Path("/f")) == (4, "claude out")
     assert fake.calls == [[*CLAUDE_BASE, "--model", "m"]]
     assert fake.options == [
         {"cwd": Path("/repo"), "stdin": "p", "timeout": 14400, "env": {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "K": "v"}}

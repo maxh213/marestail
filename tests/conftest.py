@@ -132,7 +132,7 @@ def make_context(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -
 
 
 FORBIDDEN_BINARIES = frozenset(
-    {"docker", "claude", "grok", "kilo", "kimi", "cursor-agent", "agy", "dandelion", "sonar-scanner", "curl", "wget"}
+    {"docker", "claude", "grok", "kilo", "kimi", "junie", "cursor-agent", "agy", "dandelion", "sonar-scanner", "curl", "wget"}
 )
 
 

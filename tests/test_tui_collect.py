@@ -1057,6 +1057,7 @@ def test_gate_hit_pid_default() -> None:
 
 def test_skipped_gate_backends() -> None:
     assert collect.skipped_gate(["claude"], ["claude"]) is True
+    assert collect.skipped_gate(["junie"], ["junie"]) is True
     assert collect.skipped_gate(["echo"], ["echo"]) is False
 
 

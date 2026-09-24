@@ -61,6 +61,9 @@ GROK = "grok"
 SPACE = " "
 KILO_DEFAULT_MODEL = "kilo/stepfun/step-3.7-flash:free"
 KILO_DEFAULT_VARIANT = "high"
+JUNIE = "junie"
+JUNIE_SUMMARY_WIDTH = 100
+JUNIE_LIMIT_PATTERN = re.compile(r"Your balance is exhausted|InsufficientAccountBalance|insufficient\s+balance", re.IGNORECASE)
 AGENT_TIMEOUT = 4 * 3600
 AUTHOR_ROUNDS = 3
 SUMMARY_WIDTH = 120
@@ -1077,12 +1080,10 @@ def routed(state: Run, prompt: str) -> tuple[str, str]:
 
 
 def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:
-    if backend == GROK:
-        return grok_run(state, prompt_file)
-    if backend == "kilo":
-        return kilo_run(state, prompt)
-    if backend == "kimi":
-        return kimi_run(state, prompt_file)
+    if backend in (GROK, "kimi"):
+        return {GROK: grok_run, "kimi": kimi_run}[backend](state, prompt_file)
+    if backend in ("kilo", JUNIE):
+        return {"kilo": kilo_run, JUNIE: junie_run}[backend](state, prompt)
     return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=AGENT_TIMEOUT, env=agent_env(state))
 
 
@@ -1091,6 +1092,7 @@ def outcome_readers(backend: str) -> tuple[Callable[[int, str], bool], Callable[
         "grok": (grok_rate_limited, grok_summary),
         "kilo": (kilo_rate_limited, kilo_summary),
         "kimi": (kimi_rate_limited, kimi_summary),
+        JUNIE: (junie_rate_limited, junie_summary),
     }
     return readers.get(backend, (rate_limited, summary))
 
@@ -1146,7 +1148,7 @@ def optional_flag(flag: str, value: str | None) -> list[str]:
 
 
 def agent_command(state: Run) -> list[str]:
-    builders = {"agy": agy_command, "cursor": cursor_command, "kilo": kilo_command}
+    builders = {"agy": agy_command, "cursor": cursor_command, "kilo": kilo_command, JUNIE: junie_command}
     return builders.get(resolve_agent(state), claude_command)(state)
 
 
@@ -1490,6 +1492,78 @@ def kimi_summary(output: str) -> str:
     errors = kimi_errors(events)
     text = (errors[-1] if errors else last_text(kimi_texts(events)))[:SUMMARY_WIDTH]
     return summary_line({"turns": turns, TOKENS: tokens}, cost, text)
+
+
+def junie_command(state: Run) -> list[str]:
+    binary = os.environ.get("MARESTAIL_JUNIE", JUNIE)
+    command = [binary, "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(state.config.root)]
+    if state.model:
+        command.append(f"--model={state.model}")
+    if state.effort in ("low", "medium", "high"):
+        command.append(f"--effort={state.effort}")
+    return command
+
+
+def junie_run(state: Run, prompt: str) -> tuple[int, str]:
+    command = junie_command(state)
+    return session_result(spawn(command, state, os.environ, json.dumps({"task": prompt}), command[0]), stdout_and_stderr)
+
+
+def junie_usage(data: Any) -> tuple[int, int, float]:
+    if not isinstance(data, dict):
+        return 0, 0, 0.0
+    calls = tokens = 0
+    cost = 0.0
+    for item in data.get("llmUsage", []):
+        item_calls, item_tokens, item_cost = junie_item_usage(item)
+        calls += item_calls
+        tokens += item_tokens
+        cost += item_cost
+    return calls, tokens, cost
+
+
+def junie_item_usage(item: Any) -> tuple[int, int, float]:
+    if not isinstance(item, dict):
+        return 0, 0, 0.0
+    calls = int(item.get("calls") or 0)
+    tokens = junie_item_tokens(item)
+    cost = float(item.get("cost") or 0.0)
+    return calls, tokens, cost
+
+
+def junie_item_tokens(item: Event) -> int:
+    return sum(int(item.get(key) or 0) for key in ("inputTokens", "cacheInputTokens", "outputTokens"))
+
+
+def junie_summary(output: str) -> str:
+    data = json_object(output)
+    if data is None:
+        return output_tail(output)
+    calls, tokens, cost = junie_usage(data)
+    text = str(data.get(RESULT) or "").replace("\n", " ")[:JUNIE_SUMMARY_WIDTH]
+    return f"calls={calls} tokens={tokens} cost=${cost:.2f} {text!r}"
+
+
+def junie_rate_limited(code: int, output: str) -> bool:
+    if code == 0:
+        return False
+    if junie_limit_match(output):
+        return True
+    return junie_errors_limited(json_object(output))
+
+
+def junie_limit_match(text: str) -> bool:
+    return bool(JUNIE_LIMIT_PATTERN.search(text) or LIMIT_PATTERN.search(text))
+
+
+def junie_errors_limited(data: Event | None) -> bool:
+    if data is None:
+        return False
+    return any(junie_error_limited(error) for error in data.get("errors", []))
+
+
+def junie_error_limited(error: Any) -> bool:
+    return isinstance(error, dict) and junie_limit_match(str(error.get("message") or ""))
 
 
 def grok_parse_json(output: str) -> Event | None:

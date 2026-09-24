@@ -14,6 +14,9 @@ from marestail.runner import (
     agent_command,
     agent_label,
     grok_command,
+    junie_command,
+    junie_rate_limited,
+    junie_summary,
     kilo_command,
     kilo_events,
     kilo_rate_limited,
@@ -76,6 +79,11 @@ def snapshot_existing() -> None:
         "cursor",
         agent_command(state("cursor")),
         ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "mymodel"],
+    )
+    expect(
+        "junie",
+        agent_command(state("junie")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
     )
     expect(
         "grok",
@@ -142,6 +150,49 @@ def kimi_backend() -> None:
     expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
 
 
+def junie_backend() -> None:
+    expect(
+        "junie-command",
+        junie_command(state("junie", model="gemini-3.8-flash", effort="high")),
+        [
+            "junie",
+            "--skip-update-check",
+            "--input-format=json",
+            "--output-format=json",
+            "-p",
+            str(ROOT),
+            "--model=gemini-3.8-flash",
+            "--effort=high",
+        ],
+    )
+    expect(
+        "junie-command-no-model",
+        junie_command(state("junie", model=None)),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT)],
+    )
+    expect(
+        "junie-command-xhigh",
+        junie_command(state("junie", model="gemini-3.8-flash", effort="xhigh")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=gemini-3.8-flash"],
+    )
+    expect("junie-resolve", resolve_agent(state("junie", model=None)), "junie")
+    expect("junie-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "junie"}})), "junie")
+    verified = '{"sessionId":"s","taskName":"t","result":"### Summary\\n- pong\\n\\n### Changes\\n- No files were created or modified as requested.\\n\\n### Verification\\n- Verified that the repository remains empty and untouched.","changes":[],"llmUsage":[{"model":"gemini-3.8-flash","calls":17,"cost":0.06395658750000001,"inputTokens":91729,"cacheInputTokens":261869,"cacheCreateTokens":0,"outputTokens":10527},{"model":"gpt-5.4-nano","calls":13,"cost":0.01091355,"inputTokens":44499,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":1611},{"model":"gpt-4.1-mini-2025-04-14","calls":16,"cost":0.004483599999999999,"inputTokens":10037,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":293},{"model":"gpt-4.1-2025-04-14","calls":1,"cost":0.0015019999999999999,"inputTokens":743,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":2},{"model":"gemini-3.5-flash-lite","calls":1,"cost":4.9225E-4,"inputTokens":1969,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":0}]}'
+    summary = junie_summary(verified)
+    expect(
+        "junie-summary",
+        summary,
+        "calls=48 tokens=423279 cost=$0.08 '### Summary - pong  ### Changes - No files were created or modified as requested.  ### Verification '",
+    )
+    expect("junie-not-limited", junie_rate_limited(0, verified), False)
+    expect("junie-balance-exhausted", junie_rate_limited(1, "Your balance is exhausted."), True)
+    expect("junie-insufficient-balance", junie_rate_limited(1, "insufficient balance"), True)
+    expect("junie-rate-limit", junie_rate_limited(1, "rate limit exceeded"), True)
+    expect("junie-invalid-model", junie_rate_limited(1, "Junie failed with the message: Invalid model: no-such-model-xyz"), False)
+    expect("junie-quota-ok", junie_rate_limited(0, "the quota gate passed"), False)
+    expect("junie-summary-tail", junie_summary("plain text failure"), "plain text failure")
+
+
 def env_overrides() -> None:
     keys = [
         "MARESTAIL_AGENT",
@@ -153,6 +204,7 @@ def env_overrides() -> None:
         "MARESTAIL_GROK",
         "MARESTAIL_GROK_EFFORT",
         "MARESTAIL_KIMI",
+        "MARESTAIL_JUNIE",
     ]
     previous = {key: os.environ.get(key) for key in keys}
     try:
@@ -180,6 +232,10 @@ def env_overrides() -> None:
         expect("kimi-binary", kimi_command(state("kimi"), PROMPT)[0], "/opt/kimi")
         os.environ["MARESTAIL_AGENT"] = "kimi"
         expect("env-agent-kimi", resolve_agent(state(None, model=None)), "kimi")
+        os.environ["MARESTAIL_JUNIE"] = "/opt/junie"
+        expect("junie-binary", junie_command(state("junie", model=None))[0], "/opt/junie")
+        os.environ["MARESTAIL_AGENT"] = "junie"
+        expect("env-agent-junie", resolve_agent(state(None, model=None)), "junie")
     finally:
         restore(keys, previous)
     expect("config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kilo"}})), "kilo")
@@ -207,6 +263,14 @@ def labels() -> None:
         "kimi-effort-unflagged",
         kimi_command(state("kimi", effort="high"), PROMPT),
         ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json", "-m", "mymodel"],
+    )
+    expect("label-junie", agent_label(state("junie")), "mymodel")
+    expect("label-junie-no-model", agent_label(state("junie", model=None)), "junie")
+    expect("label-junie-effort", agent_label(state("junie", effort="high")), "mymodel high")
+    expect(
+        "junie-effort-unflagged",
+        junie_command(state("junie", effort="xhigh")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
     )
     expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")
@@ -289,6 +353,7 @@ if __name__ == "__main__":
     snapshot_existing()
     kilo_defaults()
     kimi_backend()
+    junie_backend()
     env_overrides()
     labels()
     kilo_output()
