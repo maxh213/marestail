@@ -30,7 +30,7 @@ Feature: Junie backend
     Examples:
       | model             | effort | stamp                    |
       | gemini-3.8-flash  | xhigh  | gemini-3.8-flash xhigh   |
-      |                   | high   | high                     |
+      |                   | high   | junie high               |
 
   Scenario: MARESTAIL_JUNIE overrides the junie binary
     Given the environment variable "MARESTAIL_JUNIE" is "/opt/junie"
@@ -53,6 +53,7 @@ Feature: Junie backend
       | stderr | Your balance is exhausted.                                                |
       | stdout | {"errors":[{"level":"ERROR","message":"InsufficientAccountBalance"}]}      |
       | stderr | insufficient balance                                                      |
+      | stderr | rate limit exceeded                                                       |
 
   Scenario Outline: junie failures that are not rate limits
     Given a <code> junie exit with <where> containing "<text>"
@@ -62,6 +63,17 @@ Feature: Junie backend
       | code | where  | text                                                   |
       | 1    | stderr | Junie failed with the message: Invalid model: no-such-model-xyz |
       | 0    | result | the quota gate passed                                  |
+
+  Scenario Outline: non-JSON junie output falls back to its tail
+    Given a junie exit with code <code> and stdout "<stdout>"
+    When the junie outcome reader summarises it
+    Then the summary is the last 200 characters of stdout with newlines collapsed to spaces
+    And the junie outcome reader reports <rate_limited>
+
+    Examples:
+      | code | stdout              | rate_limited     |
+      | 1    | rate limit exceeded | rate limited     |
+      | 0    | plain ok output     | not rate limited |
 
   Scenario: dandelion route can send a session to junie
     Given "dandelion route" prints "gemini-3.8-flash high junie"

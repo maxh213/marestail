@@ -45,6 +45,9 @@
     assert resolve_agent(state) == "junie"
     assert agent_label(state) == "gemini-3.8-flash high"
     assert agent_command(state) == ["/opt/junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work", "--model=gemini-3.8-flash", "--effort=high"]
+    no_model = Run(config=Config(root=Path("/work"), raw={}), task=Path("/work/t.md"), model=None, retries=0, agent="junie", effort="high")
+    assert agent_label(no_model) == "junie high"
+    assert "--model" not in agent_command(no_model)
     PY
     ```
     Expected: exit code `0`, no output.
@@ -58,19 +61,30 @@
     PY
     ```
     Expected: exit code `0`, no output.
-14. Verify junie rate-limit detection:
+14. Verify junie rate-limit detection, including the shared LIMIT_PATTERN:
     ```
     python3 - <<'PY'
     from marestail.runner import junie_rate_limited
     assert junie_rate_limited(1, "Your balance is exhausted.") is True
     assert junie_rate_limited(1, '{"errors":[{"level":"ERROR","message":"InsufficientAccountBalance"}]}') is True
     assert junie_rate_limited(1, "insufficient balance") is True
+    assert junie_rate_limited(1, "rate limit exceeded") is True
     assert junie_rate_limited(1, "Junie failed with the message: Invalid model: no-such-model-xyz") is False
     assert junie_rate_limited(0, '{"result":"the quota gate passed"}') is False
     PY
     ```
     Expected: exit code `0`, no output.
-15. Verify a verdict inside the junie result is parsed:
+15. Verify non-JSON junie output falls back to its tail and is not treated as rate limited on exit 0:
+    ```
+    python3 - <<'PY'
+    from marestail.runner import junie_rate_limited, junie_summary
+    assert junie_summary("plain text failure") == "plain text failure"
+    assert junie_rate_limited(1, "plain text failure") is False
+    assert junie_rate_limited(0, "plain text ok") is False
+    PY
+    ```
+    Expected: exit code `0`, no output.
+16. Verify a verdict inside the junie result is parsed:
     ```
     python3 - <<'PY'
     from pathlib import Path
