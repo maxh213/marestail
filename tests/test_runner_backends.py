@@ -249,6 +249,13 @@ def test_hermes_run_passes_empty_stdin_and_appends_stderr_on_failure(monkeypatch
     assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (2, "subscription_expired")
 
 
+def test_hermes_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (127, "hermes: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (124, "hermes: timed out after 14400s")
+
+
 def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (0, '{"result":"ok"}', "err"))
     assert backends.junie_run(make_state(root=Path("/repo"), agent="junie"), "the prompt") == (0, '{"result":"ok"}')
@@ -732,6 +739,9 @@ def test_hermes_rate_limited(code: int, output: str, expected: bool) -> None:
             '{"type":"result","text":"' + "word " * 60 + '","tokens":{"total":7}}',
             'tokens=7 "word word word word word word word word word word word word word word word word word word word word "',
         ),
+        ('{"type":"result","text":"","tokens":{"total":0}}', 'tokens=0 ""'),
+        ('{"type":"result","tokens":{"total":0}}', 'tokens=0 ""'),
+        ('{"type":"result","text":"first\\nsecond","tokens":{"total":3}}', 'tokens=3 "first second"'),
         ("not json", "not json"),
         ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
     ],
