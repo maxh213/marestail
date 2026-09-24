@@ -6,13 +6,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail.config import Config
-from marestail.runner import (
+from marestail.backends import (
     KILO_DEFAULT_MODEL,
     KILO_DEFAULT_VARIANT,
-    Run,
-    agent_command,
-    agent_label,
     grok_command,
     hermes_command,
     hermes_rate_limited,
@@ -29,6 +25,12 @@ from marestail.runner import (
     kimi_prompt,
     kimi_rate_limited,
     kimi_summary,
+)
+from marestail.config import Config
+from marestail.runner import (
+    Run,
+    agent_command,
+    agent_label,
     parse_verdict,
     resolve_agent,
     stamped,

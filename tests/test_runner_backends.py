@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import marestail.backends as backends
 from marestail import runner
 from marestail.config import Config
 from marestail.runner import Run
@@ -69,7 +70,7 @@ def test_resolve_agent(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], 
         ({"model": "opus", "effort": "high"}, "opus high"),
         ({"route": "dandelion/route"}, "dandelion/route"),
         ({"route": "dandelion/route", "agent": "claude", "effort": "low"}, "dandelion/route low"),
-        ({"agent": "kilo"}, f"{runner.KILO_DEFAULT_MODEL} high"),
+        ({"agent": "kilo"}, f"{backends.KILO_DEFAULT_MODEL} high"),
         ({"agent": "kilo", "model": "other"}, "other"),
         ({"agent": "grok", "effort": "max"}, "grok max"),
         ({"agent": "grok"}, "grok"),
@@ -114,7 +115,7 @@ def test_agent_env_for_claude_and_others() -> None:
             {"agent": "cursor", "model": "m", "effort": "e"},
             ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "m"],
         ),
-        ({"agent": "kilo"}, [*KILO_BASE, runner.KILO_DEFAULT_MODEL, "--variant", "high"]),
+        ({"agent": "kilo"}, [*KILO_BASE, backends.KILO_DEFAULT_MODEL, "--variant", "high"]),
         (
             {"agent": "junie", "model": "m", "effort": "high"},
             ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work", "--model=m", "--effort=high"],
@@ -140,11 +141,11 @@ def test_agent_command_binaries_from_env(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_grok_command(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = Path("/work/p.md")
     base = ["grok", "--prompt-file", "/work/p.md", "--output-format", "json", "--always-approve", "--no-plan", "--trust"]
-    assert runner.grok_command(make_state(), prompt) == base
-    assert runner.grok_command(make_state(model="m", effort="e"), prompt) == [*base, "--model", "m", "--reasoning-effort", "e"]
+    assert backends.grok_command(make_state(), prompt) == base
+    assert backends.grok_command(make_state(model="m", effort="e"), prompt) == [*base, "--model", "m", "--reasoning-effort", "e"]
     monkeypatch.setenv("MARESTAIL_GROK", "/bin/g")
     monkeypatch.setenv("MARESTAIL_GROK_EFFORT", "low")
-    assert runner.grok_command(make_state(), prompt) == ["/bin/g", *base[1:], "--reasoning-effort", "low"]
+    assert backends.grok_command(make_state(), prompt) == ["/bin/g", *base[1:], "--reasoning-effort", "low"]
 
 
 @pytest.mark.parametrize(
@@ -152,7 +153,7 @@ def test_grok_command(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ({"effort": ""}, "low", None),
         ({}, None, "high"),
-        ({"model": runner.KILO_DEFAULT_MODEL}, None, "high"),
+        ({"model": backends.KILO_DEFAULT_MODEL}, None, "high"),
         ({"model": "other"}, None, None),
         ({}, "low", "low"),
         ({}, "", None),
@@ -162,26 +163,26 @@ def test_grok_command(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_kilo_variant(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], env: str | None, expected: str | None) -> None:
     if env is not None:
         monkeypatch.setenv("MARESTAIL_KILO_VARIANT", env)
-    assert runner.kilo_variant(make_state(**fields)) == expected
+    assert backends.kilo_variant(make_state(**fields)) == expected
 
 
 def test_kilo_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_KILO", "/bin/k")
-    assert runner.kilo_command(make_state(model="m", effort="")) == ["/bin/k", *KILO_BASE[1:], "m"]
+    assert backends.kilo_command(make_state(model="m", effort="")) == ["/bin/k", *KILO_BASE[1:], "m"]
 
 
 def test_kimi_command(monkeypatch: pytest.MonkeyPatch) -> None:
     prompt = Path("/work/p.md")
     expected_prompt = "Your instructions are in /work/p.md. Read that whole file first, then follow it exactly."
-    assert runner.kimi_prompt(prompt) == expected_prompt
-    assert runner.kimi_command(make_state(), prompt) == ["kimi", "-p", expected_prompt, "--output-format", "stream-json"]
+    assert backends.kimi_prompt(prompt) == expected_prompt
+    assert backends.kimi_command(make_state(), prompt) == ["kimi", "-p", expected_prompt, "--output-format", "stream-json"]
     monkeypatch.setenv("MARESTAIL_KIMI", "/bin/k")
-    assert runner.kimi_command(make_state(model="m"), prompt)[-2:] == ["-m", "m"]
-    assert runner.kimi_command(make_state(model="m"), prompt)[0] == "/bin/k"
+    assert backends.kimi_command(make_state(model="m"), prompt)[-2:] == ["-m", "m"]
+    assert backends.kimi_command(make_state(model="m"), prompt)[0] == "/bin/k"
 
 
 def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert runner.junie_command(make_state(agent="junie", model="m", effort="high")) == [
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="high")) == [
         "junie",
         "--skip-update-check",
         "--input-format=json",
@@ -191,9 +192,9 @@ def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "--model=m",
         "--effort=high",
     ]
-    assert runner.junie_command(make_state(agent="junie", model="m", effort="low"))[-1] == "--effort=low"
-    assert runner.junie_command(make_state(agent="junie", model="m", effort="medium"))[-1] == "--effort=medium"
-    assert runner.junie_command(make_state(agent="junie", model="m", effort="xhigh")) == [
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="low"))[-1] == "--effort=low"
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="medium"))[-1] == "--effort=medium"
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="xhigh")) == [
         "junie",
         "--skip-update-check",
         "--input-format=json",
@@ -202,7 +203,7 @@ def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "/work",
         "--model=m",
     ]
-    assert runner.junie_command(make_state(agent="junie")) == [
+    assert backends.junie_command(make_state(agent="junie")) == [
         "junie",
         "--skip-update-check",
         "--input-format=json",
@@ -211,7 +212,7 @@ def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "/work",
     ]
     monkeypatch.setenv("MARESTAIL_JUNIE", "/opt/junie")
-    assert runner.junie_command(make_state(agent="junie"))[0] == "/opt/junie"
+    assert backends.junie_command(make_state(agent="junie"))[0] == "/opt/junie"
 
 
 def test_hermes_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,29 +231,29 @@ def test_hermes_command(monkeypatch: pytest.MonkeyPatch) -> None:
         "--max-turns",
         "1000",
     ]
-    assert runner.hermes_command(make_state(agent="hermes"), prompt) == base
-    assert runner.hermes_command(make_state(agent="hermes", model="m", effort="e"), prompt) == [*base, "-m", "m", "--reasoning", "e"]
+    assert backends.hermes_command(make_state(agent="hermes"), prompt) == base
+    assert backends.hermes_command(make_state(agent="hermes", model="m", effort="e"), prompt) == [*base, "-m", "m", "--reasoning", "e"]
     monkeypatch.setenv("MARESTAIL_HERMES", "/bin/h")
-    assert runner.hermes_command(make_state(agent="hermes"), prompt)[0] == "/bin/h"
+    assert backends.hermes_command(make_state(agent="hermes"), prompt)[0] == "/bin/h"
 
 
 def test_hermes_run_passes_empty_stdin_and_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (0, "out", "err"))
-    assert runner.hermes_run(make_state(root=Path("/repo"), agent="hermes"), Path("/work/p.md")) == (0, "out")
+    assert backends.hermes_run(make_state(root=Path("/repo"), agent="hermes"), Path("/work/p.md")) == (0, "out")
     call = fake.calls[0]
-    assert call["command"] == runner.hermes_command(make_state(agent="hermes"), Path("/work/p.md"))
+    assert call["command"] == backends.hermes_command(make_state(agent="hermes"), Path("/work/p.md"))
     assert call["input"] == ""
     assert call["cwd"] == Path("/repo")
     assert call["env"] is os.environ
     fake = install_subprocess(monkeypatch, (2, "", "subscription_expired"))
-    assert runner.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (2, "subscription_expired")
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (2, "subscription_expired")
 
 
 def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (0, '{"result":"ok"}', "err"))
-    assert runner.junie_run(make_state(root=Path("/repo"), agent="junie"), "the prompt") == (0, '{"result":"ok"}')
+    assert backends.junie_run(make_state(root=Path("/repo"), agent="junie"), "the prompt") == (0, '{"result":"ok"}')
     call = fake.calls[0]
-    assert call["command"] == runner.junie_command(make_state(root=Path("/repo"), agent="junie"))
+    assert call["command"] == backends.junie_command(make_state(root=Path("/repo"), agent="junie"))
     assert json.loads(call["input"]) == {"task": "the prompt"}
     assert call["cwd"] == Path("/repo")
     assert call["env"] is os.environ
@@ -260,15 +261,15 @@ def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_junie_run_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (1, "out", "err"))
-    assert runner.junie_run(make_state(agent="junie"), "p") == (1, "out\nerr")
+    assert backends.junie_run(make_state(agent="junie"), "p") == (1, "out\nerr")
     assert fake.calls[0]["input"] == json.dumps({"task": "p"})
 
 
 def test_junie_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     install_subprocess(monkeypatch, FileNotFoundError("nope"))
-    assert runner.junie_run(make_state(agent="junie"), "p") == (127, "junie: not found (nope)")
+    assert backends.junie_run(make_state(agent="junie"), "p") == (127, "junie: not found (nope)")
     install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
-    assert runner.junie_run(make_state(agent="junie"), "p") == (124, "junie: timed out after 14400s")
+    assert backends.junie_run(make_state(agent="junie"), "p") == (124, "junie: timed out after 14400s")
 
 
 class FakeSubprocess:
@@ -293,14 +294,14 @@ def test_grok_run_timeout_shows_the_command(monkeypatch: pytest.MonkeyPatch) -> 
     install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
     state = make_state()
     prompt = Path("/work/p.md")
-    shown = runner.SPACE.join(runner.grok_command(state, prompt))
-    assert runner.grok_run(state, prompt) == (124, f"{shown}: timed out after 14400s")
+    shown = backends.SPACE.join(backends.grok_command(state, prompt))
+    assert backends.grok_run(state, prompt) == (124, f"{shown}: timed out after 14400s")
 
 
 def test_grok_run_passes_env_and_empty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = install_subprocess(monkeypatch, (0, "\x1b[1mout\r\n", "err"))
     state = make_state(root=Path("/repo"))
-    assert runner.grok_run(state, Path("/work/p.md")) == (0, "out\n")
+    assert backends.grok_run(state, Path("/work/p.md")) == (0, "out\n")
     call = fake.calls[0]
     assert call["command"][0] == "grok"
     assert call["cwd"] == Path("/repo")
@@ -320,18 +321,18 @@ def test_grok_run_passes_env_and_empty_stdin(monkeypatch: pytest.MonkeyPatch) ->
 )
 def test_kilo_run_output_choice(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str, str], expected: tuple[int, str]) -> None:
     fake = install_subprocess(monkeypatch, result)
-    assert runner.kilo_run(make_state(), "the prompt") == expected
+    assert backends.kilo_run(make_state(), "the prompt") == expected
     assert fake.calls[0]["input"] == "the prompt"
     assert fake.calls[0]["env"] is os.environ
 
 
 def test_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     install_subprocess(monkeypatch, FileNotFoundError("nope"))
-    assert runner.kilo_run(make_state(model="m", effort=""), "p") == (127, "kilo: not found (nope)")
+    assert backends.kilo_run(make_state(model="m", effort=""), "p") == (127, "kilo: not found (nope)")
     install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
-    command = " ".join(runner.kilo_command(make_state(model="m", effort="")))
-    assert runner.kilo_run(make_state(model="m", effort=""), "p") == (124, f"{command}: timed out after 14400s")
-    assert runner.kimi_run(make_state(), Path("/w/p.md")) == (124, "kimi: timed out after 14400s")
+    command = " ".join(backends.kilo_command(make_state(model="m", effort="")))
+    assert backends.kilo_run(make_state(model="m", effort=""), "p") == (124, f"{command}: timed out after 14400s")
+    assert backends.kimi_run(make_state(), Path("/w/p.md")) == (124, "kimi: timed out after 14400s")
 
 
 @pytest.mark.parametrize(
@@ -344,9 +345,9 @@ def test_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 )
 def test_kimi_run_output(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str, str], expected: tuple[int, str]) -> None:
     fake = install_subprocess(monkeypatch, result)
-    assert runner.kimi_run(make_state(), Path("/w/p.md")) == expected
+    assert backends.kimi_run(make_state(), Path("/w/p.md")) == expected
     assert fake.calls[0]["input"] == ""
-    assert fake.calls[0]["command"] == runner.kimi_command(make_state(), Path("/w/p.md"))
+    assert fake.calls[0]["command"] == backends.kimi_command(make_state(), Path("/w/p.md"))
     assert fake.calls[0]["env"] is os.environ
 
 
@@ -359,8 +360,8 @@ def test_kimi_run_output(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str
     ],
 )
 def test_json_events(output: str, expected: list[dict[str, Any]]) -> None:
-    assert runner.kilo_events(output) == expected
-    assert runner.kimi_events(output) == expected
+    assert backends.kilo_events(output) == expected
+    assert backends.kimi_events(output) == expected
 
 
 def kilo(*events: dict[str, Any]) -> str:
@@ -381,7 +382,7 @@ def kilo(*events: dict[str, Any]) -> str:
     ],
 )
 def test_kilo_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.kilo_rate_limited(code, output) is expected
+    assert backends.kilo_rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -413,7 +414,7 @@ def test_kilo_rate_limited(code: int, output: str, expected: bool) -> None:
     ],
 )
 def test_kilo_summary(output: str, expected: str) -> None:
-    assert runner.kilo_summary(output) == expected
+    assert backends.kilo_summary(output) == expected
 
 
 @pytest.mark.parametrize(
@@ -428,7 +429,7 @@ def test_kilo_summary(output: str, expected: str) -> None:
     ],
 )
 def test_kimi_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.kimi_rate_limited(code, output) is expected
+    assert backends.kimi_rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -445,7 +446,7 @@ def test_kimi_rate_limited(code: int, output: str, expected: bool) -> None:
     ],
 )
 def test_kimi_error(event: dict[str, Any], expected: str | None) -> None:
-    assert runner.kimi_error(event) == expected
+    assert backends.kimi_error(event) == expected
 
 
 def test_kimi_texts() -> None:
@@ -456,7 +457,7 @@ def test_kimi_texts() -> None:
         {"role": "assistant", "content": 5},
         {"role": "user", "content": "ignored"},
     ]
-    assert runner.kimi_texts(events) == ["a", "b"]
+    assert backends.kimi_texts(events) == ["a", "b"]
 
 
 @pytest.mark.parametrize(
@@ -478,18 +479,18 @@ def test_kimi_texts() -> None:
     ],
 )
 def test_kimi_summary(output: str, expected: str) -> None:
-    assert runner.kimi_summary(output) == expected
+    assert backends.kimi_summary(output) == expected
 
 
 def test_error_typed_reads_type_and_role() -> None:
-    assert runner.error_typed({"type": "error"}) is True
-    assert runner.error_typed({"role": "error"}) is True
-    assert runner.error_typed({}) is False
+    assert backends.error_typed({"type": "error"}) is True
+    assert backends.error_typed({"role": "error"}) is True
+    assert backends.error_typed({}) is False
 
 
 def test_kimi_usage_keeps_the_previous_cost() -> None:
-    events: list[dict[str, Any]] = [{runner.TOTAL_COST: 1.5, runner.NUM_TURNS: 2}, {"text": "later"}]
-    assert runner.kimi_usage(events) == (2, None, 1.5)
+    events: list[dict[str, Any]] = [{backends.TOTAL_COST: 1.5, backends.NUM_TURNS: 2}, {"text": "later"}]
+    assert backends.kimi_usage(events) == (2, None, 1.5)
 
 
 @pytest.mark.parametrize(
@@ -504,7 +505,7 @@ def test_kimi_usage_keeps_the_previous_cost() -> None:
     ],
 )
 def test_grok_parse_json(output: str, expected: dict[str, Any] | None) -> None:
-    assert runner.grok_parse_json(output) == expected
+    assert backends.grok_parse_json(output) == expected
 
 
 @pytest.mark.parametrize(
@@ -521,25 +522,25 @@ def test_grok_parse_json(output: str, expected: dict[str, Any] | None) -> None:
     ],
 )
 def test_grok_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.grok_rate_limited(code, output) is expected
+    assert backends.grok_rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
     ("data", "output", "expected"),
     [
-        ({runner.MESSAGE: "rate limit"}, "clean", True),
+        ({backends.MESSAGE: "rate limit"}, "clean", True),
         ({"text": "usage limit"}, "clean", True),
         ({"type": "overloaded"}, "clean", True),
         ({"stopReason": "capacity"}, "clean", True),
         ({}, "too many requests", True),
         ({}, "HTTP 529", True),
         ({}, "HTTP 503", True),
-        ({runner.MESSAGE: "fine"}, "clean", False),
+        ({backends.MESSAGE: "fine"}, "clean", False),
         ({}, "clean", False),
     ],
 )
 def test_grok_limit_text(data: dict[str, str], output: str, expected: bool) -> None:
-    assert runner.grok_limit_text(data, output) is expected
+    assert backends.grok_limit_text(data, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -557,7 +558,7 @@ def test_grok_limit_text(data: dict[str, str], output: str, expected: bool) -> N
     ],
 )
 def test_grok_summary(output: str, expected: str) -> None:
-    assert runner.grok_summary(output) == expected
+    assert backends.grok_summary(output) == expected
 
 
 @pytest.mark.parametrize(
@@ -572,7 +573,7 @@ def test_grok_summary(output: str, expected: str) -> None:
     ],
 )
 def test_grok_always_approve_locked(code: int, output: str, expected: bool) -> None:
-    assert runner.grok_always_approve_locked(code, output) is expected
+    assert backends.grok_always_approve_locked(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -591,7 +592,7 @@ def test_grok_always_approve_locked(code: int, output: str, expected: bool) -> N
     ],
 )
 def test_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.rate_limited(code, output) is expected
+    assert backends.rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -609,35 +610,35 @@ def test_rate_limited(code: int, output: str, expected: bool) -> None:
     ],
 )
 def test_summary(output: str, expected: str) -> None:
-    assert runner.summary(output) == expected
+    assert backends.summary(output) == expected
 
 
 def test_summary_without_a_result_key() -> None:
-    assert runner.summary('{"total_cost_usd": 2}') == "turns=None api-equivalent=$2.00 ''"
+    assert backends.summary('{"total_cost_usd": 2}') == "turns=None api-equivalent=$2.00 ''"
 
 
 def test_kilo_text_reads_part_then_text() -> None:
-    assert runner.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
-    assert runner.kilo_text({"type": "text", "text": "plain"}) == "plain"
-    assert runner.kilo_text({"type": "other", "text": "nope"}) == ""
+    assert backends.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
+    assert backends.kilo_text({"type": "text", "text": "plain"}) == "plain"
+    assert backends.kilo_text({"type": "other", "text": "nope"}) == ""
 
 
 def test_object_or_none_keeps_objects() -> None:
-    assert runner.object_or_none({"a": 1}) == {"a": 1}
-    assert runner.object_or_none([1]) is None
-    assert runner.json_object("[1, 2]") is None
+    assert backends.object_or_none({"a": 1}) == {"a": 1}
+    assert backends.object_or_none([1]) is None
+    assert backends.json_object("[1, 2]") is None
 
 
 def test_stdout_or_stderr_uses_stderr_when_stdout_is_blank() -> None:
     failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="  ", stderr="err")
-    assert runner.stdout_or_stderr(failed) == "err"
+    assert backends.stdout_or_stderr(failed) == "err"
     ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="out", stderr="err")
-    assert runner.stdout_or_stderr(ok) == "out"
+    assert backends.stdout_or_stderr(ok) == "out"
 
 
 def test_turns_summary_prefers_result_over_response() -> None:
-    data = {runner.NUM_TURNS: 2, runner.RESULT: "hello", "response": "other"}
-    text = runner.turns_summary(data, {})
+    data = {backends.NUM_TURNS: 2, backends.RESULT: "hello", "response": "other"}
+    text = backends.turns_summary(data, {})
     assert "hello" in text
     assert "other" not in text
 
@@ -664,7 +665,7 @@ JUNIE_VERIFIED_OUTPUT = '{"sessionId":"s","taskName":"t","result":"### Summary\\
     ],
 )
 def test_junie_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.junie_rate_limited(code, output) is expected
+    assert backends.junie_rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -680,7 +681,7 @@ def test_junie_rate_limited(code: int, output: str, expected: bool) -> None:
     ],
 )
 def test_junie_summary(output: str, expected: str) -> None:
-    assert runner.junie_summary(output) == expected
+    assert backends.junie_summary(output) == expected
 
 
 @pytest.mark.parametrize(
@@ -694,7 +695,7 @@ def test_junie_summary(output: str, expected: str) -> None:
     ],
 )
 def test_junie_usage(data: Any, expected: tuple[int, int, float]) -> None:
-    assert runner.junie_usage(data) == expected
+    assert backends.junie_usage(data) == expected
 
 
 @pytest.mark.parametrize(
@@ -720,7 +721,7 @@ def test_junie_usage(data: Any, expected: tuple[int, int, float]) -> None:
     ],
 )
 def test_hermes_rate_limited(code: int, output: str, expected: bool) -> None:
-    assert runner.hermes_rate_limited(code, output) is expected
+    assert backends.hermes_rate_limited(code, output) is expected
 
 
 @pytest.mark.parametrize(
@@ -736,19 +737,19 @@ def test_hermes_rate_limited(code: int, output: str, expected: bool) -> None:
     ],
 )
 def test_hermes_summary(output: str, expected: str) -> None:
-    assert runner.hermes_summary(output) == expected
+    assert backends.hermes_summary(output) == expected
 
 
 @pytest.mark.parametrize(
     ("backend", "readers"),
     [
-        ("grok", (runner.grok_rate_limited, runner.grok_summary)),
-        ("kilo", (runner.kilo_rate_limited, runner.kilo_summary)),
-        ("kimi", (runner.kimi_rate_limited, runner.kimi_summary)),
-        ("junie", (runner.junie_rate_limited, runner.junie_summary)),
-        ("hermes", (runner.hermes_rate_limited, runner.hermes_summary)),
-        ("claude", (runner.rate_limited, runner.summary)),
-        ("agy", (runner.rate_limited, runner.summary)),
+        ("grok", (backends.grok_rate_limited, backends.grok_summary)),
+        ("kilo", (backends.kilo_rate_limited, backends.kilo_summary)),
+        ("kimi", (backends.kimi_rate_limited, backends.kimi_summary)),
+        ("junie", (backends.junie_rate_limited, backends.junie_summary)),
+        ("hermes", (backends.hermes_rate_limited, backends.hermes_summary)),
+        ("claude", (backends.rate_limited, backends.summary)),
+        ("agy", (backends.rate_limited, backends.summary)),
     ],
 )
 def test_outcome_readers(backend: str, readers: tuple[Any, Any]) -> None:
@@ -767,11 +768,11 @@ def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return run_fn
 
-    monkeypatch.setattr(runner, "grok_run", make_run("grok", prompt))
-    monkeypatch.setattr(runner, "kilo_run", make_run("kilo", "p"))
-    monkeypatch.setattr(runner, "kimi_run", make_run("kimi", prompt))
-    monkeypatch.setattr(runner, "junie_run", make_run("junie", "p"))
-    monkeypatch.setattr(runner, "hermes_run", make_run("hermes", prompt))
+    monkeypatch.setattr(backends, "grok_run", make_run("grok", prompt))
+    monkeypatch.setattr(backends, "kilo_run", make_run("kilo", "p"))
+    monkeypatch.setattr(backends, "kimi_run", make_run("kimi", prompt))
+    monkeypatch.setattr(backends, "junie_run", make_run("junie", "p"))
+    monkeypatch.setattr(backends, "hermes_run", make_run("hermes", prompt))
     assert runner.run_backend(state, "grok", "p", prompt) == (1, f"grok {prompt}")
     assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
     assert runner.run_backend(state, "kimi", "p", prompt) == (1, f"kimi {prompt}")

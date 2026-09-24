@@ -7,7 +7,7 @@ type = layers
 layers =
     marestail.tui
     marestail.cli
-    marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup
+    marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail.prompts : marestail.audit : marestail.practices
     marestail.gates
     marestail.depth : marestail.graph
@@ -104,4 +104,25 @@ protected_modules =
     marestail.gates._crap
     marestail.gates._coverage
 allowed_importers =
+    marestail.gates
+
+[importlinter:contract:backends-do-not-reach-up]
+name = Backends do not import higher layers
+type = forbidden
+source_modules =
+    marestail.backends
+forbidden_modules =
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.graph
+    marestail.depth
     marestail.gates

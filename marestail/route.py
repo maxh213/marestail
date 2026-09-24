@@ -5,17 +5,19 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import marestail.backends as backends
+
 REPO = "https://github.com/maxh213/dandelion"
 MODES = {"dandelion/route": (), "dandelion/route-best": ("--high",)}
 BACKENDS = {
-    "claude": "claude",
-    "claude-work": "claude",
-    "agy": "agy",
-    "kimi": "kimi",
-    "grok": "grok",
-    "cursor": "cursor",
-    "junie": "junie",
-    "hermes": "hermes",
+    "claude": backends.CLAUDE,
+    "claude-work": backends.CLAUDE,
+    "agy": backends.AGY,
+    "kimi": backends.KIMI,
+    "grok": backends.GROK,
+    "cursor": backends.CURSOR,
+    "junie": backends.JUNIE,
+    "hermes": backends.HERMES,
 }
 NO_ROUTE = "none"
 TIMEOUT_SECONDS = 300
