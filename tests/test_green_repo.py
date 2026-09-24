@@ -28,12 +28,13 @@ def repo_root() -> Path:
 
 
 ROOT = repo_root()
+ROUTE_SCRIPT = "test-route.py"
 PASSING_SCRIPTS = [
     "test-agent-backends.py",
     "test-audit.py",
     "test-csproj-additions.py",
     "test-drop-ignored.py",
-    "test-route.py",
+    ROUTE_SCRIPT,
     "test-scope-hard.py",
     "test-sonar-worktree.py",
     "test-practices.py",
@@ -45,6 +46,10 @@ DOCKER = "docker"
 DANDELION_SRC = "MARESTAIL_DANDELION_SRC"
 FIXTURE_MODEL = "claude-opus-5"
 MINIMUM_ROUTE_LINES = 12
+LINES_PER_ACCOUNT = 2
+ACCOUNT_SPREAD = "...CLAUDE_LINES"
+PROVIDER_NAME = r"'([\w-]+)'"
+SOURCE_LINE = re.compile(r"^dandelion source: (\d+) route lines parse$", re.MULTILINE)
 FAST_GATES = ["py.tests", "py.crap", "py.lint", "py.deps", "py.runtime", "comments", "depth", "deadcode", "docs"]
 RESULT_LINE = re.compile(r"^\[ok  \] .{14} .+  \(\d+\.\d+s\)$")
 DOCUMENTED = [
@@ -290,14 +295,26 @@ def test_diagnostic_script_exits_ok(name: str, script_env: dict[str, str]) -> No
     assert "ok" in last_line(completed.stdout + completed.stderr)
 
 
+def fixture_route_lines(source: str) -> int:
+    accounts = source.count(ACCOUNT_SPREAD)
+    provided = len(re.findall(PROVIDER_NAME, source.splitlines()[-1]))
+    return accounts * LINES_PER_ACCOUNT + provided
+
+
 def test_the_route_fixture_offers_more_lines_than_the_script_demands() -> None:
     source = dandelion_route_source()
-    accounts = source.count("...CLAUDE_LINES")
-    provided = len(re.findall(r"'([\w-]+)'", source.splitlines()[-1]))
-    assert accounts == len(route.BACKENDS)
-    assert provided == len(route.BACKENDS)
-    assert accounts * 2 + len(route.BACKENDS) >= MINIMUM_ROUTE_LINES
+    assert source.count(ACCOUNT_SPREAD) == len(route.BACKENDS)
+    assert len(re.findall(PROVIDER_NAME, source.splitlines()[-1])) == len(route.BACKENDS)
+    assert fixture_route_lines(source) >= MINIMUM_ROUTE_LINES
     assert all(route.parse(f"{FIXTURE_MODEL} high {name}").backend for name in route.BACKENDS)
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+def test_the_route_script_parses_every_line_of_the_fixture_route_table(script_env: dict[str, str]) -> None:
+    completed = run_tools_script(ROUTE_SCRIPT, script_env)
+    reported = SOURCE_LINE.search(completed.stdout)
+    assert reported is not None
+    assert int(reported.group(1)) == fixture_route_lines(dandelion_route_source())
 
 
 def test_only_the_perf_db_script_needs_docker() -> None:
