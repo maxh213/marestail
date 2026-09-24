@@ -137,7 +137,7 @@ AUTHOR_AGAIN = "You asked for an authoring round; benches are editable again in 
 AUTHOR_DONE = "No authoring rounds left; benches stay frozen. Write PASS or BOUNCE with the benches as they are."
 BENCHES_CHANGED = "Benches changed in the previous authoring round; samples taken before the change were dropped."
 AUTHOR_VERDICT = re.compile(r"^\s*VERDICT:\s*AUTHOR\b", re.IGNORECASE | re.MULTILINE)
-VERDICT_LINE = re.compile(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(\w+))?", re.IGNORECASE)
+VERDICT_LINE = re.compile(r"VERDICT:\s*(PASS|BOUNCE)(?:[ \t]+(?:to\s+)?(\w+))?", re.IGNORECASE)
 
 Verdict = tuple[str, str | None, str]
 Event = dict[str, Any]

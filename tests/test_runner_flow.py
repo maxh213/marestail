@@ -876,6 +876,7 @@ def test_review_measurements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     ("text", "extra", "expected"),
     [
         (None, "log\nverdict: pass Coder", ("PASS", "coder")),
+        (None, '{"result": "...\nVERDICT: BOUNCE to coder"}', ("BOUNCE", "coder")),
         ("VERDICT: BOUNCE nobody", "", ("BOUNCE", None)),
         ("VERDICT:  bounce", "", ("BOUNCE", None)),
         ("VERDICT: PASS\nVERDICT: BOUNCE coder", "", ("PASS", None)),
