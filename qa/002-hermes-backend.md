@@ -23,17 +23,26 @@
    Expected: one match.
 6. `grep -E '"hermes"' marestail/tui/collect.py`
    Expected: one match in the `BACKENDS` frozenset.
-7. `grep -E '^\| `MARESTAIL_HERMES`' README.md`
+7. Verify the watch TUI classifies a `python -m hermes_cli.main` process as hermes:
+   ```
+   python3 - <<'PY'
+   from marestail.tui.collect import backend_of
+   cmd = ["python", "-m", "hermes_cli.main", "chat", "--query-file", "/tmp/p", "--oneshot", "-Q", "--format", "stream-json", "--yolo", "--accept-hooks", "--max-turns", "1000", "-m", "x-ai/grok-4.6", "--reasoning", "xhigh"]
+   assert backend_of(cmd) == "hermes", backend_of(cmd)
+   PY
+   ```
+   Expected: exit code `0`, no output.
+8. `grep -E '^\| `MARESTAIL_HERMES`' README.md`
    Expected: one match in the environment variables table.
-8. `grep -E 'marestail run tasks/001\.md.*--agent agy\|grok\|cursor\|kilo\|kimi\|junie\|hermes' README.md`
+9. `grep -E 'marestail run tasks/001\.md.*--agent agy\|grok\|cursor\|kilo\|kimi\|junie\|hermes' README.md`
    Expected: one match.
-9. `grep -E 'hermes.*--reasoning' README.md`
-   Expected: one match in the `--effort` paragraph.
-10. `grep -E 'dandelion/route.*hermes|hermes.*dandelion/route' README.md`
+10. `grep -E 'hermes.*--reasoning' README.md`
+    Expected: one match in the `--effort` paragraph.
+11. `grep -E 'dandelion/route.*hermes|hermes.*dandelion/route' README.md`
     Expected: one match.
-11. `grep -E '^## Hermes pipeline runs' README.md`
-    Expected: one match.
-12. Verify the hermes command shape, resolve and label:
+12. `grep -E '^## Hermes pipeline runs' README.md` and `grep -F 'hermes chat --query-file' README.md`
+    Expected: one match each.
+13. Verify the hermes command shape, resolve and label:
     ```
     python3 - <<'PY'
     import os
@@ -53,28 +62,35 @@
     PY
     ```
     Expected: exit code `0`, no output.
-13. Verify the hermes summary line from the verified output:
+14. Verify the hermes summary line from the verified output and that it truncates at 100 characters:
     ```
     python3 - <<'PY'
     from marestail.runner import hermes_summary
     output = '{"type": "system", "subtype": "init", "model": "x-ai/grok-4.6", "session_id": "20260918_151301_be7c1c", "timestamp": 1789740781416}\n{"type": "tool_use", "name": "terminal", "input": {"command": "git status --short"}, "timestamp": 1789740714068}\n{"type": "tool_result", "name": "terminal", "output": "{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}", "duration_ms": 218, "is_error": false, "timestamp": 1789740714290}\n{"type": "text", "text": "pong", "timestamp": 1789740800465}\n{"type": "result", "session_id": "20260918_151301_be7c1c", "exit_code": 0, "text": "pong", "tokens": {"input": 14851, "output": 1, "total": 14980, "cache_read": 128, "cache_write": 0}, "duration_ms": 19100, "timestamp": 1789740800516}'
     assert hermes_summary(output) == 'tokens=14980 "pong"', hermes_summary(output)
+    text = "word " * 30
+    long = f'{{"type": "result", "exit_code": 0, "text": "{text}", "tokens": {{"total": 7}}}}'
+    assert hermes_summary(long) == f'tokens=7 "{text[:100]}"', hermes_summary(long)
     PY
     ```
     Expected: exit code `0`, no output.
-14. Verify hermes rate-limit detection, including the shared LIMIT_PATTERN:
+15. Verify hermes rate-limit detection, including the shared LIMIT_PATTERN and all six entitlement strings:
     ```
     python3 - <<'PY'
     from marestail.runner import hermes_rate_limited
     assert hermes_rate_limited(2, '{"type": "result", "exit_code": 2, "error": "Subscription credits are exhausted. Top up/renew credits, then retry."}') is True
     assert hermes_rate_limited(2, 'stderr prefix\ninsufficient_credits\nstderr suffix') is True
+    assert hermes_rate_limited(2, 'no_usable_credits') is True
+    assert hermes_rate_limited(2, 'subscription_expired') is True
+    assert hermes_rate_limited(2, 'subscription_required') is True
+    assert hermes_rate_limited(2, 'member_spend_cap_exceeded') is True
     assert hermes_rate_limited(2, 'rate limit exceeded') is True
     assert hermes_rate_limited(2, "Unknown --reasoning 'ultrahigh'") is False
     assert hermes_rate_limited(0, '{"type": "result", "exit_code": 0, "text": "the quota gate passed"}') is False
     PY
     ```
     Expected: exit code `0`, no output.
-15. Verify non-JSON hermes output falls back to its tail and is not treated as rate limited on exit 0:
+16. Verify non-JSON hermes output falls back to its tail and is not treated as rate limited on exit 0:
     ```
     python3 - <<'PY'
     from marestail.runner import hermes_rate_limited, hermes_summary
@@ -84,7 +100,7 @@
     PY
     ```
     Expected: exit code `0`, no output.
-16. Verify a verdict inside the hermes result is parsed:
+17. Verify a verdict inside the hermes result is parsed:
     ```
     python3 - <<'PY'
     from pathlib import Path

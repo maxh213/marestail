@@ -45,6 +45,23 @@ Feature: Hermes backend
     Then the summary line is "tokens=14980 \"pong\""
     And the hermes outcome reader reports not rate limited
 
+  Scenario: hermes summary truncates long result text to 100 characters
+    Given a hermes result with text:
+      """
+      word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word
+      """
+    And tokens total 7
+    When the hermes outcome reader summarises it
+    Then the summary line is:
+      """
+      tokens=7 "word word word word word word word word word word word word word word word word word word word word "
+      """
+
+  Scenario: hermes stderr is included on non-zero exit
+    Given a hermes process exits 2 with stdout "" and stderr "subscription_expired"
+    When the hermes outcome reader checks rate limit
+    Then it reports rate limited
+
   Scenario Outline: hermes out-of-credit is rate limited
     Given a non-zero hermes exit with <where> containing "<text>"
     Then the hermes outcome reader reports rate limited
@@ -54,6 +71,9 @@ Feature: Hermes backend
       | result.error | Subscription credits are exhausted. Top up/renew credits, then retry. |
       | stderr       | insufficient_credits                                                  |
       | stderr       | no_usable_credits                                                     |
+      | stderr       | subscription_expired                                                  |
+      | stderr       | subscription_required                                                 |
+      | stderr       | member_spend_cap_exceeded                                             |
       | stderr       | rate limit exceeded                                                   |
 
   Scenario Outline: hermes failures that are not rate limits
@@ -64,6 +84,7 @@ Feature: Hermes backend
       | code | where        | text                            |
       | 2    | stderr       | Unknown --reasoning 'ultrahigh' |
       | 0    | result       | the quota gate passed           |
+      | 1    | stdout       | plain text failure              |
 
   Scenario Outline: non-JSON hermes output falls back to its tail
     Given a hermes exit with code <code> and stdout "<stdout>"
@@ -120,8 +141,8 @@ Feature: Hermes backend
   Scenario Outline: existing backend commands and outcome readers are unchanged
     Given a run with agent "<agent>", model "m" and effort "e"
     When the runner builds the agent command
-    Then it equals the known "<agent>" command
-    And the outcome readers for "<agent>" are unchanged
+    Then it equals the "<agent>" command asserted in tools/test-agent-backends.py
+    And the "<agent>" outcome reader assertions in tools/test-agent-backends.py still pass
 
     Examples:
       | agent  |
