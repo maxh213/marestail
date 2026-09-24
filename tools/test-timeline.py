@@ -429,14 +429,14 @@ def readme_documents() -> None:
 
 def schema_helpers() -> None:
     results = [Result(gate="sonar", ok=False, summary="fail", seconds=41.0)]
-    expect("gate-entries", timeline.gate_entries(results), [{"name": "sonar", "seconds": 41.0, "ok": False}])
+    expect("gate-entries", timeline._gate_entries(results), [{"name": "sonar", "seconds": 41.0, "ok": False}])
     expect("verdict-pass", timeline.verdict_text("PASS", None), "PASS")
     expect("verdict-bounce-target", timeline.verdict_text("BOUNCE", "specifier"), "BOUNCE specifier")
     expect("verdict-bounce", timeline.verdict_text("BOUNCE", None), "BOUNCE")
     expect("verdict-author", timeline.verdict_text("AUTHOR", None), "AUTHOR")
-    expect("first-paragraph", timeline.first_paragraph("one\n\ntwo"), "one")
+    expect("first-paragraph", timeline._first_paragraph("one\n\ntwo"), "one")
     expect("utc-z", bool(ISO_Z.match(timeline.utc_now())), True)
-    step = timeline.build_step(
+    step = timeline._build_step(
         "01-coder",
         "coder",
         1,
@@ -457,20 +457,34 @@ def schema_helpers() -> None:
     )
     with tempfile.TemporaryDirectory() as temp:
         folder = Path(temp)
-        timeline.append_step(folder, "t", step)
-        loaded = timeline.load_document(folder, "t")
+        timeline.record(
+            folder,
+            "t",
+            "01-coder",
+            "coder",
+            1,
+            "2026-01-01T00:00:00.000Z",
+            [],
+            [],
+            {"backend": "claude", "model": "claude", "effort": None, "account": None, "minutes": 0.0, "summary": "ok"},
+            None,
+            [{"hash": "abc", "subject": "add"}],
+            ["src.py"],
+            folder / "missing",
+        )
+        loaded = timeline._load_document(folder, "t")
         expect("load-task", loaded["task"], "t")
         expect("load-steps", len(loaded["steps"]), 1)
         expect_true("md-written", (folder / "timeline.md").exists())
-        expect("done-handoff", timeline.done_line(folder / "missing", [{"hash": "a", "subject": "subj"}], None), "subj")
+        expect("done-handoff", timeline._done_line(folder / "missing", [{"hash": "a", "subject": "subj"}], None), "subj")
         handoff = folder / "h.md"
         handoff.write_text("para one\n\npara two\n")
-        expect("done-para", timeline.done_line(handoff, [], {"summary": "sum"}), "para one")
-        expect("done-summary", timeline.done_line(folder / "gone", [], {"summary": "sum"}), "sum")
-        expect("format-list", timeline.format_value([1]), "[1]")
-        expect("format-dict", timeline.format_value({"a": 1}), '{"a": 1}')
-        expect("format-str", timeline.format_value("x\ny"), "x y")
-        expect("ordered", timeline.ordered_step({"files": [], "id": "1", "role": "coder"}), {"id": "1", "role": "coder", "files": []})
+        expect("done-para", timeline._done_line(handoff, [], {"summary": "sum"}), "para one")
+        expect("done-summary", timeline._done_line(folder / "gone", [], {"summary": "sum"}), "sum")
+        expect("format-list", timeline._format_value([1]), "[1]")
+        expect("format-dict", timeline._format_value({"a": 1}), '{"a": 1}')
+        expect("format-str", timeline._format_value("x\ny"), "x y")
+        expect("ordered", timeline._ordered_step({"files": [], "id": "1", "role": "coder"}), {"id": "1", "role": "coder", "files": []})
 
 
 def timeline_diagnostic_passes() -> None:

@@ -32,40 +32,40 @@ def test_utc_now_ends_with_z() -> None:
 
 def test_gate_entries() -> None:
     results = [Result(gate="sonar", ok=False, summary="fail", seconds=41.0)]
-    assert timeline.gate_entries(results) == [{"name": "sonar", "seconds": 41.0, "ok": False}]
+    assert timeline._gate_entries(results) == [{"name": "sonar", "seconds": 41.0, "ok": False}]
 
 
 def test_first_paragraph() -> None:
-    assert timeline.first_paragraph("one\n\ntwo") == "one"
-    assert timeline.first_paragraph("  only  ") == "only"
+    assert timeline._first_paragraph("one\n\ntwo") == "one"
+    assert timeline._first_paragraph("  only  ") == "only"
 
 
 def test_done_line_prefers_handoff(tmp_path: Path) -> None:
     handoff = tmp_path / "h.md"
     handoff.write_text("coded the adder\n\nmore\n")
-    assert timeline.done_line(handoff, [{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "coded the adder"
+    assert timeline._done_line(handoff, [{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "coded the adder"
 
 
 def test_handoff_paragraph_missing(tmp_path: Path) -> None:
-    assert timeline.handoff_paragraph(tmp_path / "missing") == ""
+    assert timeline._handoff_paragraph(tmp_path / "missing") == ""
 
 
 def test_commit_or_summary() -> None:
-    assert timeline.commit_or_summary([{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "subj"
-    assert timeline.commit_or_summary([], {"summary": "sum"}) == "sum"
-    assert timeline.commit_or_summary([], None) == ""
+    assert timeline._commit_or_summary([{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "subj"
+    assert timeline._commit_or_summary([], {"summary": "sum"}) == "sum"
+    assert timeline._commit_or_summary([], None) == ""
 
 
 def test_done_line_falls_back_to_commit(tmp_path: Path) -> None:
-    assert timeline.done_line(tmp_path / "missing", [{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "subj"
+    assert timeline._done_line(tmp_path / "missing", [{"hash": "a", "subject": "subj"}], {"summary": "sum"}) == "subj"
 
 
 def test_done_line_falls_back_to_summary(tmp_path: Path) -> None:
-    assert timeline.done_line(tmp_path / "missing", [], {"summary": "sum"}) == "sum"
+    assert timeline._done_line(tmp_path / "missing", [], {"summary": "sum"}) == "sum"
 
 
 def test_done_line_empty(tmp_path: Path) -> None:
-    assert timeline.done_line(tmp_path / "missing", [], None) == ""
+    assert timeline._done_line(tmp_path / "missing", [], None) == ""
 
 
 def test_verdict_text() -> None:
@@ -75,7 +75,7 @@ def test_verdict_text() -> None:
 
 
 def test_ordered_step_and_build() -> None:
-    step = timeline.build_step(
+    step = timeline._build_step(
         "01-coder",
         "coder",
         1,
@@ -90,7 +90,7 @@ def test_ordered_step_and_build() -> None:
         "done",
     )
     assert list(step.keys()) == ["id", "role", "attempt", "started_at", "ended_at", "gate", "waits", "agent", "commits", "files", "done"]
-    judged = timeline.build_step("01-hardener", "hardener", 1, "a", "b", [], [], None, "BOUNCE", [], [], "x")
+    judged = timeline._build_step("01-hardener", "hardener", 1, "a", "b", [], [], None, "BOUNCE", [], [], "x")
     assert list(judged.keys()) == [
         "id",
         "role",
@@ -107,24 +107,25 @@ def test_ordered_step_and_build() -> None:
 
 
 def test_write_and_load(tmp_path: Path) -> None:
-    step = timeline.build_step("01-coder", "coder", 1, "a", "b", [], [], None, None, [], [], "done")
-    timeline.append_step(tmp_path, "t", step)
-    loaded = timeline.load_document(tmp_path, "t")
-    assert loaded == {"task": "t", "steps": [step]}
+    timeline.record(tmp_path, "t", "01-coder", "coder", 1, "a", [], [], None, None, [], [], tmp_path / "missing")
+    loaded = timeline._load_document(tmp_path, "t")
+    assert loaded["task"] == "t"
+    assert len(loaded["steps"]) == 1
+    assert loaded["steps"][0]["id"] == "01-coder"
     assert "01-coder" in (tmp_path / "timeline.md").read_text()
-    empty = timeline.load_document(tmp_path / "missing", "u")
+    empty = timeline._load_document(tmp_path / "missing", "u")
     assert empty == {"task": "u", "steps": []}
 
 
 def test_format_value() -> None:
-    assert timeline.format_value([1]) == "[1]"
-    assert timeline.format_value({"a": 1}) == '{"a": 1}'
-    assert timeline.format_value("x\ny") == "x y"
+    assert timeline._format_value([1]) == "[1]"
+    assert timeline._format_value({"a": 1}) == '{"a": 1}'
+    assert timeline._format_value("x\ny") == "x y"
 
 
 def test_render_markdown() -> None:
-    step = timeline.build_step("01-coder", "coder", 1, "a", "b", [], [], None, None, [], [], "done")
-    text = timeline.render_markdown([step])
+    step = timeline._build_step("01-coder", "coder", 1, "a", "b", [], [], None, None, [], [], "done")
+    text = timeline._render_markdown([step])
     assert "## 01-coder (attempt 1)" in text
     assert "- role: coder" in text
 

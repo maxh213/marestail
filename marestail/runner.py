@@ -424,24 +424,21 @@ def record_attempt(
     gate_results: list[Result],
     verdict: str | None,
 ) -> None:
-    commits = attempt_commits(state.config, before)
-    files = attempt_files(state.config, before)
-    agent = state.attempt_agent
-    step = timeline.build_step(
+    timeline.record(
+        state.folder,
+        state.task_name,
         report.stem,
         role,
         attempt,
         started_at,
-        timeline.utc_now(),
-        timeline.gate_entries(gate_results),
+        gate_results,
         list(state.attempt_waits),
-        agent,
+        state.attempt_agent,
         verdict,
-        commits,
-        files,
-        timeline.done_line(report, commits, agent),
+        attempt_commits(state.config, before),
+        attempt_files(state.config, before),
+        report,
     )
-    timeline.append_step(state.folder, state.task_name, step)
 
 
 def attempt_commits(config: Config, before: str) -> list[dict[str, str]]:

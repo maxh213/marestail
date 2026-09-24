@@ -12,7 +12,7 @@ layers =
     marestail.gates
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
-    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline
     marestail.report : marestail.config : marestail.changes
     marestail.shell
 
@@ -33,6 +33,7 @@ forbidden_modules =
     marestail.audit
     marestail.practices
     marestail.sonar.setup
+    marestail.timeline
 
 [importlinter:contract:foundations-import-nothing-above]
 name = Context, report, shell, config and changes import nothing above them
@@ -46,6 +47,7 @@ source_modules =
     marestail.pipeline
     marestail.freeze
     marestail.sonar.client
+    marestail.timeline
 forbidden_modules =
     marestail.gates
     marestail.runner
@@ -69,6 +71,7 @@ forbidden_modules =
     marestail.javascript
     marestail.elixir
     marestail.sonar.setup
+    marestail.backends
 
 [importlinter:contract:language-adapters-stay-below-gates]
 name = Language adapters never import gates, the runner, the CLI or perf
@@ -95,6 +98,7 @@ forbidden_modules =
     marestail.practices
     marestail.graph
     marestail.depth
+    marestail.timeline
 
 [importlinter:contract:protect-gate-internals]
 name = Gate helpers are private to gates
@@ -126,3 +130,27 @@ forbidden_modules =
     marestail.graph
     marestail.depth
     marestail.gates
+    marestail.timeline
+
+[importlinter:contract:timeline-stays-below-runner]
+name = Timeline artefacts do not import orchestration or agents
+type = forbidden
+source_modules =
+    marestail.timeline
+forbidden_modules =
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.freeze
