@@ -1,9 +1,8 @@
 Feature: Durable per-step pipeline timeline
 
   After this task, every `marestail run` writes `.marestail/runs/<task>/timeline.md`
-  and `.marestail/runs/<task>/timeline.json` that a stranger can read after the process
-  is gone. Live stdout (`==`, `finished in`, `verdict`, …) and `marestail watch` stay
-  exactly as they are; the timeline is an extra artefact.
+  and `.marestail/runs/<task>/timeline.json`. Live stdout and `marestail watch`
+  stay as they are; the timeline is an extra artefact.
 
   Background:
     Given a temporary git repo with marestail installed and a stub agent on PATH
@@ -25,18 +24,27 @@ Feature: Durable per-step pipeline timeline
     And stdout still contains a line matching `^\s+\d+-coder finished in [0-9.]+ min:`
 
   Scenario: a judge whose gate fails still records the failed gate then the agent
-    Given a judge role with a non-null gate tier whose `gate_for` run includes a result named "sonar" with `ok` false and `seconds` 41.0
-    When that judge attempt finishes (agent may still run)
-    Then the timeline step for that attempt has a `gate` entry `{name: "sonar", seconds: 41.0, ok: false}`
+    Given `tools/test-timeline.py` doubles `Run.gates` so the hardener's single pre-loop `gate_for` returns one `Result` with `gate="sonar"`, `ok=False`, `seconds=41.0` (and does not call `state.gates` again per attempt)
+    When I run `marestail run tasks/t.md --from hardener --to hardener --auto --retries 1` with a stub that writes `VERDICT: PASS`
+    Then `gate_for` still ran once before the attempt loop (gate behaviour unchanged)
+    And every timeline step for that judge round that reuses the shared result has `gate` containing `{"name": "sonar", "seconds": 41.0, "ok": false}`
     And `agent` is present when a session ran
-    And Sonar's FAIL is visible in the timeline even if it printed on stdout before the `== <judge>` line
+    And Sonar's FAIL is in the timeline even though it printed on stdout before `== hardener`
 
   Scenario: a rate-limit then success records a waits entry
     Given `MARESTAIL_LIMIT_WAIT_SECONDS` is 0
     And the stub agent's first session exits rate-limited and the second succeeds
     When a worker attempt completes
-    Then that step's `waits` contains `{reason: "rate-limit", seconds: 0}`
+    Then that step's `waits` contains `{"reason": "rate-limit", "seconds": 0}`
     And stdout still contains `rate limited; waiting`
+
+  Scenario: a dandelion-unrouted wait then success records a waits entry
+    Given `MARESTAIL_LIMIT_WAIT_SECONDS` is 0
+    And `--model dandelion/route` with a stub dandelion whose first `route` prints `none` (exit 1) and whose second prints `claude-opus-5 high claude`
+    And a stub claude that then succeeds
+    When a worker attempt completes
+    Then that step's `waits` contains `{"reason": "dandelion-unrouted", "seconds": 0}`
+    And stdout still contains a line matching `dandelion/route:`
 
   Scenario: two attempts append two steps that never disagree
     When the same role runs attempt 1 then attempt 2
@@ -56,18 +64,24 @@ Feature: Durable per-step pipeline timeline
   Scenario: schema fields for every attempt
     Then every timeline step includes, in order: id, role, attempt, started_at, ended_at, gate, waits, commits, files, done
     And `agent` is omitted only when the attempt never invoked a session (unlimited-retry exhaustion with no session)
-    And `verdict` is present only for judges, as `PASS` / `BOUNCE` / `AUTHOR` plus bounce target when written
+    And a passing judge step has `"verdict": "PASS"`
+    And a bounce with target has `"verdict": "BOUNCE specifier"` (string: verdict, space, target; no object)
+    And a gate-forced bounce with no target has `"verdict": "BOUNCE"`
+    And `verdict` is omitted for workers
     And `done` is the handoff's first paragraph if present, else the first commit subject, else `agent.summary`
 
   Scenario: existing live log and watch stay unchanged
     Then every existing stdout wording is unchanged: `==`, `finished in`, `verdict`, `rate limited; waiting`, `dandelion/route:`, `GATE FAILED`, `pipeline complete`, `pipeline stopped at`
     And handoff / `*.json` / `*.prompt.md` layout is unchanged
     And `python3 tools/test-watch.py` exits 0 with last line containing `ok`
+    And that script is green-shaped: it asserts today's `latest_log` (overnight-*.log only) and bed discovery; it does not restore origin/main's pipeline.log preference
     And `marestail watch` still parses `==` and `finished in` as it does today
+    And this task does not add `pipeline.log` writing or change `latest_log`
 
   Scenario: README documents the timeline artefacts
-    When I read the README paragraph that mentions `.marestail/runs/<task>/pipeline.log`
+    When I read the README Overnight paragraph that names `.marestail/runs/overnight-<stamp>.md`
     Then the same paragraph (or the next sentence) names `timeline.md` and `timeline.json`
+    And the README does not claim a `.marestail/runs/<task>/pipeline.log` path that this branch does not write
 
   Scenario: the timeline diagnostic script passes
     When I run `python3 tools/test-timeline.py`
