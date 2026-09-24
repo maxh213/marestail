@@ -506,8 +506,9 @@ def test_verify_worker_tolerates_csproj_package_additions(repo: Path) -> None:
 def test_gate_for(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     fail_gates(monkeypatch, False)
     state = make_state(tmp_path)
-    assert runner.gate_for(state, None) == ("", True)
-    assert runner.gate_for(state, "full") == (render([Result(gate="lint", ok=False, summary="summary", seconds=0.0)]), False)
+    assert runner.gate_for(state, None) == ("", True, [])
+    failed = Result(gate="lint", ok=False, summary="summary", seconds=0.0)
+    assert runner.gate_for(state, "full") == (render([failed]), False, [failed])
     fail_gates(monkeypatch, True)
     assert runner.gate_for(state, "full")[1] is True
 

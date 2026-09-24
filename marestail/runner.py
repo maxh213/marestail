@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from marestail import audit, backends, freeze, practices, prompts
+from marestail import audit, backends, freeze, practices, prompts, timeline
 from marestail import config as config_module
 from marestail import route as dandelion
 from marestail.backends import (
@@ -130,7 +130,10 @@ class Run:
     hard: bool = False
     route: str | None = None
     account_env: dict[str, str] = field(default_factory=dict)
+    account: str = ""
     labels: set[str] = field(default_factory=set)
+    attempt_waits: list[dict[str, Any]] = field(default_factory=list)
+    attempt_agent: dict[str, Any] | None = None
 
     @property
     def task_name(self) -> str:
@@ -389,6 +392,9 @@ def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
 
 def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, before: str) -> str:
     report = state.next_report(worker.name)
+    started_at = timeline.utc_now()
+    attempt_before = head(state.config)
+    reset_attempt(state)
     print(f"== {worker.name} ({report.stem}) attempt {attempt}")
     prompt = prompts.worker_prompt(
         state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags, state.hard_focus
@@ -399,7 +405,58 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
         saved = drop_ignored_since(state.config, before)
         fold_handoff(state.config, worker.name, report, before, agent_label(state), state.labels)
         restore_files(state.config, saved)
+    record_attempt(state, report, worker.name, attempt, started_at, attempt_before, [], None)
     return problems
+
+
+def reset_attempt(state: Run) -> None:
+    state.attempt_waits = []
+    state.attempt_agent = None
+
+
+def record_attempt(
+    state: Run,
+    report: Path,
+    role: str,
+    attempt: int,
+    started_at: str,
+    before: str,
+    gate_results: list[Result],
+    verdict: str | None,
+) -> None:
+    commits = attempt_commits(state.config, before)
+    files = attempt_files(state.config, before)
+    agent = state.attempt_agent
+    step = timeline.build_step(
+        report.stem,
+        role,
+        attempt,
+        started_at,
+        timeline.utc_now(),
+        timeline.gate_entries(gate_results),
+        list(state.attempt_waits),
+        agent,
+        verdict,
+        commits,
+        files,
+        timeline.done_line(report, commits, agent),
+    )
+    timeline.append_step(state.folder, state.task_name, step)
+
+
+def attempt_commits(config: Config, before: str) -> list[dict[str, str]]:
+    _, output = run([GIT, LOG, f"{before}..{HEAD_REF}", "--format=%H%x00%s"], cwd=config.root)
+    return [commit_entry(line) for line in output.splitlines() if "\0" in line]
+
+
+def commit_entry(line: str) -> dict[str, str]:
+    sha, subject = line.split("\0", 1)
+    return {"hash": sha, "subject": subject}
+
+
+def attempt_files(config: Config, before: str) -> list[str]:
+    _, output = run([GIT, DIFF, NAME_ONLY, f"{before}..{HEAD_REF}"], cwd=config.root)
+    return [path for path in output.splitlines() if path]
 
 
 def next_streak(streak: list[str], problems: str) -> list[str]:
@@ -422,16 +479,27 @@ def run_judge(state: Run, judge: Judge) -> Verdict:
     return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
 
 
-def judged(state: Run, judge: Judge, gate: tuple[str, bool], progress: JudgeProgress, attempt: int) -> Verdict | None:
+def judged(state: Run, judge: Judge, gate: tuple[str, bool, list[Result]], progress: JudgeProgress, attempt: int) -> Verdict | None:
     report = state.next_report(judge.name)
+    started_at = timeline.utc_now()
+    before = head(state.config)
+    reset_attempt(state)
     print(f"== {judge.name} ({report.stem}) attempt {attempt}")
     with measuring(state, judge) as session:
         prepare_perf(state, judge, gate[1], session, progress)
         outcome, progress.feedback = judge_attempt(state, judge, report, gate, session, progress.feedback)
     if outcome is not None and outcome[0] == AUTHOR:
+        record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], timeline.verdict_text(AUTHOR, None))
         progress.author_requested()
         return None
+    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(outcome))
     return outcome
+
+
+def outcome_verdict(outcome: Verdict | None) -> str | None:
+    if outcome is None:
+        return None
+    return timeline.verdict_text(outcome[0], outcome[1])
 
 
 def has_author_round(left: int) -> bool:
@@ -460,7 +528,7 @@ def measuring(state: Run, judge: Judge) -> Iterator[perf_trees.Session | None]:
 
 
 def judge_attempt(
-    state: Run, judge: Judge, report: Path, gate: tuple[str, bool], session: perf_trees.Session | None, feedback: str
+    state: Run, judge: Judge, report: Path, gate: tuple[str, bool, list[Result]], session: perf_trees.Session | None, feedback: str
 ) -> tuple[Verdict | None, str]:
     before = judge_session(state, judge, report, gate[0], session, feedback)
     blob = session_output(state, report)
@@ -511,7 +579,7 @@ def write_missing_verdict(report: Path, parsed: tuple[str, str | None]) -> None:
     report.write_text(f"VERDICT: {verdict}" + with_target(" ", target) + "\n")
 
 
-def gated_verdict(judge: Judge, report: Path, gate: tuple[str, bool], parsed: tuple[str, str | None]) -> Verdict:
+def gated_verdict(judge: Judge, report: Path, gate: tuple[str, bool, list[Result]], parsed: tuple[str, str | None]) -> Verdict:
     verdict, target = parsed
     text = report.read_text()
     if not gate[1]:
@@ -669,11 +737,11 @@ def review_measurements(state: Run, session: perf_trees.Session, report: Path, v
     return ""
 
 
-def gate_for(state: Run, tier: str | None) -> tuple[str, bool]:
+def gate_for(state: Run, tier: str | None) -> tuple[str, bool, list[Result]]:
     if tier is None:
-        return "", True
+        return "", True, []
     results = state.gates(tier)
-    return render(results), all(result.ok for result in results)
+    return render(results), all(result.ok for result in results), results
 
 
 def parse_verdict(report: Path, extra: str = EMPTY) -> tuple[str, str | None] | None:
@@ -1003,10 +1071,15 @@ def invoke_once(state: Run, label: str, prompt: str, prompt_file: Path) -> tuple
     if state.route:
         prompt, unrouted = routed(state, prompt)
         if unrouted:
+            note_wait(state, "dandelion-unrouted")
             wait(f"   {state.route}: {unrouted}; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
             return prompt, False
         prompt_file.write_text(prompt)
     return prompt, run_session(state, label, prompt, prompt_file)
+
+
+def note_wait(state: Run, reason: str) -> None:
+    state.attempt_waits.append({"reason": reason, "seconds": LIMIT_WAIT_SECONDS})
 
 
 def wait(message: str) -> None:
@@ -1021,13 +1094,28 @@ def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     (state.folder / f"{label}.json").write_text(output)
     if backend == GROK and grok_always_approve_locked(code, output):
         print(f"   {label}: grok always-approve is locked; cannot run unattended")
+        remember_agent(state, backend, started, "")
         return True
     limited, describe = outcome_readers(backend)
     if not limited(code, output):
-        print(f"   {label} finished in {(elapsed(started)) / MINUTES:.1f} min: {describe(output)}")
+        summary = describe(output)
+        print(f"   {label} finished in {(elapsed(started)) / MINUTES:.1f} min: {summary}")
+        remember_agent(state, backend, started, summary)
         return True
+    note_wait(state, "rate-limit")
     wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
     return False
+
+
+def remember_agent(state: Run, backend: str, started: float, summary: str) -> None:
+    state.attempt_agent = {
+        "backend": backend,
+        "model": model_name(state),
+        "effort": effort_name(state) or None,
+        "account": state.account or None,
+        "minutes": elapsed(started) / MINUTES,
+        "summary": summary,
+    }
 
 
 def routed(state: Run, prompt: str) -> tuple[str, str]:
@@ -1036,6 +1124,7 @@ def routed(state: Run, prompt: str) -> tuple[str, str]:
     if choice is None:
         return prompt, unrouted
     state.agent, state.model, state.effort, state.account_env = choice.backend, choice.model, choice.effort, choice.env
+    state.account = choice.line.split()[-1] if choice.env else ""
     after = agent_label(state)
     state.labels.add(after)
     print(f"   {state.route}: {choice.line}")

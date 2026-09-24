@@ -47,6 +47,13 @@ for task in "$@"; do
     grep -E "^== |finished in|verdict|dandelion/route" "$LOG" | tail -n 40 | sed 's/^/    /'
     sed -n '/^## Config changes/,/^## Performance changes/{/^## Performance changes/!p;}' "$LOG" | tail -n 60 | sed 's/^/    /'
     sed -n '/^## Performance changes/,$p' "$LOG" | tail -n 40 | sed 's/^/    /'
+    stem="$(basename "$task" .md)"
+    timeline=".marestail/runs/$stem/timeline.md"
+    if [ -f "$timeline" ]; then
+      echo
+      echo "#### timeline.md"
+      cat "$timeline"
+    fi
     echo
   } >> "$SUMMARY"
   if [ "$code" -ne 0 ]; then

@@ -78,6 +78,8 @@ GATE_CONFIG = [
     ".cursor/hooks.json",
     ".cursor/hooks/**",
     ".cursor/cli.json",
+    ".marestail/runs/**/timeline.md",
+    ".marestail/runs/**/timeline.json",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
 CSPROJ_ADDITION = re.compile(r'^\+\s*<(PackageReference|InternalsVisibleTo) Include="[^"]+"(?: Version="[^"]+")? />\s*$')

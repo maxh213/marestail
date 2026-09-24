@@ -463,7 +463,7 @@ def test_run_worker_succeeds_after_feedback(
     assert worker_env["drop"].calls == [(state.config, "before")]
     assert worker_env["fold"].calls == [(state.config, "coder", reports[1], "before", "m e", {"x"})]
     assert worker_env["restore"].calls == [(state.config, {"a.log": b"x"})]
-    assert worker_env["head"].calls == [(state.config,)]
+    assert worker_env["head"].calls == [(state.config,), (state.config,), (state.config,)]
     assert capsys.readouterr().out == "== coder (01-coder) attempt 1\nmissing handoff\n== coder (01-coder) attempt 2\n"
 
 
@@ -521,7 +521,7 @@ def test_run_judge_retries_until_verdict(tmp_path: Path, monkeypatch: pytest.Mon
     state = make_state(tmp_path, retries=0)
     assert runner.run_judge(state, CRITIC) == ("PASS", None, "ok")
     assert [call[5] for call in attempt.calls] == ["", "retry feedback"]
-    assert attempt.calls[0][1:5] == (CRITIC, state.handoffs / "01-critic.md", ("", True), None)
+    assert attempt.calls[0][1:5] == (CRITIC, state.handoffs / "01-critic.md", ("", True, []), None)
     assert capsys.readouterr().out == "== critic (01-critic) attempt 1\n== critic (01-critic) attempt 2\n"
 
 
@@ -605,14 +605,14 @@ def test_judged_prepares_perf_for_its_own_judge(tmp_path: Path, monkeypatch: pyt
     patch(monkeypatch, runner, "judge_attempt", ((runner.PASS, None, "ok"), ""))
     state = make_state(tmp_path)
     progress = JudgeProgress(author_left=1)
-    assert runner.judged(state, CRITIC, ("", True), progress, 1) == (runner.PASS, None, "ok")
+    assert runner.judged(state, CRITIC, ("", True, []), progress, 1) == (runner.PASS, None, "ok")
     assert prepare.calls == [(state, CRITIC, True, None, progress)]
 
 
 def test_judged_after_last_authoring_round(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     patch(monkeypatch, runner, "judge_attempt", (("AUTHOR", None, ""), "fb"))
     progress = JudgeProgress(author_left=0)
-    assert runner.judged(make_state(tmp_path), CRITIC, ("", True), progress, 1) is None
+    assert runner.judged(make_state(tmp_path), CRITIC, ("", True, []), progress, 1) is None
     assert progress.feedback == runner.AUTHOR_DONE
 
 
@@ -639,7 +639,7 @@ def judge_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return env
 
 
-def attempt_judge(tmp_path: Path, judge: Judge, gate: tuple[str, bool] = ("", True), session: Session | None = None) -> Any:
+def attempt_judge(tmp_path: Path, judge: Judge, gate: tuple[str, bool, list] = ("", True, []), session: Session | None = None) -> Any:
     state = make_state(tmp_path, hard=True, focus={"a.py"})
     report = state.next_report(judge.name)
     return state, report, runner.judge_attempt(state, judge, report, gate, session, "old feedback")
@@ -702,7 +702,7 @@ def test_judge_attempt_author_request(tmp_path: Path, judge_env: dict[str, Any],
 
 def test_judge_attempt_pinned_bounce_and_failed_gate(tmp_path: Path, judge_env: dict[str, Any]) -> None:
     judge_env["files"] = {"01-practices.md": "VERDICT: PASS"}
-    _, _, outcome = attempt_judge(tmp_path, cast(Judge, find("practices")), ("GATE FAILED", False))
+    _, _, outcome = attempt_judge(tmp_path, cast(Judge, find("practices")), ("GATE FAILED", False, []))
     assert outcome == (("BOUNCE", None, "GATE FAILED\n\nVERDICT: PASS"), "")
     judge_env["files"] = {"02-practices.md": "VERDICT: BOUNCE critic"}
     _, _, pinned = attempt_judge(tmp_path, cast(Judge, find("practices")))
