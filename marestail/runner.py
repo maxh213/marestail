@@ -747,7 +747,10 @@ def agent_label(state: Run) -> str:
 
 def model_name(state: Run) -> str:
     if state.model:
-        return state.model
+        backend = resolve_agent(state)
+        if "/" in state.model or backend in state.model:
+            return state.model
+        return f"{backend}/{state.model}"
     if state.route:
         return state.route
     backend = resolve_agent(state)

@@ -144,22 +144,23 @@ def env_overrides():
 
 
 def labels():
-    expect("label-model-only", agent_label(state("claude")), "mymodel")
-    expect("label-with-effort", agent_label(state("claude", effort="high")), "mymodel high")
+    expect("label-model-only", agent_label(state("claude")), "claude/mymodel")
+    expect("label-with-effort", agent_label(state("claude", effort="high")), "claude/mymodel high")
     expect("label-no-model", agent_label(state("claude", model=None)), "claude")
     expect("label-kilo-default", agent_label(state("kilo", model=None)), f"{KILO_DEFAULT_MODEL} {KILO_DEFAULT_VARIANT}")
     expect("label-kilo-plain", agent_label(state("kilo", model="kilo/other")), "kilo/other")
     effortful = state("grok", effort="xhigh")
-    expect("label-grok", agent_label(effortful), "mymodel xhigh")
+    expect("label-grok", agent_label(effortful), "grok/mymodel xhigh")
     expect("grok-effort-flag", grok_command(effortful, PROMPT)[-2:], ["--reasoning-effort", "xhigh"])
     expect("claude-effort-flag", agent_command(state("claude", effort="xhigh"))[-2:], ["--effort", "xhigh"])
     expect("agy-effort-flag", agent_command(state("agy", effort="high"))[-2:], ["--effort", "high"])
     expect("cursor-effort-unflagged", agent_command(state("cursor", effort="high"))[-2:], ["--model", "mymodel"])
     expect("kilo-effort-flag", kilo_command(state("kilo", model="kilo/other", effort="low"))[-2:], ["--variant", "low"])
     expect("kilo-effort-off", kilo_command(state("kilo", model=None, effort=""))[-2:], ["--model", KILO_DEFAULT_MODEL])
-    expect("label-kimi", agent_label(state("kimi")), "mymodel")
+    expect("label-kimi", agent_label(state("kimi")), "kimi/mymodel")
     expect("label-kimi-no-model", agent_label(state("kimi", model=None)), "kimi")
-    expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "mymodel high")
+    expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "kimi/mymodel high")
+    expect("label-cursor-auto", agent_label(state("cursor", model="auto", effort="high")), "cursor/auto high")
     expect(
         "kimi-effort-unflagged",
         kimi_command(state("kimi", effort="high"), PROMPT),
