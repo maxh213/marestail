@@ -1611,12 +1611,7 @@ def hermes_limit_match(text: str) -> bool:
 
 
 def hermes_rate_limited(code: int, output: str) -> bool:
-    if code == 0:
-        return False
-    result = hermes_result(hermes_events(output))
-    if HERMES_LIMIT_PATTERN.search(str(result.get(ERROR) or "")):
-        return True
-    return hermes_limit_match(output)
+    return code != 0 and hermes_limit_match(output)
 
 
 def hermes_summary(output: str) -> str:
