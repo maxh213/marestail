@@ -473,7 +473,7 @@ def schema_helpers() -> None:
         expect("ordered", timeline.ordered_step({"files": [], "id": "1", "role": "coder"}), {"id": "1", "role": "coder", "files": []})
 
 
-if __name__ == "__main__":
+def timeline_diagnostic_passes() -> None:
     schema_helpers()
     freeze_lists_timeline()
     readme_documents()
@@ -486,4 +486,8 @@ if __name__ == "__main__":
         dandelion_wait(base / "dandelion")
         two_attempts(base / "two")
         overnight_embeds(base / "overnight")
+
+
+if __name__ == "__main__":
+    timeline_diagnostic_passes()
     print("timeline ok")

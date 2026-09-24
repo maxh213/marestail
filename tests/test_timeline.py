@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +11,8 @@ from marestail.config import Config
 from marestail.report import Result
 from marestail.runner import Run
 from tests.conftest import commit_all, git
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -187,3 +192,25 @@ def test_record_attempt_writes_timeline(repo: Path) -> None:
     assert data["task"] == "t"
     assert data["steps"][0]["role"] == "coder"
     assert data["steps"][0]["done"] == "coded"
+
+
+def test_watch_diagnostic_script_passes() -> None:
+    env = {key: value for key, value in os.environ.items() if key not in {"MARESTAIL_AGENT", "AGENT", "MODEL", "EFFORT"}}
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "test-watch.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert completed.returncode == 0
+    assert "ok" in completed.stdout.strip().splitlines()[-1]
+
+
+def test_timeline_diagnostic_passes_entrypoint() -> None:
+    text = (ROOT / "tools" / "test-timeline.py").read_text()
+    assert "def timeline_diagnostic_passes()" in text
+    main = text.split('if __name__ == "__main__":', 1)[1]
+    assert "timeline_diagnostic_passes()" in main
+    assert 'print("timeline ok")' in main
