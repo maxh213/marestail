@@ -17,30 +17,31 @@ from marestail.shell import ensure_dir
 def ready_app(
     start: str,
     cwd: Path,
-    port: int,
+    preferred: int,
     ready: str,
     seconds: int,
     env: dict[str, str],
     log_path: Path,
-) -> Iterator[str | None]:
+) -> Iterator[tuple[str | None, int]]:
+    port = _chosen_port(preferred)
     ensure_dir(log_path.parent)
     handle = log_path.open("w", buffering=1)
     process = None
     try:
-        process = spawn(start, cwd, port, env, handle)
-        failure = wait_ready(f"http://localhost:{port}{ready}", process, seconds)
+        process = _spawn(start, cwd, port, env, handle)
+        failure = _wait_ready(f"http://localhost:{port}{ready}", process, seconds)
         if failure:
             handle.flush()
-        yield failure
+        yield failure, port
     finally:
-        end_app(process, handle)
+        _end_app(process, handle)
 
 
-def chosen_port(preferred: int) -> int:
-    return preferred if can_bind(preferred) else free_port()
+def _chosen_port(preferred: int) -> int:
+    return preferred if _can_bind(preferred) else _free_port()
 
 
-def can_bind(port: int) -> bool:
+def _can_bind(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             sock.bind(("127.0.0.1", port))
@@ -49,13 +50,13 @@ def can_bind(port: int) -> bool:
     return True
 
 
-def free_port() -> int:
+def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
-def spawn(start: str, cwd: Path, port: int, extra: dict[str, str], handle: TextIO) -> subprocess.Popen[Any]:
+def _spawn(start: str, cwd: Path, port: int, extra: dict[str, str], handle: TextIO) -> subprocess.Popen[Any]:
     return subprocess.Popen(
         ["bash", "-lc", start],
         cwd=cwd,
@@ -66,25 +67,25 @@ def spawn(start: str, cwd: Path, port: int, extra: dict[str, str], handle: TextI
     )
 
 
-def wait_ready(url: str, process: subprocess.Popen[Any], seconds: int) -> str | None:
+def _wait_ready(url: str, process: subprocess.Popen[Any], seconds: int) -> str | None:
     deadline = time.time() + seconds
     while time.time() < deadline:
-        early = exited_early(process)
+        early = _exited_early(process)
         if early:
             return early
-        if answers(url):
+        if _answers(url):
             return None
         time.sleep(0.2)
-    stop(process)
+    _stop(process)
     return f"app did not answer on {url} within {seconds}s"
 
 
-def exited_early(process: subprocess.Popen[Any]) -> str | None:
+def _exited_early(process: subprocess.Popen[Any]) -> str | None:
     code = process.poll()
     return None if code is None else f"app exited with {code} before answering"
 
 
-def answers(url: str) -> bool:
+def _answers(url: str) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
             return int(response.status) < 500
@@ -94,23 +95,23 @@ def answers(url: str) -> bool:
         return False
 
 
-def end_app(process: subprocess.Popen[Any] | None, handle: TextIO) -> None:
+def _end_app(process: subprocess.Popen[Any] | None, handle: TextIO) -> None:
     if process is not None:
-        stop(process)
+        _stop(process)
     handle.close()
 
 
-def stop(process: subprocess.Popen[Any]) -> None:
+def _stop(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=15)
     except (ProcessLookupError, subprocess.TimeoutExpired):
-        force_kill(process)
+        _force_kill(process)
 
 
-def force_kill(process: subprocess.Popen[Any]) -> None:
+def _force_kill(process: subprocess.Popen[Any]) -> None:
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:

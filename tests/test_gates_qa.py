@@ -82,20 +82,20 @@ def test_log_tail_missing_and_present(tmp_path: Path) -> None:
 
 
 def test_chosen_port_prefers_free(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_serve, "can_bind", lambda port: port == 7)
-    monkeypatch.setattr(_serve, "free_port", lambda: 99)
-    assert _serve.chosen_port(7) == 7
-    assert _serve.chosen_port(8) == 99
+    monkeypatch.setattr(_serve, "_can_bind", lambda port: port == 7)
+    monkeypatch.setattr(_serve, "_free_port", lambda: 99)
+    assert _serve._chosen_port(7) == 7
+    assert _serve._chosen_port(8) == 99
 
 
 def test_can_bind_and_free_port() -> None:
-    port = _serve.free_port()
-    assert _serve.can_bind(port) is True
+    port = _serve._free_port()
+    assert _serve._can_bind(port) is True
     binder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     binder.bind(("127.0.0.1", 0))
     taken = binder.getsockname()[1]
     try:
-        assert _serve.can_bind(taken) is False
+        assert _serve._can_bind(taken) is False
     finally:
         binder.close()
 
@@ -111,7 +111,7 @@ def test_answers_ok(monkeypatch: pytest.MonkeyPatch) -> None:
             return None
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Ok())
-    assert _serve.answers("http://localhost/") is True
+    assert _serve._answers("http://localhost/") is True
 
 
 def test_answers_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,13 +119,13 @@ def test_answers_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.HTTPError("u", 503, "x", None, None)
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
-    assert _serve.answers("http://localhost/") is False
+    assert _serve._answers("http://localhost/") is False
 
     def client(*args: Any, **kwargs: Any) -> Any:
         raise urllib.error.HTTPError("u", 404, "x", None, None)
 
     monkeypatch.setattr(urllib.request, "urlopen", client)
-    assert _serve.answers("http://localhost/") is True
+    assert _serve._answers("http://localhost/") is True
 
 
 def test_answers_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,46 +133,46 @@ def test_answers_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.URLError("down")
 
     monkeypatch.setattr(urllib.request, "urlopen", down)
-    assert _serve.answers("http://localhost/") is False
+    assert _serve._answers("http://localhost/") is False
 
 
 def test_exited_early() -> None:
     alive = MagicMock()
     alive.poll.return_value = None
-    assert _serve.exited_early(alive) is None
+    assert _serve._exited_early(alive) is None
     dead = MagicMock()
     dead.poll.return_value = 3
-    assert _serve.exited_early(dead) == "app exited with 3 before answering"
+    assert _serve._exited_early(dead) == "app exited with 3 before answering"
 
 
 def test_wait_ready_success_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     process = MagicMock()
     process.poll.return_value = None
-    monkeypatch.setattr(_serve, "answers", lambda url: True)
-    assert _serve.wait_ready("http://x/", process, 1) is None
-    monkeypatch.setattr(_serve, "answers", lambda url: False)
+    monkeypatch.setattr(_serve, "_answers", lambda url: True)
+    assert _serve._wait_ready("http://x/", process, 1) is None
+    monkeypatch.setattr(_serve, "_answers", lambda url: False)
     monkeypatch.setattr(_serve.time, "time", MagicMock(side_effect=[0, 0, 10]))
-    monkeypatch.setattr(_serve, "stop", lambda proc: None)
-    assert _serve.wait_ready("http://x/", process, 1) == "app did not answer on http://x/ within 1s"
+    monkeypatch.setattr(_serve, "_stop", lambda proc: None)
+    assert _serve._wait_ready("http://x/", process, 1) == "app did not answer on http://x/ within 1s"
 
 
 def test_wait_ready_exited(monkeypatch: pytest.MonkeyPatch) -> None:
     process = MagicMock()
-    monkeypatch.setattr(_serve, "exited_early", lambda proc: "app exited with 1 before answering")
-    assert _serve.wait_ready("http://x/", process, 5) == "app exited with 1 before answering"
+    monkeypatch.setattr(_serve, "_exited_early", lambda proc: "app exited with 1 before answering")
+    assert _serve._wait_ready("http://x/", process, 5) == "app exited with 1 before answering"
 
 
 def test_stop_already_dead_and_force(monkeypatch: pytest.MonkeyPatch) -> None:
     dead = MagicMock()
     dead.poll.return_value = 0
-    _serve.stop(dead)
+    _serve._stop(dead)
     dead.wait.assert_not_called()
 
     live = MagicMock()
     live.poll.return_value = None
     live.pid = 123
     monkeypatch.setattr(_serve.os, "killpg", MagicMock(side_effect=ProcessLookupError))
-    _serve.stop(live)
+    _serve._stop(live)
 
     again = MagicMock()
     again.poll.return_value = None
@@ -186,14 +186,14 @@ def test_stop_already_dead_and_force(monkeypatch: pytest.MonkeyPatch) -> None:
             raise ProcessLookupError
 
     monkeypatch.setattr(_serve.os, "killpg", killpg)
-    _serve.stop(again)
+    _serve._stop(again)
     assert signal.SIGTERM in kills
     assert signal.SIGKILL in kills
 
 
 def test_force_kill_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_serve.os, "killpg", MagicMock(side_effect=ProcessLookupError))
-    _serve.force_kill(MagicMock(pid=1))
+    _serve._force_kill(MagicMock(pid=1))
 
 
 def test_spawn_sets_env_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,7 +207,7 @@ def test_spawn_sets_env_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(_serve.subprocess, "Popen", fake_popen)
     handle = (tmp_path / "log").open("w")
     try:
-        _serve.spawn("echo hi", tmp_path, 3400, {"CMS_URL": "u"}, handle)
+        _serve._spawn("echo hi", tmp_path, 3400, {"CMS_URL": "u"}, handle)
     finally:
         handle.close()
     assert seen["args"][0] == ["bash", "-lc", "echo hi"]
@@ -221,11 +221,11 @@ def test_end_app_closes(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = MagicMock()
     process = MagicMock()
     stopped: list[Any] = []
-    monkeypatch.setattr(_serve, "stop", stopped.append)
-    _serve.end_app(process, handle)
+    monkeypatch.setattr(_serve, "_stop", stopped.append)
+    _serve._end_app(process, handle)
     assert stopped == [process]
     handle.close.assert_called_once()
-    _serve.end_app(None, handle)
+    _serve._end_app(None, handle)
     assert handle.close.call_count == 2
 
 
@@ -233,16 +233,16 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     process = MagicMock()
     process.pid = 1
     process.poll.return_value = None
-    monkeypatch.setattr(_serve, "chosen_port", lambda preferred: 3456)
-    monkeypatch.setattr(_serve, "stop", lambda proc: None)
+    monkeypatch.setattr(_serve, "_chosen_port", lambda preferred: 3456)
+    monkeypatch.setattr(_serve, "_stop", lambda proc: None)
 
     def write_log(start: str, cwd: Path, port: int, extra: dict[str, str], handle: Any) -> MagicMock:
         handle.write("one\ntwo\n")
         handle.flush()
         return process
 
-    monkeypatch.setattr(_serve, "spawn", write_log)
-    monkeypatch.setattr(_serve, "wait_ready", lambda url, proc, seconds: "app did not answer on http://localhost:3456/ within 2s")
+    monkeypatch.setattr(_serve, "_spawn", write_log)
+    monkeypatch.setattr(_serve, "_wait_ready", lambda url, proc, seconds: "app did not answer on http://localhost:3456/ within 2s")
     result = checked(
         qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "python3 app.py", "ready_timeout": 2}})),
         "qa",
@@ -252,8 +252,8 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     assert result.findings == ["one", "two"]
 
     fake = fake_run(qa, [(0, "")])
-    monkeypatch.setattr(_serve, "spawn", lambda *a, **k: process)
-    monkeypatch.setattr(_serve, "wait_ready", lambda url, proc, seconds: None)
+    monkeypatch.setattr(_serve, "_spawn", lambda *a, **k: process)
+    monkeypatch.setattr(_serve, "_wait_ready", lambda url, proc, seconds: None)
     result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "python3 app.py"}})), "qa")
     assert result.ok is True
     assert result.summary == "qa passed"

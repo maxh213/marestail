@@ -31,11 +31,11 @@ def run_gate(ctx: Context) -> Result:
 
 def _run_with_app(ctx: Context, command: str, start: str, started: float) -> Result:
     cwd = _qa_cwd(ctx)
-    port = _serve.chosen_port(int(ctx.config.get("qa", "port", _DEFAULT_PORT)))
+    preferred = int(ctx.config.get("qa", "port", _DEFAULT_PORT))
     ready = ctx.config.get("qa", "ready", _DEFAULT_READY)
     seconds = int(ctx.config.get("qa", "ready_timeout", _DEFAULT_READY_TIMEOUT))
     log_path = _app_log_path(ctx.root)
-    with _serve.ready_app(start, cwd, port, ready, seconds, _qa_env(ctx), log_path) as failure:
+    with _serve.ready_app(start, cwd, preferred, ready, seconds, _qa_env(ctx), log_path) as (failure, port):
         if failure:
             return Result("qa", False, ctx.global_note(f"qa: {failure}"), _log_tail(log_path), elapsed(started))
         return _run_cmd(ctx, command, cwd, started, {_APP_URL: f"http://localhost:{port}", "PORT": str(port)})
