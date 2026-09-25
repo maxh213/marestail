@@ -2,7 +2,9 @@ Feature: A run not checked against the running app does not end as plain "pipeli
 
   After this task, the last line of `marestail run` and its exit code show whether
   QA exercised the real app (`ran-against: app|harness|nothing`). Exit 3 is new;
-  0, 1 and 2 keep today's meanings.
+  0, 1 and 2 keep today's meanings. A missing line triggers one QA retry; the
+  second accepted handoff's exact `ran-against` line (if any) is what the ending
+  follows — only a still-missing second handoff settles on `nothing`.
 
   Background:
     Given a temporary git repo with marestail installed and a stub agent on PATH
@@ -25,15 +27,23 @@ Feature: A run not checked against the running app does not end as plain "pipeli
     Then the last non-empty stdout line is exactly `pipeline complete, NOT verified against the running app (qa ran against nothing)`
     And the exit code is 3
 
-  Scenario: missing ran-against line retries QA once then settles on nothing
+  Scenario: missing ran-against line retries once; second handoff still missing settles on nothing
     When the first accepted QA handoff has no line whose entire content is exactly `ran-against: app`, `ran-against: harness`, or `ran-against: nothing`
     Then the runner retries QA once with that absence as the finding
-    And after that retry the last non-empty stdout line is exactly `pipeline complete, NOT verified against the running app (qa ran against nothing)`
+    And the stub's second accepted handoff still has no such exact line
+    And the last non-empty stdout line is exactly `pipeline complete, NOT verified against the running app (qa ran against nothing)`
     And the exit code is 3
 
+  Scenario: missing ran-against line retries once; second handoff with app is honoured
+    When the first accepted QA handoff has no exact `ran-against:` line as above
+    And the stub's second accepted handoff contains a whole line that is exactly `ran-against: app`
+    Then the last non-empty stdout line is exactly `pipeline complete`
+    And the exit code is 0
+
   Scenario: ran-against buried in a sentence counts as missing
-    When the handoff contains `We ran-against: app on a harness.` as a line (or the same words mid-paragraph) and no whole line that is exactly `ran-against: app`
-    Then that handoff is treated as missing (retry once, then nothing / exit 3 as above)
+    When the first handoff contains `We ran-against: app on a harness.` as a line (or the same words mid-paragraph) and no whole line that is exactly `ran-against: app`
+    Then that handoff is treated as missing (one retry with that as the finding)
+    And when the second accepted handoff still has no exact `ran-against:` line, the ending is nothing / exit 3 as in the still-missing scenario
 
   Scenario: --to hardener never claims QA ran
     When I run `marestail run tasks/t.md --from hardener --to hardener --auto --retries 1` with a stub that writes `VERDICT: PASS` (and the judge gate passes)
@@ -42,16 +52,17 @@ Feature: A run not checked against the running app does not end as plain "pipeli
     And stdout does not contain `NOT verified`
 
   Scenario: overnight stops on exit 3 and records NOT verified
-    Given a temp repo where `STOP_AT=qa` and the QA stub writes `ran-against: harness`
-    When `STOP_AT=qa tools/overnight.sh tasks/t.md` finishes
+    Given a temp repo with `START_FROM=qa` and `STOP_AT=qa` (same both-ends shape as `tools/test-timeline.py` overnight) and a QA stub whose accepted handoff has a whole line exactly `ran-against: harness`
+    When `START_FROM=qa STOP_AT=qa tools/overnight.sh tasks/t.md` finishes
     Then overnight exits 3 (stops; does not start a later task)
     And `.marestail/runs/overnight-*.md` under that task's `###` section contains `NOT verified`
     And that section still has the existing `- exit 3 after` line shape
 
-  Scenario: marestail watch shows the NOT verified ending
+  Scenario: marestail watch shows the NOT verified ending on a dead bed row
     Given an overnight log whose last non-empty line is `pipeline complete, NOT verified against the running app (qa ran against a harness)`
-    When `marestail watch --all` collects that bed
-    Then the bed's finished row text contains `NOT verified`
+    And the bed is dead (no live pipeline; today would paint `○ idle` and leave `runner_activity` unset)
+    When `collect_repo` runs on that bed (as `marestail watch --all` does)
+    Then the string used for that bed's idle/finished row (what `draw_idle_row` / the dead-bed painter puts on screen) includes `NOT verified`
     And it is not only the plain idle finished state (`○ idle` / idle-only)
 
   Scenario: roles/qa.md requires the line and forbids fake app claims
