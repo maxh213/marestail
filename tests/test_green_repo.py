@@ -82,7 +82,7 @@ DOCUMENTED = [
     "GROK_HOME",
     "JAVA_HOME",
 ]
-SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/context.py"]
+SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/_install.py", "marestail/context.py"]
 SCANNER_SOURCES = [
     "marestail/cs/scan/Program.cs",
     "marestail/erl/comments.escript",
@@ -672,6 +672,7 @@ def test_package_mutation_patterns_cover_every_module() -> None:
     assert "marestail.gates.rb_mutation.*" in patterns
     assert "marestail.runner.*" in patterns
     assert "marestail.install.*" in patterns
+    assert "marestail._install.*" in patterns
     assert "marestail.java.*" in patterns
     assert "marestail.ruby.*" in patterns
     assert "marestail.rust.*" in patterns

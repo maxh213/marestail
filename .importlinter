@@ -2,12 +2,13 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, prompts, gates, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, install internals, prompts, gates, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
     marestail.cli
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
+    marestail._install
     marestail.prompts : marestail.audit : marestail.practices
     marestail.gates
     marestail.depth : marestail.graph
@@ -29,6 +30,7 @@ forbidden_modules =
     marestail.tui
     marestail.perf
     marestail.install
+    marestail._install
     marestail.route
     marestail.audit
     marestail.practices
@@ -55,6 +57,7 @@ forbidden_modules =
     marestail.prompts
     marestail.pipeline
     marestail.install
+    marestail._install
     marestail.tui
     marestail.perf
     marestail.route
@@ -91,6 +94,7 @@ forbidden_modules =
     marestail.prompts
     marestail.pipeline
     marestail.install
+    marestail._install
     marestail.tui
     marestail.perf
     marestail.route
@@ -110,6 +114,14 @@ protected_modules =
 allowed_importers =
     marestail.gates
 
+[importlinter:contract:protect-install-internals]
+name = Install helpers are private to install
+type = protected
+protected_modules =
+    marestail._install
+allowed_importers =
+    marestail.install
+
 [importlinter:contract:backends-do-not-reach-up]
 name = Backends do not import higher layers
 type = forbidden
@@ -123,6 +135,7 @@ forbidden_modules =
     marestail.tui
     marestail.perf
     marestail.install
+    marestail._install
     marestail.route
     marestail.audit
     marestail.practices
@@ -145,6 +158,7 @@ forbidden_modules =
     marestail.tui
     marestail.perf
     marestail.install
+    marestail._install
     marestail.route
     marestail.audit
     marestail.practices

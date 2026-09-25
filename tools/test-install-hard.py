@@ -15,8 +15,20 @@ from marestail.freeze import GATE_CONFIG
 
 CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
 ROOT = Path(__file__).resolve().parent.parent
+GATE_MARKER = "marestail gate"
 FULL_DONE = "edit marestail.toml and sonar-project.properties"
 HARD_DONE = "left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties"
+GENERATED_IGNORE = [
+    "features/",
+    "qa/",
+    "tasks/",
+    "PERFORMANCE.md",
+    "perf/",
+    ".claude/settings.json",
+    ".agents/hooks.json",
+    ".grok/",
+    ".cursor/hooks.json",
+]
 
 
 def expect(name: str, got: object, wanted: object) -> None:
@@ -57,8 +69,8 @@ def install_quietly(target: Path, hard: bool = False, gitignore_generated: bool 
 def full_install_creates_gate() -> None:
     with fresh_target() as target:
         install_quietly(target)
-        expect("full-claude", install.GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
-        expect("full-agents", install.GATE_MARKER in (target / "AGENTS.md").read_text(), True)
+        expect("full-claude", GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
+        expect("full-agents", GATE_MARKER in (target / "AGENTS.md").read_text(), True)
 
 
 def hard_install_creates_neither() -> None:
@@ -82,7 +94,7 @@ def hard_install_implies_gitignore() -> None:
     with fresh_target() as target:
         install_quietly(target, hard=True, gitignore_generated=False)
         text = (target / ".gitignore").read_text()
-        for line in install.GITIGNORE_GENERATED_LINES:
+        for line in GENERATED_IGNORE:
             expect(f"gi-{line}", line in text, True)
 
 
@@ -113,8 +125,8 @@ def cli_scope_all_matches_full() -> None:
     with fresh_target() as target:
         code, out = run_cli(target, "--scope", "all")
         expect("cli-all-exit", code, 0)
-        expect("cli-all-claude", install.GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
-        expect("cli-all-agents", install.GATE_MARKER in (target / "AGENTS.md").read_text(), True)
+        expect("cli-all-claude", GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
+        expect("cli-all-agents", GATE_MARKER in (target / "AGENTS.md").read_text(), True)
         expect("cli-all-line", out.rstrip().endswith(f"installed into {target.resolve()}; {FULL_DONE}"), True)
         expect("cli-all-no-claude-in-line", "CLAUDE.md" in out.splitlines()[-1], False)
 
@@ -123,15 +135,15 @@ def cli_scope_changed_is_full() -> None:
     with fresh_target() as target:
         code, out = run_cli(target, "--scope", "changed")
         expect("cli-changed-exit", code, 0)
-        expect("cli-changed-gate", install.GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
+        expect("cli-changed-gate", GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
         expect("cli-changed-line", "CLAUDE.md" in out.splitlines()[-1], False)
 
 
 def gitignore_generated_still_appends_gate() -> None:
     with fresh_target() as target:
         install_quietly(target, gitignore_generated=True)
-        expect("gi-claude", install.GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
-        expect("gi-agents", install.GATE_MARKER in (target / "AGENTS.md").read_text(), True)
+        expect("gi-claude", GATE_MARKER in (target / "CLAUDE.md").read_text(), True)
+        expect("gi-agents", GATE_MARKER in (target / "AGENTS.md").read_text(), True)
 
 
 def freeze_still_lists_agent_docs() -> None:
