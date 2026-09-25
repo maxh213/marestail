@@ -101,9 +101,15 @@ def hard_install_implies_gitignore() -> None:
 def hard_install_writes_tree() -> None:
     with fresh_target() as target:
         install_quietly(target, hard=True)
-        expect("toml", (target / "marestail.toml").is_file(), True)
-        expect("guidance", (target / "guidance" / "ts.md").is_file(), True)
-        expect("hook", "marestail gate --hook" in (target / ".claude" / "settings.json").read_text(), True)
+        for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md", "tasks/README.md"):
+            expect(f"tree-{name}", (target / name).is_file(), True)
+        for path in (
+            ".claude/settings.json",
+            ".agents/hooks.json",
+            ".grok/hooks/marestail-gate.json",
+            ".cursor/hooks.json",
+        ):
+            expect(f"hook-{path}", "marestail gate --hook" in (target / path).read_text(), True)
 
 
 def cli_scope_hard_matches_api() -> None:

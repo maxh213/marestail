@@ -69,9 +69,13 @@ def test_hard_install_skips_agent_docs(home: Path, target: Path, capsys: pytest.
     install.install(target, hard=True)
     assert not (target / "CLAUDE.md").exists()
     assert not (target / "AGENTS.md").exists()
-    assert (target / "marestail.toml").is_file()
-    assert (target / "guidance" / "ts.md").is_file()
+    for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
+        assert (target / name).read_text() == (TEMPLATES / name).read_text()
+    assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
     assert "marestail gate --hook" in (target / ".claude" / "settings.json").read_text()
+    assert "marestail gate --hook" in (target / ".agents" / "hooks.json").read_text()
+    assert "marestail gate --hook" in (target / ".grok" / "hooks" / "marestail-gate.json").read_text()
+    assert "marestail gate --hook" in (target / ".cursor" / "hooks.json").read_text()
     ignore = (target / ".gitignore").read_text()
     for line in _install.GITIGNORE_GENERATED_LINES:
         assert line in ignore
