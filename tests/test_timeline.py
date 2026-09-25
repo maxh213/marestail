@@ -10,13 +10,14 @@ from typing import Any
 
 import pytest
 
-from marestail import prompts, runner, timeline
+from marestail import freeze, prompts, runner, timeline
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 from marestail.report import Result
 from marestail.route import Choice
 from marestail.runner import JudgeProgress, Run
-from tests.conftest import commit_all, git
+from tests.conftest import commit_all, git, make_context
+from tests.test_green_repo import restricted_path
 
 ROOT = Path(__file__).resolve().parent.parent
 CODER = Worker("coder", None)
@@ -487,9 +488,82 @@ def test_watch_diagnostic_script_passes() -> None:
     assert "ok" in completed.stdout.strip().splitlines()[-1]
 
 
+def test_readme_documents_timeline_artefacts() -> None:
+    overnight = (ROOT / "README.md").read_text().split("## Overnight", 1)[1].split("## ", 1)[0]
+    assert "timeline.md" in overnight
+    assert "timeline.json" in overnight
+    assert ".marestail/runs/<task>/pipeline.log" not in overnight
+
+
+def test_overnight_embeds_task_timeline(tmp_path: Path) -> None:
+    task = "tasks/t.md"
+    stem = Path(task).stem
+    runs = tmp_path / ".marestail" / "runs" / stem
+    runs.mkdir(parents=True)
+    (runs / "timeline.md").write_text("## 07-coder\n- role: coder\n")
+    summary = tmp_path / "overnight.md"
+    summary.write_text(f"### {task}\n")
+    source = (ROOT / "tools" / "overnight.sh").read_text()
+    start = source.index('stem="$(basename "$task" .md)"')
+    end = source.index("fi\n", start) + len("fi\n")
+    fragment = source[start:end]
+    assert 'cat "$timeline"' in fragment
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "basename").write_text("#!/bin/sh\nname=${1##*/}\necho ${name%$2}\n")
+    (bin_dir / "cat").write_text('#!/bin/sh\nexec <"$1"\nwhile IFS= read -r line || [ -n "$line" ]; do printf "%s\\n" "$line"; done\n')
+    for name in ("basename", "cat"):
+        (bin_dir / name).chmod(0o755)
+    completed = subprocess.run(
+        ["sh", "-c", fragment],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "task": task, "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"},
+    )
+    assert completed.returncode == 0
+    text = summary.read_text() + completed.stdout
+    assert "#### timeline.md" in text
+    assert "## 07-coder" in text
+
+
+def test_two_attempts_append_agree(tmp_path: Path) -> None:
+    folder = tmp_path / "runs"
+    folder.mkdir()
+    agent = {"backend": "claude", "model": "m", "effort": None, "account": None, "minutes": 0.1, "summary": "ok"}
+    timeline.record(folder, "t", "07-coder", "coder", 1, "2026-01-01T00:00:00.000Z", [], [], agent, None, [], [], folder / "missing")
+    timeline.record(folder, "t", "08-coder", "coder", 2, "2026-01-01T00:02:00.000Z", [], [], agent, None, [], [], folder / "missing")
+    data = json.loads((folder / "timeline.json").read_text())
+    assert len(data["steps"]) == 2
+    assert [step["attempt"] for step in data["steps"]] == [1, 2]
+    headings = [line for line in (folder / "timeline.md").read_text().splitlines() if line.startswith("## ")]
+    assert len(headings) == 2
+    assert all(step["id"] in heading for step, heading in zip(data["steps"], headings, strict=True))
+
+
+def test_coder_cannot_keep_timeline_artefacts() -> None:
+    paths = [
+        ".marestail/runs/t/timeline.md",
+        ".marestail/runs/t/timeline.json",
+        "src/a.py",
+        ".marestail/runs/t/19-coder.md",
+    ]
+    frozen = freeze.frozen_paths(make_context(ROOT).config, "coder", paths)
+    assert frozen == [".marestail/runs/t/timeline.md", ".marestail/runs/t/timeline.json"]
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
 def test_timeline_diagnostic_passes_entrypoint() -> None:
-    text = (ROOT / "tools" / "test-timeline.py").read_text()
-    assert "def timeline_diagnostic_passes()" in text
-    main = text.split('if __name__ == "__main__":', 1)[1]
-    assert "timeline_diagnostic_passes()" in main
-    assert 'print("timeline ok")' in main
+    env = {key: value for key, value in os.environ.items() if key not in {"MARESTAIL_AGENT", "AGENT", "MODEL", "EFFORT"}}
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "test-timeline.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=180,
+    )
+    assert completed.returncode == 0
+    assert "ok" in completed.stdout.strip().splitlines()[-1]

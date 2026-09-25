@@ -14,7 +14,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import runner, timeline
+from marestail import freeze, runner, timeline
 from marestail.config import Config
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, find
@@ -414,9 +414,14 @@ def overnight_embeds(folder: Path) -> None:
 
 
 def freeze_lists_timeline() -> None:
-    text = (ROOT / "marestail" / "freeze.py").read_text()
-    expect_true("freeze-md", "timeline.md" in text)
-    expect_true("freeze-json", "timeline.json" in text)
+    paths = [
+        ".marestail/runs/t/timeline.md",
+        ".marestail/runs/t/timeline.json",
+        "src/a.py",
+        ".marestail/runs/t/19-coder.md",
+    ]
+    frozen = freeze.frozen_paths(Config(root=ROOT, raw={}), "coder", paths)
+    expect("freeze-paths", frozen, [".marestail/runs/t/timeline.md", ".marestail/runs/t/timeline.json"])
 
 
 def readme_documents() -> None:
