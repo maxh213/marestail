@@ -49,8 +49,10 @@ Mutation testing always runs on the diff: even without `--scope changed`, each m
 ```sh
 export PATH="$PATH:/path/to/marestail/bin"
 cd your-repo
-marestail install .          # marestail.toml, sonar-project.properties, CLAUDE.md / AGENTS.md, PERFORMANCE.md, Stop hooks
+marestail install .          # full install: marestail.toml, sonar-project.properties, Gate section in CLAUDE.md / AGENTS.md, PERFORMANCE.md, Stop hooks
+marestail install . --scope hard   # leaves CLAUDE.md and AGENTS.md alone; implies --gitignore-generated
 marestail install . --gitignore-generated   # also gitignore features/, qa/, tasks/, PERFORMANCE.md, perf/ and the Stop-hook configs, for repos where not everyone runs marestail
+
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
 marestail gate               # fast tier, whole repo
 marestail gate --tier full --scope changed
@@ -87,7 +89,7 @@ Hermes pipeline runs (`--agent hermes`) use `hermes chat --query-file <prompt fi
 
 Junie pipeline runs (`--agent junie`) use `junie --skip-update-check --input-format=json --output-format=json -p <repo root> --model=<model> --effort=<effort>`, with the prompt sent on stdin as one JSON object `{"task": "<prompt>"}`; `--model` is passed only when the run has a model, and `--effort` only for `low`, `medium` or `high`. A judge `VERDICT:` line inside the JSON `result` still counts. Junie has no command Stop hook; the runner's four-hour cap is the timeout.
 
-`install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
+`install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `install --scope hard` leaves `CLAUDE.md` and `AGENTS.md` alone (does not create or append them) and implies `--gitignore-generated`. On a full install, `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
 
 ## Watch
 

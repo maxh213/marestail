@@ -119,13 +119,22 @@ def test_depth_command(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pyte
     assert capsys.readouterr().out == "depth ['repo']\n"
 
 
-@pytest.mark.parametrize(("argv", "generated"), [(["install"], False), (["install", "sub", "--gitignore-generated"], True)])
-def test_install_command(repo: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str], generated: bool) -> None:
+@pytest.mark.parametrize(
+    ("argv", "generated", "hard"),
+    [
+        (["install"], False, False),
+        (["install", "sub", "--gitignore-generated"], True, False),
+        (["install", "--scope", "hard"], False, True),
+        (["install", "--scope", "all"], False, False),
+        (["install", "--scope", "changed"], False, False),
+    ],
+)
+def test_install_command(repo: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str], generated: bool, hard: bool) -> None:
     fake = Recorder(None)
     monkeypatch.setattr(install, "install", fake)
     assert cli.main(argv) == 0
-    target = repo / argv[1] if len(argv) > 1 else repo
-    assert fake.calls == [(target, ("gitignore_generated", generated))]
+    target = repo / argv[1] if len(argv) > 1 and not argv[1].startswith("-") else repo
+    assert fake.calls == [(target, ("gitignore_generated", generated), ("hard", hard))]
 
 
 @pytest.mark.parametrize("action", ["up", "down"])
@@ -810,8 +819,11 @@ def test_watch_install_sonar_defaults() -> None:
     assert option_help(subparser("watch"))["--refresh"] == "seconds between redraws"
     assert option_help(subparser("watch"))["--all"] == "show every repo with a .marestail directory, not just those with a running pipeline"
     install_args = subparser("install").parse_args([])
-    assert (install_args.target, install_args.gitignore_generated) == (".", False)
+    assert (install_args.target, install_args.gitignore_generated, install_args.scope) == (".", False, None)
     assert option_help(subparser("install"))["--gitignore-generated"] == "add the files marestail generates to the target's .gitignore"
+    assert option_help(subparser("install"))["--scope"] == cli.HELP_INSTALL_SCOPE
+    scope = next(action for action in subparser("install")._actions if "--scope" in action.option_strings)
+    assert list(scope.choices or []) == list(cli.SCOPE_CHOICES)
     sonar = subparser("sonar")
     action = next(item for item in sonar._actions if item.dest == "action")
     assert list(action.choices or []) == list(cli.SONAR_ACTIONS)
@@ -822,6 +834,12 @@ def test_unknown_scope_is_rejected() -> None:
     parser = subparser("gate")
     with pytest.raises(SystemExit):
         parse_argv(parser, ["--scope", "nope"])
+
+
+def test_install_rejects_soft_scope() -> None:
+    parser = subparser("install")
+    with pytest.raises(SystemExit):
+        parse_argv(parser, ["--scope", "soft"])
 
 
 def test_unknown_tier_is_rejected() -> None:

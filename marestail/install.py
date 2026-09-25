@@ -47,7 +47,7 @@ EMPTY_LIST: list[Any] = []
 VERSION_DEFAULT = 1
 
 
-def install(target: Path, gitignore_generated: bool = False) -> None:
+def install(target: Path, gitignore_generated: bool = False, hard: bool = False) -> None:
     dotnet = uses_dotnet(target)
     copy_if_missing(TEMPLATES / CONFIG, target / CONFIG)
     if not dotnet:
@@ -59,15 +59,30 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
     copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
     if uses_csharp(target):
         copy_if_missing(TEMPLATES / "guidance" / "cs.md", target / "guidance" / "cs.md")
-    append_instructions(target / "CLAUDE.md")
-    append_instructions(target / "AGENTS.md")
+    write_agent_docs(target, hard)
     merge_hook(target / ".claude" / "settings.json")
     merge_agy_hook(target / ".agents" / "hooks.json")
     merge_grok_hook(target / ".grok" / HOOKS / "marestail-gate.json")
     merge_cursor_hook(target / ".cursor" / "hooks.json")
-    extend_gitignore(target / ".gitignore", GITIGNORE_GENERATED_LINES if gitignore_generated else [])
+    extend_gitignore(target / ".gitignore", generated_ignore(gitignore_generated, hard))
     trust_grok_folder(target)
-    print(f"installed into {target}; edit marestail.toml and sonar-project.properties")
+    print(done_message(target, hard))
+
+
+def write_agent_docs(target: Path, hard: bool) -> None:
+    if hard:
+        return
+    append_instructions(target / "CLAUDE.md")
+    append_instructions(target / "AGENTS.md")
+
+
+def generated_ignore(gitignore_generated: bool, hard: bool) -> list[str]:
+    return GITIGNORE_GENERATED_LINES if gitignore_generated or hard else []
+
+
+def done_message(target: Path, hard: bool) -> str:
+    alone = "; left CLAUDE.md and AGENTS.md alone" if hard else ""
+    return f"installed into {target}{alone}; edit marestail.toml and sonar-project.properties"
 
 
 def uses_dotnet(target: Path) -> bool:

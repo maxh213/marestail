@@ -52,6 +52,70 @@ def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.Cap
     assert (home / ".grok" / "trusted_folders.toml").read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1234\n'
 
 
+def test_hard_install_skips_agent_docs(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    install.install(target, hard=True)
+    assert not (target / "CLAUDE.md").exists()
+    assert not (target / "AGENTS.md").exists()
+    assert (target / "marestail.toml").is_file()
+    assert (target / "guidance" / "ts.md").is_file()
+    assert "marestail gate --hook" in (target / ".claude" / "settings.json").read_text()
+    ignore = (target / ".gitignore").read_text()
+    for line in install.GITIGNORE_GENERATED_LINES:
+        assert line in ignore
+    assert capsys.readouterr().out.endswith(
+        f"installed into {target}; left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties\n"
+    )
+
+
+def test_hard_install_leaves_existing_claude(home: Path, target: Path) -> None:
+    (target / "CLAUDE.md").write_text("team rules\n")
+    install.install(target, hard=True)
+    assert (target / "CLAUDE.md").read_text() == "team rules\n"
+    assert not (target / "AGENTS.md").exists()
+
+
+def test_hard_install_leaves_existing_agents(home: Path, target: Path) -> None:
+    (target / "AGENTS.md").write_text("team rules\n")
+    install.install(target, hard=True)
+    assert (target / "AGENTS.md").read_text() == "team rules\n"
+    assert not (target / "CLAUDE.md").exists()
+
+
+def test_hard_install_keeps_prior_gate(home: Path, target: Path) -> None:
+    install.install(target)
+    before = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
+    install.install(target, hard=True)
+    assert {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()} == before
+
+
+@pytest.mark.parametrize(
+    ("generated", "hard", "expected"),
+    [(False, False, []), (True, False, install.GITIGNORE_GENERATED_LINES), (False, True, install.GITIGNORE_GENERATED_LINES)],
+)
+def test_generated_ignore(generated: bool, hard: bool, expected: list[str]) -> None:
+    assert install.generated_ignore(generated, hard) == expected
+
+
+@pytest.mark.parametrize(
+    ("hard", "needle"),
+    [(False, "installed into /t; edit marestail.toml and sonar-project.properties"), (True, "left CLAUDE.md and AGENTS.md alone")],
+)
+def test_done_message(hard: bool, needle: str) -> None:
+    assert needle in install.done_message(Path("/t"), hard)
+
+
+def test_write_agent_docs_skips_when_hard(tmp_path: Path) -> None:
+    install.write_agent_docs(tmp_path, True)
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_write_agent_docs_appends_when_full(tmp_path: Path) -> None:
+    install.write_agent_docs(tmp_path, False)
+    assert install.GATE_MARKER in (tmp_path / "CLAUDE.md").read_text()
+    assert install.GATE_MARKER in (tmp_path / "AGENTS.md").read_text()
+
+
 def test_install_twice_changes_nothing(home: Path, target: Path) -> None:
     install.install(target, gitignore_generated=True)
     before = {path: path.read_text() for path in target.rglob("*") if path.is_file()}
