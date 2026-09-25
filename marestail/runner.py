@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from marestail import audit, backends, freeze, practices, prompts, timeline
+from marestail import audit, backends, freeze, practices, prompts, ran_against, timeline
 from marestail import config as config_module
 from marestail import route as dandelion
 from marestail.backends import (
@@ -50,18 +50,7 @@ AUTHOR = "AUTHOR"
 PERF = "perf"
 QA = "qa"
 CONFIG_CHANGE = "## Config change"
-RAN_AGAINST_LINE = {
-    "ran-against: app": "app",
-    "ran-against: harness": "harness",
-    "ran-against: nothing": "nothing",
-}
-MISSING_RAN_AGAINST = (
-    "Your handoff has no whole line that is exactly `ran-against: app`, `ran-against: harness`, or `ran-against: nothing`."
-)
-NOT_VERIFIED = "pipeline complete, NOT verified against the running app (qa ran against {what})"
-AGAINST_PHRASE = {"harness": "a harness", "nothing": "nothing"}
-EXIT_NOT_VERIFIED = 3
-COMPLETE = "pipeline complete"
+MISSING_RAN_AGAINST = ran_against.MISSING
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
 WORKER_REPEAT_LIMIT = 3
@@ -298,8 +287,9 @@ def includes_qa(steps: list[Step]) -> bool:
 
 
 def say_complete() -> int:
-    print(COMPLETE)
-    return 0
+    line, code = ran_against.finish("app")
+    print(line)
+    return code
 
 
 def ending_for(state: Run, steps: list[Step]) -> int:
@@ -308,15 +298,10 @@ def ending_for(state: Run, steps: list[Step]) -> int:
     return qa_ending(state.ran_against or "nothing")
 
 
-def not_verified_line(against: str) -> str:
-    return NOT_VERIFIED.format(what=AGAINST_PHRASE[against])
-
-
 def qa_ending(against: str) -> int:
-    if against == "app":
-        return say_complete()
-    print(not_verified_line(against))
-    return EXIT_NOT_VERIFIED
+    line, code = ran_against.finish(against)
+    print(line)
+    return code
 
 
 def paused(state: Run, step: Step, auto: bool) -> bool:
@@ -346,17 +331,13 @@ def run_named_worker(state: Run, worker: Worker) -> bool:
     return run_worker(state, worker, "")
 
 
-def parse_ran_against(text: str) -> str | None:
-    return next((RAN_AGAINST_LINE[line] for line in text.splitlines() if line in RAN_AGAINST_LINE), None)
-
-
 def latest_qa_text(state: Run) -> str:
     reports = sorted(state.handoffs.glob("*-qa.md"))
     return reports[LAST].read_text() if reports else EMPTY
 
 
 def read_qa_ran_against(state: Run) -> str | None:
-    return parse_ran_against(latest_qa_text(state))
+    return ran_against.parse(latest_qa_text(state))
 
 
 def record_ran_against(state: Run, against: str) -> bool:

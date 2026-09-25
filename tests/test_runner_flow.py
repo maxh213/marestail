@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import prompts, runner
+from marestail import prompts, ran_against, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -28,6 +28,7 @@ from marestail.runner import JudgeProgress, Run
 
 CRITIC = Judge("critic", None, bounce_to="specifier")
 PERF = Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True)
+COMPLETE_LINE = ran_against.finish("app")[0]
 CODER = Worker("coder", None)
 
 
@@ -278,12 +279,12 @@ def test_run_named_worker_routes_qa(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_parse_ran_against_exact_lines() -> None:
-    assert runner.parse_ran_against("ran-against: app\n") == "app"
-    assert runner.parse_ran_against("note\nran-against: harness\n") == "harness"
-    assert runner.parse_ran_against("ran-against: nothing") == "nothing"
-    assert runner.parse_ran_against("We ran-against: app on a harness.\n") is None
-    assert runner.parse_ran_against("ran-against: app elsewhere\n") is None
-    assert runner.parse_ran_against("") is None
+    assert ran_against.parse("ran-against: app\n") == "app"
+    assert ran_against.parse("note\nran-against: harness\n") == "harness"
+    assert ran_against.parse("ran-against: nothing") == "nothing"
+    assert ran_against.parse("We ran-against: app on a harness.\n") is None
+    assert ran_against.parse("ran-against: app elsewhere\n") is None
+    assert ran_against.parse("") is None
 
 
 def test_latest_qa_text_and_read(tmp_path: Path) -> None:
@@ -298,15 +299,17 @@ def test_latest_qa_text_and_read(tmp_path: Path) -> None:
 
 
 def test_qa_ending_and_not_verified(capsys: Any) -> None:
+    harness_line, harness_code = ran_against.finish("harness")
+    nothing_line, nothing_code = ran_against.finish("nothing")
     assert runner.qa_ending("app") == 0
-    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
-    assert runner.qa_ending("harness") == 3
-    assert capsys.readouterr().out == runner.not_verified_line("harness") + "\n"
-    assert runner.qa_ending("nothing") == 3
-    assert "nothing" in capsys.readouterr().out
-    assert "a harness" in runner.not_verified_line("harness")
+    assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
+    assert runner.qa_ending("harness") == harness_code
+    assert capsys.readouterr().out == harness_line + "\n"
+    assert runner.qa_ending("nothing") == nothing_code
+    assert capsys.readouterr().out == nothing_line + "\n"
+    assert "a harness" in harness_line
     assert runner.say_complete() == 0
-    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
+    assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
 
 
 def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
@@ -314,10 +317,10 @@ def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
     assert runner.includes_qa([find("qa")]) is True
     state = make_state(tmp_path)
     assert runner.ending_for(state, [find("coder")]) == 0
-    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
+    assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
     state.ran_against = "harness"
     assert runner.ending_for(state, [find("qa")]) == 3
-    assert "NOT verified" in capsys.readouterr().out
+    assert ran_against.NOTE in capsys.readouterr().out
     state.ran_against = None
     assert runner.ending_for(state, [find("qa")]) == 3
 
@@ -327,7 +330,7 @@ def test_complete_pipeline_archives(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     state = make_state(tmp_path)
     assert runner.complete_pipeline(state, [find("coder")]) == 0
     assert archive.calls == [(state,)]
-    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
+    assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
 
 
 def test_settle_and_retry_ran_against(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,10 +370,10 @@ def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     patch(monkeypatch, runner, "run_step", True)
     state = make_state(tmp_path, ran_against="app")
     assert runner.run_steps(state, [find("qa")], True) == 0
-    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
+    assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
     state.ran_against = "harness"
     assert runner.run_steps(state, [find("qa")], True) == 3
-    assert "NOT verified" in capsys.readouterr().out
+    assert ran_against.NOTE in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
