@@ -70,10 +70,9 @@ def install(target: Path, gitignore_generated: bool = False, hard: bool = False)
 
 
 def write_agent_docs(target: Path, hard: bool) -> None:
-    if hard:
-        return
-    append_instructions(target / "CLAUDE.md")
-    append_instructions(target / "AGENTS.md")
+    if not hard:
+        append_instructions(target / "CLAUDE.md")
+        append_instructions(target / "AGENTS.md")
 
 
 def generated_ignore(gitignore_generated: bool, hard: bool) -> list[str]:

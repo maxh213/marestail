@@ -98,7 +98,8 @@ def test_hard_install_keeps_prior_gate(home: Path, target: Path) -> None:
     install.install(target)
     before = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
     install.install(target, hard=True)
-    assert {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()} == before
+    after = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
+    assert after == before
 
 
 def test_install_hard_diagnostic_covers_cases() -> None:
