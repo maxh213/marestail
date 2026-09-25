@@ -358,7 +358,8 @@ def test_worker_attempt_records_timeline(repo: Path, monkeypatch: pytest.MonkeyP
     assert step["id"].endswith("-coder")
     assert step["role"] == "coder"
     assert step["attempt"] == 1
-    assert step["started_at"] and step["started_at"].endswith("Z")
+    assert step["started_at"]
+    assert step["started_at"].endswith("Z")
     assert step["commits"]
     assert "src.py" in step["files"]
     assert step["done"] == "coded the adder"
@@ -384,7 +385,8 @@ def test_judged_records_timeline(repo: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert step["id"].endswith("-critic")
     assert step["role"] == "critic"
     assert step["attempt"] == 3
-    assert step["started_at"] and step["started_at"].endswith("Z")
+    assert step["started_at"]
+    assert step["started_at"].endswith("Z")
     assert step["gate"] == [{"name": "sonar", "seconds": 41.0, "ok": False}]
     assert step["verdict"] == "BOUNCE coder"
     assert step["commits"]
