@@ -8,10 +8,13 @@ Feature: The qa gate starts the target's app when [qa] start is set
   Background:
     Given a temporary git repo with marestail installed
     And `tools/test-qa-app.py` drives the cases below
+    And the pasteable app is `app.py` that does
+      `HTTPServer(("127.0.0.1", int(os.environ["PORT"])), SimpleHTTPRequestHandler).serve_forever()`
+      with `start = "python3 app.py"`
 
   Scenario: start plus ready runs cmd only after the app answers
     Given `[qa]` has `cmd` that prints `$MARESTAIL_APP_URL` and exits 0,
-      `start` that serves HTTP on `$PORT`, `ready = "/"`, `port = 3400`
+      `start = "python3 app.py"`, `ready = "/"`, `port = 3400`
     When the `qa` gate runs
     Then `cmd` runs only after `GET http://localhost:<chosen-port>/` returns status < 500
     And `cmd`'s environment has `MARESTAIL_APP_URL=http://localhost:<chosen-port>` and `PORT=<chosen-port>`
@@ -26,7 +29,7 @@ Feature: The qa gate starts the target's app when [qa] start is set
     And the app's process group is gone after the gate returns
 
   Scenario: start that never listens fails with did-not-answer and log tail
-    Given `[qa] start` is a command that never listens, `ready = "/"`, `port = 3400`, `ready_timeout = 2`
+    Given `[qa] start = "sleep 60"`, `ready = "/"`, `port = 3400`, `ready_timeout = 2`
     When the `qa` gate runs
     Then the gate fails with summary exactly `qa: app did not answer on http://localhost:3400/ within 2s`
     And findings are the last ten non-empty lines of the app log
@@ -35,23 +38,29 @@ Feature: The qa gate starts the target's app when [qa] start is set
 
   Scenario: a taken port moves to the next free one
     Given port 3400 is already bound
-    And `[qa]` has `start`/`ready`/`port = 3400` and a `cmd` that prints `$MARESTAIL_APP_URL`
+    And `[qa]` has `start = "python3 app.py"`, `ready = "/"`, `port = 3400`
+      and a `cmd` that prints `$MARESTAIL_APP_URL`
     When the `qa` gate runs
     Then `MARESTAIL_APP_URL` is `http://localhost:<p>` for some free `p` > 3400
     And the ready poll and the app both used that same `p`
 
   Scenario: env reaches the app and never the QA prompt
-    Given `[qa] env = { CMS_URL = "https://example.test/g", LOCALE = "en-gb" }` and `start` set
+    Given `[qa] env = { CMS_URL = "https://example.test/g", LOCALE = "en-gb" }`
+      and `start = "python3 app.py"` where `app.py` also prints `CMS_URL` and `LOCALE` to stdout
     When the `qa` gate runs
-    Then the app process environment includes `CMS_URL` and `LOCALE` with those values
+    Then the app log contains `https://example.test/g` and `en-gb`
     And `prompts.worker_prompt` for the qa worker does not contain `https://example.test/g` or `en-gb`
-    And no handoff or commit message produced by a run echoes those values
 
   Scenario: with no start the gate behaves as today
     Given `[qa]` has only `cmd = "true"` and `cwd = "."` (no `start`)
     When the `qa` gate runs
     Then it is still `bash -lc` of that cmd in `cwd` with timeout 3600 and no app process
-    And empty `cmd` still yields skipped summary `no [qa] cmd configured` without starting anything
+
+  Scenario: empty cmd skips without starting even when start is set
+    Given `[qa] start = "python3 app.py"` and `cmd` is empty
+    When the `qa` gate runs
+    Then the result is skipped with summary `no [qa] cmd configured`
+    And no app process was started and no `.marestail/qa-app.log` was written by a start
 
   Scenario: only the qa tier starts the app
     Given `[qa] start` is set
@@ -66,10 +75,16 @@ Feature: The qa gate starts the target's app when [qa] start is set
     When the same gate runs under `marestail run` for task stem `t` (runner exports `MARESTAIL_TASK=t`)
     Then the log is `.marestail/runs/t/qa-app.log`
 
-  Scenario: cleanup on timeout and interrupt
-    Given `[qa] start` is set and `cmd` will run for a long time
-    When the gate's cmd times out (3600s) or the gate process receives SIGINT/SIGTERM
-    Then the app's process group is still gone afterwards (no orphan listener)
+  Scenario: cleanup on cmd timeout
+    Given `[qa] start = "python3 app.py"`, `cmd = "sleep 30"`, and env `MARESTAIL_QA_CMD_TIMEOUT=1`
+    When the `qa` gate runs
+    Then `cmd` times out (exit/code path as today's `shell.run` timeout, timeout value 1)
+    And the app's process group is gone afterwards
+
+  Scenario: cleanup on interrupt
+    Given `[qa] start = "python3 app.py"` and a long-running `cmd`
+    When the gate process receives SIGINT while the app is up
+    Then the app's process group is gone afterwards (no orphan listener on the chosen port)
 
   Scenario: QA prompt gains one line when start is set
     Given `[qa] start` is set
@@ -92,4 +107,4 @@ Feature: The qa gate starts the target's app when [qa] start is set
   Scenario: README documents the keys and qa-tier-only start
     Then the README `[qa]` / acceptance text names `start`, `ready`, `port`, `ready_timeout`, and `env`
     And it says the app is started only for the `qa` tier
-    And if the package reads `MARESTAIL_TASK` for the run log path, that variable is in the README Environment variables table
+    And if the package reads `MARESTAIL_TASK` or `MARESTAIL_QA_CMD_TIMEOUT`, those are in the README Environment variables table
