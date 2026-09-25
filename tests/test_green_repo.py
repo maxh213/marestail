@@ -35,6 +35,7 @@ PASSING_SCRIPTS = [
     "test-csproj-additions.py",
     "test-drop-ignored.py",
     ROUTE_SCRIPT,
+    "test-install-hard.py",
     "test-scope-hard.py",
     "test-sonar-worktree.py",
     "test-practices.py",

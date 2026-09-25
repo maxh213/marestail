@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,17 @@ from marestail import install
 TEMPLATES = install.TEMPLATES
 GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
 CURSOR_GATE = {"command": "marestail gate --hook", "timeout": 900, "loop_limit": 5}
+ROOT = Path(__file__).resolve().parent.parent
+INSTALL_HARD_CASES = (
+    "full_install_creates_gate",
+    "hard_install_creates_neither",
+    "hard_install_keeps_claude",
+    "hard_install_implies_gitignore",
+    "hard_install_writes_tree",
+    "cli_scope_hard_matches_api",
+    "cli_scope_all_matches_full",
+    "gitignore_generated_still_appends_gate",
+)
 
 
 @pytest.fixture
@@ -86,6 +99,16 @@ def test_hard_install_keeps_prior_gate(home: Path, target: Path) -> None:
     before = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
     install.install(target, hard=True)
     assert {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()} == before
+
+
+def test_install_hard_diagnostic_covers_cases() -> None:
+    script = ROOT / "tools" / "test-install-hard.py"
+    text = script.read_text()
+    missing = [name for name in INSTALL_HARD_CASES if f"def {name}(" not in text]
+    assert missing == []
+    completed = subprocess.run([sys.executable, str(script)], cwd=ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0
+    assert "install-hard ok" in completed.stdout
 
 
 @pytest.mark.parametrize(
