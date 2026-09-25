@@ -58,7 +58,11 @@ def _gate_entries(results: list[Result]) -> list[dict[str, Any]]:
 
 
 def _first_paragraph(text: str) -> str:
-    return text.strip().split("\n\n", 1)[0].strip()
+    stripped = text.strip()
+    cut = stripped.find("\n\n")
+    if cut == -1:
+        return stripped
+    return stripped[:cut].strip()
 
 
 def _done_line(handoff: Path, commits: list[dict[str, str]], agent: dict[str, Any] | None) -> str:
@@ -124,6 +128,7 @@ def _load_document(folder: Path, task: str) -> dict[str, Any]:
     if not path.exists():
         return {"task": task, "steps": []}
     loaded: dict[str, Any] = json.loads(path.read_text())
+    loaded["task"] = task
     return loaded
 
 
@@ -139,7 +144,7 @@ def _render_section(step: dict[str, Any]) -> str:
 
 def _format_value(value: Any) -> str:
     if isinstance(value, (list, dict)):
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value)
     return " ".join(str(value).split())
 
 
@@ -157,4 +162,4 @@ def _append_step(folder: Path, task: str, step: dict[str, Any]) -> None:
     document = _load_document(folder, task)
     steps = document["steps"]
     steps.append(step)
-    _write_files(folder, task, steps)
+    _write_files(folder, document["task"], steps)
