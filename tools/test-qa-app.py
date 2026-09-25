@@ -420,6 +420,9 @@ def freeze_unchanged() -> None:
     expect_true("freeze-qa-dir", "qa/x.md" in paths)
     expect_true("freeze-playwright", "client/playwright.config.ts" in paths)
     expect("freeze-src", "src/a.py" in paths, False)
+    ruff = (ROOT / "pyproject.toml").read_text()
+    expect_true("ruff-excludes-qa", '"qa"' in ruff.split("extend-exclude", 1)[1].split("\n", 1)[0])
+    expect_true("ruff-excludes-features", '"features"' in ruff.split("extend-exclude", 1)[1].split("\n", 1)[0])
 
 
 def main() -> None:
