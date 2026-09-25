@@ -299,12 +299,14 @@ def test_latest_qa_text_and_read(tmp_path: Path) -> None:
 
 def test_qa_ending_and_not_verified(capsys: Any) -> None:
     assert runner.qa_ending("app") == 0
-    assert capsys.readouterr().out == "pipeline complete\n"
+    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
     assert runner.qa_ending("harness") == 3
     assert capsys.readouterr().out == runner.not_verified_line("harness") + "\n"
     assert runner.qa_ending("nothing") == 3
     assert "nothing" in capsys.readouterr().out
     assert "a harness" in runner.not_verified_line("harness")
+    assert runner.say_complete() == 0
+    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
 
 
 def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
@@ -312,7 +314,7 @@ def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
     assert runner.includes_qa([find("qa")]) is True
     state = make_state(tmp_path)
     assert runner.ending_for(state, [find("coder")]) == 0
-    assert capsys.readouterr().out == "pipeline complete\n"
+    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
     state.ran_against = "harness"
     assert runner.ending_for(state, [find("qa")]) == 3
     assert "NOT verified" in capsys.readouterr().out
@@ -325,7 +327,7 @@ def test_complete_pipeline_archives(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     state = make_state(tmp_path)
     assert runner.complete_pipeline(state, [find("coder")]) == 0
     assert archive.calls == [(state,)]
-    assert capsys.readouterr().out == "pipeline complete\n"
+    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
 
 
 def test_settle_and_retry_ran_against(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -365,7 +367,7 @@ def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     patch(monkeypatch, runner, "run_step", True)
     state = make_state(tmp_path, ran_against="app")
     assert runner.run_steps(state, [find("qa")], True) == 0
-    assert capsys.readouterr().out == "pipeline complete\n"
+    assert capsys.readouterr().out == f"{runner.COMPLETE}\n"
     state.ran_against = "harness"
     assert runner.run_steps(state, [find("qa")], True) == 3
     assert "NOT verified" in capsys.readouterr().out

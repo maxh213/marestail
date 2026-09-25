@@ -160,12 +160,12 @@ def attach_live(state: RepoState, real: Path, rows: list[ProcRow]) -> None:
     chosen(state, rows, pipeline, real)
 
 
-def not_verified_activity(log_path: Path | None) -> str | None:
-    return finished_note(latest_runner_line(log_path))
-
-
 def finished_note(line: str | None) -> str | None:
     return {True: line}.get("NOT verified" in str(line), None)
+
+
+def not_verified_activity(log_path: Path | None) -> str | None:
+    return finished_note(latest_runner_line(log_path))
 
 
 def attach_finished(state: RepoState, *_rest: object) -> None:

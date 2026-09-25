@@ -127,19 +127,7 @@ def sentence_counts_as_missing(folder: Path) -> None:
 
 
 def to_hardener_unchanged(folder: Path) -> None:
-    root = folder / "repo"
-    root.mkdir(parents=True)
-    git(root, "init", "-q", "-b", "main")
-    git(root, "config", "user.email", "test@marestail")
-    git(root, "config", "user.name", "test")
-    write(root, "README.md", "# repo\n")
-    write(root, "marestail.toml", '[git]\nbase = "main"\n')
-    write(root, ".gitignore", ".marestail/\n")
-    write(root, "tasks/t.md", "# Add one\n")
-    write(root, "features/t.feature", FEATURE)
-    write(root, "qa/t.md", "1. open\n")
-    git(root, "add", "-A")
-    git(root, "commit", "-qm", "init")
+    root = new_repo(folder)
     result = run_cli(
         root,
         "tasks/t.md",

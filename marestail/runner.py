@@ -50,13 +50,16 @@ AUTHOR = "AUTHOR"
 PERF = "perf"
 QA = "qa"
 CONFIG_CHANGE = "## Config change"
-RAN_AGAINST = frozenset({"app", "harness", "nothing"})
-RAN_AGAINST_LINE = {f"ran-against: {value}": value for value in RAN_AGAINST}
+RAN_AGAINST_LINE = {
+    "ran-against: app": "app",
+    "ran-against: harness": "harness",
+    "ran-against: nothing": "nothing",
+}
 MISSING_RAN_AGAINST = (
     "Your handoff has no whole line that is exactly `ran-against: app`, `ran-against: harness`, or `ran-against: nothing`."
 )
 NOT_VERIFIED = "pipeline complete, NOT verified against the running app (qa ran against {what})"
-HARNESS_PHRASE = "a harness"
+AGAINST_PHRASE = {"harness": "a harness", "nothing": "nothing"}
 EXIT_NOT_VERIFIED = 3
 COMPLETE = "pipeline complete"
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
@@ -294,22 +297,24 @@ def includes_qa(steps: list[Step]) -> bool:
     return any(step.name == QA for step in steps)
 
 
+def say_complete() -> int:
+    print(COMPLETE)
+    return 0
+
+
 def ending_for(state: Run, steps: list[Step]) -> int:
     if not includes_qa(steps):
-        print(COMPLETE)
-        return 0
+        return say_complete()
     return qa_ending(state.ran_against or "nothing")
 
 
 def not_verified_line(against: str) -> str:
-    phrases = {"harness": HARNESS_PHRASE, "nothing": "nothing"}
-    return NOT_VERIFIED.format(what=phrases[against])
+    return NOT_VERIFIED.format(what=AGAINST_PHRASE[against])
 
 
 def qa_ending(against: str) -> int:
     if against == "app":
-        print(COMPLETE)
-        return 0
+        return say_complete()
     print(not_verified_line(against))
     return EXIT_NOT_VERIFIED
 
@@ -342,11 +347,7 @@ def run_named_worker(state: Run, worker: Worker) -> bool:
 
 
 def parse_ran_against(text: str) -> str | None:
-    for line in text.splitlines():
-        matched = RAN_AGAINST_LINE.get(line)
-        if matched is not None:
-            return matched
-    return None
+    return next((RAN_AGAINST_LINE[line] for line in text.splitlines() if line in RAN_AGAINST_LINE), None)
 
 
 def latest_qa_text(state: Run) -> str:
@@ -358,17 +359,20 @@ def read_qa_ran_against(state: Run) -> str | None:
     return parse_ran_against(latest_qa_text(state))
 
 
+def record_ran_against(state: Run, against: str) -> bool:
+    state.ran_against = against
+    return True
+
+
 def retry_qa_ran_against(state: Run, worker: Worker) -> bool:
     if not run_worker(state, worker, MISSING_RAN_AGAINST):
         return False
-    state.ran_against = read_qa_ran_against(state) or "nothing"
-    return True
+    return record_ran_against(state, read_qa_ran_against(state) or "nothing")
 
 
 def settle_ran_against(state: Run, worker: Worker, against: str | None) -> bool:
     if against is not None:
-        state.ran_against = against
-        return True
+        return record_ran_against(state, against)
     return retry_qa_ran_against(state, worker)
 
 

@@ -54,6 +54,12 @@ elif words[0] == "worker":
     Path("note.txt").write_text(action + "\n"); commit(role, "note.txt")
     h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
     tag = words[2] if len(words) > 2 else ("app" if role == "qa" else "")
-    extra = {"app": "ran-against: app\n", "harness": "ran-against: harness\n", "nothing": "ran-against: nothing\n", "sentence": "We ran-against: app on a harness.\n", "omit": ""}.get(tag, "")
-    h.write_text(f"{role} done\n{extra}")
+    bodies = {
+        "app": "ran-against: app\n",
+        "harness": "ran-against: harness\n",
+        "nothing": "ran-against: nothing\n",
+        "sentence": "We ran-against: app on a harness.\n",
+        "omit": "",
+    }
+    h.write_text(f"{role} done\n{bodies.get(tag, '')}")
 print(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0.01, "result": action}))

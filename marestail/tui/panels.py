@@ -332,7 +332,7 @@ def draw_busy_from_repo(win: curses.window, y: int, x: int, width: int, repo: Re
 
 
 def dead_row_text(repo: RepoState) -> str:
-    return str(first_text(repo.runner_activity, IDLE_TEXT))
+    return first_text(repo.runner_activity, IDLE_TEXT)
 
 
 def paint_dead(win: curses.window, y: int, x: int, _width: int, repo: RepoState, _selected: bool, state: WatchState) -> None:
