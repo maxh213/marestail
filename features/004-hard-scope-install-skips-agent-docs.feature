@@ -14,6 +14,10 @@ Feature: Hard-scoped install leaves CLAUDE.md and AGENTS.md alone
     And `<target>/CLAUDE.md` and `<target>/AGENTS.md` both exist and contain `marestail gate`
     And stdout ends with `installed into <target>; edit marestail.toml and sonar-project.properties\n`
     And that line does not contain `CLAUDE.md`
+    When I empty the target and run `marestail install --scope changed <target>`
+    Then exit code is 0
+    And `<target>/CLAUDE.md` and `<target>/AGENTS.md` both exist and contain `marestail gate`
+    And stdout ends with the same full-install closing line (no `CLAUDE.md` in that line)
 
   Scenario: hard install on an empty target creates neither agent-doc file
     When I run `marestail install --scope hard <target>` (same as `install(target, hard=True)`)
@@ -27,6 +31,12 @@ Feature: Hard-scoped install leaves CLAUDE.md and AGENTS.md alone
     When I run `marestail install --scope hard <target>`
     Then `<target>/CLAUDE.md` is still exactly `team rules\n`
     And `<target>/AGENTS.md` does not exist
+
+  Scenario: hard install leaves an existing AGENTS.md byte-for-byte
+    Given `<target>/AGENTS.md` holds exactly `team rules\n`
+    When I run `marestail install --scope hard <target>`
+    Then `<target>/AGENTS.md` is still exactly `team rules\n`
+    And `<target>/CLAUDE.md` does not exist
 
   Scenario: hard install implies --gitignore-generated
     When I run `marestail install --scope hard <target>` without `--gitignore-generated`
