@@ -114,6 +114,7 @@ protected_modules =
     marestail.gates._cycles
     marestail.gates._crap
     marestail.gates._coverage
+    marestail.gates._serve
 allowed_importers =
     marestail.gates
 

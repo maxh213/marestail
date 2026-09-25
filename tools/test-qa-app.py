@@ -30,6 +30,7 @@ APP = (
 )
 NOTE = "The app is started for the qa gate; its address is in MARESTAIL_APP_URL."
 QA_ENV_KEYS = ("MARESTAIL_TASK", "MARESTAIL_QA_CMD_TIMEOUT")
+SERVE = qa._serve
 
 
 def expect(name: str, got: Any, wanted: Any) -> None:
@@ -117,14 +118,14 @@ def restore_one(key: str, value: str | None) -> None:
 
 def capture_spawn(root: Path, raw: dict[str, Any], env: dict[str, str] | None = None) -> tuple[Any, int | None]:
     seen: dict[str, int | None] = {"pid": None}
-    real = qa.spawn
+    real = SERVE.spawn
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         process = real(*args, **kwargs)
         seen["pid"] = process.pid
         return process
 
-    with patch.object(qa, "spawn", wrapped):
+    with patch.object(SERVE, "spawn", wrapped):
         result = run_qa(root, raw, env)
     return result, seen["pid"]
 
@@ -134,7 +135,7 @@ def ready_before_cmd(folder: Path) -> None:
     root.mkdir()
     write(root, "app.py", APP)
     order: list[str] = []
-    real_answers = qa.answers
+    real_answers = SERVE.answers
 
     def track(url: str) -> bool:
         ok = real_answers(url)
@@ -149,7 +150,7 @@ def ready_before_cmd(folder: Path) -> None:
         code, output = real_run(command, cwd, **options)
         return code, output + f"\nURL={options.get('env', {}).get('MARESTAIL_APP_URL')}\nPORT={options.get('env', {}).get('PORT')}\n"
 
-    with patch.object(qa, "answers", track), patch.object(qa, "run", track_run):
+    with patch.object(SERVE, "answers", track), patch.object(qa, "run", track_run):
         result, pid = capture_spawn(
             root,
             {"qa": {"cmd": "true", "start": "python3 app.py", "ready": "/", "port": 3400}},
