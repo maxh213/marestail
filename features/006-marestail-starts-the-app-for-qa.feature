@@ -39,9 +39,9 @@ Feature: The qa gate starts the target's app when [qa] start is set
   Scenario: a taken port moves to the next free one
     Given port 3400 is already bound
     And `[qa]` has `start = "python3 app.py"`, `ready = "/"`, `port = 3400`
-      and a `cmd` that prints `$MARESTAIL_APP_URL`
+      and `cmd = "printf '%s' \"$MARESTAIL_APP_URL\" > seen-url"`
     When the `qa` gate runs
-    Then `MARESTAIL_APP_URL` is `http://localhost:<p>` for some free `p` > 3400
+    Then the file `seen-url` contains exactly `http://localhost:<p>` for some free `p` > 3400
     And the ready poll and the app both used that same `p`
 
   Scenario: env reaches the app and never the QA prompt
@@ -59,8 +59,16 @@ Feature: The qa gate starts the target's app when [qa] start is set
   Scenario: empty cmd skips without starting even when start is set
     Given `[qa] start = "python3 app.py"` and `cmd` is empty
     When the `qa` gate runs
-    Then the result is skipped with summary `no [qa] cmd configured`
+    Then the result is skipped with summary exactly `skipped: no [qa] cmd configured`
     And no app process was started and no `.marestail/qa-app.log` was written by a start
+
+  Scenario: start runs in [qa] cwd
+    Given `app.py` exists only under `web/` (not at repo root)
+    And `[qa] cwd = "web"`, `start = "python3 app.py"`, `ready = "/"`, `port = 3400`,
+      and `cmd = "true"`
+    When the `qa` gate runs
+    Then the gate is ok (start resolved `app.py` from `cwd`, not from the repo root)
+    And the app's process group is gone afterwards
 
   Scenario: only the qa tier starts the app
     Given `[qa] start` is set
