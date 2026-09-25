@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import inspect
 import os
 import shutil
 import tempfile
@@ -40,12 +41,21 @@ freeze_paths = [
 ]
 grok_home = tempfile.mkdtemp()
 os.environ["GROK_HOME"] = grok_home
+supports_hard = "hard" in inspect.signature(install.install).parameters
 
 
 def install_once() -> None:
     target = Path(tempfile.mkdtemp())
     try:
         install.install(target)
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def install_hard_once() -> None:
+    target = Path(tempfile.mkdtemp())
+    try:
+        install.install(target, hard=True)
     finally:
         shutil.rmtree(target, ignore_errors=True)
 
@@ -57,6 +67,10 @@ try:
     harness.emit("report.render", harness.measure(lambda: report.render(results)))
     harness.emit("report.to_json", harness.measure(lambda: report.to_json(results, "all", set())))
     harness.emit("marestail install", harness.measure(install_once))
+    if supports_hard:
+        harness.emit("marestail install hard", harness.measure(install_hard_once))
+    else:
+        harness.absent("marestail install hard")
     harness.emit("py_crap.coverage_omits", harness.measure_named(py_crap, "coverage_omits", ctx))
 finally:
     shutil.rmtree(grok_home, ignore_errors=True)
