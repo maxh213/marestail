@@ -11,10 +11,10 @@ from itertools import chain, starmap
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from .model import Fleet, Process, RepoState, Step, Worker
-
 import marestail.backends as backends
 from marestail.ran_against import NOTE
+
+from .model import Fleet, Process, RepoState, Step, Worker
 
 BACKENDS = frozenset({*backends.BACKENDS, "cursor-agent"})
 STEP_RE = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
@@ -162,7 +162,7 @@ def attach_live(state: RepoState, real: Path, rows: list[ProcRow]) -> None:
 
 
 def finished_note(line: str | None) -> str | None:
-    return {True: line}.get(NOTE in str(line), None)
+    return (None, line)[NOTE in str(line)]
 
 
 def not_verified_activity(log_path: Path | None) -> str | None:

@@ -30,6 +30,7 @@ CRITIC = Judge("critic", None, bounce_to="specifier")
 PERF = Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True)
 COMPLETE_LINE = ran_against.finish("app")[0]
 CODER = Worker("coder", None)
+QA = Worker("qa", "qa")
 
 
 def make_state(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -> Run:
@@ -335,35 +336,38 @@ def test_complete_pipeline_archives(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 def test_settle_and_retry_ran_against(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(tmp_path)
-    assert runner.settle_ran_against(state, find("qa"), "app") is True
+    assert runner.settle_ran_against(state, QA, "app") is True
     assert state.ran_against == "app"
     worker = patch(monkeypatch, runner, "run_worker", True)
     patch(monkeypatch, runner, "read_qa_ran_against", None)
     state.ran_against = None
-    assert runner.settle_ran_against(state, find("qa"), None) is True
+    assert runner.settle_ran_against(state, QA, None) is True
     assert state.ran_against == "nothing"
-    assert worker.calls[0][2] == runner.MISSING_RAN_AGAINST
+    assert worker.calls[0] == (state, QA, runner.MISSING_RAN_AGAINST)
     worker.replies = [False]
-    assert runner.retry_qa_ran_against(state, find("qa")) is False
+    assert runner.retry_qa_ran_against(state, QA) is False
+    assert worker.calls[1] == (state, QA, runner.MISSING_RAN_AGAINST)
 
 
 def test_retry_honours_second_handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(tmp_path)
-    patch(monkeypatch, runner, "run_worker", True)
+    worker = patch(monkeypatch, runner, "run_worker", True)
     patch(monkeypatch, runner, "read_qa_ran_against", "harness")
-    assert runner.retry_qa_ran_against(state, find("qa")) is True
+    assert runner.retry_qa_ran_against(state, QA) is True
     assert state.ran_against == "harness"
+    assert worker.calls[0] == (state, QA, runner.MISSING_RAN_AGAINST)
 
 
 def test_run_qa_success_and_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(tmp_path)
     patch(monkeypatch, runner, "run_worker", False)
-    assert runner.run_qa(state, find("qa")) is False
-    patch(monkeypatch, runner, "run_worker", True)
+    assert runner.run_qa(state, QA) is False
+    worker = patch(monkeypatch, runner, "run_worker", True)
     settle = patch(monkeypatch, runner, "settle_ran_against", True)
     patch(monkeypatch, runner, "read_qa_ran_against", "app")
-    assert runner.run_qa(state, find("qa")) is True
-    assert settle.calls[0][2] == "app"
+    assert runner.run_qa(state, QA) is True
+    assert worker.calls[0] == (state, QA, "")
+    assert settle.calls[0] == (state, QA, "app")
 
 
 def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, steps_env: dict[str, Recorder], capsys: Any) -> None:
