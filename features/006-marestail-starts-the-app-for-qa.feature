@@ -74,14 +74,18 @@ Feature: The qa gate starts the target's app when [qa] start is set
     Given `[qa] start` is set
     When `marestail gate --tier fast`, `--tier sonar`, or `--tier full` runs
     Then no app process is started (the `qa` gate is not in those tiers)
-    And `marestail gate --tier qa` (or `--only qa`) is the tier that starts the app
+    And `marestail gate --tier qa` starts the app when `start` is set
 
   Scenario: app log path
     Given `[qa] start` is set
-    When `marestail gate --tier qa` runs alone
+    When `marestail gate --tier qa` runs with `MARESTAIL_TASK` unset
     Then app stdout/stderr is written to `.marestail/qa-app.log`
-    When the same gate runs under `marestail run` for task stem `t` (runner exports `MARESTAIL_TASK=t`)
-    Then the log is `.marestail/runs/t/qa-app.log`
+    When `runner.run_pipeline` starts for a task whose stem is `t`
+    Then the runner sets `os.environ["MARESTAIL_TASK"]` to `t` before steps run
+      (export at run start next to `share_scope`; always, not only when scoped)
+    And when that run invokes the qa gate (`Run.gates("qa")` or a Stop-hook
+      `marestail gate --tier qa` that inherits the export)
+    Then the app log is `.marestail/runs/t/qa-app.log`
 
   Scenario: cleanup on cmd timeout
     Given `[qa] start = "python3 app.py"`, `cmd = "sleep 30"`, and env `MARESTAIL_QA_CMD_TIMEOUT=1`
@@ -115,4 +119,4 @@ Feature: The qa gate starts the target's app when [qa] start is set
   Scenario: README documents the keys and qa-tier-only start
     Then the README `[qa]` / acceptance text names `start`, `ready`, `port`, `ready_timeout`, and `env`
     And it says the app is started only for the `qa` tier
-    And if the package reads `MARESTAIL_TASK` or `MARESTAIL_QA_CMD_TIMEOUT`, those are in the README Environment variables table
+    And the README Environment variables table names `MARESTAIL_TASK` and `MARESTAIL_QA_CMD_TIMEOUT`

@@ -12,8 +12,8 @@ h.HTTPServer(("127.0.0.1", int(os.environ["PORT"])), h.SimpleHTTPRequestHandler)
 
 1. `cd` to the marestail-green repo root with `.venv` active.
 2. `python3 tools/test-qa-app.py`
-   Expected: exit `0`, last line contains `ok` (covers ready-before-cmd, `MARESTAIL_APP_URL`, start in `[qa] cwd`, cleanup on pass/fail/timeout, did-not-answer + log tail, next free port, env to app / not in prompt, no-`start` unchanged, empty-`cmd` skip with summary `skipped: no [qa] cmd configured`).
-3. In a temp repo with the `app.py` above and `[qa] cmd = "echo $MARESTAIL_APP_URL"`, `start = "python3 app.py"`, `ready = "/"`, `port = 3400`: run `marestail gate --tier qa --only qa`.
+   Expected: exit `0`, last line contains `ok` (covers ready-before-cmd, `MARESTAIL_APP_URL`, start in `[qa] cwd`, cleanup on pass/fail/timeout, did-not-answer + log tail, next free port, env to app / not in prompt, no-`start` unchanged, empty-`cmd` skip with summary `skipped: no [qa] cmd configured`, bare-gate log path, runner sets `MARESTAIL_TASK`, run log under `.marestail/runs/<stem>/qa-app.log`).
+3. In a temp repo with the `app.py` above and `[qa] cmd = "true"`, `start = "python3 app.py"`, `ready = "/"`, `port = 3400`: run `marestail gate --tier qa --only qa` with `MARESTAIL_TASK` unset.
    Expected: exit `0`; stdout has a `qa` ok line; `.marestail/qa-app.log` exists; nothing still listening on the chosen port.
 4. Same temp repo; change `cmd` to `exit 1`; run the same gate.
    Expected: gate fails; still no listener left on that port.
@@ -31,9 +31,34 @@ h.HTTPServer(("127.0.0.1", int(os.environ["PORT"])), h.SimpleHTTPRequestHandler)
    Expected: passes; mtime of `.marestail/qa-app.log` is unchanged.
 10. Restore `start = "python3 app.py"` and `cmd = "sleep 60"`. Run `marestail gate --tier qa --only qa` in the background; once `.marestail/qa-app.log` exists and a listener is up, send SIGINT to the gate process (`kill -INT <pid>`).
     Expected: gate exits; no listener left on the chosen port.
-11. With `start` set, run `marestail gate --tier fast --only docs` (or any non-qa-only fast gate).
+11. With `start` set, run `marestail gate --tier fast --only docs`.
     Expected: no app listener started.
-12. `grep -n 'start\|ready_timeout\|MARESTAIL_APP_URL\|MARESTAIL_QA_CMD_TIMEOUT\|qa tier' README.md templates/marestail.toml | head -40`
-    Expected: README names the new `[qa]` keys and says the app starts only for the `qa` tier; names `MARESTAIL_QA_CMD_TIMEOUT` (and `MARESTAIL_TASK` if used for the run log path); `templates/marestail.toml` has the new keys commented under `[qa]`.
-13. `python3 tools/test-qa-ran-against.py; python3 tools/test-timeline.py; python3 tools/test-perf.py; echo exit=$?`
+12. Same temp repo with `start` set; run `MARESTAIL_TASK=t marestail gate --tier qa --only qa`.
+    Expected: exit `0`; app log is `.marestail/runs/t/qa-app.log` (not `.marestail/qa-app.log`).
+13. From the marestail-green repo root (proves runner wiring, not a hand-set env):
+
+```bash
+python3 <<'PY'
+from pathlib import Path
+from unittest.mock import patch
+import os
+from marestail import runner
+from marestail import config as cm
+from marestail.config import Config
+c = Config(root=Path("."), raw={})
+with (
+    patch.object(cm, "load", return_value=c),
+    patch.object(runner, "run_steps", return_value=0),
+    patch.object(runner.perf_trees, "record_start"),
+):
+    os.environ.pop("MARESTAIL_TASK", None)
+    runner.run_pipeline(Path("tasks/006-marestail-starts-the-app-for-qa.md"), "specifier", "specifier", True, None, 0)
+print(os.environ.get("MARESTAIL_TASK"))
+PY
+```
+
+    Expected: prints exactly `006-marestail-starts-the-app-for-qa`.
+14. `grep -n 'start\|ready_timeout\|MARESTAIL_APP_URL\|MARESTAIL_QA_CMD_TIMEOUT\|MARESTAIL_TASK\|qa tier' README.md templates/marestail.toml | head -40`
+    Expected: README names the new `[qa]` keys and says the app starts only for the `qa` tier; Environment variables table names `MARESTAIL_TASK` and `MARESTAIL_QA_CMD_TIMEOUT`; `templates/marestail.toml` has the new keys commented under `[qa]`.
+15. `python3 tools/test-qa-ran-against.py; python3 tools/test-timeline.py; python3 tools/test-perf.py; echo exit=$?`
     Expected: ran-against and timeline exit 0; test-perf still exit 1 with `verdict-commit-files: '' != 'perf/bench_x.py'`.
