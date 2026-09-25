@@ -30,37 +30,29 @@ def run_gate(ctx: Context) -> Result:
     start = ctx.config.get("qa", "start")
     if start:
         return run_with_app(ctx, command, start, started)
-    return run_cmd_only(ctx, command, started)
-
-
-def run_cmd_only(ctx: Context, command: str, started: float) -> Result:
-    cwd = ctx.root / ctx.config.get("qa", "cwd", ".")
-    code, output = run(["bash", "-lc", command], cwd=cwd, timeout=cmd_timeout())
-    return qa_result(ctx, code, output, started)
+    return run_cmd(ctx, command, qa_cwd(ctx), started)
 
 
 def run_with_app(ctx: Context, command: str, start: str, started: float) -> Result:
-    cwd = ctx.root / ctx.config.get("qa", "cwd", ".")
+    cwd = qa_cwd(ctx)
     port = chosen_port(int(ctx.config.get("qa", "port", DEFAULT_PORT)))
     ready = ctx.config.get("qa", "ready", DEFAULT_READY)
     seconds = int(ctx.config.get("qa", "ready_timeout", DEFAULT_READY_TIMEOUT))
-    url = f"http://localhost:{port}{ready}"
-    base = f"http://localhost:{port}"
-    return with_app(ctx, command, start, cwd, port, url, base, seconds, app_log_path(ctx.root), started)
+    return serve_then_cmd(ctx, command, start, cwd, port, ready, seconds, started)
 
 
-def with_app(
+def serve_then_cmd(
     ctx: Context,
     command: str,
     start: str,
     cwd: Path,
     port: int,
-    url: str,
-    base: str,
+    ready: str,
     seconds: int,
-    log_path: Path,
     started: float,
 ) -> Result:
+    url = f"http://localhost:{port}{ready}"
+    log_path = app_log_path(ctx.root)
     ensure_dir(log_path.parent)
     handle = log_path.open("w", buffering=1)
     process = None
@@ -70,24 +62,26 @@ def with_app(
         if failure:
             handle.flush()
             return Result("qa", False, ctx.global_note(failure), log_tail(log_path), elapsed(started))
-        return finish_cmd(ctx, command, cwd, base, port, started)
+        return run_cmd(ctx, command, cwd, started, {APP_URL: f"http://localhost:{port}", "PORT": str(port)})
     finally:
         end_app(process, handle)
 
 
-def finish_cmd(ctx: Context, command: str, cwd: Path, base: str, port: int, started: float) -> Result:
-    code, output = run(
-        ["bash", "-lc", command],
-        cwd=cwd,
-        env={APP_URL: base, "PORT": str(port)},
-        timeout=cmd_timeout(),
-    )
+def run_cmd(ctx: Context, command: str, cwd: Path, started: float, env: dict[str, str] | None = None) -> Result:
+    options: dict[str, Any] = {"cwd": cwd, "timeout": cmd_timeout()}
+    if env is not None:
+        options["env"] = env
+    code, output = run(["bash", "-lc", command], **options)
     return qa_result(ctx, code, output, started)
 
 
 def qa_result(ctx: Context, code: int, output: str, started: float) -> Result:
     summary = "qa passed" if code == 0 else f"qa failed (exit {code})"
     return Result("qa", code == 0, ctx.global_note(summary), tail(output, 40) if code else [], elapsed(started))
+
+
+def qa_cwd(ctx: Context) -> Path:
+    return ctx.root / str(ctx.config.get("qa", "cwd", "."))
 
 
 def cmd_timeout() -> int:
@@ -101,10 +95,9 @@ def qa_env(ctx: Context) -> dict[str, str]:
 
 
 def app_log_path(root: Path) -> Path:
+    base = root / ".marestail"
     task = os.environ.get(TASK_ENV)
-    if task:
-        return root / ".marestail" / "runs" / task / LOG_NAME
-    return root / ".marestail" / LOG_NAME
+    return base / "runs" / task / LOG_NAME if task else base / LOG_NAME
 
 
 def log_tail(path: Path) -> list[str]:
@@ -165,7 +158,7 @@ def answers(url: str) -> bool:
             return int(response.status) < 500
     except urllib.error.HTTPError as error:
         return int(error.code) < 500
-    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+    except OSError:
         return False
 
 

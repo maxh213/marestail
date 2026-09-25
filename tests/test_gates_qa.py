@@ -187,7 +187,8 @@ def test_stop_already_dead_and_force(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(qa.os, "killpg", killpg)
     qa.stop(again)
-    assert signal.SIGTERM in kills and signal.SIGKILL in kills
+    assert signal.SIGTERM in kills
+    assert signal.SIGKILL in kills
 
 
 def test_force_kill_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -233,8 +234,6 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     process.pid = 1
     process.poll.return_value = None
     monkeypatch.setattr(qa, "chosen_port", lambda preferred: 3456)
-    monkeypatch.setattr(qa, "spawn", lambda *a, **k: process)
-    monkeypatch.setattr(qa, "wait_ready", lambda url, proc, seconds: "qa: app did not answer on http://localhost:3456/ within 2s")
     monkeypatch.setattr(qa, "stop", lambda proc: None)
 
     def write_log(start: str, cwd: Path, port: int, extra: dict[str, str], handle: Any) -> MagicMock:
@@ -243,6 +242,7 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
         return process
 
     monkeypatch.setattr(qa, "spawn", write_log)
+    monkeypatch.setattr(qa, "wait_ready", lambda url, proc, seconds: "qa: app did not answer on http://localhost:3456/ within 2s")
     result = checked(
         qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "python3 app.py", "ready_timeout": 2}})),
         "qa",
@@ -260,10 +260,15 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:3456", "PORT": "3456"}
 
 
-def test_finish_cmd_and_qa_result(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+def test_run_cmd_and_qa_result(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(qa, [(1, "nope\n")])
     ctx = make_context(tmp_path, {"qa": {"cmd": "x"}})
-    result = qa.finish_cmd(ctx, "x", tmp_path, "http://localhost:9", 9, 0.0)
+    result = qa.run_cmd(ctx, "x", tmp_path, 0.0, {"MARESTAIL_APP_URL": "http://localhost:9", "PORT": "9"})
     assert result.ok is False
     assert "qa failed" in result.summary
     assert fake.options[0]["env"]["MARESTAIL_APP_URL"] == "http://localhost:9"
+
+
+def test_qa_cwd(tmp_path: Path) -> None:
+    assert qa.qa_cwd(make_context(tmp_path, {"qa": {"cwd": "web"}})) == tmp_path / "web"
+    assert qa.qa_cwd(make_context(tmp_path, {"qa": {}})) == tmp_path / "."
