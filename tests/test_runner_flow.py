@@ -162,6 +162,7 @@ def test_run_pipeline_uses_config_defaults(pipeline_env: dict[str, Any], capsys:
     assert pipeline_env["start"].calls == [(state.config, "t")]
     assert pipeline_env["load"] == [Path.cwd()]
     assert os.environ["MARESTAIL_SCOPE"] == "unset"
+    assert os.environ["MARESTAIL_TASK"] == "t"
     assert capsys.readouterr().out == "\nperf changes\n"
 
 

@@ -199,6 +199,7 @@ def run_pipeline(
     picked = pick_model(config, model, agent, effort)
     scoped = pick_scope(config, scope, focus)
     share_scope(*scoped)
+    os.environ["MARESTAIL_TASK"] = Path(task).stem
     state = make_run(config, task, retries, agent, picked, scoped)
     perf_trees.record_start(config, state.task_name)
     outcome = run_steps(state, window(start, stop), auto)

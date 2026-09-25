@@ -74,6 +74,30 @@ def test_hard_scope() -> None:
     assert prompts.hard_scope({"b.py", "a"}, "scope {paths}.") == ["# Scope\nscope `a`, `b.py`."]
 
 
+def test_qa_app_note(repo: Path) -> None:
+    write(repo.parent / "roles" / "qa.md", "You are QA.\n")
+    bare = prompts.qa_app_note(config(repo), cast(Worker, find("qa")))
+    assert bare == []
+    note = prompts.qa_app_note(config(repo, {"qa": {"start": "python3 app.py"}}), cast(Worker, find("qa")))
+    assert note == ["The app is started for the qa gate; its address is in MARESTAIL_APP_URL."]
+    assert prompts.qa_app_note(config(repo, {"qa": {"start": "x"}}), cast(Worker, find("coder"))) == []
+
+
+def test_worker_prompt_includes_qa_app_note(repo: Path) -> None:
+    write(repo.parent / "roles" / "qa.md", "You are QA.\n")
+    text = prompts.worker_prompt(
+        config(repo, {"qa": {"start": "python3 app.py", "env": {"CMS_URL": "https://example.test/g", "LOCALE": "en-gb"}}}),
+        cast(Worker, find("qa")),
+        repo / "tasks" / "t.md",
+        "t",
+        report(repo, "09-qa"),
+        "",
+    )
+    assert "The app is started for the qa gate; its address is in MARESTAIL_APP_URL." in text
+    assert "example.test" not in text
+    assert "en-gb" not in text
+
+
 def test_worker_prompt(repo: Path) -> None:
     text = prompts.worker_prompt(
         config(repo), cast(Worker, find("coder")), repo / "tasks" / "t.md", "t", report(repo, "03-coder"), "fix it", "lbl", " --x"

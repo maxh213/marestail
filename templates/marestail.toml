@@ -116,3 +116,8 @@ paths = ["server", "client/app"]
 [qa]
 cmd = "npx playwright test"
 cwd = "client/app"
+# start = "yarn dev -p $PORT"
+# ready = "/"
+# port = 3400
+# ready_timeout = 180
+# env = { CMS_URL = "https://example/graphql", LOCALE = "en-gb" }

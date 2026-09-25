@@ -49,6 +49,7 @@ def worker_prompt(
     return PARAGRAPH.join(
         [
             role_text(worker.name),
+            *qa_app_note(config, worker),
             section(TASK, task.read_text()),
             *hard_scope(hard_focus, WORKER_SCOPE),
             section("Specification files", spec_listing(config, task_name)),
@@ -57,6 +58,12 @@ def worker_prompt(
             *optional_section("Why the work came back to you", feedback),
         ]
     )
+
+
+def qa_app_note(config: Config, worker: Worker) -> list[str]:
+    if worker.name != "qa" or not config.get("qa", "start"):
+        return []
+    return ["The app is started for the qa gate; its address is in MARESTAIL_APP_URL."]
 
 
 def judge_prompt(

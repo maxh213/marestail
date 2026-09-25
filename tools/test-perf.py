@@ -707,8 +707,12 @@ def gates_skip_benchmarks() -> None:
         )
         expect("vulture-exclude", "perf/*" in deadcode.PYTHON_EXCLUDES, True)
         expect("radon-exclude", "perf/*" in py_crap.radon_command(ctx)[4].split(","), True)
-        expect("ruff-exclude-at-root", py_lint.benchmark_exclusion(ctx), ["--extend-exclude", "perf/**"])
-        expect("ruff-no-exclude-nested", py_lint.benchmark_exclusion(nested), [])
+        expect(
+            "ruff-exclude-at-root",
+            py_lint.path_exclusions(ctx),
+            ["--extend-exclude", "perf/**", "--extend-exclude", "qa/**", "--extend-exclude", "features/**"],
+        )
+        expect("ruff-no-exclude-nested", py_lint.path_exclusions(nested), [])
         expect("eslint-exclude-at-root", ts_lint.eslint_command(ctx)[3:5], ["--ignore-pattern", "perf/"])
         expect("eslint-no-exclude-nested", "--ignore-pattern" in ts_lint.eslint_command(nested), False)
         expect("sonar-dotnet-exclude", "perf/**" in sonar.DOTNET_EXCLUSIONS, True)

@@ -18,9 +18,10 @@ def test_clean_full_run(tmp_path: Path, fake_run: Any) -> None:
     result = checked(py_lint.run_gate(make_context(tmp_path)), py_lint.GATE)
     assert (result.ok, result.summary, result.findings) == (True, "ruff, ruff format, mypy clean", [])
     ruff = f"{tmp_path}/.venv/bin/ruff"
+    excluded = ["--extend-exclude", "perf/**", "--extend-exclude", "qa/**", "--extend-exclude", "features/**"]
     assert fake.calls == [
-        [ruff, "check", "--output-format", "concise", "--extend-exclude", "perf/**", "."],
-        [ruff, "format", "--check", "--extend-exclude", "perf/**", "."],
+        [ruff, "check", "--output-format", "concise", *excluded, "."],
+        [ruff, "format", "--check", *excluded, "."],
         [f"{tmp_path}/.venv/bin/mypy", "--no-error-summary", "--no-pretty"],
     ]
     assert fake.options == [{"cwd": tmp_path, "timeout": 900}] * 3
@@ -52,8 +53,20 @@ def test_scoped_targets_nested_root(tmp_path: Path, fake_run: Any) -> None:
 def test_unscoped_nested_root_targets_the_folder(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"python": {"root": "src"}})
     assert py_lint.python_targets(ctx) == ["src"]
-    assert py_lint.benchmark_exclusion(ctx) == []
+    assert py_lint.path_exclusions(ctx) == []
     assert py_lint.mypy_targets(ctx) == []
+
+
+def test_path_exclusions_at_repo_root(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path)
+    assert py_lint.path_exclusions(ctx) == [
+        "--extend-exclude",
+        "perf/**",
+        "--extend-exclude",
+        "qa/**",
+        "--extend-exclude",
+        "features/**",
+    ]
 
 
 def test_relevant_caps_lines() -> None:

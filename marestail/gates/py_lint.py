@@ -36,7 +36,7 @@ def command_findings(label: str, command: list[str], ctx: Context) -> list[str]:
 
 def commands(ctx: Context) -> list[tuple[str, list[str]]]:
     targets = python_targets(ctx)
-    excluded = benchmark_exclusion(ctx)
+    excluded = path_exclusions(ctx)
     return [
         (RUFF, [ctx.python_bin(RUFF), "check", "--output-format", "concise", *excluded, *targets]),
         (FORMAT, [ctx.python_bin(RUFF), FORMAT, "--check", *excluded, *targets]),
@@ -44,8 +44,13 @@ def commands(ctx: Context) -> list[tuple[str, list[str]]]:
     ]
 
 
-def benchmark_exclusion(ctx: Context) -> list[str]:
-    return ["--extend-exclude", "perf/**"] if ctx.python_root().resolve() == ctx.root.resolve() else []
+def path_exclusions(ctx: Context) -> list[str]:
+    if ctx.python_root().resolve() != ctx.root.resolve():
+        return []
+    flags: list[str] = []
+    for pattern in ("perf/**", "qa/**", "features/**"):
+        flags.extend(["--extend-exclude", pattern])
+    return flags
 
 
 def changed_python(ctx: Context) -> list[str]:
