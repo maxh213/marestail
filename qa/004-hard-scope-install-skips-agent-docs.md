@@ -25,5 +25,7 @@
     Expected: lists `--scope` and `--gitignore-generated`.
 13. `grep -n 'install --scope hard\|CLAUDE.md\|gitignore-generated' README.md | head -20`
     Expected: quick start and the `--gitignore-generated` paragraph say hard install leaves `CLAUDE.md`/`AGENTS.md` alone and implies `--gitignore-generated`; shared-docs wording is for full install only.
-14. `python3 tools/test-practices.py; python3 tools/test-perf.py; python3 tools/test-scope-hard.py` (and `python3 tools/test-install-hard.py` if that file was added)
-    Expected: each exits 0 with a last line containing `ok` (or the practices/perf scripts' usual success lines).
+14. `python3 tools/test-practices.py; python3 tools/test-scope-hard.py; python3 tools/test-install-hard.py`
+    Expected: each exits 0 (practices / scope-hard / install-hard usual success lines).
+15. `python3 tools/test-perf.py; echo "exit=$?"`
+    Expected: exit 1; last line `verdict-commit-files: '' != 'perf/bench_x.py'` (same contract as task 000 — not a pass).

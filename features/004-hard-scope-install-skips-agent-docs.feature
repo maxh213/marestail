@@ -86,4 +86,6 @@ Feature: Hard-scoped install leaves CLAUDE.md and AGENTS.md alone
 
   Scenario: diagnostic install tests cover the cases
     Then `tools/test-practices.py` or `tools/test-install-hard.py` covers each case in the task's Tests list
-    And `python3 tools/test-practices.py`, `python3 tools/test-perf.py` and `python3 tools/test-scope-hard.py` still pass
+    And `python3 tools/test-practices.py` and `python3 tools/test-scope-hard.py` still exit 0
+    And hard-install coverage asserts the full tree list from "hard install still writes the rest of the install tree" (not only toml / ts.md / .claude)
+    And `python3 tools/test-perf.py` still fails as in 000: exit 1, last line `verdict-commit-files: '' != 'perf/bench_x.py'`
