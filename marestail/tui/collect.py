@@ -156,8 +156,20 @@ def attach_live(state: RepoState, real: Path, rows: list[ProcRow]) -> None:
     pipeline = pipeline_pids(rows, real)
     state.alive = bool(pipeline)
     bind_running(state, rows, real)
-    chosen = (skip, attach_activity)[state.alive]
+    chosen = (attach_finished, attach_activity)[state.alive]
     chosen(state, rows, pipeline, real)
+
+
+def not_verified_activity(log_path: Path | None) -> str | None:
+    return finished_note(latest_runner_line(log_path))
+
+
+def finished_note(line: str | None) -> str | None:
+    return {True: line}.get("NOT verified" in str(line), None)
+
+
+def attach_finished(state: RepoState, *_rest: object) -> None:
+    state.runner_activity = not_verified_activity(state.log_path)
 
 
 def is_pipeline_row(real: Path, row: ProcRow) -> bool:

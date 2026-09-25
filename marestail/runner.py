@@ -48,7 +48,17 @@ PASS = "PASS"
 BOUNCE = "BOUNCE"
 AUTHOR = "AUTHOR"
 PERF = "perf"
+QA = "qa"
 CONFIG_CHANGE = "## Config change"
+RAN_AGAINST = frozenset({"app", "harness", "nothing"})
+RAN_AGAINST_LINE = {f"ran-against: {value}": value for value in RAN_AGAINST}
+MISSING_RAN_AGAINST = (
+    "Your handoff has no whole line that is exactly `ran-against: app`, `ran-against: harness`, or `ran-against: nothing`."
+)
+NOT_VERIFIED = "pipeline complete, NOT verified against the running app (qa ran against {what})"
+HARNESS_PHRASE = "a harness"
+EXIT_NOT_VERIFIED = 3
+COMPLETE = "pipeline complete"
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
 WORKER_REPEAT_LIMIT = 3
@@ -134,6 +144,7 @@ class Run:
     labels: set[str] = field(default_factory=set)
     attempt_waits: list[dict[str, Any]] = field(default_factory=list)
     attempt_agent: dict[str, Any] | None = None
+    ran_against: str | None = None
 
     @property
     def task_name(self) -> str:
@@ -271,9 +282,36 @@ def run_steps(state: Run, steps: list[Step], auto: bool) -> int:
             return 1
         if paused(state, step, auto):
             return 1
-    print("pipeline complete")
+    return complete_pipeline(state, steps)
+
+
+def complete_pipeline(state: Run, steps: list[Step]) -> int:
     archive_handoffs(state)
-    return 0
+    return ending_for(state, steps)
+
+
+def includes_qa(steps: list[Step]) -> bool:
+    return any(step.name == QA for step in steps)
+
+
+def ending_for(state: Run, steps: list[Step]) -> int:
+    if not includes_qa(steps):
+        print(COMPLETE)
+        return 0
+    return qa_ending(state.ran_against or "nothing")
+
+
+def not_verified_line(against: str) -> str:
+    phrases = {"harness": HARNESS_PHRASE, "nothing": "nothing"}
+    return NOT_VERIFIED.format(what=phrases[against])
+
+
+def qa_ending(against: str) -> int:
+    if against == "app":
+        print(COMPLETE)
+        return 0
+    print(not_verified_line(against))
+    return EXIT_NOT_VERIFIED
 
 
 def paused(state: Run, step: Step, auto: bool) -> bool:
@@ -289,12 +327,55 @@ def share_scope(scope_changed: bool, hard: bool, focus: set[str]) -> None:
 
 def run_step(state: Run, step: Step) -> bool:
     if isinstance(step, Worker):
-        return run_worker(state, step, "")
+        return run_named_worker(state, step)
     reason = skip_reason(state, step)
     if reason:
         print(reason)
         return True
     return run_judge_loop(state, step)
+
+
+def run_named_worker(state: Run, worker: Worker) -> bool:
+    if worker.name == QA:
+        return run_qa(state, worker)
+    return run_worker(state, worker, "")
+
+
+def parse_ran_against(text: str) -> str | None:
+    for line in text.splitlines():
+        matched = RAN_AGAINST_LINE.get(line)
+        if matched is not None:
+            return matched
+    return None
+
+
+def latest_qa_text(state: Run) -> str:
+    reports = sorted(state.handoffs.glob("*-qa.md"))
+    return reports[LAST].read_text() if reports else EMPTY
+
+
+def read_qa_ran_against(state: Run) -> str | None:
+    return parse_ran_against(latest_qa_text(state))
+
+
+def retry_qa_ran_against(state: Run, worker: Worker) -> bool:
+    if not run_worker(state, worker, MISSING_RAN_AGAINST):
+        return False
+    state.ran_against = read_qa_ran_against(state) or "nothing"
+    return True
+
+
+def settle_ran_against(state: Run, worker: Worker, against: str | None) -> bool:
+    if against is not None:
+        state.ran_against = against
+        return True
+    return retry_qa_ran_against(state, worker)
+
+
+def run_qa(state: Run, worker: Worker) -> bool:
+    if not run_worker(state, worker, ""):
+        return False
+    return settle_ran_against(state, worker, read_qa_ran_against(state))
 
 
 def skip_reason(state: Run, judge: Judge) -> str:

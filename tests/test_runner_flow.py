@@ -266,6 +266,111 @@ def test_run_step_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert worker.calls == [(state, CODER, "")]
 
 
+def test_run_named_worker_routes_qa(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    qa = patch(monkeypatch, runner, "run_qa", True)
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(tmp_path)
+    assert runner.run_named_worker(state, find("qa")) is True
+    assert qa.calls == [(state, find("qa"))]
+    assert worker.calls == []
+    assert runner.run_named_worker(state, CODER) is True
+    assert worker.calls == [(state, CODER, "")]
+
+
+def test_parse_ran_against_exact_lines() -> None:
+    assert runner.parse_ran_against("ran-against: app\n") == "app"
+    assert runner.parse_ran_against("note\nran-against: harness\n") == "harness"
+    assert runner.parse_ran_against("ran-against: nothing") == "nothing"
+    assert runner.parse_ran_against("We ran-against: app on a harness.\n") is None
+    assert runner.parse_ran_against("ran-against: app elsewhere\n") is None
+    assert runner.parse_ran_against("") is None
+
+
+def test_latest_qa_text_and_read(tmp_path: Path) -> None:
+    state = make_state(tmp_path)
+    assert runner.latest_qa_text(state) == ""
+    handoffs = state.handoffs
+    handoffs.mkdir(parents=True)
+    (handoffs / "01-qa.md").write_text("old\n")
+    (handoffs / "02-qa.md").write_text("ran-against: harness\n")
+    assert runner.latest_qa_text(state) == "ran-against: harness\n"
+    assert runner.read_qa_ran_against(state) == "harness"
+
+
+def test_qa_ending_and_not_verified(capsys: Any) -> None:
+    assert runner.qa_ending("app") == 0
+    assert capsys.readouterr().out == "pipeline complete\n"
+    assert runner.qa_ending("harness") == 3
+    assert capsys.readouterr().out == runner.not_verified_line("harness") + "\n"
+    assert runner.qa_ending("nothing") == 3
+    assert "nothing" in capsys.readouterr().out
+    assert "a harness" in runner.not_verified_line("harness")
+
+
+def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
+    assert runner.includes_qa([find("coder")]) is False
+    assert runner.includes_qa([find("qa")]) is True
+    state = make_state(tmp_path)
+    assert runner.ending_for(state, [find("coder")]) == 0
+    assert capsys.readouterr().out == "pipeline complete\n"
+    state.ran_against = "harness"
+    assert runner.ending_for(state, [find("qa")]) == 3
+    assert "NOT verified" in capsys.readouterr().out
+    state.ran_against = None
+    assert runner.ending_for(state, [find("qa")]) == 3
+
+
+def test_complete_pipeline_archives(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    archive = patch(monkeypatch, runner, "archive_handoffs")
+    state = make_state(tmp_path)
+    assert runner.complete_pipeline(state, [find("coder")]) == 0
+    assert archive.calls == [(state,)]
+    assert capsys.readouterr().out == "pipeline complete\n"
+
+
+def test_settle_and_retry_ran_against(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    assert runner.settle_ran_against(state, find("qa"), "app") is True
+    assert state.ran_against == "app"
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    patch(monkeypatch, runner, "read_qa_ran_against", None)
+    state.ran_against = None
+    assert runner.settle_ran_against(state, find("qa"), None) is True
+    assert state.ran_against == "nothing"
+    assert worker.calls[0][2] == runner.MISSING_RAN_AGAINST
+    worker.replies = [False]
+    assert runner.retry_qa_ran_against(state, find("qa")) is False
+
+
+def test_retry_honours_second_handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    patch(monkeypatch, runner, "run_worker", True)
+    patch(monkeypatch, runner, "read_qa_ran_against", "harness")
+    assert runner.retry_qa_ran_against(state, find("qa")) is True
+    assert state.ran_against == "harness"
+
+
+def test_run_qa_success_and_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path)
+    patch(monkeypatch, runner, "run_worker", False)
+    assert runner.run_qa(state, find("qa")) is False
+    patch(monkeypatch, runner, "run_worker", True)
+    settle = patch(monkeypatch, runner, "settle_ran_against", True)
+    patch(monkeypatch, runner, "read_qa_ran_against", "app")
+    assert runner.run_qa(state, find("qa")) is True
+    assert settle.calls[0][2] == "app"
+
+
+def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, steps_env: dict[str, Recorder], capsys: Any) -> None:
+    patch(monkeypatch, runner, "run_step", True)
+    state = make_state(tmp_path, ran_against="app")
+    assert runner.run_steps(state, [find("qa")], True) == 0
+    assert capsys.readouterr().out == "pipeline complete\n"
+    state.ran_against = "harness"
+    assert runner.run_steps(state, [find("qa")], True) == 3
+    assert "NOT verified" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("judge", "raw", "guidance", "expected"),
     [

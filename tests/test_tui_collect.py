@@ -121,6 +121,42 @@ def test_attach_activity_uses_runner_line(tmp_path: Path, monkeypatch: Any) -> N
     assert state.runner_activity == "hello"
 
 
+def test_is_not_verified_and_activity() -> None:
+    assert collect.not_verified_activity(None) is None
+
+
+def test_not_verified_activity(tmp_path: Path) -> None:
+    plain = write(tmp_path / "plain.log", "pipeline complete\n")
+    noted = write(tmp_path / "noted.log", "pipeline complete, NOT verified against the running app (qa ran against a harness)\n")
+    assert collect.not_verified_activity(plain) is None
+    assert "NOT verified" in str(collect.not_verified_activity(noted))
+    assert collect.finished_note(None) is None
+    assert collect.finished_note("pipeline complete") is None
+    assert "NOT verified" in str(collect.finished_note("x NOT verified y"))
+
+
+def test_attach_finished_sets_activity(tmp_path: Path) -> None:
+    log = write(tmp_path / "run.log", "pipeline complete, NOT verified against the running app (qa ran against nothing)\n")
+    state = repo(tmp_path, log_path=log)
+    collect.attach_finished(state)
+    assert state.runner_activity is not None
+    assert "NOT verified" in state.runner_activity
+    plain = repo(tmp_path, log_path=write(tmp_path / "ok.log", "pipeline complete\n"))
+    collect.attach_finished(plain)
+    assert plain.runner_activity is None
+
+
+def test_attach_live_finished_when_dead(tmp_path: Path, monkeypatch: Any) -> None:
+    log = write(tmp_path / "run.log", "pipeline complete, NOT verified against the running app (qa ran against a harness)\n")
+    state = repo(tmp_path, log_path=log)
+    monkeypatch.setattr(collect, "pipeline_pids", lambda rows, real: [])
+    monkeypatch.setattr(collect, "bind_running", lambda *args: None)
+    collect.attach_live(state, tmp_path, [])
+    assert state.alive is False
+    assert state.runner_activity is not None
+    assert "NOT verified" in state.runner_activity
+
+
 def test_parse_log_start_finish_verdict_and_running(tmp_path: Path) -> None:
     path = write(
         tmp_path / "log",

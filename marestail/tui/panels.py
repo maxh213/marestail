@@ -331,8 +331,12 @@ def draw_busy_from_repo(win: curses.window, y: int, x: int, width: int, repo: Re
     draw_busy_row(win, y, x, width, surely(repo.worker), selected, state)
 
 
-def paint_dead(win: curses.window, y: int, x: int, _width: int, _repo: RepoState, _selected: bool, state: WatchState) -> None:
-    put(win, y, x, f"{GLYPH_IDLE} {IDLE_TEXT}", state.theme.idle)
+def dead_row_text(repo: RepoState) -> str:
+    return str(first_text(repo.runner_activity, IDLE_TEXT))
+
+
+def paint_dead(win: curses.window, y: int, x: int, _width: int, repo: RepoState, _selected: bool, state: WatchState) -> None:
+    put(win, y, x, f"{GLYPH_IDLE} {dead_row_text(repo)}", state.theme.idle)
 
 
 def paint_idle_selected(win: curses.window, y: int, x: int, width: int, repo: RepoState, state: WatchState) -> None:

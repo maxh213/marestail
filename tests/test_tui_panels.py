@@ -592,6 +592,17 @@ def test_idle_and_busy_attrs(tmp_path: Path) -> None:
     assert next(cell for cell in win.cells if cell[0] == 6 and cell[2] == "HEAD ")[3] == watch.theme.judge
 
 
+def test_dead_row_text_and_paint(tmp_path: Path) -> None:
+    idle = make_repo(tmp_path, alive=False)
+    assert panels.dead_row_text(idle) == panels.IDLE_TEXT
+    noted = make_repo(tmp_path, alive=False, runner_activity="pipeline complete, NOT verified against the running app")
+    assert "NOT verified" in panels.dead_row_text(noted)
+    win: Any = FakeWin(10, 80)
+    watch = state_of()
+    panels.paint_dead(win, 0, 0, 80, noted, False, watch)
+    assert any("NOT verified" in cell[2] for cell in win.cells)
+
+
 def test_draw_busy_row_tail_choice(tmp_path: Path) -> None:
     win: Any = FakeWin(10, 40)
     watch = state_of()
