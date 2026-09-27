@@ -1,12 +1,16 @@
+import email.message
+import os
 import signal
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -100,32 +104,62 @@ def test_can_bind_and_free_port() -> None:
         binder.close()
 
 
-def test_answers_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Ok:
-        status = 200
+def test_sockets_are_ipv4_streams_on_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    real = socket.socket
+    made: list[tuple[Any, ...]] = []
+    bound: list[tuple[str, int]] = []
 
-        def __enter__(self) -> "Ok":
-            return self
+    class Recording(real):  # type: ignore[misc,valid-type]
+        def __init__(self, *args: Any) -> None:
+            made.append(args)
+            super().__init__(*args)
 
-        def __exit__(self, *args: object) -> None:
-            return None
+        def bind(self, address: Any) -> None:
+            bound.append(address)
+            super().bind(address)
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Ok())
-    assert _serve._answers("http://localhost/") is True
+    monkeypatch.setattr(socket, "socket", Recording)
+    port = _serve._free_port()
+    assert _serve._can_bind(port) is True
+    assert made == [(socket.AF_INET, socket.SOCK_STREAM)] * 2
+    assert bound == [("127.0.0.1", 0), ("127.0.0.1", port)]
 
 
-def test_answers_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(*args: Any, **kwargs: Any) -> Any:
-        raise urllib.error.HTTPError("u", 503, "x", None, None)
+class Response:
+    def __init__(self, status: int) -> None:
+        self.status = status
 
-    monkeypatch.setattr(urllib.request, "urlopen", boom)
-    assert _serve._answers("http://localhost/") is False
+    def __enter__(self) -> "Response":
+        return self
 
-    def client(*args: Any, **kwargs: Any) -> Any:
-        raise urllib.error.HTTPError("u", 404, "x", None, None)
+    def __exit__(self, *args: object) -> None:
+        return None
 
-    monkeypatch.setattr(urllib.request, "urlopen", client)
-    assert _serve._answers("http://localhost/") is True
+
+def http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("u", code, "x", email.message.Message(), None)
+
+
+@pytest.mark.parametrize(("status", "answers"), [(200, True), (499, True), (500, False), (503, False)])
+def test_answers_by_status(monkeypatch: pytest.MonkeyPatch, status: int, answers: bool) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    def respond(*args: Any, **kwargs: Any) -> Response:
+        calls.append((args, kwargs))
+        return Response(status)
+
+    monkeypatch.setattr(urllib.request, "urlopen", respond)
+    assert _serve._answers("http://localhost:9/up") is answers
+    assert calls == [(("http://localhost:9/up",), {"timeout": 2})]
+
+
+@pytest.mark.parametrize(("code", "answers"), [(404, True), (499, True), (500, False), (503, False)])
+def test_answers_by_http_error(monkeypatch: pytest.MonkeyPatch, code: int, answers: bool) -> None:
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise http_error(code)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    assert _serve._answers("http://localhost/") is answers
 
 
 def test_answers_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,15 +179,32 @@ def test_exited_early() -> None:
     assert _serve._exited_early(dead) == "app exited with 3 before answering"
 
 
-def test_wait_ready_success_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_ready_success(monkeypatch: pytest.MonkeyPatch) -> None:
     process = MagicMock()
     process.poll.return_value = None
-    monkeypatch.setattr(_serve, "_answers", lambda url: True)
+    answers = MagicMock(return_value=True)
+    stopped: list[Any] = []
+    monkeypatch.setattr(_serve, "_answers", answers)
+    monkeypatch.setattr(_serve, "_stop", stopped.append)
     assert _serve._wait_ready("http://x/", process, 1) is None
-    monkeypatch.setattr(_serve, "_answers", lambda url: False)
-    monkeypatch.setattr(_serve.time, "time", MagicMock(side_effect=[0, 0, 10]))
-    monkeypatch.setattr(_serve, "_stop", lambda proc: None)
+    answers.assert_called_once_with("http://x/")
+    assert stopped == []
+
+
+def test_wait_ready_polls_until_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = MagicMock()
+    process.poll.return_value = None
+    answers = MagicMock(return_value=False)
+    naps: list[float] = []
+    stopped: list[Any] = []
+    monkeypatch.setattr(_serve, "_answers", answers)
+    monkeypatch.setattr(time, "time", MagicMock(side_effect=[100, 100, 100.5, 101]))
+    monkeypatch.setattr(time, "sleep", naps.append)
+    monkeypatch.setattr(_serve, "_stop", stopped.append)
     assert _serve._wait_ready("http://x/", process, 1) == "app did not answer on http://x/ within 1s"
+    assert answers.call_args_list == [call("http://x/"), call("http://x/")]
+    assert naps == [0.2, 0.2]
+    assert stopped == [process]
 
 
 def test_wait_ready_exited(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,57 +213,74 @@ def test_wait_ready_exited(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _serve._wait_ready("http://x/", process, 5) == "app exited with 1 before answering"
 
 
-def test_stop_already_dead_and_force(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_already_dead() -> None:
     dead = MagicMock()
     dead.poll.return_value = 0
     _serve._stop(dead)
     dead.wait.assert_not_called()
 
+
+def test_stop_group_already_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     live = MagicMock()
     live.poll.return_value = None
     live.pid = 123
-    monkeypatch.setattr(_serve.os, "killpg", MagicMock(side_effect=ProcessLookupError))
+    monkeypatch.setattr(os, "killpg", MagicMock(side_effect=ProcessLookupError))
     _serve._stop(live)
+    live.wait.assert_not_called()
 
-    again = MagicMock()
-    again.poll.return_value = None
-    again.pid = 7
-    again.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=1)
-    kills: list[int] = []
 
-    def killpg(pid: int, sig: int) -> None:
-        kills.append(sig)
-        if sig == signal.SIGKILL:
-            raise ProcessLookupError
+def recorded_kills(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, int]]:
+    kills: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: kills.append((pid, sig)))
+    return kills
 
-    monkeypatch.setattr(_serve.os, "killpg", killpg)
-    _serve._stop(again)
-    assert signal.SIGTERM in kills
-    assert signal.SIGKILL in kills
+
+def test_stop_terminates_and_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    kills = recorded_kills(monkeypatch)
+    live = MagicMock()
+    live.poll.return_value = None
+    live.pid = 7
+    _serve._stop(live)
+    assert kills == [(7, signal.SIGTERM)]
+    live.wait.assert_called_once_with(timeout=15)
+
+
+def test_stop_kills_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    kills = recorded_kills(monkeypatch)
+    stuck = MagicMock()
+    stuck.poll.return_value = None
+    stuck.pid = 7
+    stuck.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=15)
+    _serve._stop(stuck)
+    assert kills == [(7, signal.SIGTERM), (7, signal.SIGKILL)]
 
 
 def test_force_kill_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_serve.os, "killpg", MagicMock(side_effect=ProcessLookupError))
+    monkeypatch.setattr(os, "killpg", MagicMock(side_effect=ProcessLookupError))
     _serve._force_kill(MagicMock(pid=4242))
 
 
-def test_signal_group_refuses_init_and_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: list[tuple[int, int]] = []
-    monkeypatch.setattr(_serve.os, "killpg", lambda pid, sig: sent.append((pid, sig)))
-    for pid in (MagicMock(), 1, 0, -1):
-        with pytest.raises(ProcessLookupError, match="refusing to signal process group"):
-            _serve._signal_group(MagicMock(pid=pid), signal.SIGTERM)
+@pytest.mark.parametrize("pid", [MagicMock(), 1, 0, -1])
+def test_signal_group_refuses_init_and_everyone(monkeypatch: pytest.MonkeyPatch, pid: Any) -> None:
+    kills = recorded_kills(monkeypatch)
+    process = MagicMock(pid=pid)
+    with pytest.raises(ProcessLookupError, match="refusing to signal process group"):
+        _serve._signal_group(process, signal.SIGTERM)
+    assert kills == []
+
+
+def test_signal_group_signals_a_real_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    kills = recorded_kills(monkeypatch)
     _serve._signal_group(MagicMock(pid=2), signal.SIGTERM)
-    assert sent == [(2, signal.SIGTERM)]
+    assert kills == [(2, signal.SIGTERM)]
 
 
 def test_stop_never_signals_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: list[int] = []
-    monkeypatch.setattr(_serve.os, "killpg", lambda pid, sig: sent.append(pid))
+    kills = recorded_kills(monkeypatch)
     unnumbered = MagicMock()
     unnumbered.poll.return_value = None
     _serve._stop(unnumbered)
-    assert sent == []
+    assert kills == []
 
 
 def test_spawn_sets_env_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -223,15 +291,17 @@ def test_spawn_sets_env_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         seen["kwargs"] = kwargs
         return MagicMock()
 
-    monkeypatch.setattr(_serve.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     handle = (tmp_path / "log").open("w")
     try:
-        _serve._spawn("echo hi", tmp_path, 3400, {"CMS_URL": "u"}, handle)
+        _serve._spawn("echo hi", tmp_path, 3400, {"CMS_URL": "u", "PORT": "1"}, handle)
     finally:
         handle.close()
-    assert seen["args"][0] == ["bash", "-lc", "echo hi"]
+    assert seen["args"] == (["bash", "-lc", "echo hi"],)
     assert seen["kwargs"]["cwd"] == tmp_path
     assert seen["kwargs"]["start_new_session"] is True
+    assert seen["kwargs"]["stdout"] is handle
+    assert seen["kwargs"]["stderr"] == subprocess.STDOUT
     assert seen["kwargs"]["env"]["PORT"] == "3400"
     assert seen["kwargs"]["env"]["CMS_URL"] == "u"
 
@@ -277,6 +347,63 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     assert result.ok is True
     assert result.summary == "qa passed"
     assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:3456", "PORT": "3456"}
+
+
+def recorded_app(monkeypatch: pytest.MonkeyPatch, failure: str | None, port: int) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = []
+
+    @contextmanager
+    def fake_ready_app(*args: Any) -> Iterator[tuple[str | None, int]]:
+        calls.append(args)
+        yield failure, port
+
+    monkeypatch.setattr(_serve, "ready_app", fake_ready_app)
+    return calls
+
+
+def test_run_with_app_passes_defaults(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    calls = recorded_app(monkeypatch, None, 3400)
+    fake_run(qa, [(0, "")])
+    checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "yarn dev"}})), "qa")
+    assert calls == [("yarn dev", tmp_path / ".", 3400, "/", 180, {}, tmp_path / ".marestail" / "qa-app.log")]
+
+
+def test_run_with_app_passes_configured_keys(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_TASK", "t")
+    calls = recorded_app(monkeypatch, None, 5001)
+    fake = fake_run(qa, [(0, "")])
+    raw = {
+        "qa": {
+            "cmd": "npx playwright test",
+            "cwd": "web",
+            "start": "yarn dev",
+            "ready": "/health",
+            "port": "5000",
+            "ready_timeout": "7",
+            "env": {"LOCALE": "en-gb"},
+        }
+    }
+    checked(qa.run_gate(make_context(tmp_path, raw)), "qa")
+    log_path = tmp_path / ".marestail" / "runs" / "t" / "qa-app.log"
+    assert calls == [("yarn dev", tmp_path / "web", 5000, "/health", 7, {"LOCALE": "en-gb"}, log_path)]
+    assert fake.calls == [["bash", "-lc", "npx playwright test"]]
+    assert fake.options[0]["cwd"] == tmp_path / "web"
+    assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:5001", "PORT": "5001"}
+
+
+def test_run_with_app_not_ready_skips_cmd(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    write(tmp_path, ".marestail/qa-app.log", "booting\n")
+    recorded_app(monkeypatch, "app did not answer on http://localhost:3400/ within 180s", 3400)
+    fake = fake_run(qa, [])
+    result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "yarn dev"}})), "qa")
+    assert (result.ok, result.summary, result.findings) == (
+        False,
+        "qa: app did not answer on http://localhost:3400/ within 180s",
+        ["booting"],
+    )
+    assert fake.calls == []
 
 
 def test_run_cmd_and_qa_result(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:

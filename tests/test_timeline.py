@@ -6,7 +6,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -233,7 +233,7 @@ def test_commit_entry() -> None:
 
 def test_reset_and_note_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(tmp_path)
-    state.attempt_agent = {"backend": "claude"}
+    state.attempt_agent = cast(dict[str, Any] | None, {"backend": "claude"})
     state.attempt_waits = [{"reason": "rate-limit", "seconds": 0}]
     runner.reset_attempt(state)
     assert state.attempt_agent is None

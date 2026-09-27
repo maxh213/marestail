@@ -273,7 +273,7 @@ def test_run_named_worker_routes_qa(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     qa = patch(monkeypatch, runner, "run_qa", True)
     worker = patch(monkeypatch, runner, "run_worker", True)
     state = make_state(tmp_path)
-    assert runner.run_named_worker(state, find("qa")) is True
+    assert runner.run_named_worker(state, cast(Worker, find("qa"))) is True
     assert qa.calls == [(state, find("qa"))]
     assert worker.calls == []
     assert runner.run_named_worker(state, CODER) is True
@@ -341,7 +341,7 @@ def test_settle_and_retry_ran_against(tmp_path: Path, monkeypatch: pytest.Monkey
     assert state.ran_against == "app"
     worker = patch(monkeypatch, runner, "run_worker", True)
     patch(monkeypatch, runner, "read_qa_ran_against", None)
-    state.ran_against = None
+    state.ran_against = cast(str | None, None)
     assert runner.settle_ran_against(state, QA, None) is True
     assert state.ran_against == "nothing"
     assert worker.calls[0] == (state, QA, runner.MISSING_RAN_AGAINST)
@@ -754,7 +754,9 @@ def judge_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return env
 
 
-def attempt_judge(tmp_path: Path, judge: Judge, gate: tuple[str, bool, list] = ("", True, []), session: Session | None = None) -> Any:
+def attempt_judge(
+    tmp_path: Path, judge: Judge, gate: tuple[str, bool, list[Result]] = ("", True, []), session: Session | None = None
+) -> Any:
     state = make_state(tmp_path, hard=True, focus={"a.py"})
     report = state.next_report(judge.name)
     return state, report, runner.judge_attempt(state, judge, report, gate, session, "old feedback")
@@ -1033,7 +1035,7 @@ def test_judge_session_without_trees_uses_empty_section(tmp_path: Path, monkeypa
     patch(monkeypatch, runner, "discard_edits")
     runner.judge_session(state, CRITIC, report, "gate", None, "fb")
     assert section.calls == []
-    assert prompt.calls[0][6] == runner.EMPTY
+    assert prompt.calls[0][6] == ""
 
 
 def test_parse_verdict_without_extra_reads_the_report(tmp_path: Path) -> None:

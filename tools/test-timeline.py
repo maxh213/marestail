@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -111,7 +112,7 @@ def run_cli(root: Path, *args: str, env: dict[str, str] | None = None) -> subpro
 
 
 def load_timeline(root: Path) -> dict[str, Any]:
-    return json.loads((root / ".marestail" / "runs" / "t" / "timeline.json").read_text())
+    return cast(dict[str, Any], json.loads((root / ".marestail" / "runs" / "t" / "timeline.json").read_text()))
 
 
 def timeline_md(root: Path) -> str:
@@ -235,7 +236,9 @@ def author_step(folder: Path) -> None:
 
     def fake_invoke(state: Run, label: str, prompt: str) -> None:
         calls["n"] += 1
-        report = Path(re.search(r"Write your verdict to (\S+) and", prompt).group(1))
+        found = re.search(r"Write your verdict to (\S+) and", prompt)
+        assert found is not None
+        report = Path(found.group(1))
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text("VERDICT: AUTHOR\n" if calls["n"] == 1 else "VERDICT: PASS\n")
         (state.folder / f"{label}.json").write_text(json.dumps({"is_error": False, "num_turns": 1, "total_cost_usd": 0, "result": "ok"}))
@@ -249,21 +252,18 @@ def author_step(folder: Path) -> None:
         }
 
     state = Run(config=config, task=root / "tasks" / "t.md", model=None, retries=2, agent="claude")
-    original = runner.invoke
-    runner.invoke = fake_invoke  # type: ignore[assignment]
     saved_progress = runner.JudgeProgress
 
     @dataclass
     class ZeroAuthor(saved_progress):  # type: ignore[valid-type,misc]
         author_left: int = 0
 
-    runner.JudgeProgress = ZeroAuthor  # type: ignore[misc,assignment]
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            run_judge(state, cast(Judge, find("perf")))
-    finally:
-        runner.invoke = original
-        runner.JudgeProgress = saved_progress
+    with (
+        patch.object(runner, "invoke", fake_invoke),
+        patch.object(runner, "JudgeProgress", ZeroAuthor),
+        contextlib.redirect_stdout(io.StringIO()),
+    ):
+        run_judge(state, cast(Judge, find("perf")))
     steps = load_timeline(root)["steps"]
     verdicts = [step.get("verdict") for step in steps]
     expect_true("author-then-pass", "AUTHOR" in verdicts and "PASS" in verdicts)

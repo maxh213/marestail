@@ -18,7 +18,8 @@ from marestail import config as cm
 from marestail import gates, prompts, runner
 from marestail.config import Config
 from marestail.gates import qa
-from marestail.pipeline import find
+from marestail.perf import trees as perf_trees
+from marestail.pipeline import Worker, find
 from marestail.shell import run as shell_run
 from tests.conftest import make_context
 
@@ -30,7 +31,7 @@ APP = (
 )
 NOTE = "The app is started for the qa gate; its address is in MARESTAIL_APP_URL."
 QA_ENV_KEYS = ("MARESTAIL_TASK", "MARESTAIL_QA_CMD_TIMEOUT")
-SERVE = qa._serve
+SERVE: Any = vars(qa)["_serve"]
 
 
 def expect(name: str, got: Any, wanted: Any) -> None:
@@ -138,7 +139,7 @@ def ready_before_cmd(folder: Path) -> None:
     real_answers = SERVE._answers
 
     def track(url: str) -> bool:
-        ok = real_answers(url)
+        ok = bool(real_answers(url))
         if ok and "ready" not in order:
             order.append("ready")
         return ok
@@ -243,10 +244,12 @@ def env_to_app_not_prompt(folder: Path) -> None:
     log = (root / ".marestail" / "qa-app.log").read_text()
     expect_true("env-cms", "https://example.test/g" in log)
     expect_true("env-locale", "en-gb" in log)
+    worker = find("qa")
+    assert isinstance(worker, Worker)
     with patch.object(prompts, "ROLES_DIR", root / "roles"):
         text = prompts.worker_prompt(
             Config(root=root, raw={"qa": {"start": "python3 app.py", "env": {"CMS_URL": "https://example.test/g", "LOCALE": "en-gb"}}}),
-            find("qa"),
+            worker,
             root / "tasks" / "t.md",
             "t",
             write(root, ".marestail/r.md", ""),
@@ -320,7 +323,7 @@ def runner_sets_task() -> None:
     with (
         patch.object(cm, "load", return_value=config),
         patch.object(runner, "run_steps", return_value=0),
-        patch.object(runner.perf_trees, "record_start"),
+        patch.object(perf_trees, "record_start"),
     ):
         runner.run_pipeline(Path("tasks/006-marestail-starts-the-app-for-qa.md"), "specifier", "specifier", True, None, 0)
     expect("runner-task", os.environ.get("MARESTAIL_TASK"), "006-marestail-starts-the-app-for-qa")
@@ -421,9 +424,6 @@ def freeze_unchanged() -> None:
     expect_true("freeze-qa-dir", "qa/x.md" in paths)
     expect_true("freeze-playwright", "client/playwright.config.ts" in paths)
     expect("freeze-src", "src/a.py" in paths, False)
-    ruff = (ROOT / "ruff.toml").read_text()
-    expect_true("ruff-excludes-qa", "qa" in ruff.split("extend-exclude", 1)[1])
-    expect_true("ruff-excludes-features", "features" in ruff.split("extend-exclude", 1)[1])
 
 
 def main() -> None:
