@@ -193,7 +193,26 @@ def test_stop_already_dead_and_force(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_force_kill_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_serve.os, "killpg", MagicMock(side_effect=ProcessLookupError))
-    _serve._force_kill(MagicMock(pid=1))
+    _serve._force_kill(MagicMock(pid=4242))
+
+
+def test_signal_group_refuses_init_and_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(_serve.os, "killpg", lambda pid, sig: sent.append((pid, sig)))
+    for pid in (MagicMock(), 1, 0, -1):
+        with pytest.raises(ProcessLookupError, match="refusing to signal process group"):
+            _serve._signal_group(MagicMock(pid=pid), signal.SIGTERM)
+    _serve._signal_group(MagicMock(pid=2), signal.SIGTERM)
+    assert sent == [(2, signal.SIGTERM)]
+
+
+def test_stop_never_signals_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[int] = []
+    monkeypatch.setattr(_serve.os, "killpg", lambda pid, sig: sent.append(pid))
+    unnumbered = MagicMock()
+    unnumbered.poll.return_value = None
+    _serve._stop(unnumbered)
+    assert sent == []
 
 
 def test_spawn_sets_env_and_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,7 +250,7 @@ def test_end_app_closes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
     process = MagicMock()
-    process.pid = 1
+    process.pid = 4242
     process.poll.return_value = None
     monkeypatch.setattr(_serve, "_chosen_port", lambda preferred: 3456)
     monkeypatch.setattr(_serve, "_stop", lambda proc: None)

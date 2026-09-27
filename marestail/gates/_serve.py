@@ -1,3 +1,4 @@
+import operator
 import os
 import signal
 import socket
@@ -105,7 +106,7 @@ def _stop(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        _signal_group(process, signal.SIGTERM)
         process.wait(timeout=15)
     except (ProcessLookupError, subprocess.TimeoutExpired):
         _force_kill(process)
@@ -113,6 +114,13 @@ def _stop(process: subprocess.Popen[Any]) -> None:
 
 def _force_kill(process: subprocess.Popen[Any]) -> None:
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        _signal_group(process, signal.SIGKILL)
     except ProcessLookupError:
         return
+
+
+def _signal_group(process: subprocess.Popen[Any], sig: signal.Signals) -> None:
+    pid = operator.index(process.pid)
+    if pid <= 1:
+        raise ProcessLookupError(f"refusing to signal process group {pid}")
+    os.killpg(pid, sig)

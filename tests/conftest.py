@@ -1,3 +1,5 @@
+import operator
+import os
 import socket
 import subprocess
 from collections.abc import Callable
@@ -181,8 +183,20 @@ def refuse_network(*args: Any, **options: Any) -> Any:
     raise ForbiddenCallError("tests must not use the network")
 
 
+def guarded_signal(real: Callable[[int, int], None]) -> Callable[[int, int], None]:
+    def send(pid: int, sig: int) -> None:
+        number = operator.index(pid)
+        if number <= 1:
+            raise ForbiddenCallError(f"tests must not signal pid {number}")
+        real(number, sig)
+
+    return send
+
+
 @pytest.fixture(autouse=True)
 def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "kill", guarded_signal(os.kill))
+    monkeypatch.setattr(os, "killpg", guarded_signal(os.killpg))
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(socket.socket, "connect", refuse_network)
     monkeypatch.setattr(socket, "create_connection", refuse_network)
