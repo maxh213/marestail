@@ -1,12 +1,11 @@
 import time
-from pathlib import Path
 from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, covered_member, judged, member_units
 from marestail.report import Result, elapsed
 
 GATE = "cs.crap"
@@ -88,31 +87,6 @@ def describe(f: dict[str, Any]) -> str:
 
 
 def hyper_result(ctx: Context, members: list[dict[str, Any]], coverage: dict[str, Any], started: float) -> Result:
-    hyper = Hyper(GATE, float(ctx.dotnet(KEY, DEFAULT)), lambda copy: base_units(ctx, copy))
-    return judged(ctx, hyper, [scored_unit(ctx, member, coverage) for member in members], started)
-
-
-def unit(member: dict[str, Any]) -> dict[str, Any]:
-    name = member["name"]
-    return {
-        "file": member["file"],
-        "line": member["line"],
-        "start": member["startLine"],
-        "end": member["endLine"],
-        "name": name,
-        "label": name,
-        "cc": member["complexity"],
-    }
-
-
-def scored_unit(ctx: Context, member: dict[str, Any], coverage: dict[str, Any]) -> dict[str, Any]:
-    lines = coverage["files"].get(member["file"], {}).get("lines", {})
-    missing = {int(number) for number, hits in lines.items() if hits == 0}
-    return {**unit(member), "cov": score(ctx, member, coverage)["cov"], "missing": missing}
-
-
-def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
-    members, error = dotnet.scan(ctx, "complexity", [copy])
-    if error:
-        return None
-    return list(map(unit, members))
+    hyper = Hyper(GATE, float(ctx.dotnet(KEY, DEFAULT)), lambda copy: member_units(dotnet.scan(ctx, "complexity", [copy])))
+    units = [covered_member(member, coverage, score(ctx, member, coverage)["cov"]) for member in members]
+    return judged(ctx, hyper, units, started)

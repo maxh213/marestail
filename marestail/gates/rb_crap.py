@@ -11,7 +11,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, judged, unit
 from marestail.report import Result, elapsed
 from marestail.ruby import scan, scanned, sources
 
@@ -193,12 +193,7 @@ def covered_units(units: list[dict[str, Any]], file_cov: dict[str, Any]) -> list
 
 def ranged(file: str, group: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
     ends = method_ranges(text, [fn["line"] for fn in group])
-    return [unit(file, fn, method_end_line(ends, fn["line"])) for fn in group]
-
-
-def unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
-    line = fn["line"]
-    return {"file": file, "line": line, "start": line, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+    return [unit(file, fn, fn["line"], method_end_line(ends, fn["line"])) for fn in group]
 
 
 def missed(unit: dict[str, Any], file_cov: dict[str, Any]) -> set[int]:

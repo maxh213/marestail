@@ -9,7 +9,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, judged, unhit_lines, unit
 from marestail.report import Result, elapsed
 
 GATE = "rs.crap"
@@ -74,22 +74,20 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
 
 
 def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[Any]) -> list[dict[str, Any]]:
-    return [covered_unit(unit(rust.rel(ctx, fn["file"]), fn), coverage["files"].get(rust.rel(ctx, fn["file"]), {})) for fn in functions]
+    return [covered_unit(rs_unit(rust.rel(ctx, fn["file"]), fn), coverage["files"].get(rust.rel(ctx, fn["file"]), {})) for fn in functions]
 
 
-def unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
-    line = fn["line"]
-    return {"file": file, "line": line, "start": line, "end": fn["end"], "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+def rs_unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
+    return unit(file, fn, fn["line"], fn["end"])
 
 
 def covered_unit(unit: dict[str, Any], file_cov: dict[str, Any]) -> dict[str, Any]:
     lines = file_cov.get("lines", {})
-    missing = {int(number) for number, hits in lines.items() if hits == 0}
-    return {**unit, "cov": covered_share(measured(lines, unit["start"], unit["end"])), "missing": missing}
+    return {**unit, "cov": covered_share(measured(lines, unit["start"], unit["end"])), "missing": unhit_lines(lines)}
 
 
 def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
     functions, _ = rust.scan(ctx, "complexity", [copy])
     if functions is None:
         return None
-    return [unit("", fn) for fn in functions]
+    return [rs_unit("", fn) for fn in functions]

@@ -24,6 +24,30 @@ class Hyper:
     scan_base: Callable[[Path], list[Fn] | None]
 
 
+def unit(file: str, fn: Fn, start: int, end: int) -> Fn:
+    return {"file": file, "line": fn["line"], "start": start, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+
+
+def unhit_lines(lines: dict[str, int]) -> set[int]:
+    return {int(number) for number, hits in lines.items() if hits == 0}
+
+
+def member_unit(member: Fn) -> Fn:
+    return unit(member["file"], member, member["startLine"], member["endLine"])
+
+
+def covered_member(member: Fn, coverage: Fn, cov: float) -> Fn:
+    lines = coverage["files"].get(member["file"], {}).get("lines", {})
+    return {**member_unit(member), "cov": cov, "missing": unhit_lines(lines)}
+
+
+def member_units(scanned: tuple[Any, str | None]) -> list[Fn] | None:
+    members, error = scanned
+    if error:
+        return None
+    return list(map(member_unit, members))
+
+
 def judged(ctx: Context, hyper: Hyper, functions: list[Fn], started: float) -> Result:
     gated = innermost(functions, ctx)
     bases, unread = base_complexities(ctx, hyper, sorted({fn["file"] for fn in gated}))

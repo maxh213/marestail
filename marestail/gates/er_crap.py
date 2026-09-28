@@ -11,7 +11,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import crap_result as crap_result
 from marestail.gates._crap import file_percent_score, scored_functions
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, judged, unit
 from marestail.report import Result, elapsed
 
 COVERAGE_JSON = ER_COVERAGE
@@ -92,12 +92,11 @@ def touches_hunk(fn: dict[str, Any], ends: dict[tuple[str, int], int], ctx: Cont
 
 def ranged(file: str, functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ends = function_ends(functions)
-    return [unit(file, fn, ends[(fn["file"], fn["line"])]) for fn in functions]
+    return [er_unit(file, fn, ends[(fn["file"], fn["line"])]) for fn in functions]
 
 
-def unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
-    line = fn["line"]
-    return {"file": file, "line": line, "start": line, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+def er_unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
+    return unit(file, fn, fn["line"], end)
 
 
 def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,7 +106,7 @@ def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str
 
 def covered_unit(ctx: Context, fn: dict[str, Any], end: int, file_cov: dict[str, Any]) -> dict[str, Any]:
     covered = file_percent_score(fn, file_cov, ctx)["cov"]
-    return {**unit(relative_path(fn["file"], ctx), fn, end), "cov": covered, "missing": set(file_cov.get("missing_lines", []))}
+    return {**er_unit(relative_path(fn["file"], ctx), fn, end), "cov": covered, "missing": set(file_cov.get("missing_lines", []))}
 
 
 def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:

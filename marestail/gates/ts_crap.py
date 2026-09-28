@@ -10,7 +10,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, judged, unit
 from marestail.report import Result, elapsed
 
 GATE = "ts.crap"
@@ -86,20 +86,11 @@ def ratio(hits: list[int]) -> float:
 
 
 def hyper_units(coverage: dict[str, Any], parsed: list[dict[str, Any]], ctx: Context) -> list[dict[str, Any]]:
-    return [{**unit(javascript.rel(fn["file"], ctx), fn), **covered_by(fn, coverage[fn["file"]])} for fn in parsed]
+    return [{**ts_unit(javascript.rel(fn["file"], ctx), fn), **covered_by(fn, coverage[fn["file"]])} for fn in parsed]
 
 
-def unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
-    line = fn["line"]
-    return {
-        "file": file,
-        "line": line,
-        "start": line,
-        "end": fn["endLine"],
-        "name": fn["name"],
-        "label": fn["name"],
-        "cc": fn["complexity"],
-    }
+def ts_unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
+    return unit(file, fn, fn["line"], fn["endLine"])
 
 
 def covered_by(fn: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
@@ -114,4 +105,4 @@ def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
     code, output = javascript.scan(ctx, "complexity", [copy])
     if code != 0:
         return None
-    return [unit("", fn) for fn in json.loads(output)]
+    return [ts_unit("", fn) for fn in json.loads(output)]

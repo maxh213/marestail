@@ -11,7 +11,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import crap_result as crap_result
 from marestail.gates._crap import file_percent_score, scored_functions
-from marestail.gates._hyper_crap import Hyper, judged
+from marestail.gates._hyper_crap import Hyper, judged, unit
 from marestail.report import Result, elapsed
 
 COVERAGE_JSON = EX_COVERAGE
@@ -65,9 +65,8 @@ def span(fn: dict[str, Any]) -> tuple[int, int]:
     return start, int(fn.get("end_line") or start)
 
 
-def unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
-    start, end = span(fn)
-    return {"file": file, "line": fn["line"], "start": start, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+def ex_unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
+    return unit(file, fn, *span(fn))
 
 
 def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -76,11 +75,11 @@ def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str
 
 def covered_unit(ctx: Context, fn: dict[str, Any], file_cov: dict[str, Any]) -> dict[str, Any]:
     covered = file_percent_score(fn, file_cov, ctx)["cov"]
-    return {**unit(relative_path(fn["file"], ctx), fn), "cov": covered, "missing": set(file_cov.get("missing_lines", []))}
+    return {**ex_unit(relative_path(fn["file"], ctx), fn), "cov": covered, "missing": set(file_cov.get("missing_lines", []))}
 
 
 def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
     code, output = elixir.scan(ctx, "complexity", [copy], timeout=600)
     if code != 0:
         return None
-    return [unit("", fn) for fn in json.loads(output)]
+    return [ex_unit("", fn) for fn in json.loads(output)]
