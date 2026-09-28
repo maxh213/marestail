@@ -124,6 +124,7 @@ def test_judge_progress_author_requested() -> None:
 def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setenv("MARESTAIL_SCOPE", "unset")
     monkeypatch.setenv("MARESTAIL_FOCUS", "unset")
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
     config = Config(root=tmp_path, raw={"agent": {"model": "cfg-model", "effort": "cfg-effort"}})
     seen_load: list[Path] = []
 
