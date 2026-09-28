@@ -103,7 +103,7 @@ def check_default(root):
     subjects = rb_mutation.changed_subjects(ctx, scopes["ruby"].files)
     check("rb: subjects from changed file", subjects == ["Fresh*"], str(subjects))
     mutate = ts_mutation.changed_sources(ctx, scopes["ts"].files)
-    ts_args = ts_mutation.mutation_command(mutate)
+    ts_args = ts_mutation.mutation_command(ctx, mutate)
     check("ts: --mutate carries changed source, excludes spec", "--mutate" in ts_args and ts_args[ts_args.index("--mutate") + 1] == "src/fresh.ts", str(ts_args))
     targets = cs_mutation.mutation_targets(ctx, scopes["dotnet"].files)
     cs_args = cs_mutation.command(ctx, root / "App.csproj", root / "App.Tests" / "App.Tests.csproj", root / "out", targets)
@@ -121,7 +121,7 @@ def check_all_config(root):
         scope = ctx.mutation_files(lang, root, suffixes)
         check(f"{lang}: mutation_scope=all resolves full", scope.mode == "full" and scope.files is None and not scope.note, str(scope))
     check("ex: full run has no --files", "--files" not in ex_mutation.command(ctx, []))
-    check("ts: full run has no --mutate", "--mutate" not in ts_mutation.mutation_command([]))
+    check("ts: full run has no --mutate", "--mutate" not in ts_mutation.mutation_command(ctx, []))
     sources = erlang.source_files(ctx)
     check("er: full run mutates every source", len(er_mutation.mutate_files(ctx, sources, None)) == 2)
 

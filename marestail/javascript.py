@@ -10,6 +10,7 @@ COMPLEXITY = SCANNERS / "ts_complexity.mjs"
 DEPTH = SCANNERS / "ts_depth.mjs"
 SCRIPTS = {"comments": COMMENTS, "complexity": COMPLEXITY, "depth": DEPTH}
 NPX = ("npx",)
+DEPCRUISE_CONFIG = ".dependency-cruiser.cjs"
 
 
 def script(mode: str) -> Path:
@@ -60,11 +61,20 @@ def tooling_file(ctx: Context, name: str) -> Path | None:
     return path if path.exists() else None
 
 
-def config_flag(ctx: Context, flag: str, name: str) -> list[str]:
+def tooling_argument(ctx: Context, name: str) -> list[str]:
     path = tooling_file(ctx, name)
-    return [] if path is None else [flag, str(path)]
+    return [] if path is None else [str(path)]
+
+
+def config_flag(ctx: Context, flag: str, name: str) -> list[str]:
+    path = tooling_argument(ctx, name)
+    return [flag, *path] if path else []
 
 
 def config_or(ctx: Context, name: str, fallback: str) -> str:
     path = tooling_file(ctx, name)
     return fallback if path is None else str(path)
+
+
+def depcruise_config(ctx: Context) -> str:
+    return config_or(ctx, DEPCRUISE_CONFIG, str(ctx.ts("depcruise_config", DEPCRUISE_CONFIG)))

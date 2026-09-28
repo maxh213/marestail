@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
-from marestail.javascript import config_flag, tool
 from marestail.javascript import rel as relative
+from marestail.javascript import tool, tooling_argument
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
@@ -70,10 +70,10 @@ def survivor_result(survivors: list[str], note: str, started: float) -> Result:
 
 
 def mutation_command(ctx: Context, mutate: list[str]) -> list[str]:
-    config = config_flag(ctx, "run", "stryker.config.json")
     command = [
         *tool(ctx, "stryker"),
-        *(config or ["run"]),
+        "run",
+        *tooling_argument(ctx, "stryker.config.json"),
         "--reporters",
         "json,progress",
         "--tempDirName",

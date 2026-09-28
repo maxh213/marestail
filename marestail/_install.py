@@ -12,6 +12,8 @@ from marestail.shell import ensure_dir, run
 
 PERFORMANCE = "PERFORMANCE.md"
 CONFIG = "marestail.toml"
+CLAUDE_MD = "CLAUDE.md"
+AGENTS_MD = "AGENTS.md"
 SONAR = "sonar-project.properties"
 DEPCRUISE = ".dependency-cruiser.cjs"
 TSCONFIG = "tsconfig.json"
@@ -42,8 +44,8 @@ HYPER_EXCLUDES = [
 ]
 TRACK_CANDIDATES = [
     ".gitignore",
-    "AGENTS.md",
-    "CLAUDE.md",
+    AGENTS_MD,
+    CLAUDE_MD,
     CONFIG,
     SONAR,
     TASKS_README,
@@ -140,7 +142,7 @@ def copy_templates(target: Path) -> None:
     dotnet = uses_dotnet(target)
     copy_if_missing(TEMPLATES / CONFIG, target / CONFIG)
     if not dotnet:
-        copy_if_missing(TEMPLATES / "sonar-project.properties", target / "sonar-project.properties")
+        copy_if_missing(TEMPLATES / SONAR, target / SONAR)
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     copy_if_missing(TEMPLATES / PERFORMANCE, target / PERFORMANCE)
@@ -159,8 +161,8 @@ def apply_hooks(target: Path) -> None:
 
 def write_agent_docs(target: Path, hard: bool) -> None:
     if not hard:
-        append_instructions(target / "CLAUDE.md")
-        append_instructions(target / "AGENTS.md")
+        append_instructions(target / CLAUDE_MD)
+        append_instructions(target / AGENTS_MD)
 
 
 def generated_ignore(gitignore_generated: bool, hard: bool) -> list[str]:
@@ -190,7 +192,7 @@ def copy_if_missing(source: Path, destination: Path) -> None:
 
 
 def append_instructions(path: Path) -> None:
-    snippet = (TEMPLATES / "CLAUDE.md").read_text()
+    snippet = (TEMPLATES / CLAUDE_MD).read_text()
     existing = path.read_text() if path.exists() else ""
     if GATE_MARKER not in existing:
         path.write_text(existing.rstrip() + ("\n\n" if existing else "") + snippet)
@@ -361,6 +363,9 @@ class Tooling:
     def has_tsconfig(self) -> bool:
         return (self.ts_root / self.tsconfig_name).exists()
 
+    def has_depcruise(self) -> bool:
+        return (self.ts_root / str(self.ts.get("depcruise_config", DEPCRUISE))).exists()
+
     def has_vitest(self) -> bool:
         return self.jest or self.has(VITEST_KINDS)
 
@@ -523,7 +528,7 @@ def tooling_plan(tooling: Tooling) -> list[tuple[str, bool, Callable[[Tooling], 
         ("package.json", False, package_json),
         ("eslint.config.mjs", tooling.has(ESLINT_KINDS), eslint_text),
         (TSCONFIG, tooling.has_tsconfig(), tsconfig_text),
-        (DEPCRUISE, (tooling.ts_root / str(tooling.ts.get("depcruise_config", DEPCRUISE))).exists(), depcruise_text),
+        (DEPCRUISE, tooling.has_depcruise(), depcruise_text),
         (VITEST_CONFIG, tooling.has_vitest(), vitest_text),
         ("stryker.config.json", tooling.has(STRYKER_KINDS), stryker_text),
         ("knip.json", tooling.has(KNIP_KINDS), knip_text),

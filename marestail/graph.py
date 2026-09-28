@@ -72,7 +72,7 @@ def ts_graph(config: Config) -> str:
     command = [
         *javascript.tool(ctx, "depcruise"),
         "--config",
-        javascript.config_or(ctx, ".dependency-cruiser.cjs", config.get("ts", "depcruise_config", ".dependency-cruiser.cjs")),
+        javascript.depcruise_config(ctx),
         "--output-type",
         "text",
         config.get("ts", "source", "src"),
