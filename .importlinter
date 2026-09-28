@@ -2,14 +2,14 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, install internals, prompts, gates, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, install internals, prompts and the hunk check, gates, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
     marestail.cli
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail._install
-    marestail.prompts : marestail.audit : marestail.practices
+    marestail.prompts : marestail.audit : marestail.practices : marestail.hunks
     marestail.gates
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
@@ -23,6 +23,7 @@ type = forbidden
 source_modules =
     marestail.gates
 forbidden_modules =
+    marestail.hunks
     marestail.runner
     marestail.cli
     marestail.prompts
@@ -54,6 +55,7 @@ source_modules =
     marestail.timeline
     marestail.ran_against
 forbidden_modules =
+    marestail.hunks
     marestail.gates
     marestail.runner
     marestail.cli
@@ -91,6 +93,7 @@ source_modules =
     marestail.javascript
     marestail.elixir
 forbidden_modules =
+    marestail.hunks
     marestail.gates
     marestail.runner
     marestail.cli
@@ -175,6 +178,7 @@ type = forbidden
 source_modules =
     marestail.backends
 forbidden_modules =
+    marestail.hunks
     marestail.runner
     marestail.cli
     marestail.prompts
@@ -199,6 +203,7 @@ type = forbidden
 source_modules =
     marestail.timeline
 forbidden_modules =
+    marestail.hunks
     marestail.runner
     marestail.cli
     marestail.prompts
@@ -223,6 +228,7 @@ type = forbidden
 source_modules =
     marestail.ran_against
 forbidden_modules =
+    marestail.hunks
     marestail.runner
     marestail.cli
     marestail.prompts
@@ -250,3 +256,37 @@ protected_modules =
 allowed_importers =
     marestail.runner
     marestail.prompts
+
+[importlinter:contract:hunk-check-belongs-to-runner]
+name = The hyper hunk check and the blast review are asked for only by the runner
+type = protected
+protected_modules =
+    marestail.hunks
+allowed_importers =
+    marestail.runner
+
+[importlinter:contract:hunk-check-reads-only-git-and-freeze]
+name = The hunk check reads git and the file classes, never orchestration, prompts or gates
+type = forbidden
+source_modules =
+    marestail.hunks
+forbidden_modules =
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.timeline
+    marestail.ran_against
+    marestail.context

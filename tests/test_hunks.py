@@ -43,7 +43,7 @@ def test_problems_reports_a_whitespace_hunk_and_an_unlisted_hunk(repo: tuple[Con
     )
     change(config, {"util.py": reindented, "src.py": "changed\n"})
     assert hunks.problems(config, start, "no section") == [
-        f"util.py:2-4: {hunks.WHITESPACE}",
+        f"util.py:2-4: {hunks._WHITESPACE}",
         "src.py:1-1: not listed under ## Hunks",
     ]
 
@@ -79,9 +79,9 @@ def test_problems_ignore_features_qa_and_non_source_hunks(repo: tuple[Config, st
     [("@@ -1 +1,2 @@", (1, 2)), ("@@ -3 +3 @@", (3, 3)), ("@@ -3,2 +2,0 @@", (2, 2)), ("@@ -0,0 +5,3 @@ def x():", (5, 7))],
 )
 def test_span_reads_the_new_side(header: str, expected: tuple[int, int]) -> None:
-    match = hunks.HUNK_HEADER.search(header)
+    match = hunks._HUNK_HEADER.search(header)
     assert match is not None
-    assert hunks.span(match) == expected
+    assert hunks._span(match) == expected
 
 
 def test_parse_hunks_takes_each_file_path_from_its_header() -> None:
@@ -89,11 +89,11 @@ def test_parse_hunks_takes_each_file_path_from_its_header() -> None:
         "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n@@ -4 +4,2 @@\n+z\n"
         "diff --git a/b.py b/b.py\ndeleted file mode 100644\n--- a/b.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-++ b/c.py\n"
     )
-    assert hunks.parse_hunks(diff) == [("a.py", 1, 1), ("a.py", 4, 5)]
+    assert hunks._parse_hunks(diff) == [("a.py", 1, 1), ("a.py", 4, 5)]
 
 
 def test_parse_hunks_of_an_empty_diff() -> None:
-    assert hunks.parse_hunks("") == []
+    assert hunks._parse_hunks("") == []
 
 
 @pytest.mark.parametrize(
@@ -106,27 +106,27 @@ def test_parse_hunks_of_an_empty_diff() -> None:
         (("a", 2, 4), ("b", 2, 4), False),
     ],
 )
-def test_overlaps(one: hunks.Hunk, other: hunks.Hunk, expected: bool) -> None:
-    assert hunks.overlaps(one, other) is expected
+def test_overlaps(one: hunks._Hunk, other: hunks._Hunk, expected: bool) -> None:
+    assert hunks._overlaps(one, other) is expected
 
 
 def test_covered() -> None:
-    assert hunks.covered(("a", 1, 1), [("b", 1, 1), ("a", 1, 3)]) is True
-    assert hunks.covered(("a", 1, 1), []) is False
+    assert hunks._covered(("a", 1, 1), [("b", 1, 1), ("a", 1, 3)]) is True
+    assert hunks._covered(("a", 1, 1), []) is False
 
 
 @pytest.mark.parametrize(("path", "expected"), [("src.py", True), ("tests/test_src.py", False), ("notes.txt", False)])
 def test_needs_listing(path: str, expected: bool) -> None:
-    assert hunks.needs_listing(path) is expected
+    assert hunks._needs_listing(path) is expected
 
 
 def test_findings() -> None:
-    assert hunks.findings([("a.py", 1, 2)], "bad") == ["a.py:1-2: bad"]
+    assert hunks._findings([("a.py", 1, 2)], "bad") == ["a.py:1-2: bad"]
 
 
 def test_moved_file() -> None:
-    assert hunks.moved_file(["D", "a.py"]) == (f"a.py: deleted; {NO_MOVES}", "a.py")
-    assert hunks.moved_file(["R100", "a.py", "b.py"]) == (f"a.py -> b.py: renamed or moved; {NO_MOVES}", "b.py")
+    assert hunks._moved_file(["D", "a.py"]) == (f"a.py: deleted; {NO_MOVES}", "a.py")
+    assert hunks._moved_file(["R100", "a.py", "b.py"]) == (f"a.py -> b.py: renamed or moved; {NO_MOVES}", "b.py")
 
 
 def test_listed_hunks_accept_bullets_bare_lines_and_single_lines() -> None:
@@ -134,15 +134,15 @@ def test_listed_hunks_accept_bullets_bare_lines_and_single_lines() -> None:
         "intro\n- x.py:9-9 — outside\n## Hunks\n- src.py:1-2 — the fix needs it\nutil.py:3-3 — why\n"
         "  * lib/a.py:7 - why\nnot a line\n\n## Audit\n- b.py:1-1 — after\n"
     )
-    assert hunks.listed_hunks(handoff) == [("src.py", 1, 2), ("util.py", 3, 3), ("lib/a.py", 7, 7)]
+    assert hunks._listed_hunks(handoff) == [("src.py", 1, 2), ("util.py", 3, 3), ("lib/a.py", 7, 7)]
 
 
 def test_listed_hunks_without_a_section() -> None:
-    assert hunks.listed_hunks("- src.py:1-2 — why\n") == []
+    assert hunks._listed_hunks("- src.py:1-2 — why\n") == []
 
 
 def test_hunks_section_runs_to_the_end_without_a_next_heading() -> None:
-    assert hunks.hunks_section("## Hunks  \na\n\nb") == ["a", "", "b"]
+    assert hunks._hunks_section("## Hunks  \na\n\nb") == ["a", "", "b"]
 
 
 def test_review_holds_the_diff_since_start_and_the_latest_hunks(repo: tuple[Config, str], tmp_path: Path) -> None:
@@ -167,4 +167,4 @@ def test_review_is_empty_without_changes_or_handoffs(repo: tuple[Config, str], t
 def test_hunks_listing_of_a_handoff_without_hunks(tmp_path: Path) -> None:
     report = tmp_path / "02-architect.md"
     report.write_text("## Hunks\n\n")
-    assert hunks.hunks_listing(report) == ""
+    assert hunks._hunks_listing(report) == ""
