@@ -12,11 +12,15 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     - rename or move: `<old> -> <new>: renamed or moved; under hyper no file may be renamed, moved or deleted`
     - deletion:       `<path>: deleted; under hyper no file may be renamed, moved or deleted`
     - whitespace:     `<path>:<s>-<e>: whitespace or formatting only; under hyper leave code the fix does not need as it is`
-                      (a hunk that is in `git diff -U0` and missing from `git diff -U0 -w`; applies to every file.
-                      Such a hunk gets this finding only, never the unlisted one as well)
+                      (a `git diff -U0` hunk whose `s-e` no `git diff -U0 -w` hunk of the same path overlaps; applies
+                      to every file. A hunk that mixes re-indentation with a real change is overlapped, so it is not
+                      whitespace-only and is checked as a normal hunk. A whitespace-only hunk gets this finding only,
+                      never the unlisted one as well)
     - unlisted:       `<path>:<s>-<e>: not listed under ## Hunks`
                       (a hunk in a non-test file that no `## Hunks` line of this role's handoff covers.
                       A line covers a hunk when it has the same path and an overlapping `s-e`. Extra lines are fine.)
+  A renamed, moved or deleted file gets its rename or delete finding only; none of its hunks, such as the
+  `-1,4 +0,0` hunk of a deleted file, gets a whitespace or unlisted finding.
   The handoff checked is the one this role just wrote. The architect's `## Hunks` must list every non-test hunk
   since <start>, the coder's included; a coder hunk the architect leaves out is an unlisted finding against the architect.
   A test file has a path segment `tests`, `test`, `spec` or `__tests__`, or a name matching `test_*`,
@@ -32,6 +36,8 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     `code rename`            `git mv util.py helpers.py`
     `code delete`            `git rm util.py`
     `code reindent`          lines 2-4 of util.py gain 4 more leading spaces each
+    `code reindent-fix`      lines 2-4 of util.py gain 4 more leading spaces each and line 3 becomes `            return 2`;
+                             `## Hunks` also lists `- util.py:2-4 — the fix needs it`
     `code miss-util`         util.py line 3 becomes `        return 2`; `## Hunks` still lists only src.py:1-2
     `code package explain`   adds `package.json` containing `{}`, plus the `## Config change` section `explain` writes today
     `code five-tests`        the one exception: it skips the src.py write. It changes only util.py line 3 to `        return 2`,
@@ -96,20 +102,23 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     Given STUB_PLAN is `<action>`
     When I run `marestail run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1` in a prepared repo
     Then stdout contains `<finding>`
+    And stdout does not contain `<absent>`
     And stdout contains `pipeline stopped at coder` and the exit code is 1
 
     Examples:
-      | action          | finding                                                                                              |
-      | code rename     | util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted         |
-      | code delete     | util.py: deleted; under hyper no file may be renamed, moved or deleted                                |
-      | code reindent   | util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is     |
-      | code miss-util  | util.py:3-3: not listed under ## Hunks                                                                |
+      | action          | finding                                                                                              | absent                                |
+      | code rename     | util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted         | not listed under ## Hunks             |
+      | code rename     | util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted         | whitespace or formatting only         |
+      | code delete     | util.py: deleted; under hyper no file may be renamed, moved or deleted                                | util.py:0-0                           |
+      | code delete     | util.py: deleted; under hyper no file may be renamed, moved or deleted                                | not listed under ## Hunks             |
+      | code reindent   | util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is     | not listed under ## Hunks             |
+      | code miss-util  | util.py:3-3: not listed under ## Hunks                                                                | whitespace or formatting only         |
 
-  Scenario: a whitespace-only hunk gets the whitespace finding and no unlisted finding
-    Given STUB_PLAN is `code reindent`
+  Scenario: a hunk that re-indents and also changes a line is not whitespace-only
+    Given STUB_PLAN is `code reindent-fix`
     When I run `marestail run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1` in a prepared repo
-    Then stdout contains `util.py:2-4: whitespace or formatting only`
-    And stdout does not contain `util.py:2-4: not listed under ## Hunks`
+    Then stdout does not contain `whitespace or formatting only`
+    And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
 
   Scenario: the hunk check bounces the architect when its ## Hunks leaves out the coder's hunk
     Given STUB_PLAN is `code five-tests`, `architect no-hunks`

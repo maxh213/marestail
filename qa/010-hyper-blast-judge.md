@@ -23,11 +23,15 @@ Work in a scratch directory. `M` is the marestail-green checkout. The stub actio
    This repo is now "prepared". Run `git log --oneline -1` and note the line as P (its hash is `<P>`).
    Steps 6 to 14 each start from P: first `git reset --hard <P>` and `git clean -fdq -e .marestail`, then check that `git log --oneline -1` prints P; then empty `../prompts`, write the plan, and run the command from the repo.
 6. Plan `code rename`. Run `python3 $M/marestail/cli.py run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1`.
-   Expected: stdout contains `util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted`, then `pipeline stopped at coder`, and the exit code is 1.
+   Expected: stdout contains `util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted`, then `pipeline stopped at coder`, and the exit code is 1. stdout contains no `not listed under ## Hunks` and no `whitespace or formatting only`.
+   Reset to P and repeat with plan `code delete`.
+   Expected: stdout contains `util.py: deleted; under hyper no file may be renamed, moved or deleted`, and contains no `util.py:0-0` and no `not listed under ## Hunks`. The exit code is 1.
 7. Plan `code reindent`, the step 6 command.
-   Expected: stdout contains `util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is` and does not contain `util.py:2-4: not listed under ## Hunks`. The exit code is 1.
+   Expected: stdout contains `util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is` and does not contain `not listed under ## Hunks`. The exit code is 1.
+   Reset to P and repeat with plan `code reindent-fix`.
+   Expected: stdout contains no `whitespace or formatting only`, the last line is `pipeline complete` and the exit code is 0.
 8. Plan `code miss-util`, the step 6 command.
-   Expected: stdout contains `util.py:3-3: not listed under ## Hunks`, and the exit code is 1.
+   Expected: stdout contains `util.py:3-3: not listed under ## Hunks` and no `whitespace or formatting only`, and the exit code is 1.
 9. Plan `code package explain` then `code`. Run the step 6 command with `--retries 2`.
    Expected: stdout contains `package.json: frozen, reverted. Your reason was recorded as`. `git log --format=%B` shows `Revert change to frozen files by NN-coder, recorded as a proposal` and `Proposed by NN-coder: package.json`. `git cat-file -e HEAD:package.json` fails. The last line is `pipeline complete`.
 10. Plan `code five-tests`, the step 6 command.
