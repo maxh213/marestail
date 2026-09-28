@@ -3,14 +3,29 @@ Feature: `marestail gate --scope hyper` gates only the lines that changed
   A developer who changes one line in a legacy file runs `marestail gate --scope hyper`
   and is judged on that line alone.
 
-  Rule for every path:line gate (comments, lint, deadcode, depth, Sonar issues and hotspots) under hyper, applied in this order:
-    1. Crash first. If a tool exits with a code other than 0 or its findings code (ruff check, ruff format --check and mypy: 1),
-       or produces no report, the gate fails with the finding text `changed` prints today, unfiltered.
-    2. A finding holding `<repo-relative path>:<line>` (with or without `:<col>`) and line >= 1 is kept only when that line changed.
-    3. A finding that names a changed file but has no line, or line 0, is file-level: dropped, and counted in the summary
-       as `N file-level findings not gated under hyper`. The phrase is absent when N is 0.
-    4. Any other output line (tool chatter such as `[*] 2 fixable with the --fix option.`, or ruff format's diff context) is dropped and not counted.
-  Surviving findings keep their text and order. The same helper serves every language; the end-to-end fixtures are Python and TypeScript.
+  Under hyper every gate sorts its output into two kinds before anything is filtered:
+    - A location finding is built from one record of a tool's report that names a source file and a line
+      (the findings `--scope changed` filters by file today). Only these go through the shared line filter.
+    - A gate diagnostic is text marestail writes about the run itself: a crash, a missing tool, a missing or unparseable
+      report, a bad config, a sanity check. Diagnostics are never line-filtered, never counted as file-level, and fail the gate.
+      A placeholder location such as `marestail.toml:1`, `sonar-project.properties:1` or `<file>:1` does not make one a location finding.
+  The shared line filter, for location findings only:
+    1. A finding whose file is in the diff and whose line (>= 1) changed is kept, with its text and order unchanged.
+    2. A finding whose file is in the diff but whose record has no line is file-level: dropped, and counted by appending
+       `; N file-level findings not gated under hyper` to the gate's summary. Nothing is appended when N is 0.
+    3. Every other location finding is dropped and not counted.
+  Where each path:line gate draws the line (exit codes and texts are what the gates use today):
+    | gate      | tool                    | location findings                                   | gate diagnostics, kept unfiltered                                                   |
+    | py.lint   | ruff check, ruff format --check, mypy | exit 1: output lines holding `path:line[:col]`; other exit-1 lines (`[*] 2 fixable ...`, diff context, `1 file would be reformatted`) are dropped uncounted | any exit other than 0 or 1 (ruff 2, mypy 2, 127 `<bin>: not found (...)`): every output line, prefixed `ruff: `, `format: ` or `mypy: ` as today |
+    | ts.lint   | tsc                     | lines matching the tsc `path(line,col)` pattern     | `tsc: <line>` when nothing matches; `marestail.toml:1 [ts] tsconfig = '<name>' does not exist under <root>` |
+    | ts.lint   | eslint                  | messages in the JSON report; a message with no `line` is file-level, not `:1` | `eslint: <line>` when the report does not parse; `marestail.toml:1 eslint exited N without a message` when the exit is not 0 and no message survives parsing |
+    | comments  | every scanner           | the scanner's `path:line comment: ...` records      | each `<language> comment scanner failed: <tail>` text                               |
+    | deadcode  | vulture (exit 3 = findings), knip, and the ruby, C#, rust, java, elixir, erlang scanners | the scanner's `path:line ...` records | `vulture failed`, `knip produced no report`, `<language> deadcode scanner failed`, `elixir/erlang dead code analysis failed` texts and erlang hints |
+    | depth     | in-process analysis     | every `path:line ...` finding                       | none                                                                                |
+    | rb/rs/cs/java/ex/er lint | their linters | per-record `path:line` findings; rustfmt's `<file>:1 not rustfmt formatted` is file-level | `rubocop failed`, `cargo clippy failed`, `cargo fmt --check failed`, `PMD failed (exit N)`, `<file>:1 PMD could not analyse`, the C# `SARIF version` text, and each linter's existing failed text |
+    | sonar     | SonarQube               | open issues, hotspots and reopened issues; an issue with no `line` is file-level | `not set up`, `scanner failed`, `analysis did not complete`, and the language checks `<where>:1 SonarQube received no <lang> lines ...` and `... SonarQube imported no <lang> coverage ...` |
+  Mutation gates keep their existing no-report texts (`stryker produced no report (exit N)` and the like) as failures.
+  The end-to-end fixtures are Python and TypeScript; other languages share the same filter and are covered by the table.
 
   Background:
     Given a Python fixture repo on branch "work" whose `marestail.toml` has `[git] base = "base"`, `[python] root = "."`, `sources = ["app"]`
@@ -137,16 +152,47 @@ Feature: `marestail gate --scope hyper` gates only the lines that changed
     Then survivors on `src/legacy.ts:9`, `src/legacy.ts:13` and `src/legacy.ts:14` are listed too
 
   Scenario: Sonar issues are filtered by line, file-level issues are counted, duplication is not gated
-    Given a stubbed Sonar client, as in `tools/samples/scope-sonar.sh`, for a tree where only lines 1 and 6 of `app/legacy.py` changed
+    Given a stubbed Sonar client, as in `tools/samples/scope-sonar.sh`, with quality gate status `ERROR`,
+      for a tree where only lines 1 and 6 of `app/legacy.py` changed
+    And it returns accepted issues `{"key": "A1", "component": "proj:app/legacy.py", "line": 6, "rule": "python:S3", "issueStatus": "ACCEPTED"}`
+      and `{"key": "A2", "component": "proj:app/legacy.py", "line": 9, "rule": "python:S4", "issueStatus": "FALSE_POSITIVE"}`
     And it returns open issues `{"component": "proj:app/legacy.py", "line": 2, "severity": "MAJOR", "rule": "python:S1481", "message": "old"}`,
       `{"component": "proj:app/legacy.py", "line": 6, "severity": "MAJOR", "rule": "python:S1481", "message": "new"}`
       and `{"component": "proj:app/legacy.py", "severity": "MINOR", "rule": "python:S1451", "message": "Add a header"}`,
       hotspots `{"component": "proj:app/legacy.py", "line": 1, "message": "check import"}` and
       `{"component": "proj:app/legacy.py", "line": 9, "message": "old hotspot"}`, and 12.0% duplication for `app/legacy.py`
     When the sonar gate collects and summarizes under `--scope hyper`
-    Then the findings are exactly `app/legacy.py:6 MAJOR python:S1481: new` and `app/legacy.py:1 hotspot: check import`
+    Then the client posted exactly one reopen transition, for issue `A1`; `A2` on unchanged line 9 is left as it is in Sonar
+    And the findings, in this order, are exactly
+      | app/legacy.py:6 python:S3 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties |
+      | app/legacy.py:6 MAJOR python:S1481: new |
+      | app/legacy.py:1 hotspot: check import |
     And no finding contains `duplication`, even though line 1 changed
-    And the summary contains `1 file-level findings not gated under hyper` and `duplication not gated under hyper`
+    And the summary is `3 sonar findings in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; 1 file-level findings not gated under hyper; duplication not gated under hyper)`
+    When the stub returns no accepted issues, no open issues and no hotspots
+    Then the gate passes with summary `sonar clean in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; duplication not gated under hyper)`
+
+  Scenario: Sonar language diagnostics still fail under hyper
+    Given the same stub, a `[java]` section in `marestail.toml`, and language measures `java=40;py=12` with no `coverage` metric
+    And no issues and no hotspots
+    When the sonar gate runs under `--scope hyper`
+    Then the gate fails with exactly one finding:
+      `marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists`
+    And the summary does not contain `file-level`
+
+  Scenario: a config diagnostic with a placeholder line still fails under hyper
+    Given in the TypeScript fixture `marestail.toml` has `[ts] tsconfig = "missing.json"`, committed at base
+    And line 6 of `src/legacy.ts` is changed to "  return 2 * price;"
+    When I run `marestail gate --tier full --scope hyper --only ts.lint`
+    Then the exit code is 1
+    And ts.lint has exactly one finding: `marestail.toml:1 [ts] tsconfig = 'missing.json' does not exist under .`
+
+  Scenario: an eslint crash still fails under hyper
+    Given line 6 of `src/legacy.ts` is changed to "  return 2 * price;"
+    And `eslint.config.js` in the working tree is `export default [{rules: {"eqeqeq": }}];`
+    When I run `marestail gate --tier full --scope hyper --only ts.lint`
+    Then the exit code is 1 and ts.lint is `[FAIL]`
+    And every finding starts with `eslint: ` or is `marestail.toml:1 eslint exited 2 without a message`
 
   Scenario: a gate whose tool is missing still fails under hyper
     Given line 6 of `app/legacy.py` is changed to "    return 2 * price"

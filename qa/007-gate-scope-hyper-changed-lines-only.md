@@ -40,7 +40,11 @@
     Expected: one finding, `src/legacy.ts:6 eqeqeq: Expected '===' and instead saw '=='.`
 19. `git checkout src/legacy.ts && sed -i '10s/.*/  return "item: " + name;/' src/legacy.ts && marestail gate --tier full --scope hyper --only ts.mutation`
     Expected: `1 surviving mutants`, only `src/legacy.ts:10 StringLiteral Survived: ""`. `reports/mutation/mutation.json` lists only line-10 mutants, which shows stryker got `--mutate src/legacy.ts:10-10`.
-20. Sonar cannot run here without a SonarQube server. In `$M`: `python3 tools/test-scope-hyper.py; python3 tools/test-scope-hard.py`
-    Expected: both exit 0 with a last line containing `ok`; the hyper output includes its stubbed Sonar check passing (line filter, `1 file-level findings not gated under hyper`, `duplication not gated under hyper`).
-21. `grep -n -A6 'scope hyper' README.md`
+20. `git checkout src/legacy.ts && sed -i '6s/.*/  return 2 * price;/' src/legacy.ts && printf 'export default [{rules: {"eqeqeq": }}];\n' > eslint.config.js && marestail gate --tier full --scope hyper --only ts.lint; echo "exit=$?"; git checkout eslint.config.js`
+    Expected: ts.lint `[FAIL]`; every finding starts with `eslint: ` or is `marestail.toml:1 eslint exited 2 without a message`; `exit=1`.
+21. `git checkout src/legacy.ts`, add `tsconfig = "missing.json"` under `[ts]` in `marestail.toml`, then `git commit -qam cfg && git tag -f base && sed -i '6s/.*/  return 2 * price;/' src/legacy.ts && marestail gate --tier full --scope hyper --only ts.lint; echo "exit=$?"`. Afterwards `git reset -q --hard HEAD~1 && git tag -f base`.
+    Expected: exactly one finding, `marestail.toml:1 [ts] tsconfig = 'missing.json' does not exist under .`; `exit=1`.
+22. Sonar cannot run here without a SonarQube server. In `$M`: `python3 tools/test-scope-hyper.py; python3 tools/test-scope-hard.py`
+    Expected: both exit 0 with a last line containing `ok`; the hyper output includes its stubbed Sonar checks passing: only issue `A1` reopened, the three findings in order, the summary `3 sonar findings in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; 1 file-level findings not gated under hyper; duplication not gated under hyper)`, and the java coverage diagnostic failing the gate.
+23. `grep -n -A6 'scope hyper' README.md`
     Expected: the scope section describes hyper next to `changed` and `hard`, with one line saying how the three differ.
