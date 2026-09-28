@@ -2,9 +2,12 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
 
   After this task a developer can install marestail into a shared repository,
   run a hyper-scoped fix and open a pull request that holds only the fix and
-  its tests. Below, <T> is `<target>/.marestail/tooling` as an absolute path and
-  <exclude> is the path `git rev-parse --git-path info/exclude` prints in the
-  target (`.git/info/exclude` in its main worktree).
+  its tests. Below, <T> is `<target>/.marestail/tooling` as an absolute path,
+  <b> is `<T>/node_modules/.bin`, <exclude> is the path
+  `git rev-parse --git-path info/exclude` prints in the target, <R> is the ts root
+  (`[ts] root` of the marestail.toml at the target root after install), <P> is the
+  path from <T> to <R> (`../../web` when `root = "web"`) and <S> each entry of
+  `[ts] sources`, else `[ts] source`, else `src`.
 
   Pinned rules:
   - The exclude block starts with the line `# marestail (install --scope hyper)`
@@ -13,14 +16,22 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     `guidance/`, `tasks/`, `features/`, `qa/`, `perf/`, `PERFORMANCE.md`,
     `.claude/settings.local.json`, `.agents/hooks.json`, `.grok/hooks/marestail-gate.json`
     and `.cursor/hooks.json`. Text outside the block is left byte-for-byte.
-  - Hyper install writes: `marestail.toml` (template plus `tooling = ".marestail/tooling"`
-    under `[ts]`), `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`, and under <T>:
-    `package.json` (private, devDependencies keys `eslint`, `typescript`,
-    `dependency-cruiser`, `@stryker-mutator/core`, `knip`, `vitest`), `eslint.config.mjs`,
-    `tsconfig.json`, `.dependency-cruiser.cjs`, `stryker.config.json`, `knip.json`,
-    `vitest.config.ts` and `sonar-project.properties`. A config kind the target's ts
-    root already has (e.g. its own `eslint.config.mjs`) is not written to <T>.
-    It never writes `sonar-project.properties` at the root.
+  - Hyper install writes `marestail.toml` (the template plus `tooling = ".marestail/tooling"`
+    under `[ts]`) only when none exists; an existing one is left byte-for-byte. It
+    writes `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`, and under <T> the
+    files of the scenario "tooling files have the pinned contents", overwriting them
+    on every hyper install. It never writes `sonar-project.properties` at the root.
+  - A kind the target already has is not written to <T>. It counts as present when
+    one of these exists in <R> (Sonar: in the target root):
+    eslint: `eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc`, `.eslintrc.{js,cjs,json,yml,yaml}`;
+    tsconfig: the file `[ts] tsconfig` names (default `tsconfig.app.json`), the one the gate falls back to;
+    depcruise: the file `[ts] depcruise_config` names (default `.dependency-cruiser.cjs`), likewise;
+    vitest: `vitest.config.*`, `vite.config.*`; stryker: `stryker.conf.*`, `stryker.config.*`;
+    knip: `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, `knip.ts`, `knip.config.*`;
+    sonar: `sonar-project.properties`.
+    `package.json` under <T> is always written.
+  - `[ts] runner = "jest"`: install writes no jest config and adds no jest; jest comes
+    from the target's own `node_modules`, as today.
   - It then runs `npm install --prefix .marestail/tooling` with the target as cwd.
   - Stop hooks: Claude goes to `.claude/settings.local.json`, never `.claude/settings.json`.
     Agy, Grok and Cursor hook files are written only when not tracked; a tracked one
@@ -28,19 +39,26 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
   - Hyper install never writes `.gitignore`, `CLAUDE.md` or `AGENTS.md`, tracked or not.
   - Stdout, in order: an optional Grok trust line; `left tracked files alone: <paths>`
     (comma+space separated, sorted, every tracked path install would have written or
-    edited; the line is omitted when there are none); the `no Stop hook` lines; and
-    last `installed into <target> with --scope hyper; nothing to commit, see <exclude>`.
-  - Gate commands with `[ts] tooling` set, `<b>` = `<T>/node_modules/.bin`:
-    tsc `<b>/tsc --noEmit -p <T>/tsconfig.json`;
+    edited; omitted when there are none); the `no Stop hook` lines; and last
+    `installed into <target> with --scope hyper; nothing to commit, see <exclude>`.
+  - Gates with `[ts] tooling` set: every `npx <tool>` (tsc, eslint, depcruise, stryker,
+    knip, vitest) becomes `<b>/<tool>`, and the config flag points into <T> when that
+    file exists in <T>, else it is today's flag and path:
+    tsc `<b>/tsc --noEmit -p <T>/tsconfig.json`; the `[ts] tsconfig ... does not exist`
+    check is skipped when `<T>/tsconfig.json` exists and runs as today otherwise;
     eslint `<b>/eslint -c <T>/eslint.config.mjs .` then today's remaining arguments;
-    depcruise `<b>/depcruise --config <T>/.dependency-cruiser.cjs --output-type err <source>`;
+    depcruise (ts.deps and `graph.ts_graph`) `<b>/depcruise --config <T>/.dependency-cruiser.cjs --output-type <err|text> <source>`;
     stryker `<b>/stryker run <T>/stryker.config.json` then today's remaining arguments;
     knip `<b>/knip --config <T>/knip.json --reporter json --no-progress`;
-    vitest `<b>/vitest run --config <T>/vitest.config.ts` then today's coverage arguments
-    (jest: `<b>/jest --config <T>/jest.config.js` then today's arguments);
-    the TS scanners resolve `typescript` from `<T>/package.json`;
-    the Sonar scanner gets `-Dproject.settings=<T>/sonar-project.properties`.
-    A config file missing from <T> leaves that flag out; the binary still comes from <b>.
+    vitest `<b>/vitest run --config <T>/vitest.config.ts` then today's coverage arguments;
+    jest is unchanged: `<R>/node_modules/.bin/jest` and today's arguments;
+    the TS scanners run `node <script> <T> <files...>` with today's cwd, so
+    `ts_complexity.mjs`, `ts_depth.mjs` and `ts_comments.mjs` resolve `typescript`
+    from `<T>/package.json`;
+    Sonar: when `<T>/sonar-project.properties` exists, the scanner gets
+    `-Dproject.settings=<T>/sonar-project.properties` and `sonar.exclusions` are read
+    from that file, not the root one.
+    With `[ts] tooling` unset, every command, argv and file read is today's.
 
   Background:
     Given a temporary git repository <target> on branch `main` with one commit
@@ -74,17 +92,110 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
 
   Scenario: tooling lives out of tree
     When I run `marestail install --scope hyper <target>`
-    Then `.marestail/tooling/package.json` exists and its devDependencies hold the pinned keys
+    Then `.marestail/tooling/package.json` exists
     And the fake npm was called once with argv `npm install --prefix .marestail/tooling` and cwd <target>
     And <target> has no `package.json`, `package-lock.json` or `eslint.config.mjs` at its root
     And `marestail.toml` has `tooling = ".marestail/tooling"` under `[ts]`
     And `sonar-project.properties` exists under `.marestail/tooling/` and not at the root
 
-  Scenario: a repo's own config is not duplicated into tooling
-    Given the target's ts root holds its own `eslint.config.mjs`
+  Scenario: tooling files have the pinned contents
+    Given <target> has an untracked `marestail.toml` holding exactly `[ts]\nroot = "web"\nsource = "src"\ntooling = ".marestail/tooling"\n`
     When I run `marestail install --scope hyper <target>`
-    Then `.marestail/tooling/eslint.config.mjs` does not exist
-    And the ts.lint eslint command has no `-c` and runs `<T>/node_modules/.bin/eslint .`
+    Then `marestail.toml` is unchanged
+    And `.marestail/tooling/package.json` is exactly
+      """
+      {
+        "name": "marestail-tooling",
+        "private": true,
+        "devDependencies": {
+          "@stryker-mutator/core": "^9.0.0",
+          "@stryker-mutator/vitest-runner": "^9.0.0",
+          "@vitest/coverage-v8": "^3.2.0",
+          "dependency-cruiser": "^16.0.0",
+          "eslint": "^9.0.0",
+          "knip": "^5.0.0",
+          "typescript": "^5.8.0",
+          "typescript-eslint": "^8.0.0",
+          "vitest": "^3.2.0"
+        }
+      }
+      """
+    And `.marestail/tooling/eslint.config.mjs` is exactly
+      """
+      import tseslint from "typescript-eslint";
+
+      export default tseslint.config(
+        { ignores: ["node_modules/**", "dist/**", "coverage/**"] },
+        { files: ["src/**/*.{ts,tsx}"], extends: [tseslint.configs.recommended] },
+      );
+      """
+    And `.marestail/tooling/tsconfig.json` is exactly
+      """
+      {
+        "compilerOptions": {
+          "target": "ES2022",
+          "module": "ESNext",
+          "moduleResolution": "Bundler",
+          "jsx": "react-jsx",
+          "strict": true,
+          "noEmit": true,
+          "skipLibCheck": true,
+          "esModuleInterop": true,
+          "types": ["vitest/globals"]
+        },
+        "include": ["../../web/src"]
+      }
+      """
+    And `.marestail/tooling/vitest.config.ts` is exactly
+      """
+      import { defineConfig } from "vitest/config";
+
+      export default defineConfig({
+        root: process.cwd(),
+        test: {
+          globals: true,
+          include: ["src/**/*.{test,spec}.{ts,tsx}"],
+          coverage: { provider: "v8", include: ["src/**/*.{ts,tsx}"], exclude: ["src/**/*.{test,spec}.{ts,tsx}"] },
+        },
+      });
+      """
+    And `.marestail/tooling/stryker.config.json` is exactly, with <T> written as the absolute path
+      """
+      {
+        "testRunner": "vitest",
+        "plugins": ["@stryker-mutator/vitest-runner"],
+        "vitest": { "configFile": "<T>/vitest.config.ts" },
+        "mutate": ["src/**/*.ts", "src/**/*.tsx", "!src/**/*.test.*", "!src/**/*.spec.*"],
+        "ignorePatterns": [".marestail"],
+        "coverageAnalysis": "perTest"
+      }
+      """
+    And `.marestail/tooling/knip.json` is exactly
+      """
+      {
+        "entry": ["src/index.{ts,tsx}", "src/main.{ts,tsx}"],
+        "project": ["src/**/*.{ts,tsx}"]
+      }
+      """
+    And `.marestail/tooling/.dependency-cruiser.cjs` is `templates/dependency-cruiser.cjs` with `fileName: "tsconfig.app.json"` replaced by `fileName: "<T>/tsconfig.json"` (by the `[ts] tsconfig` name when <T> gets no tsconfig)
+    And `.marestail/tooling/sonar-project.properties` is `templates/sonar-project.properties` with `,.marestail/**` appended to the `sonar.exclusions` line
+    And each file ends with one newline, and with `[ts] sources = ["app", "lib"]` every `src` pattern is written once per source in that order
+
+  Scenario: a jest target gets the jest Stryker runner and no vitest
+    Given <target> has an untracked `marestail.toml` holding exactly `[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n`
+    When I run `marestail install --scope hyper <target>`
+    Then `.marestail/tooling/package.json` devDependencies are the pinned ones without `vitest`, `@vitest/coverage-v8` and `@stryker-mutator/vitest-runner`, plus `"@stryker-mutator/jest-runner": "^9.0.0"`
+    And `.marestail/tooling/stryker.config.json` has `"testRunner": "jest"`, `"plugins": ["@stryker-mutator/jest-runner"]` and no `vitest` key
+    And `.marestail/tooling/tsconfig.json` has `"types": []`
+    And no `vitest.config.ts` and no `jest.config.*` exists under `.marestail/tooling/`
+    And the ts.tests command is `<target>/web/node_modules/.bin/jest --ci --coverage ...` exactly as today
+
+  Scenario: a repo's own configs are not duplicated into tooling
+    Given <target> has an untracked `marestail.toml` with `[ts]` `root = "web"` and `tooling = ".marestail/tooling"`
+    And `web/` holds `eslint.config.js`, `tsconfig.app.json` and `.dependency-cruiser.cjs`
+    When I run `marestail install --scope hyper <target>`
+    Then `.marestail/tooling/` has no `eslint.config.mjs`, `tsconfig.json` or `.dependency-cruiser.cjs`
+    And it has `package.json`, `vitest.config.ts`, `stryker.config.json`, `knip.json` and `sonar-project.properties`
 
   Scenario: a tracked hook file is left alone and reported
     Given the commit also tracks `.cursor/hooks.json` holding exactly `{}\n`
@@ -119,7 +230,8 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     Given `marestail install --scope hyper <target>` has run and <before> is HEAD
     When a worker runs `git add -f marestail.toml` and commits
     And the runner's untrack step `runner.drop_ignored_since(config, <before>)` runs
-    Then `git ls-files marestail.toml` prints nothing and `marestail.toml` is still on disk
+    Then stdout contains `dropping gitignored files: marestail.toml`
+    And `git ls-files marestail.toml` prints nothing and `marestail.toml` is still on disk
 
   Scenario: a second worktree of the clone sees the same exclusions
     Given `marestail install --scope hyper <target>` has run
@@ -128,23 +240,49 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
 
   Scenario: gates point at the tooling configs when tooling is set
     Given a context whose marestail.toml has `[ts]` with `root = "."`, `source = "src"` and `tooling = ".marestail/tooling"`
-    And every config file named in the pinned rules exists under <T>
-    Then the tsc, eslint, depcruise, stryker, knip and vitest commands are exactly the pinned commands
+    And every <T> file of the scenario "tooling files have the pinned contents" exists
+    Then tsc runs `<b>/tsc --noEmit -p <T>/tsconfig.json` in <R>
+    And eslint runs `<b>/eslint -c <T>/eslint.config.mjs . --ignore-pattern perf/ --max-warnings 0 --format json`
+    And ts.deps runs `<b>/depcruise --config <T>/.dependency-cruiser.cjs --output-type err src`
+    And `graph.ts_graph` runs `<b>/depcruise --config <T>/.dependency-cruiser.cjs --output-type text src`
+    And stryker runs `<b>/stryker run <T>/stryker.config.json --reporters json,progress --tempDirName <today's temp dir> --cleanTempDir always`
+    And knip runs `<b>/knip --config <T>/knip.json --reporter json --no-progress`
+    And vitest runs `<b>/vitest run --config <T>/vitest.config.ts --coverage.enabled=true` then today's remaining coverage arguments
+    And the complexity, depth and comments scanners run `node <script> <T> <files...>`
     And the Sonar scanner command contains `-Dproject.settings=<T>/sonar-project.properties`
+
+  Scenario: Sonar exclusions come from the tooling properties
+    Given tooling is set, `<T>/sonar-project.properties` has `sonar.exclusions=a/**` and the root has `sonar-project.properties` with `sonar.exclusions=b/**`
+    Then the scanner's `-Dsonar.exclusions=` value contains `a/**` and not `b/**`
+
+  Scenario: gates fall back to the repo's own configs when <T> lacks one
+    Given a context with `[ts]` `root = "."`, `tsconfig = "tsconfig.build.json"`, `depcruise_config = ".dependency-cruiser.js"` and `tooling = ".marestail/tooling"`
+    And <R> holds `tsconfig.build.json` and <T> holds no config files
+    Then tsc runs `<b>/tsc --noEmit -p tsconfig.build.json`
+    And ts.deps runs `<b>/depcruise --config .dependency-cruiser.js --output-type err src`
+    And eslint runs `<b>/eslint . --ignore-pattern perf/ --max-warnings 0 --format json`
+    And stryker runs `<b>/stryker run --reporters json,progress ...` with no config argument
+    And knip runs `<b>/knip --reporter json --no-progress` and vitest runs `<b>/vitest run --coverage.enabled=true ...`
+    And the Sonar scanner command contains no `-Dproject.settings` and exclusions come from the root file
+    But with `tsconfig.build.json` also missing from <R>, ts.lint reports `marestail.toml:1 [ts] tsconfig = 'tsconfig.build.json' does not exist under .` as today
 
   Scenario: gates without tooling run the commands of today
     Given a context whose marestail.toml has `[ts]` with `root = "."` and `source = "src"` and no `tooling`
     Then tsc runs `npx tsc --noEmit -p tsconfig.app.json`
-    And eslint runs `npx eslint . --max-warnings 0 --format json` (plus `--ignore-pattern perf/` when the ts root is the repo root)
-    And depcruise runs `npx depcruise --config .dependency-cruiser.cjs --output-type err src`
+    And eslint runs `npx eslint . --ignore-pattern perf/ --max-warnings 0 --format json`
+    And ts.deps runs `npx depcruise --config .dependency-cruiser.cjs --output-type err src` and `graph.ts_graph` the same with `--output-type text`
     And stryker runs `npx stryker run --reporters json,progress --tempDirName <today's temp dir> --cleanTempDir always`
-    And knip runs `npx --yes knip --reporter json --no-progress`
+    And knip runs `npx --yes knip --reporter json --no-progress` and vitest runs `npx vitest run --coverage.enabled=true ...`
+    And the scanners run `node <script> <R> <files...>`
     And the Sonar scanner command contains no `-Dproject.settings`
 
   Scenario: the other installs are unchanged
-    When I run `marestail install <dir>`, `marestail install --gitignore-generated <dir>` and `marestail install --scope hard <dir>` into fresh empty directories
-    Then each writes and prints exactly what features/004-hard-scope-install-skips-agent-docs.feature pins
-    And none of them writes `.marestail/tooling/`, runs npm, or touches `.git/info/exclude`
+    Given three fresh git repositories, each with one empty commit, and a checksum of each `.git/info/exclude`
+    When I run `marestail install <a>`, `marestail install --gitignore-generated <b>` and `marestail install --scope hard <c>`
+    Then <a> and <b> end stdout with `installed into <dir>; edit marestail.toml and sonar-project.properties`
+    And <c> ends stdout with `installed into <c>; left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties`
+    And each writes exactly what features/004-hard-scope-install-skips-agent-docs.feature pins
+    And no `.git/info/exclude` checksum changed, no `.marestail/tooling/` exists and npm was never called
     And `marestail install --help` lists `--scope` with choices `all`, `changed`, `hard`, `hyper`
 
   Scenario: diagnostics and README

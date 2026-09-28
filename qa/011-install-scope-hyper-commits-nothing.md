@@ -20,14 +20,14 @@ Run from the marestail-green repo root with `.venv` active and `bin/` on PATH.
    Expected: one block listing `marestail.toml`, `sonar-project.properties`, `guidance/`, `tasks/`, `features/`, `qa/`, `perf/`, `PERFORMANCE.md`, `.marestail/`, `mutants/`, `.claude/settings.local.json`, `.agents/hooks.json`, `.grok/hooks/marestail-gate.json`, `.cursor/hooks.json`; the git sample comments above it remain.
 5. `git check-ignore -v marestail.toml; grep -A8 '^\[ts\]' marestail.toml | grep tooling; grep marestail .claude/settings.local.json`
    Expected: check-ignore names `.git/info/exclude`; `tooling = ".marestail/tooling"`; the local settings carry `marestail gate --hook`.
-6. `ls -a .marestail/tooling; cat $F/npm.log`
-   Expected: `package.json`, `eslint.config.mjs`, `tsconfig.json`, `.dependency-cruiser.cjs`, `stryker.config.json`, `knip.json`, `vitest.config.ts`, `sonar-project.properties`, `node_modules`; one log line `/tmp/mt-hyper install --prefix .marestail/tooling`.
+6. `ls -a .marestail/tooling; cat $F/npm.log; cat .marestail/tooling/package.json; grep -n include .marestail/tooling/tsconfig.json; grep fileName .marestail/tooling/.dependency-cruiser.cjs; grep exclusions .marestail/tooling/sonar-project.properties`
+   Expected: `package.json`, `eslint.config.mjs`, `tsconfig.json`, `.dependency-cruiser.cjs`, `stryker.config.json`, `knip.json`, `vitest.config.ts`, `sonar-project.properties`, `node_modules`; one log line `/tmp/mt-hyper install --prefix .marestail/tooling`; package.json matches the feature's pinned text (nine devDependencies incl. `typescript-eslint`, `@vitest/coverage-v8`, `@stryker-mutator/vitest-runner`); include is `"../../client/app/src"` (the template's `[ts] root`); `fileName: "/tmp/mt-hyper/.marestail/tooling/tsconfig.json"`; exclusions end with `,.marestail/**`.
 7. `marestail install --scope hyper $T >/dev/null; grep -c '# marestail (install --scope hyper)' .git/info/exclude; git status --porcelain`
    Expected: `1`; status prints nothing.
 8. `git add -f marestail.toml && git commit -qm force && git ls-files marestail.toml`
    Expected: prints `marestail.toml`. Then from the marestail-green root run
    `python -c "from pathlib import Path; from marestail.config import load; from marestail import runner; runner.drop_ignored_since(load(Path('$T')), 'HEAD~1')"` and in $T `git ls-files marestail.toml; ls marestail.toml`
-   Expected: the untrack step prints `dropping gitignored files: marestail.toml`; `ls-files` prints nothing; the file is still on disk.
+   Expected: the untrack step's output contains `dropping gitignored files: marestail.toml`; `ls-files` prints nothing; the file is still on disk.
 9. `git worktree add -q /tmp/mt-hyper-wt && touch /tmp/mt-hyper-wt/marestail.toml && git -C /tmp/mt-hyper-wt status --porcelain`
    Expected: prints nothing.
 10. `printf '{}\n' > .cursor/hooks.json && git add -f .cursor/hooks.json && git commit -qm cursor && marestail install --scope hyper $T | grep -e 'no Stop hook' -e 'left tracked'; cat .cursor/hooks.json`
@@ -36,9 +36,18 @@ Run from the marestail-green repo root with `.venv` active and `bin/` on PATH.
     Expected: `npm install --prefix .marestail/tooling failed (exit 1); everything else is installed`; exit 1.
 12. `marestail install --scope hyper /tmp/mt-hyper-plain; echo "exit=$?"; ls -A /tmp/mt-hyper-plain`
     Expected: `marestail install --scope hyper needs a git repository: /tmp/mt-hyper-plain`; `exit=1`; nothing listed.
-13. `cd - && rm -rf /tmp/mt-full && mkdir /tmp/mt-full && marestail install --scope hard /tmp/mt-full | tail -1; ls /tmp/mt-full/.marestail 2>&1; marestail install --help | grep -A1 -- --scope`
-    Expected: `installed into /tmp/mt-full; left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties`; no `.marestail`; choices `{all,changed,hard,hyper}`.
+13. Other installs, each into a git repo:
+    ```sh
+    cd - && for d in a b c; do rm -rf /tmp/mt-$d && git init -q /tmp/mt-$d && sha1sum /tmp/mt-$d/.git/info/exclude > /tmp/mt-$d.sum; done
+    : > $F/npm.log
+    marestail install /tmp/mt-a | tail -1; marestail install --gitignore-generated /tmp/mt-b | tail -1; marestail install --scope hard /tmp/mt-c | tail -1
+    for d in a b c; do sha1sum -c --quiet /tmp/mt-$d.sum && echo "$d exclude same"; ls -d /tmp/mt-$d/.marestail/tooling 2>&1 | tail -1; done; wc -l < $F/npm.log
+    marestail install --help | grep -A1 -- --scope
+    ```
+    Expected: `installed into /tmp/mt-a; edit marestail.toml and sonar-project.properties`, the same for `/tmp/mt-b`, and `installed into /tmp/mt-c; left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties`; `a exclude same`, `b exclude same`, `c exclude same`, each `ls` reporting no such file; npm log `0`; choices `{all,changed,hard,hyper}`.
 14. `python3 tools/test-install-hyper.py; python3 tools/test-install-hard.py; python3 tools/test-perf.py; echo "exit=$?"`
     Expected: the first two end in a line containing `ok`; test-perf ends `verdict-commit-files: '' != 'perf/bench_x.py'` with `exit=1`.
-15. `grep -n -A20 'Installing into a repository that does not use marestail' README.md`
+15. Jest target: `rm -rf /tmp/mt-jest && git init -q /tmp/mt-jest && printf '[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n' > /tmp/mt-jest/marestail.toml && marestail install --scope hyper /tmp/mt-jest >/dev/null; ls /tmp/mt-jest/.marestail/tooling; grep -e jest -e vitest /tmp/mt-jest/.marestail/tooling/package.json /tmp/mt-jest/.marestail/tooling/stryker.config.json`
+    Expected: no `vitest.config.ts` and no `jest.config.*` listed; the only matches are `@stryker-mutator/jest-runner` in package.json and `"testRunner": "jest"` and `"plugins": ["@stryker-mutator/jest-runner"]` in the Stryker config.
+16. `grep -n -A20 'Installing into a repository that does not use marestail' README.md`
     Expected: the section shows `marestail install --scope hyper`, names `.git/info/exclude` and `.marestail/tooling`, says a reviewer sees only the fix and its tests, and says Python venv and tool lookups are unchanged for now.
