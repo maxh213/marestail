@@ -84,7 +84,14 @@ DOCUMENTED = [
     "GROK_HOME",
     "JAVA_HOME",
 ]
-SPLIT_MODULES = ["marestail/runner.py", "marestail/install.py", "marestail/_install.py", "marestail/context.py"]
+SPLIT_MODULES = [
+    "marestail/runner.py",
+    "marestail/install.py",
+    "marestail/_install.py",
+    "marestail/_hyper.py",
+    "marestail/_tooling.py",
+    "marestail/context.py",
+]
 SCANNER_SOURCES = [
     "marestail/cs/scan/Program.cs",
     "marestail/erl/comments.escript",

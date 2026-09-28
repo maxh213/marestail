@@ -66,7 +66,7 @@ def test_tooling_is_none_without_the_key(tmp_path: Path) -> None:
     assert javascript.tool(ctx, "tsc") == ["npx", "tsc"]
     assert javascript.tool(ctx, "knip", ("npx", "--yes")) == ["npx", "--yes", "knip"]
     assert javascript.tooling_file(ctx, "knip.json") is None
-    assert javascript.config_flag(ctx, "--config", "knip.json") == []
+    assert javascript.config_flag(ctx, "knip.json", "--config") == []
     assert javascript.config_or(ctx, "knip.json", "fallback") == "fallback"
 
 
@@ -82,7 +82,7 @@ def test_tooling_files_count_only_when_present(tmp_path: Path) -> None:
     folder = tooling_dir(tmp_path, "knip.json")
     assert javascript.tooling_file(ctx, "knip.json") == folder / "knip.json"
     assert javascript.tooling_file(ctx, "tsconfig.json") is None
-    assert javascript.config_flag(ctx, "--config", "knip.json") == ["--config", str(folder / "knip.json")]
-    assert javascript.config_flag(ctx, "-c", "eslint.config.mjs") == []
+    assert javascript.config_flag(ctx, "knip.json", "--config") == ["--config", str(folder / "knip.json")]
+    assert javascript.config_flag(ctx, "eslint.config.mjs", "-c") == []
     assert javascript.config_or(ctx, "knip.json", "fallback") == str(folder / "knip.json")
     assert javascript.config_or(ctx, "tsconfig.json", "fallback") == "fallback"

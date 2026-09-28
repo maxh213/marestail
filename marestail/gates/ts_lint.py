@@ -101,7 +101,7 @@ def eslint_lines(output: str) -> list[str]:
 
 def eslint_command(ctx: Context) -> list[str]:
     benchmarks = ["--ignore-pattern", "perf/"] if ctx.ts_root().resolve() == ctx.root.resolve() else []
-    config = config_flag(ctx, "-c", "eslint.config.mjs")
+    config = config_flag(ctx, "eslint.config.mjs", "-c")
     return [*tool(ctx, "eslint"), *config, ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
 
 

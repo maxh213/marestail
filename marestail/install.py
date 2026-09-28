@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from marestail import _hyper
 from marestail import _install as impl
 
 __all__ = ["install"]
@@ -7,7 +8,7 @@ __all__ = ["install"]
 
 def install(target: Path, gitignore_generated: bool = False, hard: bool = False, hyper: bool = False) -> int:
     if hyper:
-        return impl.install_hyper(target)
+        return _hyper.install_hyper(target)
     impl.write_tree(target, hard)
     impl.apply_hooks(target)
     impl.extend_gitignore(target / ".gitignore", impl.generated_ignore(gitignore_generated, hard))

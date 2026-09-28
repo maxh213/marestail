@@ -12,6 +12,19 @@ SCRIPTS = {"comments": COMMENTS, "complexity": COMPLEXITY, "depth": DEPTH}
 NPX = ("npx",)
 DEPCRUISE_CONFIG = ".dependency-cruiser.cjs"
 
+__all__ = [
+    "COMMENTS",
+    "COMPLEXITY",
+    "DEPTH",
+    "config_flag",
+    "depcruise_config",
+    "labelled",
+    "rel",
+    "scan",
+    "tool",
+    "tooling_file",
+]
+
 
 def script(mode: str) -> Path:
     return SCRIPTS[mode]
@@ -61,14 +74,9 @@ def tooling_file(ctx: Context, name: str) -> Path | None:
     return path if path.exists() else None
 
 
-def tooling_argument(ctx: Context, name: str) -> list[str]:
+def config_flag(ctx: Context, name: str, *flag: str) -> list[str]:
     path = tooling_file(ctx, name)
-    return [] if path is None else [str(path)]
-
-
-def config_flag(ctx: Context, flag: str, name: str) -> list[str]:
-    path = tooling_argument(ctx, name)
-    return [flag, *path] if path else []
+    return [] if path is None else [*flag, str(path)]
 
 
 def config_or(ctx: Context, name: str, fallback: str) -> str:

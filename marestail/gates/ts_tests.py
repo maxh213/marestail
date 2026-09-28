@@ -68,7 +68,7 @@ def vitest_command(ctx: Context) -> list[str]:
     return [
         *tool(ctx, chosen_runner(ctx)),
         "run",
-        *config_flag(ctx, "--config", "vitest.config.ts"),
+        *config_flag(ctx, "vitest.config.ts", "--config"),
         "--coverage.enabled=true",
         "--coverage.all=true",
         "--coverage.reporter=json",

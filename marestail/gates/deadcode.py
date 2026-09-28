@@ -124,7 +124,7 @@ def ts_findings(ctx: Context) -> list[str]:
         return []
     ts_root = ctx.ts_root()
     kinds = ctx.config.get("deadcode", "ts_kinds", TS_KINDS)
-    command = [*tool(ctx, "knip", ("npx", "--yes")), *config_flag(ctx, "--config", "knip.json")]
+    command = [*tool(ctx, "knip", ("npx", "--yes")), *config_flag(ctx, "knip.json", "--config")]
     _, output = run([*command, "--reporter", "json", "--no-progress"], cwd=ts_root, timeout=900)
     start = output.find("{")
     if start < 0:
