@@ -24,7 +24,26 @@ Feature: `marestail gate --scope hyper` gates only the lines that changed
     | depth     | in-process analysis     | every `path:line ...` finding                       | none                                                                                |
     | rb/rs/cs/java/ex/er lint | their linters | per-record `path:line` findings; rustfmt's `<file>:1 not rustfmt formatted` is file-level | `rubocop failed`, `cargo clippy failed`, `cargo fmt --check failed`, `PMD failed (exit N)`, `<file>:1 PMD could not analyse`, the C# `SARIF version` text, and each linter's existing failed text |
     | sonar     | SonarQube               | open issues, hotspots and reopened issues; an issue with no `line` is file-level | `not set up`, `scanner failed`, `analysis did not complete`, and the language checks `<where>:1 SonarQube received no <lang> lines ...` and `... SonarQube imported no <lang> coverage ...` |
-  Mutation gates keep their existing no-report texts (`stryker produced no report (exit N)` and the like) as failures.
+    | cs/java/rs/rb deps | their dependency scanners | layer breaks `<from>:<line> ... must not depend on ...`; an rb edge with no `line` is file-level, not `:1` | `dependency scanner failed` and each scanner's error text, `er` `sources failed to compile`, `<layers file>:1 missing` |
+  Dependency findings that are not per-edge stay exactly as under `changed` under hyper: not line-filtered, not counted as file-level:
+    - cycles in every language (`<first>:<line> dependency cycle: ...`, `<first>:<line> module cycle: ...`, `cycle: ...`),
+      because one changed import can close a cycle and the printed line is only the first file's edge;
+    - py.deps (import-linter `- a.b -> c.d` lines) and ts.deps (depcruise lines with no line number).
+  `docs` is not scope-filtered today and stays so under hyper; it does not use the shared helper.
+  Mutation, every language: a mutant is kept only when its start line changed, and the summary's total counts only those mutants
+  (`S of T mutants not killed`, T = mutants on changed lines; ts keeps `N surviving mutants`). A mutant with no line or line 0
+  is file-level: dropped, left out of T, and counted in the file-level suffix. Only stryker (ts) is given a line range; the other
+  tools run as under `changed` and only their report is filtered. When mutants were generated but none starts on a changed line,
+  the gate passes with summary `no mutants on changed lines`.
+    | gate        | mutant start line                                      | gate diagnostics, kept unfiltered                                                 |
+    | py.mutation | def line of the mutated function + offset of the first `-` line in `mutmut show` | `mutmut failed`, `no mutants were generated`                    |
+    | ts.mutation | `location.start.line`; run with `--mutate <file>:<start>-<end>` per changed range | `stryker produced no report (exit N)`                           |
+    | cs.mutation | `location.start.line` (0 when absent)                  | `stryker produced no report (exit N)`, dotnet hints, `no mutants were generated`    |
+    | java.mutation | `lineNumber` (0 when absent)                         | `PIT is not in the pom`, `PIT produced no report (exit N)`, maven hints, the no-mutants text |
+    | rs.mutation | `span.start.line` (0 when absent)                      | `cargo-mutants missing`, `cargo mutants produced no outcomes.json (exit N)`, `tests fail before any mutation`, `no viable mutants were generated` |
+    | rb.mutation | the `line` of each coverage result                     | `bundle not available`, `mutant is not in the bundle`, `mutant produced no report (exit N)`, `mutant session report unreadable`, `no mutants were generated` |
+    | ex.mutation | `location.line` (0 when absent)                        | the muex missing text, `muex produced no report`, `no mutants were generated`      |
+    | er.mutation | the mutant's `line`                                    | the eunit baseline texts and each `erlang.trouble` text                            |
   The end-to-end fixtures are Python and TypeScript; other languages share the same filter and are covered by the table.
 
   Background:
