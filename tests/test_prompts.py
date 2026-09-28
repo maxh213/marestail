@@ -312,17 +312,23 @@ def test_perf_author_prompt_minimal(repo: Path) -> None:
     ]
 
 
+HUNKS = (
+    "Add a `## Hunks` section to your handoff: one line per hunk outside the tests, `path:start-end — why`, where why is "
+    "`the fix needs it` or `boy scout: <what got better> in <the touched function>`."
+)
+GROW = "Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier."
 HYPER_ROLE_SENTENCES = {
     "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
     "changed lines can reach.",
     "critic": "Bounce a scenario that would force a change outside the fix.",
     "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
-    "Write the tests the repository can already run, in the style it already uses. Write as many as you need.",
+    "Write the tests the repository can already run, in the style it already uses. Write as many as you need. " + HUNKS,
     "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
     "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
     "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "
-    "dependency.",
-    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change.",
+    "dependency. " + HUNKS,
+    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change. "
+    + GROW,
 }
 HYPER_ALL = (
     "This run is hyper-scoped. Make the smallest change that does what the task asks. Leave the code you touch a little "
@@ -344,7 +350,7 @@ def hyper_prompt(repo: Path, role: str) -> str:
     return prompts.worker_prompt(config(repo), step, task, "t", report(repo, "03"), "", "", " --scope hyper", hyper=True)
 
 
-@pytest.mark.parametrize("role", ["specifier", "critic", "coder", "architect", "hardener", "qa"])
+@pytest.mark.parametrize("role", ["specifier", "critic", "coder", "architect", "blast", "hardener", "qa"])
 def test_hyper_prompt_carries_its_scope_section(repo: Path, role: str) -> None:
     text = hyper_prompt(repo, role)
     scope = next(part for part in text.split("\n\n") if part.startswith("# Scope\n"))
@@ -388,3 +394,25 @@ def test_prompts_outside_hyper_keep_the_hard_scope(repo: Path, role: str, tier: 
     assert f"Run `marestail gate --tier {tier} --scope hard`" in text
     assert "This run is hyper-scoped" not in text
     assert "# Scope\n" + prompts.WORKER_SCOPE.format(paths="`src`") in text
+
+
+@pytest.mark.parametrize(
+    ("role", "hunks", "grow"), [("coder", True, False), ("architect", True, False), ("hardener", False, True), ("blast", False, False)]
+)
+def test_hyper_prompt_asks_for_hunks_and_forbids_growing_the_diff(repo: Path, role: str, hunks: bool, grow: bool) -> None:
+    text = hyper_prompt(repo, role)
+    assert (HUNKS in text, GROW in text) == (hunks, grow)
+
+
+def test_judge_prompt_shows_the_review_sections_with_none_for_empty_ones(repo: Path) -> None:
+    add_role("blast")
+    review = {"Diff stat": " src.py | 2 +", "Diff": "", "Hunks": "## 01-coder\n- src.py:1-2 — why"}
+    text = prompts.judge_prompt(config(repo), find("blast", "hyper"), repo / "tasks" / "t.md", "t", report(repo, "05"), "", review=review)
+    assert "\n\n# Diff stat\nsrc.py | 2 +\n\n# Diff\nnone\n\n# Hunks\n## 01-coder\n- src.py:1-2 — why\n\n" in text
+    assert "# Gate report" not in text
+
+
+def test_judge_prompt_without_a_review_has_no_diff_section(repo: Path) -> None:
+    add_role("hardener")
+    text = prompts.judge_prompt(config(repo), find("hardener"), repo / "tasks" / "t.md", "t", report(repo, "05"), "")
+    assert "# Diff" not in text

@@ -192,7 +192,7 @@ def roles_and_readme() -> None:
     expect_true("roles-harness", "ran-against: harness" in qa)
     expect_true("roles-nothing", "ran-against: nothing" in qa)
     expect_true("roles-no-fake-app", "must not claim" in qa and "app" in qa and "stand-in" in qa)
-    pipeline = (ROOT / "README.md").read_text().split("## Pipeline", 1)[1].split("## ", 1)[0]
+    pipeline = (ROOT / "README.md").read_text().split("## Pipeline", 1)[1].split("\n## ", 1)[0]
     expect_true("readme-app", "app" in pipeline and "ran-against" in pipeline)
     expect_true("readme-harness", "harness" in pipeline)
     expect_true("readme-nothing", "nothing" in pipeline)

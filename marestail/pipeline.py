@@ -39,12 +39,22 @@ _PIPELINE: list[Step] = [
 HYPER = "hyper"
 _HYPER_DROPPED = ("cleaner", "practices", "perf")
 _HYPER_FULL_TIER = ("coder", "architect")
+_BLAST = Judge("blast", None, bounce_to="coder")
+_BLAST_BEFORE = "hardener"
 
 
 def steps(mode: str | None = None) -> list[Step]:
     if mode != HYPER:
         return _PIPELINE
-    return [_hyper_step(step) for step in _PIPELINE if step.name not in _HYPER_DROPPED]
+    return _hyper_pipeline()
+
+
+def _hyper_pipeline() -> list[Step]:
+    return [added for step in _PIPELINE if step.name not in _HYPER_DROPPED for added in _hyper_steps(step)]
+
+
+def _hyper_steps(step: Step) -> list[Step]:
+    return [_BLAST, step] if step.name == _BLAST_BEFORE else [_hyper_step(step)]
 
 
 def _hyper_step(step: Step) -> Step:

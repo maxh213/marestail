@@ -7,7 +7,7 @@ import pytest
 from marestail import audit, runner
 from marestail.config import Config
 from marestail.perf import trees as perf_trees
-from marestail.pipeline import Worker
+from marestail.pipeline import Judge, Worker
 from marestail.report import Result, render
 from marestail.runner import Run
 from tests.conftest import commit_all, git
@@ -187,10 +187,9 @@ def test_ignored_files_tracked_before_are_kept(repo: Path) -> None:
     assert runner.newly_tracked_ignored(config, before) == ["new.log"]
 
 
-def test_revert_commands_check_out_then_stage_then_commit() -> None:
+def test_revert_commands_restore_index_and_tree_then_commit() -> None:
     assert runner.revert_commands("abc", ["a.toml"], "why") == [
-        ["git", "checkout", "abc", "--", "a.toml"],
-        ["git", "add", "-A", "--", "a.toml"],
+        ["git", "restore", "--source=abc", "--staged", "--worktree", "--", "a.toml"],
         ["git", "commit", "-q", "-m", "why"],
     ]
 
@@ -550,3 +549,59 @@ def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatc
     state.next_report("coder").write_text("h")
     runner.archive_handoffs(state)
     assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "h"
+
+
+def test_frozen_changes_under_hyper_freeze_files_that_are_neither_source_nor_test(repo: Path) -> None:
+    config = Config(root=repo, raw={})
+    before = runner.head(config)
+    touched = ["package.json", "src.py", "tests/test_src.py"]
+    assert runner.frozen_changes(config, Worker("coder", None), before, touched, True) == ["package.json"]
+    assert runner.frozen_changes(config, Worker("coder", None), before, touched) == []
+
+
+def test_verify_worker_under_hyper_reverts_a_new_frozen_file(repo: Path) -> None:
+    state = make_state(repo, hyper=True, start=runner.head(Config(root=repo, raw={})))
+    before = state.start
+    write(repo, "package.json", "{}\n")
+    commit_all(repo, "package")
+    report = state.next_report("coder")
+    report.write_text("done")
+    problems = runner.verify_worker(state, Worker("coder", None), report, before)
+    assert problems == "package.json is frozen for coder; reverted. Work within the current configuration."
+    assert "package.json" not in tracked(repo)
+    assert not (repo / "package.json").exists()
+
+
+def test_verify_worker_under_hyper_bounces_hunk_findings(repo: Path) -> None:
+    state = make_state(repo, hyper=True, start=runner.head(Config(root=repo, raw={})))
+    write(repo, "src.py", "x = 1\ny = 2\n")
+    commit_all(repo, "code")
+    report = state.next_report("architect")
+    report.write_text("done\n## Hunks\n- src.py:2 — the fix needs it\n")
+    assert runner.verify_worker(state, Worker("architect", None), report, state.start) == ""
+    report.write_text("done")
+    problems = runner.verify_worker(state, Worker("architect", None), report, state.start)
+    assert problems == "src.py:1-2: not listed under ## Hunks"
+
+
+def test_verify_worker_skips_the_hunk_check_outside_hyper_and_for_other_roles(repo: Path) -> None:
+    write(repo, "src.py", "x = 1\n")
+    commit_all(repo, "code")
+    start = git(repo, "rev-parse", "HEAD~1").strip()
+    for state, role in ((make_state(repo, start=start), "coder"), (make_state(repo, hyper=True, start=start), "specifier")):
+        report = state.next_report(role)
+        report.write_text("done")
+        assert runner.hunk_problems(state, Worker(role, None), report) == []
+
+
+def test_hunk_checked_only_for_coder_and_architect_under_hyper(repo: Path) -> None:
+    hyper = make_state(repo, hyper=True)
+    assert [runner.hunk_checked(hyper, Worker(role, None)) for role in ("coder", "architect", "qa")] == [True, True, False]
+    assert runner.hunk_checked(make_state(repo), Worker("coder", None)) is False
+
+
+def test_blast_review_only_for_the_blast_judge(repo: Path) -> None:
+    state = make_state(repo, start=runner.head(Config(root=repo, raw={})))
+    blast = runner.blast_review(state, Judge("blast", None, bounce_to="coder"))
+    assert blast == {"Diff stat": "", "Diff": "", "Hunks": ""}
+    assert runner.blast_review(state, Judge("hardener", "full", bounce_to="coder")) is None

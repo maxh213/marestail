@@ -108,3 +108,41 @@ def test_is_wrapper(line: str, expected: bool) -> None:
 def test_changed_lines_skip_headers_and_context() -> None:
     diff = "--- a/x\n+++ b/x\n@@ -1 +1 @@\n context\n-old\n+new\n"
     assert freeze.changed_lines(diff) == ["-old", "+new"]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("tests/test_x.py", True),
+        ("a/test/x.rb", True),
+        ("spec/x.rb", True),
+        ("src/__tests__/x.ts", True),
+        ("test_x.py", True),
+        ("x_test.go", True),
+        ("src/app.test.ts", True),
+        ("src/app.spec.ts", True),
+        ("src/app.ts", False),
+        ("tests", False),
+        ("latest/x.py", False),
+    ],
+)
+def test_is_test(path: str, expected: bool) -> None:
+    assert freeze.is_test(path) is expected
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"), [("lib/extra.py", True), ("src/app.tsx", True), ("a.hrl", True), ("package.json", False), ("README.md", False)]
+)
+def test_is_source(path: str, expected: bool) -> None:
+    assert freeze.is_source(path) is expected
+
+
+def test_frozen_paths_under_hyper_freeze_everything_but_source_and_tests() -> None:
+    paths = ["package.json", "package-lock.json", ".gitignore", "README.md", ".github/workflows/ci.yml", "note.txt"]
+    code = ["lib/extra.py", "src/app.ts", "tests/test_x.py", "src/app.test.ts", "tests/data.json"]
+    assert freeze.frozen_paths(config(), "coder", paths + code, True) == paths
+    assert freeze.frozen_paths(config(), "coder", paths + code) == []
+
+
+def test_frozen_paths_under_hyper_keep_the_role_allow_list_and_the_freeze_list() -> None:
+    assert freeze.frozen_paths(config(), "architect", ["pyproject.toml", "vite.config.js"], True) == ["vite.config.js"]

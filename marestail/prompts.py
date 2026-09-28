@@ -39,17 +39,22 @@ HYPER_SCOPE = (
     "better than you found it. Leave code the change does not touch exactly as it is, including code you would like to "
     "improve. The gates measure only the lines that change."
 )
+HUNKS_INSTRUCTION = (
+    "Add a `## Hunks` section to your handoff: one line per hunk outside the tests, `path:start-end — why`, where why is "
+    "`the fix needs it` or `boy scout: <what got better> in <the touched function>`."
+)
 HYPER_ROLE_SCOPE = {
     "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
     "changed lines can reach.",
     "critic": "Bounce a scenario that would force a change outside the fix.",
     "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
-    "Write the tests the repository can already run, in the style it already uses. Write as many as you need.",
+    "Write the tests the repository can already run, in the style it already uses. Write as many as you need. " + HUNKS_INSTRUCTION,
     "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
     "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
     "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "
-    "dependency.",
-    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change.",
+    "dependency. " + HUNKS_INSTRUCTION,
+    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change. "
+    "Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier.",
 }
 
 
@@ -96,6 +101,7 @@ def judge_prompt(
     feedback: str = EMPTY,
     hard_focus: set[str] | None = None,
     hyper: bool = False,
+    review: dict[str, str] | None = None,
 ) -> str:
     return PARAGRAPH.join(
         [
@@ -103,6 +109,7 @@ def judge_prompt(
             section(TASK, task.read_text()),
             *scope_section(judge.name, hard_focus, JUDGE_SCOPE, hyper),
             section(SPECIFICATION, judge_specification(config, judge, task_name)),
+            *review_sections(review or {}),
             *optional_section("Gate report", gate_report),
             *optional_section("Trees", trees),
             section(HANDOFFS, handoffs(config, task_name)),
@@ -111,6 +118,10 @@ def judge_prompt(
             *optional_section("Why your verdict was rejected", feedback),
         ]
     )
+
+
+def review_sections(review: dict[str, str]) -> list[str]:
+    return [section(title, body or "none") for title, body in review.items()]
 
 
 def judge_specification(config: Config, judge: Judge, task_name: str) -> str:

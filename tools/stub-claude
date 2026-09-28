@@ -9,7 +9,10 @@ plan.write_text("".join(line + "\n" for line in rest))
 root = Path.cwd()
 def sh(*cmd): subprocess.run(cmd, cwd=root, check=True, capture_output=True)
 def commit(role, *paths):
-    sh("git", "add", *paths); sh("git", "commit", "-q", "--allow-empty", "-m", f"{action}\n\nBy {role}.")
+    if paths: sh("git", "add", *paths)
+    sh("git", "commit", "-q", "--allow-empty", "-m", f"{action}\n\nBy {role}.")
+def hunks_section(lines):
+    return "## Hunks\n" + "".join(line + "\n" for line in lines) if lines else ""
 def handoff_path():
     return root / re.search(r"Write (\.marestail/\S+?):", prompt).group(1)
 def verdict_path():
@@ -37,9 +40,31 @@ elif words[0] == "perf":
     body = "1. add_one is twice as slow; batch the work in src.py:1\n" if words[1] == "BOUNCE" else "## Degradations\n- add_one: +100% p50, accepted: Adds one\n"
     v.write_text(f"VERDICT: {words[1]}\n{body}")
 elif words[0] == "code":
-    Path("src.py").write_text("def add_one(x):\n    return x + 1\n")
+    paths = ["tests"]
+    listed = ["- src.py:1-2 — the fix needs it"]
+    if "five-tests" not in words:
+        Path("src.py").write_text("def add_one(x):\n    return x + 1\n"); paths.append("src.py")
     Path("tests").mkdir(exist_ok=True); Path("tests/test_src.py").write_text("def test_adds_one():\n    pass\ndef test_rejects_bad_input():\n    pass\n")
-    paths = ["src.py", "tests"]
+    if "five-tests" in words:
+        for name in "abcd": Path(f"tests/test_{name}.py").write_text(f"def test_{name}():\n    pass\n")
+        listed = ["- util.py:3-3 — the fix needs it"]
+    util = Path("util.py")
+    lines = util.read_text().splitlines(True) if util.exists() else []
+    if "reindent" in words or "reindent-fix" in words:
+        lines[1:4] = ["    " + line for line in lines[1:4]]
+    if "reindent-fix" in words:
+        lines[2] = "            return 2\n"; listed.append("- util.py:2-4 — the fix needs it")
+    if "miss-util" in words or "five-tests" in words:
+        lines[2] = "        return 2\n"
+    if "bare" in words: listed.append("util.py:3-3 — the fix needs it")
+    if "single" in words: listed.append("* util.py:3 - the fix needs it")
+    if lines: util.write_text("".join(lines))
+    if "rename" in words: sh("git", "mv", "util.py", "helpers.py")
+    if "delete" in words: sh("git", "rm", "-q", "util.py")
+    if util.exists(): paths.append("util.py")
+    if "package" in words:
+        Path("package.json").write_text("{}\n"); paths.append("package.json")
+    if "no-hunks" in words: listed = []
     if "revert" in words:
         Path("marestail.toml").write_text('[git]\nbase = "main"\n'); paths.append("marestail.toml")
     if "freeze" in words:
@@ -48,7 +73,16 @@ elif words[0] == "code":
     h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
     audit = "" if "bad-audit" in words else "## Audit\n- Adds one -> tests/test_src.py::test_adds_one\n- Rejects bad input -> tests/test_src.py::test_rejects_bad_input\n"
     explain = "## Config change\nTests moved, so the test path must follow.\n" if "explain" in words else ""
-    h.write_text(f"coded\n{audit}{explain}")
+    h.write_text(f"coded\n{audit}{explain}{hunks_section(listed)}")
+elif words[0] == "architect":
+    tag = words[1] if len(words) > 1 else ""
+    if tag == "extract":
+        Path("src.py").write_text("def add_one(x):\n    return increment(x)\n\n\ndef increment(x):\n    return x + 1\n"); commit("architect", "src.py")
+    else:
+        commit("architect")
+    listed = {"no-hunks": [], "util": ["- util.py:3-3 — the fix needs it"], "extract": ["- src.py:1-6 — boy scout: named the increment in add_one"]}
+    h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
+    h.write_text(f"architect done\n{hunks_section(listed.get(tag, ['- src.py:1-2 — the fix needs it']))}")
 elif words[0] == "worker":
     role = words[1]
     Path("note.txt").write_text(action + "\n"); commit(role, "note.txt")

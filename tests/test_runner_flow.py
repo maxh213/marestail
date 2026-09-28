@@ -787,7 +787,7 @@ def test_judge_attempt_records_bounce(tmp_path: Path, judge_env: dict[str, Any],
     state, report, outcome = attempt_judge(tmp_path, judge)
     assert outcome == (("BOUNCE", "coder", "VERDICT: bounce coder\n1. fix"), "")
     assert judge_env["prompt"].calls == [
-        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}, False),
+        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}, False, None),
     ]
     assert judge_env["discard"].calls == [(state.config, ("keep", report), ("writes", ("docs/**",)))]
     assert judge_env["stage"].calls == [(state.config, ("docs/**",))]
@@ -1262,18 +1262,24 @@ def test_make_run_carries_hyper(tmp_path: Path) -> None:
     assert (state.scope_changed, state.hard, state.focus, state.hyper) == (True, False, set(), True)
 
 
+def test_run_pipeline_records_the_start_commit(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    patch(monkeypatch, runner, "head", "abc")
+    runner.run_pipeline(Path("t.md"), None, None, True, "x", 1, scope="hyper")
+    assert pipeline_env["state"].start == "abc"
+
+
 def test_run_pipeline_hyper_runs_the_short_pipeline(pipeline_env: dict[str, Any]) -> None:
     runner.run_pipeline(Path("t.md"), None, None, True, "x", 1, scope="hyper")
     window = pipeline_env["window"]
-    assert [step.name for step in window] == ["specifier", "critic", "coder", "architect", "hardener", "qa"]
-    assert [step.tier for step in window] == [None, None, "full", "full", "full", "qa"]
+    assert [step.name for step in window] == ["specifier", "critic", "coder", "architect", "blast", "hardener", "qa"]
+    assert [step.tier for step in window] == [None, None, "full", "full", None, "full", "qa"]
 
 
 @pytest.mark.parametrize(("start", "stop"), [("cleaner", None), (None, "cleaner")])
 def test_run_pipeline_hyper_rejects_a_role_it_lacks(pipeline_env: dict[str, Any], start: str | None, stop: str | None) -> None:
     with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(Path("t.md"), start, stop, True, "x", 1, scope="hyper")
-    assert str(raised.value) == "unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa"
+    assert str(raised.value) == "unknown role cleaner; choose from specifier, critic, coder, architect, blast, hardener, qa"
     assert "window" not in pipeline_env
 
 
@@ -1323,4 +1329,4 @@ def test_judge_attempt_under_hyper_refuses_a_bounce_to_cleaner(tmp_path: Path, j
     verdict, _ = runner.judge_attempt(state, cast(Judge, find("hardener", "hyper")), report, ("", True, []), None, "")
     assert verdict is not None
     assert verdict[:2] == ("BOUNCE", None)
-    assert judge_env["prompt"].calls[0][-1] is True
+    assert judge_env["prompt"].calls[0][-2] is True

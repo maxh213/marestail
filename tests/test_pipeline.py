@@ -51,7 +51,7 @@ def test_step_defaults() -> None:
     assert (judge.bounces, judge.pause_after, judge.writes, judge.pinned_bounce, judge.optional) == (0, False, (), False, False)
 
 
-HYPER_ROLES = ["specifier", "critic", "coder", "architect", "hardener", "qa"]
+HYPER_ROLES = ["specifier", "critic", "coder", "architect", "blast", "hardener", "qa"]
 
 
 def test_steps_default_to_the_whole_pipeline() -> None:
@@ -61,9 +61,21 @@ def test_steps_default_to_the_whole_pipeline() -> None:
 
 def test_hyper_steps_drop_cleaner_practices_and_perf_and_gate_workers_full() -> None:
     assert pipeline.names("hyper") == HYPER_ROLES
-    assert [step.tier for step in pipeline.steps("hyper")] == [None, None, "full", "full", "full", "qa"]
+    assert [step.tier for step in pipeline.steps("hyper")] == [None, None, "full", "full", None, "full", "qa"]
     assert pipeline.find("coder", "hyper") == Worker("coder", "full", audit=True)
     assert pipeline.find("hardener", "hyper") is pipeline.find("hardener")
+
+
+def test_blast_is_an_unpinned_judge_that_writes_nothing_and_runs_only_under_hyper() -> None:
+    assert pipeline.find("blast", "hyper") == Judge("blast", None, bounce_to="coder")
+    assert "blast" not in pipeline.names()
+    assert "blast" not in pipeline.names("hard")
+
+
+def test_hyper_steps_put_blast_before_the_hardener_only() -> None:
+    hardener = pipeline.find("hardener")
+    assert pipeline._hyper_steps(hardener) == [pipeline._BLAST, hardener]
+    assert pipeline._hyper_steps(pipeline.find("coder")) == [Worker("coder", "full", audit=True)]
 
 
 def test_hyper_step_only_changes_coder_and_architect() -> None:
@@ -72,7 +84,7 @@ def test_hyper_step_only_changes_coder_and_architect() -> None:
 
 
 def test_find_under_hyper_rejects_a_dropped_role() -> None:
-    with pytest.raises(SystemExit, match=r"^unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa$"):
+    with pytest.raises(SystemExit, match=r"^unknown role cleaner; choose from specifier, critic, coder, architect, blast, hardener, qa$"):
         pipeline.find("cleaner", "hyper")
 
 
@@ -82,6 +94,7 @@ def test_find_under_hyper_rejects_a_dropped_role() -> None:
         (None, None, HYPER_ROLES),
         ("coder", "architect", ["coder", "architect"]),
         ("hardener", "qa", ["hardener", "qa"]),
+        ("architect", "hardener", ["architect", "blast", "hardener"]),
     ],
 )
 def test_window_under_hyper(start: str | None, stop: str | None, expected: list[str]) -> None:

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from marestail import audit, backends, freeze, practices, prompts, ran_against, timeline
+from marestail import audit, backends, freeze, hunks, practices, prompts, ran_against, timeline
 from marestail import config as config_module
 from marestail import route as dandelion
 from marestail.backends import (
@@ -48,6 +48,8 @@ PASS = "PASS"
 BOUNCE = "BOUNCE"
 AUTHOR = "AUTHOR"
 PERF = "perf"
+BLAST = "blast"
+HUNK_CHECKED = ("coder", "architect")
 QA = "qa"
 CONFIG_CHANGE = "## Config change"
 MISSING_RAN_AGAINST = ran_against.MISSING
@@ -138,6 +140,7 @@ class Run:
     attempt_waits: list[dict[str, Any]] = field(default_factory=list)
     attempt_agent: dict[str, Any] | None = None
     ran_against: str | None = None
+    start: str = ""
 
     @property
     def task_name(self) -> str:
@@ -205,6 +208,7 @@ def run_pipeline(
     share_scope(*scoped)
     os.environ["MARESTAIL_TASK"] = Path(task).stem
     state = make_run(config, task, retries, agent, picked, scoped)
+    state.start = head(config)
     perf_trees.record_start(config, state.task_name)
     outcome = run_steps(state, window(start, stop, state.scope_name), auto)
     print(proposals_summary(state))
@@ -635,12 +639,26 @@ def judge_attempt(
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
     trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
     prompt = prompts.judge_prompt(
-        state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus, state.hyper
+        state.config,
+        judge,
+        state.task,
+        state.task_name,
+        report,
+        gate_report,
+        trees,
+        feedback,
+        state.hard_focus,
+        state.hyper,
+        blast_review(state, judge),
     )
     before = head(state.config)
     invoke(state, report.stem, prompt)
     discard_edits(state.config, keep=report, writes=judge_writes(judge))
     return before
+
+
+def blast_review(state: Run, judge: Judge) -> dict[str, str] | None:
+    return hunks.review(state.config, state.start, state.handoffs) if judge.name == BLAST else None
 
 
 def judge_writes(judge: Judge) -> tuple[str, ...]:
@@ -854,6 +872,7 @@ def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     dirty = changed_paths(state.config, STATUS_COMMAND)
     problems.extend(dirty_problems(dirty))
     problems.extend(frozen_problems(state, worker, report, before, dirty))
+    problems.extend(hunk_problems(state, worker, report))
     problems.extend(audit_problems(state, worker, report))
     problems.extend(gate_problems(state, worker))
     return "\n\n".join(problems)
@@ -869,16 +888,29 @@ def dirty_problems(dirty: list[str]) -> list[str]:
 
 def frozen_problems(state: Run, worker: Worker, report: Path, before: str, dirty: list[str]) -> list[str]:
     touched = changed_paths(state.config, [GIT, DIFF, NAME_ONLY, f"{before}..{HEAD_REF}"]) + dirty
-    frozen = frozen_changes(state.config, worker, before, touched)
+    frozen = frozen_changes(state.config, worker, before, touched, hunk_checked(state, worker))
     if frozen and not dirty:
         return reject_config_change(state, worker, report, before, frozen)
     return [f"{path} is frozen for {worker.name}" for path in frozen]
 
 
-def frozen_changes(config: Config, worker: Worker, before: str, touched: list[str]) -> list[str]:
+def frozen_changes(config: Config, worker: Worker, before: str, touched: list[str], hyper: bool = False) -> list[str]:
     return [
-        path for path in freeze.frozen_paths(config, worker.name, touched) if not freeze.tolerated(path, file_diff(config, before, path))
+        path
+        for path in freeze.frozen_paths(config, worker.name, touched, hyper)
+        if not freeze.tolerated(path, file_diff(config, before, path))
     ]
+
+
+def hunk_checked(state: Run, worker: Worker) -> bool:
+    return state.hyper and worker.name in HUNK_CHECKED
+
+
+def hunk_problems(state: Run, worker: Worker, report: Path) -> list[str]:
+    if not hunk_checked(state, worker):
+        return []
+    found = hunks.problems(state.config, state.start, read_or_empty(report))
+    return ["\n".join(found)] if found else []
 
 
 def audit_problems(state: Run, worker: Worker, report: Path) -> list[str]:
@@ -946,8 +978,7 @@ def revert(config: Config, before: str, paths: list[str], message: str) -> None:
 
 def revert_commands(before: str, paths: list[str], message: str) -> list[list[str]]:
     return [
-        [GIT, CHECKOUT, before, DOUBLE_DASH, *paths],
-        [GIT, ADD, ALL_FILES, DOUBLE_DASH, *paths],
+        [GIT, "restore", f"--source={before}", "--staged", "--worktree", DOUBLE_DASH, *paths],
         [GIT, COMMIT, QUIET, MESSAGE_FLAG, message],
     ]
 

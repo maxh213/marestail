@@ -100,10 +100,28 @@ ALLOWED = {
 }
 
 
-def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
+SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rb", ".rs", ".cs", ".java", ".ex", ".exs", ".erl", ".hrl")
+TEST_SEGMENTS = {"tests", "test", "spec", "__tests__"}
+TEST_NAMES = ["test_*", "*_test.*", "*.test.*", "*.spec.*"]
+
+
+def frozen_paths(config: Config, role: str, paths: list[str], hyper: bool = False) -> list[str]:
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
     allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
-    return [path for path in paths if matches_any(path, frozen) and not matches_any(path, allowed)]
+    return [path for path in paths if frozen_under(path, frozen, hyper) and not matches_any(path, allowed)]
+
+
+def frozen_under(path: str, frozen: list[str], hyper: bool) -> bool:
+    return matches_any(path, frozen) or (hyper and not is_test(path) and not is_source(path))
+
+
+def is_test(path: str) -> bool:
+    *folders, name = path.split("/")
+    return bool(TEST_SEGMENTS.intersection(folders)) or any(fnmatch(name, pattern) for pattern in TEST_NAMES)
+
+
+def is_source(path: str) -> bool:
+    return path.endswith(SOURCE_SUFFIXES)
 
 
 def tolerated(path: str, diff: str) -> bool:
