@@ -18,7 +18,13 @@
    Expected: `[FAIL] py.crap`, summary as step 6, one finding `app/payments.py:9 receive_message crap=48.6 (cc=9, coverage=21%); changed lines not covered: 21`; no line contains `complexity rose`.
 8. `git checkout -- app/payments.py && sed -i '9s/.*/    def on_message(data):/; 15s/.*/            return "thank you"/; 28s/.*/    return on_message/' app/payments.py && G --scope hyper`
    Expected: `[FAIL] py.crap` with the one finding `app/payments.py:9 on_message crap=48.6 (cc=9, coverage=21%)`; no line contains `load_payment_popup`.
-9. In `$M`: `grep -n 'Coverage and CRAP work as under' README.md; sed -n '/--scope hyper. gates/p' README.md`
+9. Repeat step 1 in a new folder `/tmp/hyperdraft`, but write the feature's unparsable `app/draft.py` instead of `app/payments.py` before the base commit. Then `sed -i '1s/.*/def settle(amount):/' app/draft.py && G --scope hyper`
+   Expected: `[FAIL] py.crap` with `1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base; no base complexity for app/draft.py, crap_max only` and the one finding `app/draft.py:1 settle crap=20.0 (cc=4, coverage=0%)`.
+10. Build the TypeScript fixture as in step 16 of `qa/007-gate-scope-hyper-changed-lines-only.md` in `/tmp/hyperts`, but before the base commit also write `src/payments.ts` (feature, 30 lines).
+    Expected: `node $M/marestail/js/ts_complexity.mjs . src/payments.ts` reports `loadPaymentPopup` line 1 endLine 30 complexity 4 and `receiveMessage` line 9 endLine 27 complexity 9.
+11. `sed -i '15s/.*/      return "thank you";/' src/payments.ts`, write `src/payments.test.ts` from the feature, then `marestail gate --tier full --only ts.tests,ts.crap --scope hyper`
+    Expected: `[ok  ] ts.crap` with `1 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base`; no line contains `loadPaymentPopup`.
+12. In `$M`: `grep -n 'Coverage and CRAP work as under' README.md; sed -n '/--scope hyper. gates/p' README.md`
    Expected: the grep prints nothing; the hyper paragraph has one sentence saying only the innermost function holding a changed line is gated, and one saying it passes when CRAP is at most `crap_max` or its complexity is no higher than at `[git] base` with every changed line covered.
-10. In `$M`: `python3 tools/test-scope-hyper.py; python3 tools/test-scope-hard.py`
+13. In `$M`: `python3 tools/test-scope-hyper.py; python3 tools/test-scope-hard.py`
     Expected: last lines `hyper scope ok` and `hard scope ok`.

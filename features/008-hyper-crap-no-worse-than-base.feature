@@ -10,17 +10,25 @@ Feature: under `--scope hyper`, a fix inside a complex legacy function passes CR
     2. A gated function passes when its CRAP is at most `crap_max`, or when all three hold:
        it exists at `[git] base`, its cyclomatic complexity at HEAD is no higher than at base, and every changed
        line inside it that the coverage report measures is covered (lines coverage does not measure count as covered).
+       A changed line is uncovered when the gate's existing report says so: py, ex, er: it is in the file's `missing_lines`;
+       ts: a statement starting on it has 0 hits in `coverage-final.json`; rb: `lines[n-1]` is 0, or it is in `missing_lines`
+       when `lines` is absent; rs, cs, java: `lines["n"]` is 0. File-level `percent_covered` never decides this.
     3. Base complexity comes from `git show <base>:<path>` run through the same complexity scanner. A function
        is matched by file, name and nesting path (`load_payment_popup.receive_message`). A function whose file,
        name or nesting path differs from base, or whose file is new, has no base and must meet `crap_max`.
-    4. Findings, sorted by CRAP descending as today:
-       - complexity rose: `<file>:<line> <name> complexity rose from <base cc> to <head cc>; move the new condition into its own function`
+       The nesting path is the enclosing functions' names plus any class or module name the scanner reports: py methods
+       are `Class.method` (radon `classname`); cs, java, rb, ex and er use the names they already print; ts reports no
+       classes, so a ts path holds function names only. A method moved to another class counts as new.
+    4. Findings, sorted by CRAP descending as today. The first rule that applies wins:
+       - complexity rose (wins even when a changed line is also uncovered; no coverage suffix then): `<file>:<line> <name> complexity rose from <base cc> to <head cc>; move the new condition into its own function`
        - otherwise the text used today, `<file>:<line> <name> crap=<c> (cc=<n>, coverage=<p>)`, and when the function
          has a base and a changed line is uncovered, followed by `; changed lines not covered: <lines, comma separated>`.
     5. Summary: `<G> innermost changed functions, <A> above CRAP <limit>, <K> of them no worse than base`.
        The gate fails when A > K.
-    6. A gate whose scanner cannot scan a base file appends `; no base complexity, crap_max only` to that summary and
-       judges every gated function by `crap_max` alone.
+    6. Every gate scans the base copy of a file (`git show`, written under `.marestail/` with the same file name) with its
+       usual scanner, so no language falls back as a whole. When the scanner fails or reports an error for a base file
+       (for example it does not parse), the summary gets `; no base complexity for <file>, crap_max only` (one per file,
+       in path order) and that file's gated functions are judged by `crap_max` alone.
   Under `all`, `changed` and `hard` the CRAP gates, their findings, `crap_max` and its config keys, and the scanners'
   complexity numbers are unchanged.
 
@@ -124,23 +132,83 @@ Feature: under `--scope hyper`, a fix inside a complex legacy function passes CR
     And its only finding is `app/payments.py:31 fee_band crap=42.0 (cc=6, coverage=0%)`
 
   Scenario: an uncovered changed line fails on coverage, not on complexity
-    Given line 21 is `            return "on hold"` and the paid test is present unchanged
+    Given line 15 is `            return "thank you"`, line 21 is `            return "on hold"`, and the paid test is present
     When the gate runs with `--scope hyper`
     Then py.crap is `[FAIL]` with summary `1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base`
     And its only finding is `app/payments.py:9 receive_message crap=48.6 (cc=9, coverage=21%); changed lines not covered: 21`
     And no output line contains `complexity rose`
 
   Scenario: a renamed function counts as new
-    Given line 9 is `    def on_message(data):`, line 28 is `    return on_message`, and the paid test is present with line 15 unchanged
+    Given line 9 is `    def on_message(data):`, line 15 is `            return "thank you"`, line 28 is `    return on_message`,
+      and the paid test is present
     When the gate runs with `--scope hyper`
     Then py.crap is `[FAIL]` with summary `1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base`
     And its only finding is `app/payments.py:9 on_message crap=48.6 (cc=9, coverage=21%)`
-    And no output line contains `load_payment_popup`
+    And no output line contains `load_payment_popup`, although line 28 is a changed line of it: rule 1 drops it
+      because it strictly contains the touched `on_message`
+
+  Scenario: a base file the scanner cannot read falls back to crap_max
+    Given a fresh copy of the Python fixture whose base commit also holds `app/draft.py`, which does not parse:
+      """
+      def settle(amount)
+          if amount < 0:
+              return "refund"
+          if amount == 0:
+              return "free"
+          if amount > 100:
+              return "large"
+          return "normal"
+      """
+    And the work tree sets line 1 to `def settle(amount):` and no test calls `settle` (radon then scores it at complexity 4)
+    When the gate runs with `--scope hyper`
+    Then py.crap is `[FAIL]` with summary `1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base; no base complexity for app/draft.py, crap_max only`
+    And its only finding is `app/draft.py:1 settle crap=20.0 (cc=4, coverage=0%)`
 
   Scenario: TypeScript follows the same rules
-    Given the TypeScript fixture of `tools/test-scope-hyper.py` also holds at base `src/payments.ts`, a line-for-line port of
-      `app/payments.py` (`export function loadPaymentPopup(settings)` containing `function receiveMessage(data)`)
-    And the work tree changes the `return "thanks";` line to `return "thank you";` and adds a vitest test that makes that line run
+    Given the TypeScript fixture of `tools/test-scope-hyper.py` also holds at base `src/payments.ts`, lines 1 to 30 verbatim:
+      """
+      export function loadPaymentPopup(settings) {
+        if (!settings)
+          return null;
+        if (settings.sandbox)
+          settings = { ...settings, origin: "https://sandbox.example" };
+        if (settings.debug)
+          console.log("popup ready");
+
+        function receiveMessage(data) {
+          if (data === null)
+            return "ignored";
+          if (data.origin !== settings.origin)
+            return "foreign";
+          if (data.status === "paid")
+            return "thanks";
+          if (data.status === "failed")
+            return "retry";
+          if (data.status === "cancelled")
+            return "closed";
+          if (data.status === "pending")
+            return "waiting";
+          if (Number(data.amount) > 1000)
+            return "review";
+          if (data.recurring)
+            return "monthly";
+          return "unknown";
+        }
+
+        return receiveMessage;
+      }
+      """
+    And the ts complexity scanner reports `loadPaymentPopup` at line 1, endLine 30, complexity 4, and `receiveMessage` at line 9, endLine 27, complexity 9
+    And the work tree sets line 15 to `      return "thank you";` and adds `src/payments.test.ts`:
+      """
+      import { expect, test } from "vitest";
+      import { loadPaymentPopup } from "./payments";
+
+      test("paid", () => {
+        const receive = loadPaymentPopup({ origin: "https://pay.example" });
+        expect(receive({ origin: "https://pay.example", status: "paid" })).toBe("thank you");
+      });
+      """
     When `marestail gate --tier full --only ts.tests,ts.crap --scope hyper` runs
     Then ts.crap is `[ok  ]` with summary `1 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base`
     And no output line contains `loadPaymentPopup`
