@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -343,7 +344,7 @@ def package_proposal(source: Path, folder: Path) -> None:
     expect("package-gone", git_out(root, "cat-file", "-e", "HEAD:package.json").returncode != 0, True)
 
 
-def classified(config: object, path: str) -> str:
+def classified(config: Any, path: str) -> str:
     from marestail import freeze
 
     if freeze.frozen_paths(config, "coder", [path], True):

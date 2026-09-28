@@ -407,12 +407,14 @@ def test_hyper_prompt_asks_for_hunks_and_forbids_growing_the_diff(repo: Path, ro
 def test_judge_prompt_shows_the_review_sections_with_none_for_empty_ones(repo: Path) -> None:
     add_role("blast")
     review = {"Diff stat": " src.py | 2 +", "Diff": "", "Hunks": "## 01-coder\n- src.py:1-2 — why"}
-    text = prompts.judge_prompt(config(repo), find("blast", "hyper"), repo / "tasks" / "t.md", "t", report(repo, "05"), "", review=review)
+    text = prompts.judge_prompt(
+        config(repo), cast(Judge, find("blast", "hyper")), repo / "tasks" / "t.md", "t", report(repo, "05"), "", review=review
+    )
     assert "\n\n# Diff stat\nsrc.py | 2 +\n\n# Diff\nnone\n\n# Hunks\n## 01-coder\n- src.py:1-2 — why\n\n" in text
     assert "# Gate report" not in text
 
 
 def test_judge_prompt_without_a_review_has_no_diff_section(repo: Path) -> None:
     add_role("hardener")
-    text = prompts.judge_prompt(config(repo), find("hardener"), repo / "tasks" / "t.md", "t", report(repo, "05"), "")
+    text = prompts.judge_prompt(config(repo), cast(Judge, find("hardener")), repo / "tasks" / "t.md", "t", report(repo, "05"), "")
     assert "# Diff" not in text
