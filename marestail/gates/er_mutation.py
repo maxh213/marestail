@@ -97,7 +97,7 @@ def generate(job: Job) -> Result:
 def mutants_found(job: Job, mutants: list[dict[str, Any]]) -> Result:
     if not mutants:
         return nothing_to_mutate(job)
-    kept = job.ctx.located(mutants, partial(describe, job.ctx, status=SURVIVED))
+    kept = job.ctx.on_changed_lines(mutants, partial(describe, job.ctx, status=SURVIVED))
     if not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], job.elapsed())
     apply_cap(kept, job.ctx)

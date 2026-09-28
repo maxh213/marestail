@@ -97,7 +97,7 @@ def verdict(ctx: Context, report: dict[str, Any], output: str, started: float) -
     viable = viable_mutants(outcomes)
     if not viable:
         return Result(GATE, False, "no viable mutants were generated", tail(output), elapsed(started))
-    return judged(ctx, ctx.located(viable, partial(describe, ctx)), started)
+    return judged(ctx, ctx.on_changed_lines(viable, partial(describe, ctx)), started)
 
 
 def judged(ctx: Context, viable: list[Outcome], started: float) -> Result:

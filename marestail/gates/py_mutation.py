@@ -64,7 +64,7 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
     statuses = mutant_statuses(ctx.python_root() / "mutants", tuple(map(mutant_prefix, patterns)))
     if not statuses:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    return judged(ctx.located(statuses, MutantLines(ctx).where), note, started)
+    return judged(ctx.on_changed_lines(statuses, MutantLines(ctx).where), note, started)
 
 
 def judged(statuses: list[Status], note: str, started: float) -> Result:

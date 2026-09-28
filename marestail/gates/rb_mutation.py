@@ -79,7 +79,7 @@ def stdout_result(ctx: Context, code: int, output: str, started: float, note: st
     match = RESULTS_LINE.search(output)
     if not match:
         return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), elapsed(started))
-    return verdict(int(match.group(1)), ctx.located(stdout_findings(output, ctx), failure_where), output, started, note)
+    return verdict(int(match.group(1)), ctx.on_changed_lines(stdout_findings(output, ctx), failure_where), output, started, note)
 
 
 def newest_report(created: set[Path]) -> dict[str, Any] | None:
@@ -95,7 +95,7 @@ def session_result(ctx: Context, created: set[Path], output: str, started: float
     if report is None:
         return Result(GATE, False, "mutant session report unreadable", tail(output), elapsed(started))
     subjects = list_field(report, SUBJECT_RESULTS)
-    kept = ctx.located(subjects, partial(subject_where, ctx))
+    kept = ctx.on_changed_lines(subjects, partial(subject_where, ctx))
     if subjects and not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     return verdict(*session_failures(kept, ctx), output, started, note)

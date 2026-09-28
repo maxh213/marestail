@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from marestail import changes, context
+from marestail import _location, changes, context
 from marestail.config import Config
 from marestail.context import Context, MutationScope
 from tests.conftest import FakeRun, commit_all, git, make_context
@@ -292,16 +292,17 @@ def test_on_changed_lines_keeps_order_and_counts_file_level(tmp_path: Path) -> N
     assert (kept, ctx.file_level) == (["app/a.py:6 b", "app/a.py:6 a"], 1)
 
 
-def test_located_filters_records_by_where(tmp_path: Path) -> None:
+def test_on_changed_lines_filters_records_by_where(tmp_path: Path) -> None:
     ctx = hyper_context(tmp_path)
     records = [{"line": 6}, {"line": 7}, {"line": 0}]
-    assert ctx.located(records, lambda record: f"app/a.py:{record['line']}") == [{"line": 6}]
+    assert ctx.on_changed_lines(records, lambda record: f"app/a.py:{record['line']}") == [{"line": 6}]
     assert ctx.take_file_level() == 1
 
 
 @pytest.mark.parametrize(("count", "note"), [(0, ""), (2, "; 2 file-level findings not gated under hyper")])
-def test_file_level_note(count: int, note: str) -> None:
-    assert context.file_level_note(count) == note
+def test_file_level_note(tmp_path: Path, count: int, note: str) -> None:
+    ctx = make_context(tmp_path, file_level=count)
+    assert (ctx.file_level_note(), ctx.file_level) == (note, 0)
 
 
 def test_build_unscoped(tmp_path: Path) -> None:
@@ -388,4 +389,4 @@ def test_focus_clash_names_scopes_that_refuse_focus(scope: str | None, focus: se
     ],
 )
 def test_location_reads_the_first_path_and_line(finding: str, place: tuple[str, int] | None) -> None:
-    assert context.location(finding) == place
+    assert _location.location(finding) == place

@@ -107,7 +107,7 @@ def mutable(file: str) -> bool:
 
 def placed(report: dict[str, Any], ctx: Context) -> list[Placed]:
     found = [(name, mutant) for name, data in named_files(report, ctx) if ctx.in_scope(name) for mutant in json_list(data, "mutants")]
-    return ctx.located(found, where)
+    return ctx.on_changed_lines(found, where)
 
 
 def where(entry: Placed) -> str:

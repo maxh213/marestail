@@ -8,7 +8,7 @@ from pathlib import Path
 
 from marestail import config as config_module
 from marestail import context as context_module
-from marestail.context import Context, file_level_note, hook_focus, resolve_focus
+from marestail.context import Context, hook_focus, resolve_focus
 from marestail.report import Result, elapsed
 
 FAST = "fast"
@@ -152,7 +152,7 @@ def run_one(gate: Gate, ctx: Context) -> Result:
 
 
 def noted(result: Result, ctx: Context) -> Result:
-    result.summary += file_level_note(ctx.take_file_level())
+    result.summary += ctx.file_level_note()
     return result
 
 

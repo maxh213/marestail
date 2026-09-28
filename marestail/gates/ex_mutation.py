@@ -80,7 +80,7 @@ def read_report(output: str) -> dict[str, Any] | str:
 def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, Any]], output: str, started: float) -> Result:
     if not mutations:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    mutations = ctx.located(mutations, partial(describe, ctx))
+    mutations = ctx.on_changed_lines(mutations, partial(describe, ctx))
     if not mutations:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     findings = failures(ctx, mutations)

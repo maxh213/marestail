@@ -65,7 +65,7 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     mutants = viable(report)
     if not mutants:
         return Result(GATE, False, NO_MUTANTS, tail(output), elapsed(started))
-    return judged(ctx, ctx.located(mutants, partial(describe, ctx)), note, started)
+    return judged(ctx, ctx.on_changed_lines(mutants, partial(describe, ctx)), note, started)
 
 
 def judged(ctx: Context, mutants: list[ET.Element], note: str, started: float) -> Result:

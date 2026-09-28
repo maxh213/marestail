@@ -119,7 +119,7 @@ def verdict(ctx: Context, mutants: list[tuple[str, dict[str, Any]]], output: str
     note, started = run_info
     if not mutants:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    kept = ctx.located(mutants, placed)
+    kept = ctx.on_changed_lines(mutants, placed)
     if not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     findings = failures(kept)

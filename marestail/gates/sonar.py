@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet, erlang, java, rust
-from marestail.context import Context, file_level_note
+from marestail.context import Context
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -114,7 +114,7 @@ def summarize(ctx: Context, findings: list[str], status: str) -> str:
 def hyper_notes(ctx: Context) -> str:
     if not ctx.hyper:
         return EMPTY
-    return file_level_note(ctx.take_file_level()) + "; duplication not gated under hyper"
+    return ctx.file_level_note() + "; duplication not gated under hyper"
 
 
 def scanner_command(ctx: Context, creds: Credentials, key: str) -> list[str]:
@@ -470,7 +470,7 @@ def issue_path(component: dict[str, Any]) -> str:
 def reopened(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, issueStatuses="ACCEPTED,FALSE_POSITIVE", ps=PAGE)
     in_scope = [issue for issue in mapping_list(data, "issues") if ctx.in_scope(issue_path(issue))]
-    return [reopen(client, issue) for issue in ctx.located(in_scope, where_of)]
+    return [reopen(client, issue) for issue in ctx.on_changed_lines(in_scope, where_of)]
 
 
 def where_of(item: dict[str, Any]) -> str:
