@@ -702,7 +702,7 @@ def test_hyper_clean_sonar_still_says_duplication_is_not_gated(tmp_path: Path, m
 
 
 def test_hyper_language_diagnostics_still_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    empty = {"accepted": [], "open": [], "hotspots": []}
+    empty: dict[str, Any] = {"accepted": [], "open": [], "hotspots": []}
     respond = hyper_responder(empty, [{"metric": "ncloc_language_distribution", "value": "java=40;py=12"}])
     result, _ = hyper_analysis(tmp_path, monkeypatch, respond, {"java": {}})
     assert (result.ok, result.findings) == (

@@ -1,7 +1,7 @@
 import ast
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -217,7 +217,7 @@ def test_mutant_lines_fall_back_to_line_zero(tmp_path: Path) -> None:
     lines = py_mutation.MutantLines(make_context(tmp_path))
     assert lines.where(("app.legacy.x_gone__mutmut_1", "survived")) == "app/legacy.py:0"
     assert lines.where(("pkg.x_f__mutmut_1", "survived")) == "pkg/__init__.py:0"
-    assert lines.body(tmp_path / "missing.py", ast.parse("def f():\n    pass\n").body[0]) == []
+    assert lines.body(tmp_path / "missing.py", cast(ast.FunctionDef, ast.parse("def f():\n    pass\n").body[0])) == []
 
 
 def test_first_difference() -> None:

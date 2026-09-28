@@ -425,10 +425,14 @@ class StubClient:
 
 def sonar_run(folder: Path, replies: dict[str, Any], raw: dict[str, Any]) -> tuple[Any, StubClient]:
     client = StubClient(replies)
-    sonar.credentials = lambda: {"url": "http://stub", "token": "t"}
-    sonar.Client = lambda url, token: client
-    sonar.scan = lambda *args: (0, "", folder / "task")
-    sonar.wait_for_analysis = lambda *args: None
+    stubs: dict[str, Any] = {
+        "credentials": lambda: {"url": "http://stub", "token": "t"},
+        "Client": lambda url, token: client,
+        "scan": lambda *args: (0, "", folder / "task"),
+        "wait_for_analysis": lambda *args: None,
+    }
+    for name, stub in stubs.items():
+        setattr(sonar, name, stub)
     config = Config(root=folder, raw={"sonar": {"project_key": "proj"}, **raw})
     ctx = Context(config=config, scope_changed=True, hyper=True, changed={PY_FILE}, changed_lines_map={PY_FILE: {1, 6}})
     return sonar.run_gate(ctx), client
