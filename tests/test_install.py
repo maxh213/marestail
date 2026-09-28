@@ -47,7 +47,7 @@ def read_json(path: Path) -> Any:
 
 
 def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    install.install(target)
+    assert install.install(target) == 0
     for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
         assert (target / name).read_text() == (TEMPLATES / name).read_text()
     assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
@@ -66,7 +66,7 @@ def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.Cap
 
 
 def test_hard_install_skips_agent_docs(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    install.install(target, hard=True)
+    assert install.install(target, hard=True) == 0
     assert not (target / "CLAUDE.md").exists()
     assert not (target / "AGENTS.md").exists()
     for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
@@ -144,8 +144,20 @@ def test_write_agent_docs_appends_when_full(tmp_path: Path) -> None:
     assert _install.GATE_MARKER in (tmp_path / "AGENTS.md").read_text()
 
 
+@pytest.mark.parametrize(("generated", "hard"), [(False, False), (True, False), (False, True)])
+def test_classic_installs_leave_the_git_exclude_alone(home: Path, git_repo: Path, generated: bool, hard: bool) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    before = exclude.read_bytes()
+
+    assert install.install(git_repo, gitignore_generated=generated, hard=hard) == 0
+
+    assert exclude.read_bytes() == before
+    assert (git_repo / "sonar-project.properties").exists()
+    assert not (git_repo / ".marestail" / "tooling").exists()
+
+
 def test_install_twice_changes_nothing(home: Path, target: Path) -> None:
-    install.install(target, gitignore_generated=True)
+    assert install.install(target, gitignore_generated=True) == 0
     before = {path: path.read_text() for path in target.rglob("*") if path.is_file()}
     install.install(target, gitignore_generated=True)
     assert {path: path.read_text() for path in target.rglob("*") if path.is_file()} == before

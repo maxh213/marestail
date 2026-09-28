@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from marestail import _hyper, _install, _tooling, install, shell
+from marestail import _hyper, _install, _tooling, install, runner, shell
+from marestail.config import Config
 from tests.conftest import commit_all, git
 
 TEMPLATES = _install.TEMPLATES
@@ -81,25 +82,170 @@ def test_hyper_install_reports_a_failed_npm(
 
     assert _hyper.install_hyper(seeded) == 1
 
+    assert str(seeded.resolve()) in (grok / "trusted_folders.toml").read_text()
+
     assert capsys.readouterr().out.splitlines()[-1] == (
         "npm install --prefix .marestail/tooling failed (exit 3); everything else is installed, see .marestail/tooling/npm.log"
     )
 
 
-def test_hyper_install_refuses_a_folder_outside_git(tmp_path: Path, grok: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def ignored(root: Path, *paths: str) -> bool:
+    checked = subprocess.run(["git", "check-ignore", "--no-index", *paths], cwd=root, capture_output=True, text=True, check=False)
+    return checked.stdout.split() == list(paths)
+
+
+def test_hyper_install_twice_hides_everything_in_one_block(seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_npm(monkeypatch)
+
+    _hyper.install_hyper(seeded)
+    _hyper.install_hyper(seeded)
+
+    exclude = (seeded / ".git" / "info" / "exclude").read_text()
+    assert exclude.count(_hyper.HYPER_START) == 1
+    assert ignored(seeded, "marestail.toml", "PERFORMANCE.md", "tasks/README.md", "guidance/ts.md", ".claude/settings.local.json")
+    assert ignored(seeded, ".marestail/tooling/package.json", ".agents/hooks.json", ".grok/hooks/marestail-gate.json")
+    assert json.loads((seeded / ".marestail" / "tooling" / "package.json").read_text())["name"] == "marestail-tooling"
+    assert not (seeded / "package.json").exists()
+    assert not (seeded / "sonar-project.properties").exists()
+    assert git(seeded, "status", "--porcelain") == ""
+
+
+def test_hyper_install_keeps_committed_marestail_files(
+    seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_npm(monkeypatch)
+    kept = {
+        "marestail.toml": '[git]\nbase = "main"\n',
+        "PERFORMANCE.md": "ours\n",
+        ".claude/settings.local.json": "{}\n",
+        "sonar-project.properties": "sonar.projectKey=ours\n",
+    }
+    for name, text in kept.items():
+        shell.ensure_dir((seeded / name).parent)
+        (seeded / name).write_text(text)
+    git(seeded, "add", "-f", *kept)
+    commit_all(seeded, "ours")
+
+    assert _hyper.install_hyper(seeded) == 0
+
+    assert {name: (seeded / name).read_text() for name in kept} == kept
+    assert not (seeded / ".marestail" / "tooling" / "sonar-project.properties").exists()
+    assert capsys.readouterr().out.splitlines() == [
+        f"trusted {seeded.resolve()} for grok project hooks",
+        "left tracked files alone: .claude/settings.local.json, .gitignore, CLAUDE.md, PERFORMANCE.md, marestail.toml, sonar-project.properties",
+        "no Stop hook for claude: .claude/settings.local.json is tracked",
+        _hyper.NO_TOOLING,
+        f"installed into {seeded} with --scope hyper; nothing to commit, see .git/info/exclude",
+    ]
+    assert git(seeded, "status", "--porcelain") == ""
+
+
+def test_hyper_install_keeps_untracked_files_and_merges_the_local_hook(seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_npm(monkeypatch)
+    (seeded / "guidance").mkdir()
+    (seeded / "guidance" / "ts.md").write_text("mine\n")
+    (seeded / ".claude").mkdir()
+    (seeded / ".claude" / "settings.local.json").write_text('{"env": {"A": "1"}}\n')
+
+    _hyper.install_hyper(seeded)
+
+    settings = json.loads((seeded / ".claude" / "settings.local.json").read_text())
+    assert (seeded / "guidance" / "ts.md").read_text() == "mine\n"
+    assert settings["env"] == {"A": "1"}
+    assert "marestail gate --hook" in json.dumps(settings["hooks"]["Stop"])
+
+
+def test_force_added_marestail_file_is_dropped_by_the_runner(seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_npm(monkeypatch)
+    _hyper.install_hyper(seeded)
+    config = Config(root=seeded, raw={})
+    before = runner.head(config)
+    git(seeded, "add", "-f", "marestail.toml")
+    git(seeded, "commit", "-q", "-m", "work")
+
+    runner.drop_ignored_since(config, before)
+
+    assert "marestail.toml" not in git(seeded, "ls-files").split()
+    assert (seeded / "marestail.toml").exists()
+
+
+def test_a_second_worktree_shares_the_exclusions(seeded: Path, grok: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_npm(monkeypatch)
+    _hyper.install_hyper(seeded)
+    linked = tmp_path / "linked"
+    git(seeded, "worktree", "add", "-q", "--detach", str(linked))
+    (linked / "marestail.toml").write_text("")
+
+    assert ignored(linked, "marestail.toml", ".marestail/tooling/package.json")
+    assert git(linked, "status", "--porcelain") == ""
+
+
+def test_hyper_install_refuses_a_folder_outside_git(
+    tmp_path: Path, grok: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    npm = fake_npm(monkeypatch)
     plain = tmp_path / "plain"
     plain.mkdir()
 
     assert _hyper.install_hyper(plain) == 1
+
+    assert npm.calls == []
 
     assert capsys.readouterr().out == f"marestail install --scope hyper needs a git repository: {plain}\n"
     assert list(plain.iterdir()) == []
     assert not grok.exists()
 
 
+class Recorder:
+    def __init__(self, code: int, output: str) -> None:
+        self.reply = (code, output)
+        self.calls: list[tuple[list[str], Path, dict[str, Any]]] = []
+
+    def __call__(self, command: list[str], cwd: Path, **options: Any) -> tuple[int, str]:
+        self.calls.append((command, cwd, options))
+        return self.reply
+
+
+def record(monkeypatch: pytest.MonkeyPatch, code: int, output: str) -> Recorder:
+    recorder = Recorder(code, output)
+    monkeypatch.setattr(_hyper, "run", recorder)
+    return recorder
+
+
 def test_exclude_file_is_what_git_names(git_repo: Path, tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
     assert _hyper.exclude_file(git_repo) == ".git/info/exclude"
-    assert _hyper.exclude_file(tmp_path / "missing") is None
+    assert _hyper.exclude_file(plain) is None
+
+
+def test_exclude_file_of_a_worktree_is_the_common_one(git_repo: Path, tmp_path: Path) -> None:
+    commit_all(git_repo, "seed")
+    linked = tmp_path / "linked"
+    git(git_repo, "worktree", "add", "--detach", str(linked))
+
+    assert Path(str(_hyper.exclude_file(linked))).resolve() == (git_repo / ".git" / "info" / "exclude").resolve()
+
+
+def test_exclude_file_asks_git_once_and_strips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = record(monkeypatch, 0, " .git/info/exclude\n")
+
+    assert _hyper.exclude_file(tmp_path) == ".git/info/exclude"
+    assert recorder.calls == [(["git", "rev-parse", "--git-path", "info/exclude"], tmp_path, {"timeout": 60})]
+
+
+def test_exclude_file_is_none_when_git_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    record(monkeypatch, 128, ".git/info/exclude\n")
+
+    assert _hyper.exclude_file(tmp_path) is None
+
+
+def test_tracked_paths_asks_git_for_the_candidates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = record(monkeypatch, 0, "a b\0PERFORMANCE.md\0")
+
+    assert _hyper.tracked_paths(tmp_path) == {"a b", "PERFORMANCE.md"}
+    assert recorder.calls == [(["git", "ls-files", "-z", "--", *_hyper.TRACK_CANDIDATES], tmp_path, {"timeout": 60})]
 
 
 def test_tracked_paths_only_lists_candidates(git_repo: Path) -> None:
@@ -112,12 +258,29 @@ def test_tracked_paths_only_lists_candidates(git_repo: Path) -> None:
     assert _hyper.tracked_paths(git_repo) == {"CLAUDE.md", ".cursor/hooks.json"}
 
 
+def test_tracked_paths_splits_several_nested_names(git_repo: Path) -> None:
+    (git_repo / "guidance").mkdir()
+    (git_repo / "guidance" / "ts.md").write_text("x")
+    (git_repo / ".agents").mkdir()
+    (git_repo / ".agents" / "hooks.json").write_text("{}")
+    git(git_repo, "add", "guidance/ts.md", ".agents/hooks.json")
+
+    assert _hyper.tracked_paths(git_repo) == {"guidance/ts.md", ".agents/hooks.json"}
+
+
 def test_hyper_config_adds_tooling_under_ts() -> None:
     text = _hyper.hyper_config()
 
     assert '\n[ts]\ntooling = ".marestail/tooling"\n' in text
     assert text.count("tooling = ") == 1
     assert text.replace('tooling = ".marestail/tooling"\n', "") == (TEMPLATES / "marestail.toml").read_text()
+
+
+def test_hyper_config_adds_tooling_under_the_first_ts_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "marestail.toml").write_text("a = 1\n[ts]\nroot = 'x'\n[ts]\n")
+    monkeypatch.setattr(_hyper, "TEMPLATES", tmp_path)
+
+    assert _hyper.hyper_config() == "a = 1\n[ts]\ntooling = \".marestail/tooling\"\nroot = 'x'\n[ts]\n"
 
 
 def test_hyper_files_add_cs_guidance_only_for_csharp(tmp_path: Path) -> None:
@@ -216,6 +379,21 @@ def test_package_json_depends_on_the_runner(tmp_path: Path) -> None:
     assert "@stryker-mutator/jest-runner" not in vitest["devDependencies"]
     assert set(jest["devDependencies"]) == {*_tooling.BASE_DEPENDENCIES, "@stryker-mutator/jest-runner"}
     assert _tooling.package_json(tooling(tmp_path)).endswith("}\n")
+
+
+def test_package_json_text_is_pinned(tmp_path: Path) -> None:
+    head = '{\n  "name": "marestail-tooling",\n  "private": true,\n  "devDependencies": {\n    "@stryker-mutator/core": "^9.0.0",\n'
+    tail = (
+        '    "dependency-cruiser": "^16.0.0",\n    "eslint": "^9.0.0",\n    "knip": "^5.0.0",\n'
+        '    "typescript": "^5.8.0",\n    "typescript-eslint": "^8.0.0"'
+    )
+    vitest_tail = ',\n    "vitest": "^3.2.0"\n  }\n}\n'
+    vitest_mid = '    "@stryker-mutator/vitest-runner": "^9.0.0",\n    "@vitest/coverage-v8": "^3.2.0",\n'
+
+    assert _tooling.package_json(tooling(tmp_path)) == head + vitest_mid + tail + vitest_tail
+    assert _tooling.package_json(tooling(tmp_path, {"runner": "jest"})) == (
+        head + '    "@stryker-mutator/jest-runner": "^9.0.0",\n' + tail + "\n  }\n}\n"
+    )
 
 
 def test_tsconfig_types_follow_the_runner(tmp_path: Path) -> None:
