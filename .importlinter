@@ -118,6 +118,14 @@ protected_modules =
 allowed_importers =
     marestail.gates
 
+[importlinter:contract:serve-belongs-to-qa]
+name = The app lifecycle is private to the qa gate
+type = protected
+protected_modules =
+    marestail.gates._serve
+allowed_importers =
+    marestail.gates.qa
+
 [importlinter:contract:protect-install-internals]
 name = Install helpers are private to install
 type = protected
