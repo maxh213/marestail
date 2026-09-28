@@ -2,63 +2,72 @@ Feature: `marestail run --scope hyper` runs a short pipeline
 
   Under hyper the pipeline is specifier, critic, coder, architect, hardener, qa.
   Cleaner, practices and perf do not exist in that mode. Every role's prompt gets
-  a `# Scope` section with the hyper text, and the coder and the architect
-  run the `full` tier. The pipeline, prompts and tiers under `all`, `changed`
-  and `hard` stay as they are.
+  a `# Scope` section with the hyper text, and the coder and the architect are told
+  to run, and are gated by, the `full` tier. `all`, `changed` and `hard` stay as they are.
 
-  The hyper roles, in order: specifier, critic, coder, architect, hardener, qa.
   The error for a role that does not exist is today's `find` text:
-  `unknown role <name>; choose from <roles joined by ", ">`.
+  `unknown role <name>; choose from <roles joined by ", ">`. Under hyper it is
+  `unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa`.
 
   Background:
-    Given a temporary git repo with marestail installed and `tools/stub-claude` as the agent via `MARESTAIL_CLAUDE`
-    And the task file is "tasks/t.md"
-    And `marestail.toml` sets `[practices] enabled = false` and `[perf] enabled = false`, so both judges print their skip line instead of calling the agent
-    And `tools/test-run-hyper.py` drives the scenarios below with that stub
-    And a role is "visited" when the agent is invoked for it or the run prints its skip line `<role> disabled in marestail.toml; skipping`
+    Given a fresh fixture repo: `git init -b main`; `marestail.toml` containing `[git] base = "main"`, `[practices] enabled = false` and `[perf] enabled = false`; `.gitignore` containing `.marestail/`; `tasks/t.md` containing `# Add one`; `src.py` containing `original`; all committed as `init`
+    And `marestail` is run as `python3 <marestail-green>/marestail/cli.py run ...` with `<marestail-green>/bin` prepended to PATH
+    And `MARESTAIL_CLAUDE` points at a capture wrapper that saves its stdin to `$PROMPTS/NN.txt` (NN = 01, 02, ... in invocation order) and then pipes it to `tools/stub-claude`
+    And `STUB_PLAN` is a file with one `tools/stub-claude` action per line, consumed one per invocation
+    And a "prepared" repo is a fresh fixture after the hyper run of the first scenario, so `features/t.feature` and `qa/t.md` exist
+    And the role of an invocation is read from the first line of its saved prompt: `You are the <role>.` or `You are QA.`
+    And a role is "visited" when stdout has its `== <role> (` line or its line `<role> disabled in marestail.toml; skipping`
 
   Scenario: a hyper run visits the six hyper roles in order and no others
-    When I run `marestail run tasks/t.md --scope hyper --auto` with a stub plan where every worker commits a handoff and every judge writes `VERDICT: PASS`
-    Then the agent is invoked for exactly these roles, in this order: specifier, critic, coder, architect, hardener, qa
-    And stdout contains no line `practices disabled in marestail.toml; skipping` and no line `perf disabled in marestail.toml; skipping`
-    And no handoff file under `.marestail/handoffs/t/` has a name ending in `-cleaner.md`, `-practices.md` or `-perf.md`
-    And the last non-empty stdout line starts with `pipeline complete`
+    Given STUB_PLAN is `specify`, `judge PASS`, `code`, `worker architect`, `judge PASS`, `worker qa`
+    When I run `marestail run tasks/t.md --scope hyper --auto --retries 2` in a fresh fixture
+    Then the `== <role> (` lines on stdout name, in order, specifier, critic, coder, architect, hardener, qa
+    And stdout names no cleaner, practices or perf, including no `disabled in marestail.toml; skipping` line
+    And STUB_PLAN is empty and 6 prompts were saved
+    And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
 
   Scenario: a hard run still visits all nine roles
-    When I run `marestail run tasks/t.md --scope hard --focus src --auto` with the same kind of stub plan
-    Then the roles visited, in order, are specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa
-    And the agent is invoked for specifier, critic, coder, cleaner, architect, hardener, qa
-    And stdout contains `practices disabled in marestail.toml; skipping` and `perf disabled in marestail.toml; skipping`
-    And the coder prompt says `--tier fast` and the architect prompt says `--tier sonar`
+    Given STUB_PLAN is `specify`, `judge PASS`, `code`, `worker cleaner`, `worker architect`, `judge PASS`, `worker qa`
+    When I run `marestail run tasks/t.md --scope hard --focus src.py --auto --retries 2` in a fresh fixture
+    Then the visited roles, in order, are specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa
+    And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
 
-  Scenario: --from a role that hyper does not have is an error naming the hyper roles
-    When I run `marestail run tasks/t.md --from cleaner --scope hyper --auto`
-    Then the exit code is not 0
-    And the output contains `unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa`
-    And the agent is never invoked
-
-  Scenario Outline: --from and --to with roles that exist under hyper still work
-    When I run `marestail run tasks/t.md --scope hyper --from <from> --to <to> --auto`
-    Then the agent is invoked for exactly <roles>, in that order
+  Scenario Outline: --from or --to a role that hyper does not have is an error
+    Given STUB_PLAN is `code`
+    When I run `marestail run tasks/t.md --scope hyper <flag> cleaner --auto` in a prepared repo
+    Then the exit code is 1
+    And stderr contains `unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa`
+    And no prompt was saved and STUB_PLAN still reads `code`
 
     Examples:
-      | from      | to        | roles                     |
-      | coder     | architect | coder, architect          |
-      | architect | hardener  | architect, hardener       |
-      | hardener  | qa        | hardener, qa              |
+      | flag   |
+      | --from |
+      | --to   |
+
+  Scenario Outline: --from and --to with roles that exist under hyper still work
+    Given STUB_PLAN is <plan>
+    When I run `marestail run tasks/t.md --scope hyper --from <from> --to <to> --auto --retries 2` in a prepared repo
+    Then the `== <role> (` lines on stdout name exactly <roles>, in that order, and the exit code is 0
+
+    Examples:
+      | from      | to        | plan                                | roles               |
+      | coder     | architect | `code`, `worker architect`          | coder, architect    |
+      | architect | hardener  | `worker architect`, `judge PASS`    | architect, hardener |
+      | hardener  | qa        | `judge PASS`, `worker qa`           | hardener, qa        |
 
   Scenario: a judge that bounces to a role hyper does not have is refused
-    When I run `marestail run tasks/t.md --scope hyper --from hardener --to hardener --auto --retries 2`
-    And the stub hardener first writes `VERDICT: BOUNCE cleaner`, then the coder commits a handoff, then the hardener writes `VERDICT: PASS`
-    Then the `cleaner` target is ignored, exactly as an unknown role such as `VERDICT: BOUNCE nobody` is today
-    And the bounce goes to the hardener's default, so the next role invoked is coder, not cleaner
-    And the hardener is invoked again after that coder and the run ends with `pipeline complete`
+    Given STUB_PLAN is `judge BOUNCE cleaner`, `code`, `judge PASS`
+    When I run `marestail run tasks/t.md --scope hyper --from hardener --to hardener --auto --retries 2` in a prepared repo
+    Then the `== <role> (` lines on stdout name, in order, hardener, coder, hardener
+    And no cleaner is invoked
+    And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
 
-  Scenario Outline: every hyper prompt carries the hyper scope section
-    When the <role> prompt is built under `--scope hyper`
+  Scenario Outline: every hyper prompt carries its hyper scope section
+    When the <role> prompt is saved during the first scenario's hyper run
     Then it contains a section `# Scope` with the sentence "This run is hyper-scoped. Make the smallest change that does what the task asks. Leave the code you touch a little better than you found it. Leave code the change does not touch exactly as it is, including code you would like to improve. The gates measure only the lines that change."
     And that section also contains <sentence>
-    And the prompt does not contain "This run has a hard scope"
+    And it contains no other role's sentence from this table
+    And it does not contain "This run has a hard scope"
 
     Examples:
       | role      | sentence |
@@ -69,8 +78,8 @@ Feature: `marestail run --scope hyper` runs a short pipeline
       | hardener  | "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change." |
       | qa        | no role-specific sentence (the all-roles sentence only) |
 
-  Scenario Outline: the coder and the architect run the full tier under hyper
-    When the <role> prompt is built under `--scope hyper`
+  Scenario Outline: the coder and the architect are told to run the full tier under hyper
+    When the <role> prompt is saved during the first scenario's hyper run
     Then it contains "Run `marestail gate --tier full --scope hyper` and keep working until it prints GATE PASSED."
     And it does not contain "--tier fast" or "--tier sonar"
 
@@ -79,31 +88,43 @@ Feature: `marestail run --scope hyper` runs a short pipeline
       | coder     |
       | architect |
 
-  Scenario Outline: prompts and tiers outside hyper are unchanged
+  Scenario Outline: the runner gates each worker and judge with the tier its mode names
+    When the pipeline runs under `--scope <scope>` with the first scenario's stub plan for hyper and the hard scenario's plan otherwise, and the tier of every `Run.gates` call is recorded in call order
+    Then the tiers are <tiers>
+
+    Examples:
+      | scope   | tiers                         |
+      | hyper   | full, full, full, qa          |
+      | hard    | fast, sonar, sonar, full, qa  |
+      | changed | fast, sonar, sonar, full, qa  |
+      | all     | fast, sonar, sonar, full, qa  |
+
+  Scenario Outline: prompts outside hyper are unchanged
     When the <role> prompt is built under `--scope <scope>`
     Then it contains "Run `marestail gate --tier <tier>"
-    And it contains no "This run is hyper-scoped"
+    And it does not contain "This run is hyper-scoped"
     And it is byte-identical to the prompt the base commit builds for the same inputs
 
     Examples:
       | role      | scope   | tier  |
       | coder     | all     | fast  |
       | coder     | changed | fast  |
+      | coder     | hard    | fast  |
       | architect | all     | sonar |
       | architect | hard    | sonar |
 
   Scenario: overnight passes SCOPE=hyper through
-    When I run `SCOPE=hyper START_FROM=coder STOP_AT=coder tools/overnight.sh tasks/t.md` with the stub
-    Then the overnight summary records exit 0 for tasks/t.md
-    And the coder prompt the stub received contains "This run is hyper-scoped." and "--tier full --scope hyper"
+    Given STUB_PLAN is `code`
+    When I run `SCOPE=hyper START_FROM=coder STOP_AT=coder tools/overnight.sh tasks/t.md` in a prepared repo
+    Then the exit code is 0 and the newest `.marestail/runs/overnight-*.md` contains `- exit 0`
+    And the one saved prompt starts with `You are the coder.` and contains "This run is hyper-scoped." and "--tier full --scope hyper"
 
   Scenario: README shows which roles run under hyper
     When I read the table under `## Pipeline` in README.md
     Then it has a `hyper` column
-    And that column marks specifier, critic, coder, architect, hardener and qa as running and cleaner, practices and perf as not running
-    And the coder and architect rows name `full` as their gate under hyper
+    And that column marks specifier, critic, coder, architect, hardener and qa as running, with `full` for coder and architect, and cleaner, practices and perf as not running
 
-  Scenario: the existing diagnostic scripts keep passing
+  Scenario: the diagnostic scripts keep passing
     When I run `python3 tools/test-run-hyper.py`
     Then it exits 0 and its last line contains "ok"
     And every other `tools/test-*.py` exits as it did before this task, `tools/test-perf.py` still exiting 1 with last line `verdict-commit-files: '' != 'perf/bench_x.py'`
