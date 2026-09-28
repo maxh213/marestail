@@ -18,9 +18,11 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     and `.cursor/hooks.json`. Text outside the block is left byte-for-byte.
   - Hyper install writes `marestail.toml` (the template plus `tooling = ".marestail/tooling"`
     under `[ts]`) only when none exists; an existing one is left byte-for-byte. It
-    writes `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`, and under <T> the
-    files of the scenario "tooling files have the pinned contents", overwriting them
-    on every hyper install. It never writes `sonar-project.properties` at the root.
+    writes `tasks/README.md`, `PERFORMANCE.md` and `guidance/ts.md` only when missing
+    (as today); a tracked or untracked existing one is left byte-for-byte. Only the
+    files under <T> of the scenario "tooling files have the pinned contents" are
+    overwritten on every hyper install. It never writes `sonar-project.properties`
+    at the root.
   - A kind the target already has is not written to <T>. It counts as present when
     one of these exists in <R> (Sonar: in the target root):
     eslint: `eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc`, `.eslintrc.{js,cjs,json,yml,yaml}`;
@@ -33,14 +35,24 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
   - `[ts] runner = "jest"`: install writes no jest config and adds no jest; jest comes
     from the target's own `node_modules`, as today.
   - It then runs `npm install --prefix .marestail/tooling` with the target as cwd.
+    npm's stdout and stderr both go to `.marestail/tooling/npm.log` (replaced each
+    run) and never to marestail's stdout or stderr.
   - Stop hooks: Claude goes to `.claude/settings.local.json`, never `.claude/settings.json`.
-    Agy, Grok and Cursor hook files are written only when not tracked; a tracked one
-    is left alone and install prints `no Stop hook for <backend>: <path> is tracked`.
+    Every hook file (Claude, Agy, Grok, Cursor) is merged as today only when not
+    tracked; a tracked one is left byte-for-byte and install prints
+    `no Stop hook for <backend>: <path> is tracked` (backend `claude`, `agy`, `grok`, `cursor`).
   - Hyper install never writes `.gitignore`, `CLAUDE.md` or `AGENTS.md`, tracked or not.
   - Stdout, in order: an optional Grok trust line; `left tracked files alone: <paths>`
     (comma+space separated, sorted, every tracked path install would have written or
-    edited; omitted when there are none); the `no Stop hook` lines; and last
-    `installed into <target> with --scope hyper; nothing to commit, see <exclude>`.
+    edited, including `.gitignore`, `CLAUDE.md`, `AGENTS.md`, `marestail.toml`,
+    `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md` and hook files; omitted when
+    there are none); the `no Stop hook` lines, sorted by path; when the root
+    `marestail.toml` (new or existing) has no `tooling` under `[ts]`, the line
+    `marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it`;
+    and last either `installed into <target> with --scope hyper; nothing to commit, see <exclude>`
+    (exit 0) or, when npm exits non-zero with code <n>,
+    `npm install --prefix .marestail/tooling failed (exit <n>); everything else is installed, see .marestail/tooling/npm.log`
+    (exit 1, and no `installed into` line). Nothing else is printed.
   - Gates with `[ts] tooling` set: every `npx <tool>` (tsc, eslint, depcruise, stryker,
     knip, vitest) becomes `<b>/<tool>`, and the config flag points into <T> when that
     file exists in <T>, else it is today's flag and path:
@@ -64,7 +76,7 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     Given a temporary git repository <target> on branch `main` with one commit
     And that commit tracks `.gitignore` holding exactly `node_modules/\n`
     And that commit tracks `CLAUDE.md` holding exactly `team rules\n`
-    And a fake `npm` first on PATH that records its argv and cwd, creates `.marestail/tooling/node_modules/.bin/`, and exits 0
+    And a fake `npm` first on PATH that records its argv and cwd, prints `npm out` to stdout and `npm err` to stderr, creates `.marestail/tooling/node_modules/.bin/`, and exits 0
     And GROK_HOME points at a fresh empty directory
 
   Scenario: a hyper install leaves the working tree clean
@@ -73,8 +85,9 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     And `git status --porcelain` in <target> prints nothing
     And `.gitignore` is still exactly `node_modules/\n` and `CLAUDE.md` still exactly `team rules\n`
     And `AGENTS.md` does not exist
-    And stdout contains `left tracked files alone: .gitignore, CLAUDE.md`
-    And the last stdout line is `installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude`
+    And stdout is exactly the two lines `left tracked files alone: .gitignore, CLAUDE.md` and `installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude`
+    And stderr is empty
+    And `.marestail/tooling/npm.log` contains `npm out` and `npm err`
 
   Scenario: everything install wrote is hidden by the local exclude file
     When I run `marestail install --scope hyper <target>`
@@ -207,10 +220,26 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
 
   Scenario: a target that already committed marestail files keeps them
     Given the commit also tracks `marestail.toml` holding exactly `[git]\nbase = "main"\n`
+    And the commit also tracks `PERFORMANCE.md` holding exactly `ours\n` and `.claude/settings.local.json` holding exactly `{}\n`
     When I run `marestail install --scope hyper <target>`
     Then `marestail.toml` is still exactly `[git]\nbase = "main"\n` and `git ls-files marestail.toml` still prints `marestail.toml`
-    And stdout contains `left tracked files alone: .gitignore, CLAUDE.md, marestail.toml`
-    And `git status --porcelain` prints nothing
+    And `PERFORMANCE.md` is still exactly `ours\n` and `.claude/settings.local.json` still exactly `{}\n`
+    And stdout is exactly these lines in order:
+      | left tracked files alone: .claude/settings.local.json, .gitignore, CLAUDE.md, PERFORMANCE.md, marestail.toml |
+      | no Stop hook for claude: .claude/settings.local.json is tracked |
+      | marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it |
+      | installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude |
+    And the exit code is 0 and `git status --porcelain` prints nothing
+
+  Scenario: untracked marestail files are kept, not overwritten
+    Given <target> has an untracked `marestail.toml` holding exactly `[ts]\nroot = "."\n`, an untracked `guidance/ts.md` holding `mine\n` and an untracked `.claude/settings.local.json` holding `{"env": {"A": "1"}}\n`
+    When I run `marestail install --scope hyper <target>`
+    Then `marestail.toml` and `guidance/ts.md` are unchanged
+    And `.claude/settings.local.json` keeps `"env": {"A": "1"}` and its Stop hooks include `marestail gate --hook`
+    And stdout is exactly these lines in order:
+      | left tracked files alone: .gitignore, CLAUDE.md |
+      | marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it |
+      | installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude |
 
   Scenario: a target that is not a git repository is refused
     Given <plain> is an empty directory outside any git repository
@@ -223,7 +252,11 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     Given the fake npm exits 1
     When I run `marestail install --scope hyper <target>`
     Then the exit code is 1
-    And the last stdout line is `npm install --prefix .marestail/tooling failed (exit 1); everything else is installed`
+    And stdout is exactly these lines in order:
+      | left tracked files alone: .gitignore, CLAUDE.md |
+      | npm install --prefix .marestail/tooling failed (exit 1); everything else is installed, see .marestail/tooling/npm.log |
+    And stderr is empty and `.marestail/tooling/npm.log` contains `npm out` and `npm err`
+    And `marestail.toml`, `.marestail/tooling/package.json` and `.claude/settings.local.json` exist
     And `git status --porcelain` prints nothing
 
   Scenario: a force-added marestail file is untracked by the runner
