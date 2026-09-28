@@ -1,4 +1,5 @@
 import tempfile
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,8 +51,9 @@ def member_units(scanned: tuple[Any, str | None]) -> list[Fn] | None:
 
 def judged(ctx: Context, hyper: Hyper, functions: list[Fn], started: float) -> Result:
     gated = innermost(functions, ctx)
+    by_file = _by_file(functions)
     bases, unread = _base_complexities(ctx, hyper, sorted({fn["file"] for fn in gated}))
-    above = _offenders([_judge(ctx, fn, functions, bases) for fn in gated], hyper.limit)
+    above = _offenders([_judge(ctx, fn, by_file[fn["file"]], bases) for fn in gated], hyper.limit)
     failing = _failures(above)
     kept = len(above) - len(failing)
     summary = f"{len(gated)} innermost changed functions, {len(above)} above CRAP {hyper.limit:g}, {kept} of them no worse than base"
@@ -88,7 +90,15 @@ def encloses(outer: Fn, inner: Fn) -> bool:
 
 def innermost(functions: list[Fn], ctx: Context) -> list[Fn]:
     touched = _touched_functions(functions, ctx)
-    return [fn for fn in touched if not _encloses_any(fn, touched)]
+    by_file = _by_file(touched)
+    return [fn for fn in touched if not _encloses_any(fn, by_file[fn["file"]])]
+
+
+def _by_file(functions: list[Fn]) -> dict[str, list[Fn]]:
+    grouped: dict[str, list[Fn]] = defaultdict(list)
+    for fn in functions:
+        grouped[fn["file"]].append(fn)
+    return grouped
 
 
 def _touched_functions(functions: list[Fn], ctx: Context) -> list[Fn]:
@@ -144,10 +154,10 @@ def _written(path: Path, text: str) -> Path:
     return path
 
 
-def _judge(ctx: Context, fn: Fn, functions: list[Fn], bases: Bases) -> Fn:
+def _judge(ctx: Context, fn: Fn, siblings: list[Fn], bases: Bases) -> Fn:
     scored = {key: fn[key] for key in SHOWN}
     scored["crap"] = crap_score(fn["cc"], fn["cov"])
-    base = bases.get(fn["file"], {}).get(nesting_path(fn, functions))
+    base = bases.get(fn["file"], {}).get(nesting_path(fn, siblings))
     missed = sorted(fn["missing"] & changed_in(fn, ctx))
     return {**scored, "finding": finding(scored, base, missed)}
 

@@ -63,6 +63,12 @@ def test_innermost_drops_functions_around_a_touched_one(tmp_path: Path) -> None:
     assert _hyper_crap.innermost([outer], hyper_ctx(tmp_path, {})) == []
 
 
+def test_innermost_ignores_functions_in_other_files(tmp_path: Path) -> None:
+    outer, inner = unit("outer", (1, 20), 4), unit("inner", (5, 12), 9, file="b.py")
+    ctx = hyper_ctx(tmp_path, {"a.py": {7}, "b.py": {7}})
+    assert _hyper_crap.innermost([outer, inner], ctx) == [outer, inner]
+
+
 def test_changed_in_keeps_lines_inside_the_range(tmp_path: Path) -> None:
     ctx = hyper_ctx(tmp_path, {"a.py": {1, 3, 5, 6}})
     assert _hyper_crap.changed_in(unit("f", (3, 5), 1), ctx) == {3, 5}
