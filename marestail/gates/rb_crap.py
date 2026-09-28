@@ -11,6 +11,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
+from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
 from marestail.ruby import scan, scanned, sources
 
@@ -38,12 +39,15 @@ def run_gate(ctx: Context) -> Result:
     code, output = scan(ctx, "complexity", files)
     if code != 0:
         return Result(GATE, False, "complexity scanner failed", output.splitlines()[-10:], elapsed(started))
-    return crap_result(ctx, coverage, functions_in_scope(scanned(output), ctx), started)
+    return crap_result(ctx, coverage, scanned(output), started)
 
 
 def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]], started: float) -> Result:
     limit = float(ctx.ruby(KEY, DEFAULT))
-    scored = [score(fn, coverage["files"].get(relative_path(fn["file"], ctx), {}), ctx) for fn in functions]
+    if ctx.hyper:
+        return judged(ctx, Hyper(GATE, limit, lambda copy: base_units(ctx, copy)), hyper_units(ctx, coverage, functions), started)
+    in_scope = functions_in_scope(functions, ctx)
+    scored = [score(fn, coverage["files"].get(relative_path(fn["file"], ctx), {}), ctx) for fn in in_scope]
     offenders = above(scored, limit)
     summary = f"{len(scored)} methods, {len(offenders)} above CRAP {limit:g}"
     return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
@@ -174,3 +178,35 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
         "cov": covered,
         "crap": complexity**2 * (1 - covered) ** CRAP_POWER + complexity,
     }
+
+
+def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    units: list[dict[str, Any]] = []
+    for file, group in by_file(functions, ctx).items():
+        units.extend(covered_units(ranged(file, group, file_text(ctx, file)), coverage["files"].get(file, {})))
+    return units
+
+
+def covered_units(units: list[dict[str, Any]], file_cov: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{**unit, "cov": line_covered(unit["line"], file_cov), "missing": missed(unit, file_cov)} for unit in units]
+
+
+def ranged(file: str, group: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    ends = method_ranges(text, [fn["line"] for fn in group])
+    return [unit(file, fn, method_end_line(ends, fn["line"])) for fn in group]
+
+
+def unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
+    line = fn["line"]
+    return {"file": file, "line": line, "start": line, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+
+
+def missed(unit: dict[str, Any], file_cov: dict[str, Any]) -> set[int]:
+    return {line for line in range(unit["start"], unit["end"] + 1) if not line_covered(line, file_cov)}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    code, output = scan(ctx, "complexity", [copy])
+    if code != 0:
+        return None
+    return ranged("", scanned(output), copy.read_text(errors="replace"))

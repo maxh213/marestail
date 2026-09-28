@@ -7,7 +7,7 @@ import pytest
 
 from marestail import elixir
 from marestail.context import Context
-from marestail.gates import ex_crap
+from marestail.gates import _hyper_crap, ex_crap
 from marestail.report import Result
 from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
@@ -91,3 +91,29 @@ def test_scoped(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
 )
 def test_in_hunks(fn: dict[str, Any], gated: set[int] | None, expected: bool) -> None:
     assert ex_crap.in_hunks(fn, gated) is expected
+
+
+def hyper_ex(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, base_reply: tuple[int, str]) -> Result:
+    source = str(tmp_path / "app" / "lib" / "a.ex")
+    coverage = {"files": {source: {"percent_covered": 50.0, "missing_lines": [3, 12]}}}
+    ctx = project(tmp_path, coverage, scope_changed=True, hyper=True, changed={"app/lib/a.ex"}, changed_lines_map={"app/lib/a.ex": {3}})
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "defmodule A do\nend\n")
+    head = [{"file": source, "line": 2, "end_line": 8, "name": "big/2", "complexity": 5}]
+    fake_run(elixir, [(0, json.dumps(head)), base_reply])
+    return checked(ex_crap.run_gate(ctx), ex_crap.GATE)
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [{"file": "copy", "line": 2, "end_line": 8, "name": "big/2", "complexity": 5}]
+    result = hyper_ex(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)))
+    assert shape(result) == (
+        "ex.crap",
+        False,
+        "1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base",
+        ["app/lib/a.ex:2 big/2 crap=8.1 (cc=5, coverage=50%); changed lines not covered: 3"],
+    )
+
+
+def test_hyper_base_script_failure_falls_back(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    result = hyper_ex(tmp_path, fake_run, monkeypatch, (1, "boom"))
+    assert result.summary.endswith("; no base complexity for app/lib/a.ex, crap_max only")

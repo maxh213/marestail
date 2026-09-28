@@ -66,6 +66,80 @@ def test_calls():
     code(1)
     relay(1)
 """
+PY_PAYMENTS_FILE = "app/payments.py"
+PY_PAYMENTS = """def load_payment_popup(settings):
+    if not settings:
+        return None
+    if settings.get("sandbox"):
+        settings = {**settings, "origin": "https://sandbox.example"}
+    if settings.get("debug"):
+        print("popup ready")
+
+    def receive_message(data):
+        if data is None:
+            return "ignored"
+        if data.get("origin") != settings["origin"]:
+            return "foreign"
+        if data.get("status") == "paid":
+            return "thanks"
+        if data.get("status") == "failed":
+            return "retry"
+        if data.get("status") == "cancelled":
+            return "closed"
+        if data.get("status") == "pending":
+            return "waiting"
+        if data.get("amount", 0) > 1000:
+            return "review"
+        if data.get("recurring"):
+            return "monthly"
+        return "unknown"
+
+    return receive_message
+"""
+PY_PAID_FILE = "tests/test_payments.py"
+PY_PAID_TEST = """from app.payments import load_payment_popup
+
+
+def test_paid():
+    receive = load_payment_popup({"origin": "https://pay.example"})
+    assert receive({"origin": "https://pay.example", "status": "paid"}) == "thank you"
+"""
+PY_HAS_DONATED = """
+
+def has_donated(data):
+    status = data.get("status")
+    return status in ("paid", "donated")
+"""
+PY_FEE_BAND = """
+
+def fee_band(amount):
+    if amount < 5:
+        return "micro"
+    if amount < 20:
+        return "small"
+    if amount < 100:
+        return "medium"
+    if amount < 500:
+        return "large"
+    if amount < 5000:
+        return "major"
+    return "gift"
+"""
+PY_DRAFT_FILE = "app/draft.py"
+PY_DRAFT = """def settle(amount)
+    if amount < 0:
+        return "refund"
+    if amount == 0:
+        return "free"
+    if amount > 100:
+        return "large"
+    return "normal"
+"""
+PY_CRAP = ("--only", "py.tests,py.crap")
+PY_THANK_YOU = '            return "thank you"'
+PY_RECEIVE = f"{PY_PAYMENTS_FILE}:9 receive_message crap=48.6 (cc=9, coverage=21%)"
+NO_WORSE = "1 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base"
+WORSE = "1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base"
 PY_TOML = """[git]
 base = "base"
 
@@ -113,6 +187,46 @@ export function code(n) {
   return n+1;
 }
 """
+TS_PAYMENTS_FILE = "src/payments.ts"
+TS_PAYMENTS = """export function loadPaymentPopup(settings) {
+  if (!settings)
+    return null;
+  if (settings.sandbox)
+    settings = { ...settings, origin: "https://sandbox.example" };
+  if (settings.debug)
+    console.log("popup ready");
+
+  function receiveMessage(data) {
+    if (data === null)
+      return "ignored";
+    if (data.origin !== settings.origin)
+      return "foreign";
+    if (data.status === "paid")
+      return "thanks";
+    if (data.status === "failed")
+      return "retry";
+    if (data.status === "cancelled")
+      return "closed";
+    if (data.status === "pending")
+      return "waiting";
+    if (Number(data.amount) > 1000)
+      return "review";
+    if (data.recurring)
+      return "monthly";
+    return "unknown";
+  }
+
+  return receiveMessage;
+}
+"""
+TS_PAID_TEST = """import { expect, test } from "vitest";
+import { loadPaymentPopup } from "./payments";
+
+test("paid", () => {
+  const receive = loadPaymentPopup({ origin: "https://pay.example" });
+  expect(receive({ origin: "https://pay.example", status: "paid" })).toBe("thank you");
+});
+"""
 TS_TEST = """import { expect, test } from "vitest";
 import { code, double, label } from "./legacy";
 
@@ -148,6 +262,7 @@ TS_FILES = {
     "marestail.toml": '[git]\nbase = "base"\n\n[ts]\nroot = "."\n',
     ".gitignore": "node_modules/\n.marestail/\nreports/\n.stryker-tmp/\ncoverage/\n",
     TS_FILE: TS_LEGACY,
+    TS_PAYMENTS_FILE: TS_PAYMENTS,
     "src/legacy.test.ts": TS_TEST,
 }
 
@@ -218,7 +333,7 @@ def new_repo(folder: Path, files: dict[str, str]) -> Path:
     return folder
 
 
-def python_fixture(folder: Path) -> Path:
+def python_fixture(folder: Path, name: str = "py", extra: dict[str, str] | None = None) -> Path:
     files = {
         "marestail.toml": PY_TOML,
         "pyproject.toml": PY_PROJECT,
@@ -226,8 +341,9 @@ def python_fixture(folder: Path) -> Path:
         "app/__init__.py": "",
         PY_FILE: PY_LEGACY,
         "tests/test_legacy.py": PY_TEST,
+        **(extra or {PY_PAYMENTS_FILE: PY_PAYMENTS}),
     }
-    repo = new_repo(folder / "py", files)
+    repo = new_repo(folder / name, files)
     shell(repo, "uv", "venv", ".venv", "--quiet")
     shell(repo, "uv", "pip", "install", "--python", ".venv/bin/python", "--quiet", *PY_TOOLS)
     commit_base(repo)
@@ -403,6 +519,103 @@ def typescript_fail_closed(repo: Path) -> None:
     restore(repo, "marestail.toml", TS_FILE)
 
 
+def crap_gate(repo: Path, scope: str) -> tuple[str, list[str], str]:
+    _, output = gate(repo, SCOPE, scope, *PY_CRAP)
+    return header(output, "py.crap"), results(output, "py.crap"), output
+
+
+def expect_crap(name: str, got: tuple[str, list[str], str], status: str, summary: str, findings: list[str]) -> None:
+    expect(name, (got[0][:6], f" {summary}  (" in got[0], got[1]), (status, True, findings))
+
+
+def reset_payments(repo: Path, *lines: tuple[int, str]) -> Path:
+    restore(repo, PY_PAYMENTS_FILE)
+    source = repo / PY_PAYMENTS_FILE
+    for number, text in lines:
+        set_line(source, number, text)
+    return source
+
+
+def python_covered_fix(repo: Path) -> None:
+    write_all(repo, {PY_PAID_FILE: PY_PAID_TEST})
+    reset_payments(repo, (15, PY_THANK_YOU))
+    got = crap_gate(repo, HYPER)
+    expect_crap("hyper-covered-fix", got, "[ok  ]", NO_WORSE, [])
+    lacks("hyper-no-outer", got[2], "load_payment_popup")
+    outer = f"{PY_PAYMENTS_FILE}:1 load_payment_popup crap=5.3 (cc=4, coverage=57%)"
+    changed = "2 functions, 2 above CRAP 4 on changed functions"
+    expect_crap("changed-both", crap_gate(repo, "changed"), "[FAIL]", changed, [PY_RECEIVE, outer])
+
+
+def python_added_branch(repo: Path) -> None:
+    reset_payments(repo, (14, '        if data.get("status") == "paid" or data.get("status") == "donated":'), (15, PY_THANK_YOU))
+    rose = f"{PY_PAYMENTS_FILE}:9 receive_message complexity rose from 9 to 10; move the new condition into its own function"
+    expect_crap("hyper-rose", crap_gate(repo, HYPER), "[FAIL]", WORSE, [rose])
+
+
+def python_extracted_condition(repo: Path) -> None:
+    source = reset_payments(repo, (14, "        if has_donated(data):"), (15, PY_THANK_YOU))
+    with source.open("a") as handle:
+        handle.write(PY_HAS_DONATED)
+    got = crap_gate(repo, HYPER)
+    expect_crap("hyper-extracted", got, "[ok  ]", "2 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base", [])
+    lacks("hyper-extracted-outer", got[2], "load_payment_popup")
+
+
+def python_new_function(repo: Path) -> None:
+    source = reset_payments(repo)
+    with source.open("a") as handle:
+        handle.write(PY_FEE_BAND)
+    expect_crap("hyper-new", crap_gate(repo, HYPER), "[FAIL]", WORSE, [f"{PY_PAYMENTS_FILE}:31 fee_band crap=42.0 (cc=6, coverage=0%)"])
+
+
+def python_uncovered_line(repo: Path) -> None:
+    reset_payments(repo, (15, PY_THANK_YOU), (21, '            return "on hold"'))
+    got = crap_gate(repo, HYPER)
+    expect_crap("hyper-uncovered", got, "[FAIL]", WORSE, [f"{PY_RECEIVE}; changed lines not covered: 21"])
+    lacks("hyper-uncovered-not-rose", got[2], "complexity rose")
+
+
+def python_renamed(repo: Path) -> None:
+    reset_payments(repo, (9, "    def on_message(data):"), (15, PY_THANK_YOU), (28, "    return on_message"))
+    got = crap_gate(repo, HYPER)
+    expect_crap("hyper-renamed", got, "[FAIL]", WORSE, [f"{PY_PAYMENTS_FILE}:9 on_message crap=48.6 (cc=9, coverage=21%)"])
+    lacks("hyper-renamed-outer", got[2], "load_payment_popup")
+    restore(repo, PY_PAYMENTS_FILE)
+    (repo / PY_PAID_FILE).unlink()
+
+
+def readme_states_hyper_crap() -> None:
+    readme = (CLI.parent.parent / "README.md").read_text()
+    paragraph = next(line for line in readme.splitlines() if line.startswith("`--scope hyper` gates"))
+    lacks("readme-old-rule", readme, "Coverage and CRAP work as under `changed`")
+    contains(
+        "readme-rules",
+        paragraph,
+        "CRAP gates only the innermost function holding a changed line",
+        "passes when its CRAP is at most `crap_max`, or when its complexity is no higher than at `[git] base` and every changed line in it is covered.",
+    )
+
+
+def python_unreadable_base(folder: Path) -> None:
+    repo = python_fixture(folder, "draft", {PY_DRAFT_FILE: PY_DRAFT})
+    set_line(repo / PY_DRAFT_FILE, 1, "def settle(amount):")
+    summary = f"{WORSE}; no base complexity for {PY_DRAFT_FILE}, crap_max only"
+    expect_crap(
+        "hyper-unreadable-base", crap_gate(repo, HYPER), "[FAIL]", summary, [f"{PY_DRAFT_FILE}:1 settle crap=20.0 (cc=4, coverage=0%)"]
+    )
+
+
+def typescript_payments(repo: Path) -> None:
+    set_line(repo / TS_PAYMENTS_FILE, 15, '      return "thank you";')
+    write_all(repo, {"src/payments.test.ts": TS_PAID_TEST})
+    _, output = gate(repo, SCOPE, HYPER, ONLY, "ts.tests,ts.crap")
+    expect("ts-hyper-crap", (header(output, "ts.crap")[:6], f" {NO_WORSE}  (" in header(output, "ts.crap")), ("[ok  ]", True))
+    lacks("ts-hyper-crap-outer", output, "loadPaymentPopup")
+    restore(repo, TS_PAYMENTS_FILE)
+    (repo / "src/payments.test.ts").unlink()
+
+
 class StubClient:
     def __init__(self, replies: dict[str, Any]) -> None:
         self.replies = replies
@@ -484,6 +697,7 @@ if __name__ == "__main__":
             raise SystemExit(f"{tool} is needed to build the fixtures")
     with tempfile.TemporaryDirectory(prefix="marestail-hyper-scope-") as temp:
         folder = Path(temp)
+        readme_states_hyper_crap()
         sonar_checks(folder)
         python = python_fixture(folder)
         python_happy_path(python)
@@ -492,8 +706,19 @@ if __name__ == "__main__":
         python_mutation(python)
         python_fail_closed(python)
         python_hooks_and_runs(python, folder)
+        for check in (
+            python_covered_fix,
+            python_added_branch,
+            python_extracted_condition,
+            python_new_function,
+            python_uncovered_line,
+            python_renamed,
+        ):
+            check(python)
         python_edges(python)
+        python_unreadable_base(folder)
         typescript = ts_fixture(folder)
         typescript_checks(typescript)
         typescript_fail_closed(typescript)
+        typescript_payments(typescript)
     print("hyper scope ok")

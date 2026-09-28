@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import javascript
-from marestail.gates import ts_crap
+from marestail.gates import _hyper_crap, ts_crap
 from tests.conftest import checked, make_context, untimed
 
 TS = {"ts": {"root": "web"}}
@@ -125,3 +125,41 @@ def test_function_coverage_only_counts_code_inside_the_function() -> None:
     data = file_coverage({4: 0, 5: 1, 9: 1, 10: 0}, {5: [1, 1, 0], 11: [0]})
 
     assert ts_crap.function_coverage({"line": 5, "endLine": 9}, data) == 0.8
+
+
+def hyper_ts(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[int, str], lines: set[int]) -> Any:
+    source = str(tmp_path / "web" / "p.ts")
+    setup(tmp_path, {source: file_coverage({2: 1, 10: 1, 11: 0, 12: 0}, {10: [1, 0]})})
+    head = [function(source, "outer", 1, 30, 4), function(source, "inner", 9, 27, 9)]
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "base")
+    fake = fake_run(javascript, [(0, json.dumps(head)), base_reply])
+    ctx = make_context(tmp_path, TS, scope_changed=True, hyper=True, changed={"web/p.ts"}, changed_lines_map={"web/p.ts": lines})
+    return checked(ts_crap.run_gate(ctx), ts_crap.GATE), fake
+
+
+def test_hyper_passes_an_inner_function_no_worse_than_base(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [function("x", "outer", 1, 30, 4), function("x", "inner", 9, 27, 9)]
+    result, fake = hyper_ts(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)), {10})
+    assert (result.ok, result.summary, result.findings) == (
+        True,
+        "1 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base",
+        [],
+    )
+    assert fake.calls[1][-1].endswith("/web/p.ts")
+    assert ".marestail" in fake.calls[1][-1]
+
+
+def test_hyper_reports_statements_with_no_hits(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [function("x", "outer", 1, 30, 4), function("x", "inner", 9, 27, 9)]
+    result, _ = hyper_ts(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)), {10, 12})
+    assert result.findings == ["web/p.ts:9 inner crap=26.5 (cc=9, coverage=40%); changed lines not covered: 12"]
+
+
+def test_hyper_scanner_failure_on_base_falls_back(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_ts(tmp_path, fake_run, monkeypatch, (1, "boom"), {10})
+    assert result.summary.endswith("; no base complexity for web/p.ts, crap_max only")
+    assert result.ok is False
+
+
+def test_missed_lines_are_statement_starts_with_no_hits() -> None:
+    assert ts_crap.missed_lines(file_coverage({1: 0, 2: 3, 5: 0}, {})) == {1, 5}

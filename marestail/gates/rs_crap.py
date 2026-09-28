@@ -9,6 +9,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
+from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
 
 GATE = "rs.crap"
@@ -39,10 +40,16 @@ def ignored_path(ignored: str | None, path: Path) -> bool:
 
 def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[Any] | None, started: float) -> Result:
     limit = float(ctx.rust(KEY, DEFAULT))
-    scored = [score(fn, coverage["files"].get(rust.rel(ctx, fn["file"]), {}), ctx) for fn in functions or []]
+    if ctx.hyper:
+        return judged(ctx, Hyper(GATE, limit, lambda copy: base_units(ctx, copy)), hyper_units(ctx, coverage, functions or []), started)
+    scored = scored_functions(ctx, coverage, functions)
     offenders = above(scored, limit)
     summary = f"{len(scored)} functions, {len(offenders)} above CRAP {limit:g}"
     return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
+
+
+def scored_functions(ctx: Context, coverage: dict[str, Any], functions: list[Any] | None) -> list[dict[str, Any]]:
+    return [score(fn, coverage["files"].get(rust.rel(ctx, fn["file"]), {}), ctx) for fn in functions or []]
 
 
 def measured(lines: dict[str, int], start: int, end: int) -> list[int]:
@@ -64,3 +71,25 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
         "cov": covered,
         "crap": complexity**2 * (1 - covered) ** 3 + complexity,
     }
+
+
+def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[Any]) -> list[dict[str, Any]]:
+    return [covered_unit(unit(rust.rel(ctx, fn["file"]), fn), coverage["files"].get(rust.rel(ctx, fn["file"]), {})) for fn in functions]
+
+
+def unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
+    line = fn["line"]
+    return {"file": file, "line": line, "start": line, "end": fn["end"], "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+
+
+def covered_unit(unit: dict[str, Any], file_cov: dict[str, Any]) -> dict[str, Any]:
+    lines = file_cov.get("lines", {})
+    missing = {int(number) for number, hits in lines.items() if hits == 0}
+    return {**unit, "cov": covered_share(measured(lines, unit["start"], unit["end"])), "missing": missing}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    functions, _ = rust.scan(ctx, "complexity", [copy])
+    if functions is None:
+        return None
+    return [unit("", fn) for fn in functions]

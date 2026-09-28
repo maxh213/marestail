@@ -144,3 +144,15 @@ def test_file_lines(tmp_path: Path) -> None:
     assert changes.file_lines(tmp_path / "empty") == set()
     assert changes.file_lines(tmp_path / "missing") is None
     assert changes.file_lines(tmp_path) is None
+
+
+def test_base_text_reads_the_file_at_base_relative_to_the_root(git_repo: Path) -> None:
+    (git_repo / "pkg").mkdir()
+    (git_repo / "pkg" / "a.py").write_text("old\n")
+    commit_all(git_repo)
+    git(git_repo, "tag", "base")
+    (git_repo / "pkg" / "a.py").write_text("new\n")
+    commit_all(git_repo)
+    assert changes.base_text(git_repo, "base", "pkg/a.py") == "old\n"
+    assert changes.base_text(git_repo / "pkg", "base", "a.py") == "old\n"
+    assert changes.base_text(git_repo, "base", "pkg/missing.py") is None

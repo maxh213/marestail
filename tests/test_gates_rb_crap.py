@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import ruby
-from marestail.gates import _crap, rb_crap
+from marestail.gates import _crap, _hyper_crap, rb_crap
 from tests.conftest import checked, make_context, untimed
 
 SOURCE = "class User\n  def a\n    1\n  end\n\n  def b\n    2\n  end\nend\n"
@@ -222,3 +222,45 @@ def test_body_touched_at_the_first_line() -> None:
 def test_above_sorts_worst_first() -> None:
     scored = [{"crap": 5.0}, {"crap": 4.0}, {"crap": 9.0}]
     assert _crap.above(scored, 4.0) == [{"crap": 9.0}, {"crap": 5.0}]
+
+
+def hyper_rb(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[int, str], lines: set[int]) -> Any:
+    write_tree(tmp_path)
+    write_coverage(tmp_path)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: SOURCE)
+    head = [fn for fn in json.loads(methods(tmp_path)) if fn["file"].endswith("user.rb")]
+    fake = fake_run(ruby, [(0, json.dumps(head)), base_reply])
+    lines_map = {"app/models/user.rb": lines}
+    ctx = make_context(
+        tmp_path,
+        {"ruby": {"ruby": "rb", "crap_max": 2.5}},
+        scope_changed=True,
+        hyper=True,
+        changed=set(lines_map),
+        changed_lines_map=lines_map,
+    )
+    return checked(rb_crap.run_gate(ctx), rb_crap.GATE), fake
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [{"file": "copy", "line": 2, "name": "User#a", "complexity": 3}, {"file": "copy", "line": 6, "name": "User#b", "complexity": 2}]
+    result, fake = hyper_rb(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)), {3, 7})
+    assert result.findings == [
+        "app/models/user.rb:6 User#b complexity rose from 2 to 3; move the new condition into its own function",
+        "app/models/user.rb:2 User#a crap=3.0 (cc=3, coverage=100%); changed lines not covered: 3",
+    ]
+    assert result.summary == "2 innermost changed functions, 2 above CRAP 2.5, 0 of them no worse than base"
+    assert fake.calls[1][:3] == ["rb", str(ruby.SCRIPT), "complexity"]
+
+
+def test_hyper_base_scanner_failure_falls_back(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_rb(tmp_path, fake_run, monkeypatch, (1, "boom"), {2})
+    assert result.summary.endswith("0 of them no worse than base; no base complexity for app/models/user.rb, crap_max only")
+
+
+@pytest.mark.parametrize(
+    ("file_cov", "expected"),
+    [({"lines": [1, 0, None, 0]}, {2, 4}), ({"missing_lines": [3, 9]}, {3}), ({"lines": [0], "missing_lines": [2]}, {1, 2})],
+)
+def test_missed_reads_line_hits_then_missing_lines(file_cov: dict[str, Any], expected: set[int]) -> None:
+    assert rb_crap.missed({"start": 1, "end": 4}, file_cov) == expected

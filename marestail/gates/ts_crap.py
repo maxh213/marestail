@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 from marestail import javascript
@@ -9,6 +10,7 @@ from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
 from marestail.gates._crap import describe as describe
+from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
 
 GATE = "ts.crap"
@@ -35,10 +37,16 @@ def scoped_files(coverage: dict[str, Any], ctx: Context) -> list[str]:
 
 def crap_result(ctx: Context, coverage: dict[str, Any], parsed: list[dict[str, Any]], started: float) -> Result:
     limit = float(ctx.ts(KEY, DEFAULT))
-    functions = [score(fn, coverage[fn["file"]], ctx) for fn in parsed if touches_hunk(fn, ctx)]
+    if ctx.hyper:
+        return judged(ctx, Hyper(GATE, limit, lambda copy: base_units(ctx, copy)), hyper_units(coverage, parsed, ctx), started)
+    functions = touched_scores(ctx, coverage, parsed)
     worst = above(functions, limit)
     summary = f"{len(functions)} functions, {len(worst)} above CRAP {limit:g}"
     return Result(GATE, not worst, summary, [describe(fn, "complexity") for fn in worst], elapsed(started))
+
+
+def touched_scores(ctx: Context, coverage: dict[str, Any], parsed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [score(fn, coverage[fn["file"]], ctx) for fn in parsed if touches_hunk(fn, ctx)]
 
 
 def touches_hunk(fn: dict[str, Any], ctx: Context) -> bool:
@@ -75,3 +83,35 @@ def ratio(hits: list[int]) -> float:
     if not hits:
         return 1.0
     return sum(1 for hit in hits if hit > 0) / len(hits)
+
+
+def hyper_units(coverage: dict[str, Any], parsed: list[dict[str, Any]], ctx: Context) -> list[dict[str, Any]]:
+    return [{**unit(javascript.rel(fn["file"], ctx), fn), **covered_by(fn, coverage[fn["file"]])} for fn in parsed]
+
+
+def unit(file: str, fn: dict[str, Any]) -> dict[str, Any]:
+    line = fn["line"]
+    return {
+        "file": file,
+        "line": line,
+        "start": line,
+        "end": fn["endLine"],
+        "name": fn["name"],
+        "label": fn["name"],
+        "cc": fn["complexity"],
+    }
+
+
+def covered_by(fn: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    return {"cov": function_coverage(fn, data), "missing": missed_lines(data)}
+
+
+def missed_lines(data: dict[str, Any]) -> set[int]:
+    return {data["statementMap"][key]["start"]["line"] for key, hits in data["s"].items() if hits == 0}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    code, output = javascript.scan(ctx, "complexity", [copy])
+    if code != 0:
+        return None
+    return [unit("", fn) for fn in json.loads(output)]

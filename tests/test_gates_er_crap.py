@@ -7,7 +7,7 @@ import pytest
 
 from marestail import erlang
 from marestail.context import Context
-from marestail.gates import _crap, er_crap
+from marestail.gates import _crap, _hyper_crap, er_crap
 from marestail.report import Result
 from tests.conftest import FakeRun, checked, gate_shape, make_context, untimed
 
@@ -159,3 +159,35 @@ def test_paired_ends_rejects_mismatched_lengths() -> None:
 
 def test_paired_ends_keeps_matching_bounds() -> None:
     assert er_crap.paired_ends("a.erl", [1, 4], [3, 9]) == {("a.erl", 1): 3, ("a.erl", 4): 9}
+
+
+def hyper_er(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, base_code: int) -> Result:
+    source = str(tmp_path / "src/a.erl")
+    coverage = {"files": {source: {"percent_covered": 50.0, "missing_lines": [6, 12]}}}
+    ctx = project(tmp_path, coverage, scope_changed=True, hyper=True, changed={"src/a.erl"}, changed_lines_map={"src/a.erl": {6, 7}})
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "line\n" * 20)
+
+    def reply(command: list[str]) -> tuple[int, str]:
+        file = command[2]
+        found = [{"file": file, "line": 2, "name": "small/0", "complexity": 1}, {"file": file, "line": 5, "name": "mid/1", "complexity": 4}]
+        if file == source:
+            return 0, json.dumps(found)
+        return base_code, json.dumps(found[1:] if base_code == 0 else "boom")
+
+    fake_run(erlang, reply)
+    return checked(er_crap.run_gate(ctx), er_crap.GATE)
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    assert shape(hyper_er(tmp_path, fake_run, monkeypatch, 0)) == (
+        "er.crap",
+        False,
+        "1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base",
+        ["src/a.erl:5 mid/1 crap=6.0 (cc=4, coverage=50%); changed lines not covered: 6"],
+    )
+
+
+def test_hyper_base_script_failure_falls_back(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    result = hyper_er(tmp_path, fake_run, monkeypatch, 1)
+    assert result.summary.endswith("; no base complexity for src/a.erl, crap_max only")
+    assert result.findings == ["src/a.erl:5 mid/1 crap=6.0 (cc=4, coverage=50%)"]

@@ -8,7 +8,7 @@ import pytest
 
 from marestail import java
 from marestail.context import Context
-from marestail.gates import java_crap
+from marestail.gates import _hyper_crap, java_crap
 from marestail.report import Result
 from tests.conftest import checked, make_context, reject_none, untimed
 
@@ -179,3 +179,39 @@ def test_window_empty() -> None:
 def test_describe() -> None:
     finding = {"file": "A.java", "line": 7, "name": "A.m", "crap": 12.345, "cc": 3, "cov": 0.256}
     assert java_crap.describe(finding) == "A.java:7 A.m crap=12.3 (cc=3, coverage=26%)"
+
+
+def hyper_java(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None], lines: set[int]) -> Any:
+    project(tmp_path)
+    replies = [(MEMBERS, None), base_reply]
+    seen: list[list[Path]] = []
+
+    def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
+        seen.append(paths)
+        return replies.pop(0)
+
+    monkeypatch.setattr(java, "scan", reject_none(scan))
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "class X {}\n")
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={APP}, changed_lines_map={APP: lines})
+    return checked(java_crap.run_gate(ctx), java_crap.GATE), seen
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [{**MEMBERS[0], "file": "copy"}]
+    result, seen = hyper_java(tmp_path, monkeypatch, (base, None), {5, 10})
+    assert fields(result)[1:4] == (
+        False,
+        "2 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base",
+        [f"{APP}:3 App.run crap=10.4 (cc=5, coverage=40%); changed lines not covered: 5"],
+    )
+    assert seen[1][0].relative_to(tmp_path / ".marestail").parts[1:] == tuple(APP.split("/"))
+
+
+def test_hyper_passes_no_worse_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_java(tmp_path, monkeypatch, ([{**MEMBERS[0], "complexity": 6}], None), {4})
+    assert fields(result)[1:4] == (True, "1 innermost changed functions, 1 above CRAP 4, 1 of them no worse than base", [])
+
+
+def test_hyper_base_scan_error_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_java(tmp_path, monkeypatch, (None, "java not found"), {4})
+    assert result.summary.endswith(f"; no base complexity for {APP}, crap_max only")

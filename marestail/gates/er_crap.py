@@ -10,7 +10,8 @@ from marestail.gates._coverage import relative_path as relative_path
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import crap_result as crap_result
-from marestail.gates._crap import scored_functions as scored_functions
+from marestail.gates._crap import file_percent_score, scored_functions
+from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
 
 COVERAGE_JSON = ER_COVERAGE
@@ -33,8 +34,14 @@ def run_gate(ctx: Context) -> Result:
     failed = erlang.trouble(code, output, "complexity script failed", output.splitlines()[-10:])
     if failed:
         return Result(GATE, False, *failed, elapsed(started))
-    functions = scoped_functions(json.loads(output), ctx)
-    return crap_result(GATE, scored_functions(functions, coverage, ctx), float(ctx.erlang(KEY, DEFAULT)), started)
+    return verdict(ctx, coverage, json.loads(output), started)
+
+
+def verdict(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]], started: float) -> Result:
+    limit = float(ctx.erlang(KEY, DEFAULT))
+    if ctx.hyper:
+        return judged(ctx, Hyper(GATE, limit, lambda copy: base_units(ctx, copy)), hyper_units(ctx, coverage, functions), started)
+    return crap_result(GATE, scored_functions(scoped_functions(functions, ctx), coverage, ctx), limit, started)
 
 
 def files_in_scope(coverage: dict[str, Any], ctx: Context) -> list[Path]:
@@ -81,3 +88,30 @@ def touches_hunk(fn: dict[str, Any], ends: dict[tuple[str, int], int], ctx: Cont
         return True
     end = ends[(fn["file"], fn["line"])]
     return any(fn["line"] <= line <= end for line in gated)
+
+
+def ranged(file: str, functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ends = function_ends(functions)
+    return [unit(file, fn, ends[(fn["file"], fn["line"])]) for fn in functions]
+
+
+def unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
+    line = fn["line"]
+    return {"file": file, "line": line, "start": line, "end": end, "name": fn["name"], "label": fn["name"], "cc": fn["complexity"]}
+
+
+def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ends = function_ends(functions)
+    return [covered_unit(ctx, fn, ends[(fn["file"], fn["line"])], coverage["files"].get(fn["file"], {})) for fn in functions]
+
+
+def covered_unit(ctx: Context, fn: dict[str, Any], end: int, file_cov: dict[str, Any]) -> dict[str, Any]:
+    covered = file_percent_score(fn, file_cov, ctx)["cov"]
+    return {**unit(relative_path(fn["file"], ctx), fn, end), "cov": covered, "missing": set(file_cov.get("missing_lines", []))}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    code, output = erlang.escript(ctx, "complexity.escript", [str(copy)], timeout=COMPLEXITY_TIMEOUT)
+    if erlang.trouble(code, output, "complexity script failed"):
+        return None
+    return ranged("", json.loads(output))

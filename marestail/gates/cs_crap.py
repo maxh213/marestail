@@ -1,10 +1,12 @@
 import time
+from pathlib import Path
 from typing import Any
 
 from marestail import dotnet
 from marestail.context import Context
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
+from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
 
 GATE = "cs.crap"
@@ -21,7 +23,7 @@ def run_gate(ctx: Context) -> Result:
     members, error = dotnet.scan(ctx, "complexity", files)
     if error:
         return Result(GATE, False, error, [], elapsed(started))
-    return verdict(ctx, scoped_members(ctx, members), coverage, started)
+    return verdict(ctx, members, coverage, started)
 
 
 def scoped_members(ctx: Context, members: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -32,7 +34,9 @@ def scoped_members(ctx: Context, members: list[dict[str, Any]]) -> list[dict[str
 
 def verdict(ctx: Context, members: list[dict[str, Any]], coverage: dict[str, Any], started: float) -> Result:
     limit = float(ctx.dotnet(KEY, DEFAULT))
-    scored = [score(ctx, member, coverage) for member in members]
+    if ctx.hyper:
+        return hyper_result(ctx, members, coverage, started)
+    scored = [score(ctx, member, coverage) for member in scoped_members(ctx, members)]
     worst = offenders(scored, limit)
     summary = f"{len(scored)} members, {len(worst)} above CRAP {limit:g}"
     return Result(GATE, not worst, summary, [describe(f) for f in worst], elapsed(started))
@@ -81,3 +85,34 @@ def missed_branches(file_cov: dict[str, Any], start: int, end: int) -> int:
 
 def describe(f: dict[str, Any]) -> str:
     return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['cc']}, coverage={f['cov']:.0%})"
+
+
+def hyper_result(ctx: Context, members: list[dict[str, Any]], coverage: dict[str, Any], started: float) -> Result:
+    hyper = Hyper(GATE, float(ctx.dotnet(KEY, DEFAULT)), lambda copy: base_units(ctx, copy))
+    return judged(ctx, hyper, [scored_unit(ctx, member, coverage) for member in members], started)
+
+
+def unit(member: dict[str, Any]) -> dict[str, Any]:
+    name = member["name"]
+    return {
+        "file": member["file"],
+        "line": member["line"],
+        "start": member["startLine"],
+        "end": member["endLine"],
+        "name": name,
+        "label": name,
+        "cc": member["complexity"],
+    }
+
+
+def scored_unit(ctx: Context, member: dict[str, Any], coverage: dict[str, Any]) -> dict[str, Any]:
+    lines = coverage["files"].get(member["file"], {}).get("lines", {})
+    missing = {int(number) for number, hits in lines.items() if hits == 0}
+    return {**unit(member), "cov": score(ctx, member, coverage)["cov"], "missing": missing}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    members, error = dotnet.scan(ctx, "complexity", [copy])
+    if error:
+        return None
+    return list(map(unit, members))

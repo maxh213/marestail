@@ -111,3 +111,8 @@ def file_lines(path: Path) -> set[int] | None:
     if b"\0" in raw:
         return None
     return set(range(1, len(raw.decode("utf-8", errors="replace").splitlines()) + 1))
+
+
+def base_text(root: Path, base: str, path: str) -> str | None:
+    code, output = run(["git", "show", f"{base}:./{path}"], cwd=root)
+    return output if code == 0 else None

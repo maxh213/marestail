@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import rust
-from marestail.gates import rs_crap
+from marestail.gates import _hyper_crap, rs_crap
 from tests.conftest import checked, make_context, untimed
 
 
@@ -94,3 +94,33 @@ def test_measured() -> None:
 def test_score(tmp_path: Path) -> None:
     fn = {"file": "src/a.rs", "line": 1, "end": 2, "name": "f", "complexity": 3}
     assert rs_crap.score(fn, {}, make_context(tmp_path)) == {"file": "src/a.rs", "line": 1, "name": "f", "cc": 3, "cov": 0.0, "crap": 12.0}
+
+
+def hyper_rs(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[int, str]) -> Any:
+    setup_crate(tmp_path)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "fn half() {}\n")
+    head = [fn for fn in json.loads(functions(tmp_path)) if fn["name"] == "half"]
+    fake = fake_run(rust, [(0, json.dumps(head)), base_reply])
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"src/lib.rs"}, changed_lines_map={"src/lib.rs": {2, 4}})
+    return checked(rs_crap.run_gate(ctx), rs_crap.GATE), fake
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [{"file": "copy", "line": 1, "end": 4, "name": "half", "complexity": 4}]
+    result, fake = hyper_rs(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)))
+    assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%); changed lines not covered: 2"]
+    assert result.summary == "1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base"
+    assert fake.calls[1][1:] == ["complexity", fake.calls[1][-1]]
+    assert fake.calls[1][-1].endswith("/src/lib.rs")
+
+
+def test_hyper_base_scanner_failure_falls_back(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_rs(tmp_path, fake_run, monkeypatch, (1, "bad"))
+    assert result.summary.endswith("; no base complexity for src/lib.rs, crap_max only")
+    assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%)"]
+
+
+def test_hyper_without_functions(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True)
+    result = rs_crap.crap_result(ctx, {"files": {}}, None, 0.0)
+    assert (result.ok, result.summary) == (True, "0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base")

@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import dotnet
-from marestail.gates import cs_crap
+from marestail.gates import _hyper_crap, cs_crap
 from marestail.report import Result
 from tests.conftest import checked, gate_shape, make_context, untimed
 
@@ -190,3 +190,34 @@ def test_default_crap_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     ctx = project(tmp_path)
     ctx.config.raw["dotnet"] = {}
     assert view(checked(cs_crap.run_gate(ctx), cs_crap.GATE)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])
+
+
+def hyper_cs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None]) -> tuple[Result, list[list[Path]]]:
+    replies = [(MEMBERS, None), base_reply]
+    seen: list[list[Path]] = []
+
+    def scan(ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
+        seen.append(paths)
+        return replies.pop(0)
+
+    monkeypatch.setattr(dotnet, "scan", scan)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "class A {}\n")
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {4}})
+    return checked(cs_crap.run_gate(ctx), cs_crap.GATE), seen
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, seen = hyper_cs(tmp_path, monkeypatch, ([member("High", 3, 5, 6, file="copy")], None))
+    assert view(result) == (
+        "cs.crap",
+        False,
+        "2 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base",
+        ["App/A.cs:3 High crap=10.5 (cc=6, coverage=50%); changed lines not covered: 4"],
+    )
+    assert seen[1][0].relative_to(tmp_path / ".marestail").parts[1:] == ("App", "A.cs")
+
+
+def test_hyper_base_scan_error_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_cs(tmp_path, monkeypatch, (None, "C# scanner failed"))
+    assert result.summary.endswith("; no base complexity for App/A.cs, crap_max only")
+    assert result.findings == ["App/A.cs:3 High crap=10.5 (cc=6, coverage=50%)"]
