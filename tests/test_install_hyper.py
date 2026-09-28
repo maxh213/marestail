@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from marestail import _install, install
+from marestail import _install, install, shell
 from tests.conftest import commit_all, git
 
 TEMPLATES = _install.TEMPLATES
@@ -34,7 +34,7 @@ class Npm:
     def __init__(self, code: int) -> None:
         self.code = code
         self.calls: list[tuple[list[str], Path, Any]] = []
-        self.real = _install.run
+        self.real = shell.run
 
     def __call__(self, command: list[str], cwd: Path, **options: Any) -> tuple[int, str]:
         if command[0] != "npm":
