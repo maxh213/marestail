@@ -84,6 +84,7 @@ def suppression_findings(ctx: Context) -> list[str]:
         f"{dotnet.rel(ctx, path)}:{number} analyzer suppressed in source; fix the code instead"
         for path in dotnet.in_scope(ctx, dotnet.files(ctx))
         for number in dotnet.matching_lines(path, SUPPRESSION.search)
+        if ctx.keeps(f"{dotnet.rel(ctx, path)}:{number}")
     ]
 
 
@@ -112,7 +113,7 @@ def result_finding(ctx: Context, result: dict[str, Any], project: Path) -> list[
 
 
 def reportable(result: dict[str, Any], where: str, ctx: Context) -> bool:
-    return result.get("level", "warning") in LEVELS and file_in_scope(where, ctx)
+    return result.get("level", "warning") in LEVELS and file_in_scope(where, ctx) and ctx.keeps(where)
 
 
 def path_of_finding(where: str) -> str:
@@ -128,7 +129,7 @@ def file_in_scope(where: str, ctx: Context) -> bool:
 def location(ctx: Context, result: dict[str, Any], project: Path) -> str | None:
     locations = result.get("locations") or []
     if not locations:
-        return f"{dotnet.rel(ctx, project)}:1"
+        return f"{dotnet.rel(ctx, project)}:{ctx.placeholder_line}"
     physical = locations[0]["physicalLocation"]
     path = resolve_uri(ctx, physical["artifactLocation"]["uri"])
     if not reportable_path(ctx, path):

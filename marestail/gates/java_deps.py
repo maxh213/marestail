@@ -28,7 +28,7 @@ def run_gate(ctx: Context) -> Result:
     data, error = java.scan(ctx, "deps", files)
     if error:
         return Result(GATE, False, error, [], elapsed(started))
-    return verdict(scoped_findings(ctx, layer_findings(ctx, layers, data) + cycle_findings(data["edges"])), started)
+    return verdict(scoped_findings(ctx, ctx.on_changed_lines(layer_findings(ctx, layers, data)) + cycle_findings(data["edges"])), started)
 
 
 def verdict(findings: list[str], started: float) -> Result:

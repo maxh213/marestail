@@ -389,3 +389,45 @@ def test_structured_scan_receives_context(tmp_path: Path, monkeypatch: pytest.Mo
     ctx = make_context(tmp_path, {"dotnet": {}})
     assert comments.dotnet_findings(ctx) == ["A.cs:1 comment: // c"]
     assert seen == [ctx]
+
+
+def hyper(root: Path, lines: dict[str, set[int]]) -> Any:
+    return make_context(root, EVERYWHERE, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+
+
+def test_hyper_python_keeps_only_comments_and_docstrings_on_changed_lines(tmp_path: Path) -> None:
+    write(tmp_path, "app/legacy.py", "import os\n# legacy note\n\n\ndef double(price):\n    return 2 * price  # doubled\n")
+    write(tmp_path, "app/other.py", '"""doc"""\n')
+
+    result = checked(comments.run_gate(hyper(tmp_path, {"app/legacy.py": {6}, "app/other.py": {1}})), "comments")
+
+    assert (result.ok, result.findings) == (False, ["app/legacy.py:6 comment: # doubled", "app/other.py:1 docstring"])
+
+
+def test_hyper_keeps_untokenizable_python(tmp_path: Path) -> None:
+    write(tmp_path, "a.py", "# old\nx = (\n")
+
+    assert comments.python_findings(hyper(tmp_path, {"a.py": {9}})) == ["a.py:0 comment: could not tokenize"]
+
+
+def test_hyper_scanner_findings_are_filtered_but_failures_kept(tmp_path: Path, fake_run: Any) -> None:
+    source = write(tmp_path, "a.ts", "// x\n")
+    reply = json.dumps([{"file": str(source), "line": 1, "text": "// old"}, {"file": str(source), "line": 4, "text": "// new"}])
+    fake_run(javascript, [(0, reply), (2, "boom src/a.ts:9")])
+    ctx = hyper(tmp_path, {"a.ts": {4}})
+    ctx.config.raw["ts"] = {"root": "."}
+
+    assert comments.ts_findings(ctx) == ["a.ts:4 comment: // new"]
+    assert comments.ts_findings(ctx) == ["comment scanner failed: boom src/a.ts:9"]
+
+
+def test_hyper_structured_and_markup_findings_are_filtered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write(tmp_path, "A.java", "// c\n")
+    write(tmp_path, "b.css", "/* old */\n/* new */\n")
+    found = [{"file": "A.java", "line": 1, "text": "// old"}, {"file": "A.java", "line": 2, "text": "// new"}]
+    monkeypatch.setattr(java, "scan", reject_none(lambda ctx, mode, paths: (found, None)))
+    ctx = hyper(tmp_path, {"A.java": {2}, "b.css": {2}})
+    ctx.config.raw["java"] = {}
+
+    assert comments.java_findings(ctx) == ["A.java:2 comment: // new"]
+    assert comments.markup_findings(ctx) == ["b.css:2 comment: /* new */"]

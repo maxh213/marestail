@@ -265,3 +265,14 @@ def test_project_findings_returns_the_no_sarif_result(tmp_path: Path, monkeypatc
 
 def test_path_of_finding_keeps_a_leading_colon() -> None:
     assert cs_lint.path_of_finding(":10") == ""
+
+
+def test_hyper_keeps_suppressions_and_results_on_changed_lines(tmp_path: Path) -> None:
+    lines = {"App/A.cs": {4, 7}, "App/App.csproj": {2}}
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert cs_lint.suppression_findings(ctx) == [SUPPRESSED[1]]
+    log = ctx.work / "x.sarif"
+    results = [diagnostic("App/A.cs"), diagnostic("App/A.cs", 3), {"ruleId": "CS1", "level": "error", "message": {"text": "x"}}]
+    log.write_text(sarif(*results))
+    assert cs_lint.sarif_findings(ctx, log, tmp_path / "App" / "App.csproj") == ["App/A.cs:7 CA1822: Member 'X' can be static"]
+    assert ctx.file_level == 1

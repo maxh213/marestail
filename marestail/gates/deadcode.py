@@ -41,7 +41,12 @@ def run_gate(ctx: Context) -> Result:
 
 
 def collected(ctx: Context) -> list[str]:
-    return [finding for scanner in SCANNERS for finding in scanner(ctx) if ctx.in_scope(finding_file(finding))]
+    found = [finding for scanner in SCANNERS for finding in scanner(ctx)]
+    return found if ctx.hyper else in_scope_only(found, ctx)
+
+
+def in_scope_only(found: list[str], ctx: Context) -> list[str]:
+    return [finding for finding in found if ctx.in_scope(finding_file(finding))]
 
 
 def failed(label: str, output: str) -> str:
@@ -66,7 +71,7 @@ def vetted(code: int, output: str, findings: list[str]) -> list[str]:
 
 
 def vulture_findings(output: str, kinds: set[str], root: Path, ctx: Context) -> list[str]:
-    return [vulture_finding(entry, root, ctx) for entry in vulture_entries(output) if entry[2] in kinds]
+    return ctx.on_changed_lines([vulture_finding(entry, root, ctx) for entry in vulture_entries(output) if entry[2] in kinds])
 
 
 def vulture_entries(output: str) -> list[tuple[str, str, str, str]]:
@@ -123,7 +128,7 @@ def ts_findings(ctx: Context) -> list[str]:
     if start < 0:
         return [failed("knip produced no report", output)]
     report, _ = json.JSONDecoder().raw_decode(output[start:])
-    return knip_findings(report, kinds, ts_root.relative_to(ctx.root))
+    return ctx.on_changed_lines(knip_findings(report, kinds, ts_root.relative_to(ctx.root)))
 
 
 def report_items(report: dict[str, Any], key: str) -> list[Any]:
@@ -165,13 +170,13 @@ def ruby_findings(ctx: Context) -> list[str]:
     if not files:
         return []
     code, output = scan(ctx, "dead", files)
-    return ruby_report(code, output)
+    return ruby_report(code, output, ctx)
 
 
-def ruby_report(code: int, output: str) -> list[str]:
+def ruby_report(code: int, output: str, ctx: Context) -> list[str]:
     if code != 0:
         return [failed("ruby deadcode scanner failed", output)]
-    return list(json.loads(output or "[]"))
+    return ctx.on_changed_lines(list(json.loads(output or "[]")))
 
 
 def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, **options: Any) -> list[str]:
@@ -181,7 +186,7 @@ def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable
     data, error = module.scan(ctx, "dead", files, **options)
     if error:
         return [f"{failure}: {error}"]
-    return [f"{relabel(e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data]
+    return ctx.on_changed_lines([f"{relabel(e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data])
 
 
 def dotnet_findings(ctx: Context) -> list[str]:
@@ -227,7 +232,7 @@ def elixir_findings(ctx: Context) -> list[str]:
 
 
 def elixir_entries(entries: list[dict[str, Any]], root: Path, ctx: Context) -> list[str]:
-    return [unused_function(elixir_label(entry["file"], root, ctx), entry) for entry in entries]
+    return ctx.on_changed_lines([unused_function(elixir_label(entry["file"], root, ctx), entry) for entry in entries])
 
 
 def elixir_label(name: str, root: Path, ctx: Context) -> str:
@@ -268,7 +273,7 @@ def xref_entries(ctx: Context, sources: list[Path], entries: list[dict[str, Any]
     from marestail import erlang
 
     labels = {path.stem: erlang.rel(ctx, path) for path in sources}
-    return [unused_function(labels.get(entry["module"], entry["module"]), entry) for entry in entries]
+    return ctx.on_changed_lines([unused_function(labels.get(entry["module"], entry["module"]), entry) for entry in entries])
 
 
 def as_name_list(value: Any) -> list[str]:

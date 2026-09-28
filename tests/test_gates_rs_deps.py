@@ -125,3 +125,15 @@ def test_components_finds_every_cycle() -> None:
 def test_components_cross_edge_to_finished_node() -> None:
     edges = [edge("a", "b"), edge("b", "a"), edge("c", "a"), edge("c", "d"), edge("d", "c")]
     assert rs_deps.components(rs_deps.edge_graph(edges)) == [["b", "a"], ["d", "c"]]
+
+
+def test_hyper_keeps_breaks_on_changed_lines_and_every_cycle(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake_run(rust, [(0, json.dumps(scanned_edges(tmp_path)))])
+    lines = {"src/domain/user.rs": {4}, "src/b.rs": {1}}
+    ctx = make_context(tmp_path, {"rust": {"layers": LAYERS}}, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    result = checked(rs_deps.run_gate(ctx), rs_deps.GATE)
+    assert result.findings == [
+        "src/domain/user.rs:4 src/domain/user.rs must not depend on src/db/pool.rs (crate::db::pool)",
+        "src/a.rs:7 module cycle: src/a.rs -> src/b.rs -> src/c.rs -> src/a.rs",
+    ]

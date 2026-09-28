@@ -1,9 +1,10 @@
 import json
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, MutationScope
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.elixir import project_files
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
@@ -79,9 +80,16 @@ def read_report(output: str) -> dict[str, Any] | str:
 def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, Any]], output: str, started: float) -> Result:
     if not mutations:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    findings = [describe(ctx, mutation) for mutation in mutations if status(mutation) not in PASSING]
+    mutations = ctx.located(mutations, partial(describe, ctx))
+    if not mutations:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    findings = failures(ctx, mutations)
     summary = mutation_summary(len(findings), counted(mutations), scope.note)
     return Result(GATE, not findings, summary, findings, elapsed(started))
+
+
+def failures(ctx: Context, mutations: list[dict[str, Any]]) -> list[str]:
+    return [describe(ctx, mutation) for mutation in mutations if status(mutation) not in PASSING]
 
 
 def status(mutation: dict[str, Any]) -> str:

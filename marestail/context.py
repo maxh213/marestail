@@ -1,4 +1,6 @@
+import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -7,6 +9,9 @@ from marestail.changes import base_exists, changed_files, changed_lines, file_li
 from marestail.config import Config, focus_paths
 
 CHANGED = "changed"
+HYPER = "hyper"
+NO_CHANGED_MUTANTS = "no mutants on changed lines"
+LOCATED = re.compile(r"(?P<path>[^\s:()]+):(?P<line>\d+)")
 DEFAULT_BASE = "origin/master"
 BENCHMARKS = "perf"
 
@@ -42,6 +47,8 @@ class Context:
     focus: set[str] = field(default_factory=set)
     changed_lines_map: dict[str, set[int]] = field(default_factory=dict)
     hard: bool = False
+    hyper: bool = False
+    file_level: int = 0
 
     @property
     def root(self) -> Path:
@@ -59,6 +66,8 @@ class Context:
     def scope_name(self) -> str:
         if self.hard:
             return "hard"
+        if self.hyper:
+            return HYPER
         return CHANGED if self.scoped else "all"
 
     def section_root(self, section: str) -> Path:
@@ -162,14 +171,51 @@ class Context:
             return "all"
         if self.hard:
             return "hard: " + ", ".join(sorted(self.focus))
+        if self.hyper:
+            return f"hyper: {self.changed_line_count()} changed lines in {len(self.changed)} files"
         return self.changed_summary()
 
+    def changed_line_count(self) -> int:
+        return sum(len(lines) for lines in self.changed_lines_map.values())
+
     def changed_summary(self) -> str:
-        total = sum(len(lines) for lines in self.changed_lines_map.values())
-        summary = f"changed ({len(self.changed)} files, {total} lines)"
+        summary = f"changed ({len(self.changed)} files, {self.changed_line_count()} lines)"
         if self.focus:
             summary += " + focus: " + ", ".join(sorted(self.focus))
         return summary
+
+    @property
+    def placeholder_line(self) -> int:
+        return 0 if self.hyper else 1
+
+    def on_changed_lines(self, findings: list[str]) -> list[str]:
+        return [finding for finding in findings if self.keeps(finding)]
+
+    def located(self, records: list[Any], where: Callable[[Any], str]) -> list[Any]:
+        if not self.hyper:
+            return records
+        return [record for record in records if self.keeps(where(record))]
+
+    def keeps(self, finding: str) -> bool:
+        if not self.hyper:
+            return True
+        match = LOCATED.search(finding)
+        if match is None:
+            return self.dropped_file_level(any(token in self.changed for token in finding.split()))
+        return self.kept_line(match["path"], int(match["line"]))
+
+    def kept_line(self, path: str, line: int) -> bool:
+        if line == 0:
+            return self.dropped_file_level(path in self.changed)
+        return line in self.changed_lines_map.get(path, set())
+
+    def dropped_file_level(self, counted: bool) -> bool:
+        self.file_level += counted
+        return False
+
+    def take_file_level(self) -> int:
+        count, self.file_level = self.file_level, 0
+        return count
 
     def global_note(self, summary: str) -> str:
         if not self.scoped:
@@ -209,8 +255,23 @@ def diff_context(config: Config, scoped: bool, focused: set[str]) -> Context:
     return Context(config=config, scope_changed=True, changed=changed, focus=focused, changed_lines_map=lines)
 
 
-def build(config: Config, scope_changed: bool, focus: set[str] | None = None, hard: bool = False) -> Context:
-    focused = focus or set()
+def file_level_note(count: int) -> str:
+    return f"; {count} file-level findings not gated under hyper" if count else ""
+
+
+def hyper_context(config: Config) -> Context:
+    ctx = diff_context(config, True, set())
+    ctx.hyper = True
+    return ctx
+
+
+def build(config: Config, scope_changed: bool, focus: set[str] | None = None, hard: bool = False, hyper: bool = False) -> Context:
+    if hyper:
+        return hyper_context(config)
+    return scoped_context(config, scope_changed, focus or set(), hard)
+
+
+def scoped_context(config: Config, scope_changed: bool, focused: set[str], hard: bool) -> Context:
     if hard:
         return hard_context(config, focused)
     return diff_context(config, scope_changed or bool(focused), focused)

@@ -145,11 +145,11 @@ def test_surviving_skips_out_of_scope_files(tmp_path: Path) -> None:
     }
     ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"})
 
-    assert ts_mutation.surviving(report, ctx) == [
+    assert ts_mutation.survivors_of(ts_mutation.placed(report, ctx)) == [
         "web/src/a.ts:1 BooleanLiteral RuntimeError: x",
         "web/src/a.ts:2 BooleanLiteral CompileError: x",
     ]
-    assert ts_mutation.surviving({}, ctx) == []
+    assert ts_mutation.placed({}, ctx) == []
 
 
 def test_replacement_text_defaults_and_clips() -> None:
@@ -171,3 +171,40 @@ def test_drop_tree_skips_a_missing_path(tmp_path: Path) -> None:
     (present / "x").write_text("x")
     ts_mutation.drop_tree(present)
     assert not present.exists()
+
+
+def hyper(root: Path, lines: dict[str, set[int]]) -> Any:
+    (root / "web").mkdir(exist_ok=True)
+    return make_context(root, TS, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+
+
+def test_hyper_mutates_and_reports_only_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    report = {"files": {"src/a.ts": {"mutants": [mutant("Survived", 9), mutant("Survived", 10, ""), mutant("Killed", 11)]}}}
+    fake = fake_run(ts_mutation, stryker(tmp_path, report, []))
+    ctx = hyper(tmp_path, {"web/src/a.ts": {10, 11, 14}, "web/src/a.test.ts": {1}})
+
+    result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "1 surviving mutants", ["web/src/a.ts:10 BooleanLiteral Survived: "])
+    assert fake.calls == [[*BASE, "--mutate", "src/a.ts:10-11,src/a.ts:14-14"]]
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_mutation, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Survived", 9)]}}}, []))
+
+    result = checked(ts_mutation.run_gate(hyper(tmp_path, {"web/src/a.ts": {10}})), ts_mutation.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (True, "no mutants on changed lines", [])
+
+
+def test_hyper_missing_report_still_fails(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_mutation, stryker(tmp_path, None, []))
+
+    result = checked(ts_mutation.run_gate(hyper(tmp_path, {"web/src/a.ts": {10}})), ts_mutation.GATE)
+
+    assert (result.ok, result.summary) == (False, "stryker produced no report (exit 1)")
+
+
+def test_spans_group_consecutive_lines() -> None:
+    assert ts_mutation.spans([1, 2, 3, 7, 9, 10]) == [[1, 3], [7, 7], [9, 10]]
+    assert ts_mutation.spans([]) == []

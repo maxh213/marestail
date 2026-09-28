@@ -129,3 +129,10 @@ def test_failed_findings_ignore_output_when_code_is_zero() -> None:
 def test_batch_findings_clean_code_drops_parsed_lines(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     assert er_lint.batch_findings(0, "src/a.erl:1: unused", ctx) == []
+
+
+def test_lint_findings_hyper_keeps_changed_lines(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"src/b.hrl"}, changed_lines_map={"src/b.hrl": {4}})
+    output = "src/b.hrl:4:1: worse\nsrc/b.hrl:9: old\n"
+    assert er_lint.lint_findings(output, ctx) == ["src/b.hrl:4 worse"]
+    assert er_lint.lint_findings("escript crashed", ctx) == ["escript crashed"]

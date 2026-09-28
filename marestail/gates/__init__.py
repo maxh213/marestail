@@ -8,7 +8,7 @@ from pathlib import Path
 
 from marestail import config as config_module
 from marestail import context as context_module
-from marestail.context import Context, hook_focus, resolve_focus
+from marestail.context import Context, file_level_note, hook_focus, resolve_focus
 from marestail.report import Result, elapsed
 
 FAST = "fast"
@@ -115,17 +115,19 @@ def tiers_for(tier: str) -> set[str]:
     return {FAST: {FAST}, SONAR: {FAST, SONAR}, FULL: {FAST, SONAR, FULL}, QA: {FAST, QA}, "all": {FAST, SONAR, FULL, QA}}[tier]
 
 
-def run_gates(tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False) -> list[Result]:
-    results, _ = run_gates_with_context(tier, scope_changed, only, focus, hard)
+def run_gates(
+    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False, hyper: bool = False
+) -> list[Result]:
+    results, _ = run_gates_with_context(tier, scope_changed, only, focus, hard, hyper)
     return results
 
 
 def run_gates_with_context(
-    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False
+    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False, hyper: bool = False
 ) -> tuple[list[Result], Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
-    ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard)
+    ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard, hyper)
     return [run_one(gate, ctx) for gate in configured_gates(config, tier, only)], ctx
 
 
@@ -140,12 +142,18 @@ def configured_gates(config: config_module.Config, tier: str, only: set[str] | N
 
 def run_one(gate: Gate, ctx: Context) -> Result:
     started = time.time()
+    ctx.take_file_level()
     try:
-        return gate.run(ctx)
+        return noted(gate.run(ctx), ctx)
     except BaseException as error:
         if not isinstance(error, Exception | SystemExit):
             raise
         return crashed(gate, error, started)
+
+
+def noted(result: Result, ctx: Context) -> Result:
+    result.summary += file_level_note(ctx.take_file_level())
+    return result
 
 
 def crashed(gate: Gate, error: BaseException, started: float) -> Result:

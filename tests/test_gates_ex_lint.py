@@ -121,3 +121,9 @@ def test_relevant() -> None:
 def test_problems_ignore_output_when_code_is_zero() -> None:
     assert ex_lint.problems("format", (0, "lib/a.ex is not formatted")) == []
     assert ex_lint.problems("format", (1, "lib/a.ex is not formatted")) == ["format: lib/a.ex is not formatted"]
+
+
+def test_compile_findings_hyper_keeps_blocks_on_changed_lines(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {3}})
+    output = "warning: new\n  lib/a.ex:3:5\n\nwarning: old\n  lib/a.ex:9:1\n"
+    assert ex_lint.compile_findings(output, ["lib/a.ex"], ctx) == ["compile: warning: new", "compile:   lib/a.ex:3:5"]

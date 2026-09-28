@@ -77,6 +77,7 @@ def test_paths(tmp_path: Path) -> None:
         ({"focus": {"a.py"}}, True, "changed"),
         ({"hard": True, "focus": {"a.py"}}, True, "hard"),
         ({"hard": True}, False, "hard"),
+        ({"scope_changed": True, "hyper": True}, True, "hyper"),
     ],
 )
 def test_scope_name(tmp_path: Path, fields: dict[str, Any], scoped: bool, name: str) -> None:
@@ -177,6 +178,8 @@ def test_gated_lines(tmp_path: Path) -> None:
         ({"hard": True, "focus": {"b", "a"}}, "hard: a, b"),
         ({"scope_changed": True, "changed": {"x", "y"}, "changed_lines_map": {"x": {1, 2}, "y": {5}}}, "changed (2 files, 3 lines)"),
         ({"focus": {"b", "a"}}, "changed (0 files, 0 lines) + focus: a, b"),
+        ({"scope_changed": True, "hyper": True, "changed": {"x"}, "changed_lines_map": {"x": {6}}}, "hyper: 1 changed lines in 1 files"),
+        ({"scope_changed": True, "hyper": True}, "hyper: 0 changed lines in 0 files"),
     ],
 )
 def test_scope_summary(tmp_path: Path, fields: dict[str, Any], expected: str) -> None:
@@ -238,6 +241,67 @@ def test_build_hard_needs_focus(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as raised:
         context.build(config, True, None, hard=True)
     assert str(raised.value) == "--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml"
+
+
+def test_build_hyper_reads_the_diff_and_drops_focus(git_repo: Path) -> None:
+    tree(git_repo, "a.py")
+    commit_all(git_repo, "base")
+    git(git_repo, "checkout", "-q", "-b", "work")
+    (git_repo / "a.py").write_text("one\nTWO\n")
+    config = Config(root=git_repo, raw={"git": {"base": "main"}})
+    expected = Context(config=config, scope_changed=True, changed={"a.py"}, changed_lines_map={"a.py": {2}}, hyper=True)
+    assert context.build(config, False, {"x"}, hyper=True) == expected
+
+
+def hyper_context(root: Path) -> Context:
+    return make_context(root, scope_changed=True, hyper=True, changed={"app/a.py", "app/b.py"}, changed_lines_map={"app/a.py": {6}})
+
+
+@pytest.mark.parametrize(
+    ("finding", "kept", "file_level"),
+    [
+        ("app/a.py:6 comment: # doubled", True, 0),
+        ("ruff: app/a.py:6:34: E711 Comparison", True, 0),
+        ("  --> app/a.py:6:13", True, 0),
+        ("app/a.py:2 comment: # legacy note", False, 0),
+        ("app/b.py:3 no lines changed here", False, 0),
+        ("app/c.py:6 not in the diff", False, 0),
+        ("app/a.py:0 MINOR python:S1451: Add a header", False, 1),
+        ("app/c.py:0 not in the diff", False, 0),
+        ("app/a.py unused file", False, 1),
+        ("Would reformat: app/b.py", False, 1),
+        ("1 file would be reformatted", False, 0),
+    ],
+)
+def test_keeps_only_changed_lines_under_hyper(tmp_path: Path, finding: str, kept: bool, file_level: int) -> None:
+    ctx = hyper_context(tmp_path)
+    assert ctx.keeps(finding) is kept
+    assert ctx.take_file_level() == file_level
+    assert ctx.take_file_level() == 0
+
+
+def test_keeps_everything_outside_hyper(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, changed={"a.py"})
+    assert ctx.on_changed_lines(["b.py:1 x", "a.py:0 y", "text"]) == ["b.py:1 x", "a.py:0 y", "text"]
+    assert ctx.take_file_level() == 0
+
+
+def test_on_changed_lines_keeps_order_and_counts_file_level(tmp_path: Path) -> None:
+    ctx = hyper_context(tmp_path)
+    kept = ctx.on_changed_lines(["app/a.py:6 b", "app/a.py:2 old", "app/a.py:6 a", "app/a.py:0 whole"])
+    assert (kept, ctx.file_level) == (["app/a.py:6 b", "app/a.py:6 a"], 1)
+
+
+def test_located_filters_records_by_where(tmp_path: Path) -> None:
+    ctx = hyper_context(tmp_path)
+    records = [{"line": 6}, {"line": 7}, {"line": 0}]
+    assert ctx.located(records, lambda record: f"app/a.py:{record['line']}") == [{"line": 6}]
+    assert ctx.take_file_level() == 1
+
+
+@pytest.mark.parametrize(("count", "note"), [(0, ""), (2, "; 2 file-level findings not gated under hyper")])
+def test_file_level_note(count: int, note: str) -> None:
+    assert context.file_level_note(count) == note
 
 
 def test_build_unscoped(tmp_path: Path) -> None:

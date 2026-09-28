@@ -74,7 +74,7 @@ def file_offenses(file: dict[str, Any], ctx: Context) -> list[str]:
     rel = relative(file.get("path", ""), ctx)
     if not ctx.in_scope(rel):
         return []
-    return [offense_line(rel, offense) for offense in list_field(file, "offenses")]
+    return ctx.on_changed_lines([offense_line(rel, offense) for offense in list_field(file, "offenses")])
 
 
 def list_field(data: dict[str, Any], key: str) -> list[Any]:

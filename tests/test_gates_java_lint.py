@@ -375,3 +375,18 @@ def test_pmd_command_configured_ruleset(tmp_path: Path, monkeypatch: pytest.Monk
     assert command[0] == "/jdk/bin/java"
     assert command[9] == str(tmp_path / "svc" / "rules.xml")
     assert command[-2:] == ["--file-list", "/l.txt"]
+
+
+def test_hyper_keeps_java_findings_on_changed_lines(tmp_path: Path) -> None:
+    files = [write(tmp_path / "A.java", '@SuppressWarnings("x")\nint a; //NOPMD\n')]
+    lines = {"A.java": {2}}
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert java_lint.suppression_findings(ctx, files) == ["A.java:2 warning suppressed in source; fix the code instead"]
+    diagnostics: list[dict[str, Any]] = [
+        {"file": None, "line": 0, "kind": "WARNING", "code": None, "message": "boot"},
+        {"file": "A.java", "line": 1, "kind": "WARNING", "code": None, "message": "old"},
+        {"file": "A.java", "line": 2, "kind": "WARNING", "code": None, "message": "new"},
+    ]
+    assert java_lint.javac_findings(ctx, diagnostics) == ["pom.xml:0 javac WARNING: boot", "A.java:2 javac WARNING: new"]
+    entry = {"filename": str(tmp_path / "A.java"), "violations": [{"beginline": b, "rule": "R", "description": "d"} for b in (1, 2)]}
+    assert java_lint.entry_findings(ctx, entry) == ["A.java:2 PMD R: d"]

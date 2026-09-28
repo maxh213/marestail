@@ -4,8 +4,10 @@ import json
 import re
 import time
 import tokenize
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import partial
+from itertools import filterfalse
+from operator import itemgetter
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -86,8 +88,14 @@ def python_findings(ctx: Context) -> list[str]:
 def python_file_findings(path: Path, ctx: Context) -> list[str]:
     text = path.read_text()
     label = str(path.relative_to(ctx.root))
-    found = [comment(label, line, snippet) for line, snippet in python_comments(text)]
-    return found + [f"{label}:{line} docstring" for line in docstrings(text)]
+    found = python_comments(text)
+    located = ctx.on_changed_lines(comment_lines(label, filter(itemgetter(0), found)))
+    broken = comment_lines(label, filterfalse(itemgetter(0), found))
+    return located + broken + ctx.on_changed_lines([f"{label}:{line} docstring" for line in docstrings(text)])
+
+
+def comment_lines(label: str, found: Iterable[tuple[int, str]]) -> list[str]:
+    return [comment(label, line, snippet) for line, snippet in found]
 
 
 def python_comments(text: str) -> list[tuple[int, str]]:
@@ -137,7 +145,7 @@ def documentable(tree: ast.Module) -> list[ast.Module | ast.FunctionDef | ast.As
 def scanned(ctx: Context, code: int, output: str, failure: str) -> list[str]:
     if code != 0:
         return [failed(failure, output)]
-    return [comment(Path(c["file"]).relative_to(ctx.root), c["line"], c["text"]) for c in json.loads(output)]
+    return ctx.on_changed_lines([comment(Path(c["file"]).relative_to(ctx.root), c["line"], c["text"]) for c in json.loads(output)])
 
 
 def ts_findings(ctx: Context) -> list[str]:
@@ -198,7 +206,7 @@ def structured(ctx: Context, module: ModuleType, paths: list[Path], failure: str
     data, error = module.scan(ctx, COMMENTS_MODE, paths)
     if error:
         return [f"{failure}: {error}"]
-    return [comment(relabel(c["file"]), c["line"], c["text"]) for c in data]
+    return ctx.on_changed_lines([comment(relabel(c["file"]), c["line"], c["text"]) for c in data])
 
 
 def dotnet_findings(ctx: Context) -> list[str]:
@@ -231,7 +239,9 @@ def markup_findings(ctx: Context) -> list[str]:
 
 def markup_file_findings(path: Path, ctx: Context) -> list[str]:
     lines = enumerate(path.read_text().splitlines(), start=1)
-    return [comment(path.relative_to(ctx.root), number, line.strip()[:80]) for number, line in lines if markup_comment(path, line)]
+    return ctx.on_changed_lines(
+        [comment(path.relative_to(ctx.root), number, line.strip()[:80]) for number, line in lines if markup_comment(path, line)]
+    )
 
 
 def markup_comment(path: Path, line: str) -> bool:

@@ -50,3 +50,15 @@ def test_scoped_filters_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 def test_summary() -> None:
     assert depth_gate.summary([], []) == "no modules"
     assert depth_gate.summary([module("a"), module("b", public=4)], ["x"]) == "2 modules, 1 shallow, 1 rule breaks"
+
+
+def test_hyper_keeps_rule_breaks_on_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    changed = Module("app/legacy.py", ["relay", "forward"], 10, ["app/legacy.py:17 relay only forwards its arguments"], [])
+    changed.pass_throughs.append("app/legacy.py:21 forward only forwards its arguments")
+    fake_analyse(monkeypatch, [changed])
+    ctx = make_context(
+        tmp_path, scope_changed=True, hyper=True, changed={"app/legacy.py"}, changed_lines_map={"app/legacy.py": {19, 20, 21, 22}}
+    )
+    result = checked(depth_gate.run_gate(ctx), "depth")
+    assert (result.ok, result.findings) == (False, ["app/legacy.py:21 forward only forwards its arguments"])
+    assert result.summary == "1 modules, 0 shallow, 1 rule breaks"

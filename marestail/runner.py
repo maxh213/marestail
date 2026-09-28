@@ -63,6 +63,7 @@ ALLOW_EMPTY = "--allow-empty"
 UNMATCHED = "--ignore-unmatch"
 COMMIT = "commit"
 CHANGED = "changed"
+HYPER = "hyper"
 CACHED = "--cached"
 NAME_ONLY = "--name-only"
 CHECKOUT = "checkout"
@@ -130,6 +131,7 @@ class Run:
     scope_changed: bool = False
     focus: set[str] = field(default_factory=set)
     hard: bool = False
+    hyper: bool = False
     route: str | None = None
     account_env: dict[str, str] = field(default_factory=dict)
     account: str = ""
@@ -146,15 +148,18 @@ class Run:
     def gate_flags(self) -> str:
         if not self.scope_changed:
             return ""
-        scope = "hard" if self.hard else CHANGED
-        return f" --scope {scope}" + "".join(f" --focus {path}" for path in sorted(self.focus))
+        return f" --scope {self.scope_name}" + "".join(f" --focus {path}" for path in sorted(self.focus))
+
+    @property
+    def scope_name(self) -> str:
+        return shared_scope(self.hard, self.hyper)
 
     @property
     def hard_focus(self) -> set[str] | None:
         return self.focus if self.hard else None
 
     def gates(self, tier: str) -> list[Result]:
-        return run_gates(tier, self.scope_changed, None, self.focus, self.hard)
+        return run_gates(tier, self.scope_changed, None, self.focus, self.hard, self.hyper)
 
     @property
     def folder(self) -> Path:
@@ -215,10 +220,10 @@ def make_run(
     retries: int,
     agent: str | None,
     picked: tuple[str | None, str | None, str | None],
-    scoped: tuple[bool, bool, set[str]],
+    scoped: tuple[bool, bool, set[str], bool],
 ) -> Run:
     model, route, effort = picked
-    scope_changed, hard, focused = scoped
+    scope_changed, hard, focused, hyper = scoped
     return Run(
         config=config,
         task=task.resolve(),
@@ -229,6 +234,7 @@ def make_run(
         scope_changed=scope_changed,
         focus=focused,
         hard=hard,
+        hyper=hyper,
         route=route,
     )
 
@@ -251,12 +257,24 @@ def focus_list(focus: list[str] | None) -> list[str]:
     return [path for path in focus or [] if path.strip()]
 
 
-def pick_scope(config: Config, scope: str | None, focus: list[str] | None) -> tuple[bool, bool, set[str]]:
+FOCUS_CLASHES = {
+    "all": "--focus cannot be combined with --scope all",
+    HYPER: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
+}
+
+
+def pick_scope(config: Config, scope: str | None, focus: list[str] | None) -> tuple[bool, bool, set[str], bool]:
     paths = focus_list(focus)
-    if scope == "all" and paths:
-        raise SystemExit("--focus cannot be combined with --scope all")
+    refuse_focus(scope, paths)
+    if scope == HYPER:
+        return True, False, set(), True
     scope_changed = scope in (CHANGED, "hard") or bool(paths)
-    return scope_changed, scope == "hard", scoped_focus(config, scope_changed, scope == "hard", paths)
+    return scope_changed, scope == "hard", scoped_focus(config, scope_changed, scope == "hard", paths), False
+
+
+def refuse_focus(scope: str | None, paths: list[str]) -> None:
+    if paths and scope in FOCUS_CLASHES:
+        raise SystemExit(FOCUS_CLASHES[scope])
 
 
 def scoped_focus(config: Config, scope_changed: bool, hard: bool, paths: list[str]) -> set[str]:
@@ -309,11 +327,17 @@ def paused(state: Run, step: Step, auto: bool) -> bool:
     return step.pause_after and not auto and not approve(state)
 
 
-def share_scope(scope_changed: bool, hard: bool, focus: set[str]) -> None:
+def share_scope(scope_changed: bool, hard: bool, focus: set[str], hyper: bool = False) -> None:
     if not scope_changed:
         return
-    os.environ["MARESTAIL_SCOPE"] = "hard" if hard else CHANGED
+    os.environ["MARESTAIL_SCOPE"] = shared_scope(hard, hyper)
     os.environ["MARESTAIL_FOCUS"] = os.pathsep.join(sorted(focus))
+
+
+def shared_scope(hard: bool, hyper: bool) -> str:
+    if hyper:
+        return HYPER
+    return "hard" if hard else CHANGED
 
 
 def run_step(state: Run, step: Step) -> bool:

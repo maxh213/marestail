@@ -233,6 +233,13 @@ def test_gate_rejects_focus_with_scope_all(gates: Callable[..., Recorder], capsy
     assert fake.calls == []
 
 
+def test_gate_rejects_focus_with_scope_hyper(gates: Callable[..., Recorder], capsys: pytest.CaptureFixture[str]) -> None:
+    fake = gates(PASS)
+    assert cli.main(["gate", "--scope", "hyper", "--focus", "app/legacy.py"]) == 2
+    assert capsys.readouterr().err == "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else\n"
+    assert fake.calls == []
+
+
 def test_gate_reports_no_gates(gates: Callable[..., Recorder], capsys: pytest.CaptureFixture[str]) -> None:
     gates()
     assert cli.main(["gate", "--tier", "full", "--only", "x"]) == 2
@@ -242,11 +249,12 @@ def test_gate_reports_no_gates(gates: Callable[..., Recorder], capsys: pytest.Ca
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["gate"], ("fast", False, None, set(), False)),
-        (["gate", "--scope", "all", "--focus", " "], ("fast", False, None, set(), False)),
-        (["gate", "--scope", "changed", "--tier", "sonar"], ("sonar", True, None, set(), False)),
-        (["gate", "--scope", "hard", "--only", "a, b"], ("fast", True, {"a", "b"}, set(), True)),
-        (["gate", "--focus", "src", "--focus", "src"], ("fast", True, None, {"src"}, False)),
+        (["gate"], ("fast", False, None, set(), False, False)),
+        (["gate", "--scope", "all", "--focus", " "], ("fast", False, None, set(), False, False)),
+        (["gate", "--scope", "changed", "--tier", "sonar"], ("sonar", True, None, set(), False, False)),
+        (["gate", "--scope", "hard", "--only", "a, b"], ("fast", True, {"a", "b"}, set(), True, False)),
+        (["gate", "--focus", "src", "--focus", "src"], ("fast", True, None, {"src"}, False, False)),
+        (["gate", "--scope", "hyper", "--tier", "full"], ("full", True, None, set(), False, True)),
     ],
 )
 def test_gate_passes_scope_to_the_gates(gates: Callable[..., Recorder], argv: list[str], expected: tuple[Any, ...]) -> None:
@@ -270,7 +278,14 @@ def test_gate_prints_json(gates: Callable[..., Recorder], monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize(
     ("scope", "focus", "expected"),
-    [(None, set(), False), ("all", set(), False), ("changed", set(), True), ("hard", set(), True), (None, {"a"}, True)],
+    [
+        (None, set(), False),
+        ("all", set(), False),
+        ("changed", set(), True),
+        ("hard", set(), True),
+        ("hyper", set(), True),
+        (None, {"a"}, True),
+    ],
 )
 def test_wants_changed(scope: str | None, focus: set[str], expected: bool) -> None:
     assert cli.wants_changed(scope, focus) is expected
@@ -296,7 +311,7 @@ def registry(monkeypatch: pytest.MonkeyPatch, repo: Path) -> Recorder:
     monkeypatch.setattr(
         context_module,
         "build",
-        lambda config, changed, focus, hard: make_context(config.root, scope_changed=changed, focus=focus, hard=hard),
+        lambda config, changed, focus, hard, hyper: make_context(config.root, scope_changed=changed, focus=focus, hard=hard, hyper=hyper),
     )
     return select
 
@@ -319,6 +334,11 @@ def test_run_gates_hard_adds_configured_focus(registry: Recorder, capsys: pytest
     assert (ctx.focus, ctx.hard) == ({"src"}, True)
     assert capsys.readouterr().err == "warning: ignoring missing focus path: gone\n"
     assert gates_module.run_gates("fast", False, None) == [PASS, FAIL]
+
+
+def test_run_gates_hyper_builds_a_hyper_context(registry: Recorder) -> None:
+    _, ctx = gates_module.run_gates_with_context("fast", True, None, None, False, True)
+    assert (ctx.focus, ctx.hyper, ctx.scope_name) == (set(), True, "hyper")
 
 
 def test_resolve_focus(repo: Path) -> None:
@@ -344,9 +364,11 @@ def test_hook_scope_reads_the_environment(repo: Path, monkeypatch: pytest.Monkey
         (repo / name).mkdir()
     monkeypatch.setenv("MARESTAIL_FOCUS", os.pathsep.join(["a", "", "missing", str(repo / "b")]))
     monkeypatch.setenv("MARESTAIL_SCOPE", "hard")
-    assert cli.hook_scope(config_module.load(repo)) == ({"a", "b"}, True)
+    assert cli.hook_scope(config_module.load(repo)) == ({"a", "b"}, True, False)
     monkeypatch.setenv("MARESTAIL_SCOPE", "changed")
     assert cli.hook_scope(config_module.load(repo))[1] is False
+    monkeypatch.setenv("MARESTAIL_SCOPE", "hyper")
+    assert cli.hook_scope(config_module.load(repo)) == (set(), False, True)
 
 
 def test_scope_line(repo: Path) -> None:
@@ -410,7 +432,7 @@ def test_hook_passing_claude_is_silent(
     assert cli.main(["gate", "--hook"]) == 0
     assert capsys.readouterr() == ("", "")
     assert not counter(repo, "default").exists()
-    assert fake.calls == [("fast", True, None, set(), False)]
+    assert fake.calls == [("fast", True, None, set(), False, False)]
 
 
 def test_hook_failing_claude_blocks(
@@ -493,7 +515,7 @@ def test_hook_verdict_includes_the_scope_line(gates: Callable[..., Recorder], re
 
 
 def test_hook_scope_without_environment(repo: Path) -> None:
-    assert cli.hook_scope(config_module.load(repo)) == (set(), False)
+    assert cli.hook_scope(config_module.load(repo)) == (set(), False, False)
 
 
 def test_load_hook_config(repo: Path, tmp_path: Path) -> None:
@@ -524,9 +546,9 @@ def test_cursor_hook_follows_up(
     gates(PASS, FAIL)
     seen: list[str] = []
 
-    def hook_scope(config: Any) -> tuple[set[str], bool]:
+    def hook_scope(config: Any) -> tuple[set[str], bool, bool]:
         seen.append(os.getcwd())
-        return set(), False
+        return set(), False, False
 
     monkeypatch.setattr(cli, "hook_scope", hook_scope)
     monkeypatch.chdir(tmp_path)
@@ -772,7 +794,10 @@ def test_gate_parser_defaults_and_help() -> None:
     assert (args.tier, args.scope, args.focus, args.only, args.json, args.hook) == ("fast", None, [], None, False, False)
     helped = option_help(parser)
     assert helped["--tier"] is None
-    assert helped["--scope"] == "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths"
+    assert helped["--scope"] == (
+        "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths; "
+        "hyper: only the changed lines of the diff"
+    )
     assert helped["--focus"] == "add a file or directory to the gate scope (repeatable); implies --scope changed"
     assert helped["--only"] == "comma separated gate names"
     assert helped["--json"] is None
@@ -793,7 +818,7 @@ def test_run_parser_defaults_and_help() -> None:
     assert helped["--scope"] == (
         "changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, "
         "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
-        "the smallest supporting edits"
+        "the smallest supporting edits. hyper gates only the changed lines of the diff"
     )
     assert next(action.dest for action in parser._actions if "--from" in action.option_strings) == "start"
     assert next(action.dest for action in parser._actions if "--to" in action.option_strings) == "stop"
@@ -895,3 +920,13 @@ def test_perf_tree_and_db_commands_are_required() -> None:
         parse_argv(database, [])
     require_tree(nested_parser(database, "golden"))
     require_tree(nested_parser(database, "url"))
+
+
+def test_readme_scope_section_describes_hyper_next_to_changed_and_hard() -> None:
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    difference = (
+        "In one line: `changed` gates the files the diff touches, `hard` gates the focus paths as fully changed and nothing else, "
+        "and `hyper` gates only the lines the diff touches."
+    )
+    assert readme.index("`--scope changed` gates") < readme.index("`--scope hard` gates") < readme.index("`--scope hyper` gates")
+    assert difference in readme

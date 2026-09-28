@@ -79,7 +79,7 @@ def suppression_findings(ctx: Context, files: list[Path]) -> list[str]:
         for number, line in enumerate(java.read_replaced(path).splitlines(), start=1):
             if SUPPRESSION.search(line):
                 findings.append(f"{java.rel(ctx, path)}:{number} warning suppressed in source; fix the code instead")
-    return findings
+    return ctx.on_changed_lines(findings)
 
 
 def javac_findings(ctx: Context, diagnostics: list[dict[str, Any]]) -> list[str]:
@@ -87,7 +87,7 @@ def javac_findings(ctx: Context, diagnostics: list[dict[str, Any]]) -> list[str]
 
 
 def outside_scope(ctx: Context, diagnostic: dict[str, Any]) -> bool:
-    return bool(diagnostic["file"]) and not ctx.in_scope(diagnostic["file"])
+    return bool(diagnostic["file"]) and not (ctx.in_scope(diagnostic["file"]) and ctx.keeps(f"{diagnostic['file']}:{diagnostic['line']}"))
 
 
 def javac_finding(ctx: Context, diagnostic: dict[str, Any]) -> str | None:
@@ -131,7 +131,9 @@ def entry_findings(ctx: Context, entry: dict[str, Any]) -> list[str]:
     relative = java.rel(ctx, entry[FILENAME])
     if not ctx.in_scope(relative):
         return []
-    return [f"{relative}:{v['beginline']} PMD {v['rule']}: {squash(v['description'])}" for v in entry.get("violations", [])]
+    return ctx.on_changed_lines(
+        [f"{relative}:{v['beginline']} PMD {v['rule']}: {squash(v['description'])}" for v in entry.get("violations", [])]
+    )
 
 
 def problem_finding(ctx: Context, problem: dict[str, Any]) -> str:

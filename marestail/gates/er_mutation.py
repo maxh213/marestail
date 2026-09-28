@@ -3,11 +3,12 @@ import math
 import shutil
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from marestail import erlang
-from marestail.context import Context, MutationScope
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -90,11 +91,17 @@ def generate(job: Job) -> Result:
     manifest = job.scratch / MANIFEST
     if not manifest.exists():
         return job.fail("no mutant manifest written", tail(output))
-    mutants = loaded_mutants(manifest)
-    apply_cap(mutants, job.ctx)
+    return mutants_found(job, loaded_mutants(manifest))
+
+
+def mutants_found(job: Job, mutants: list[dict[str, Any]]) -> Result:
     if not mutants:
         return nothing_to_mutate(job)
-    return execute(job, mutants)
+    kept = job.ctx.located(mutants, partial(describe, job.ctx, status=SURVIVED))
+    if not kept:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], job.elapsed())
+    apply_cap(kept, job.ctx)
+    return execute(job, kept)
 
 
 def loaded_mutants(manifest: Path) -> list[dict[str, Any]]:

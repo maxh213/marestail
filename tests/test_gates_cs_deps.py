@@ -216,3 +216,10 @@ def test_dependency_graph() -> None:
 )
 def test_strongly_connected_cases(graph: dict[str, set[str]], expected: list[set[str]]) -> None:
     assert cs_deps.strongly_connected(graph) == expected
+
+
+def test_hyper_keeps_breaks_on_changed_lines_and_every_cycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, (DATA, None))
+    lines = {"cs/Domain/Order.cs": {5}, "cs/Data/Repo.cs": {1}}
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert view(checked(cs_deps.run_gate(ctx), cs_deps.GATE)) == ("cs.deps", False, "2 layer breaks", [FINDINGS[1], FINDINGS[3]])

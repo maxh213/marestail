@@ -441,3 +441,41 @@ def test_erlang_without_sources_or_ignores(tmp_path: Path, monkeypatch: pytest.M
 )
 def test_vulture_entries(output: str, expected: list[tuple[str, str, str, str]]) -> None:
     assert deadcode.vulture_entries(output) == expected
+
+
+def hyper(root: Path, raw: dict[str, Any], lines: dict[str, set[int]]) -> Any:
+    return make_context(root, raw, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+
+
+def test_hyper_keeps_dead_code_on_changed_lines_only(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(deadcode, [(3, VULTURE)])
+
+    result = checked(deadcode.run_gate(hyper(tmp_path, PYTHON, {"marestail/a.py": {3}, "marestail/b.py": {1}})), "deadcode")
+
+    assert (result.ok, result.findings) == (False, ["marestail/a.py:3 unused function 'foo'"])
+
+
+def test_hyper_keeps_scanner_failures(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(deadcode, [(1, "Traceback marestail/a.py:3 boom")])
+
+    result = checked(deadcode.run_gate(hyper(tmp_path, PYTHON, {"marestail/a.py": {9}})), "deadcode")
+
+    assert (result.ok, result.findings) == (False, ["vulture failed: Traceback marestail/a.py:3 boom"])
+
+
+def test_hyper_knip_counts_findings_without_a_line(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(deadcode, [(1, json.dumps(KNIP))])
+    ctx = hyper(tmp_path, {"ts": {"root": "web"}}, {"web/src/orphan.ts": {1}, "web/src/a.ts": {4}})
+
+    assert deadcode.ts_findings(ctx) == ["web/src/a.ts:4 unused export 'helper'"]
+    assert ctx.file_level == 2
+
+
+def test_hyper_filters_ruby_structured_elixir_and_erlang_entries(tmp_path: Path) -> None:
+    ctx = hyper(tmp_path, {}, {"app/a.rb": {1}})
+
+    assert deadcode.ruby_report(0, json.dumps(["app/a.rb:1 unused method 'x'", "app/a.rb:5 unused method 'y'"]), ctx) == [
+        "app/a.rb:1 unused method 'x'"
+    ]
+    entries = [{"file": "app/a.rb", "line": 9, "module": "M", "function": "f", "arity": 0}]
+    assert deadcode.elixir_entries(entries, tmp_path, ctx) == []

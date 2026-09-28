@@ -43,14 +43,16 @@ def scoped_run(ctx: Context, root: Path, started: float) -> Result:
     findings = problems("format", run([*FORMAT, *files], cwd=root, timeout=FORMAT_TIMEOUT))
     compile_code, compile_out = run(COMPILE, cwd=root, timeout=COMPILE_TIMEOUT)
     if compile_code != 0:
-        findings.extend(compile_findings(compile_out, files))
+        findings.extend(compile_findings(compile_out, files, ctx))
     findings = findings[:MAX_LINES]
     summary = f"{len(findings)} problems in scope" if findings else "mix format, compile clean in scope"
     return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
-def compile_findings(output: str, files: list[str]) -> list[str]:
-    return [f"compile: {line}" for block in scoped_blocks(output, files) for line in block.splitlines() if line.strip()]
+def compile_findings(output: str, files: list[str], ctx: Context) -> list[str]:
+    return [
+        f"compile: {line}" for block in ctx.on_changed_lines(scoped_blocks(output, files)) for line in block.splitlines() if line.strip()
+    ]
 
 
 def scoped_blocks(output: str, files: list[str]) -> list[str]:

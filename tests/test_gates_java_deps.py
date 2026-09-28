@@ -195,3 +195,10 @@ def test_layer_findings_unknown_edge_package(tmp_path: Path) -> None:
 )
 def test_inside(path: str, package: str, layer: str, prefix: str, expected: bool) -> None:
     assert java_deps.inside(path, package, layer, prefix) is expected
+
+
+def test_hyper_keeps_breaks_on_changed_lines_and_every_cycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(tmp_path)
+    fake_scan(monkeypatch, (DATA, None))
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={DOMAIN}, changed_lines_map={DOMAIN: {8}})
+    assert fields(checked(java_deps.run_gate(ctx), java_deps.GATE)) == ("java.deps", False, "2 layer breaks", [BREAKS[1], BREAKS[3]], 2.0)

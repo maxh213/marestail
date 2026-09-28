@@ -41,7 +41,7 @@ def tsc_report(output: str, ctx: Context) -> list[str]:
     matches = tsc_matches(lines)
     if not matches:
         return [f"tsc: {line}" for line in lines]
-    return in_scope_findings([tsc_finding(match, ctx) for match in matches], ctx)
+    return ctx.on_changed_lines(in_scope_findings([tsc_finding(match, ctx) for match in matches], ctx))
 
 
 def tsc_matches(lines: list[str]) -> list[re.Match[str]]:
@@ -61,6 +61,8 @@ def eslint_report(ctx: Context, code: int, output: str) -> list[str]:
     report = parse(output)
     if report is None:
         return eslint_lines(output)
+    if ctx.hyper:
+        return hyper_messages(report, ctx, code, output)
     return scoped_messages(report, ctx) if ctx.scoped else unscoped_messages(report, ctx, code, output)
 
 
@@ -69,7 +71,16 @@ def scoped_messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
 
 
 def unscoped_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
-    return messages(report, ctx) or eslint_lines(output) or [f"marestail.toml:1 eslint exited {code} without a message"]
+    return messages(report, ctx) or silent_exit(code, output)
+
+
+def hyper_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
+    located = messages(report, ctx)
+    return ctx.on_changed_lines(located) if located else silent_exit(code, output)
+
+
+def silent_exit(code: int, output: str) -> list[str]:
+    return eslint_lines(output) or [f"marestail.toml:1 eslint exited {code} without a message"]
 
 
 def messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
@@ -102,7 +113,8 @@ def as_report(report: object) -> list[Any] | None:
 
 def describe(file: dict[str, Any], message: dict[str, Any], ctx: Context) -> str:
     text = first_line(str_field(message, "message"))
-    return f"{relative(str_field(file, FILE_PATH), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
+    line = message.get("line") or ctx.placeholder_line
+    return f"{relative(str_field(file, FILE_PATH), ctx)}:{line} {message.get('ruleId') or 'error'}: {text}"
 
 
 def str_field(data: dict[str, Any], key: str) -> str:

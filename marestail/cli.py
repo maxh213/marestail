@@ -30,21 +30,25 @@ EMPTY = ""
 FOCUS_ENV = "MARESTAIL_FOCUS"
 SCOPE_ENV = "MARESTAIL_SCOPE"
 HARD_SCOPE = "hard"
+HYPER_SCOPE = "hyper"
 STOP_EVENT = "stop"
 COMPLETED = "completed"
 END_TURN = "end_turn"
 STORE_TRUE = "store_true"
 TREE = "--tree"
 TUI_APP = "marestail.tui.app"
-SCOPE_CHOICES = ("all", "changed", "hard")
+SCOPE_CHOICES = ("all", "changed", "hard", "hyper")
 TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
 AGENT_CHOICES = tuple(dict.fromkeys(route_module.BACKENDS.values()))
 HELP_TASK = "path to the task file"
-HELP_GATE_SCOPE = "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths"
+HELP_GATE_SCOPE = (
+    "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths; "
+    "hyper: only the changed lines of the diff"
+)
 HELP_RUN_SCOPE = (
     "changed is a soft scope: gate the diff against [git] base plus the focus paths; workers may still edit any file, "
     "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
-    "the smallest supporting edits"
+    "the smallest supporting edits. hyper gates only the changed lines of the diff"
 )
 HELP_FOCUS = "add a file or directory to the gate scope (repeatable); implies --scope changed"
 HELP_MODEL = "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
@@ -196,17 +200,26 @@ def gate_command(args: argparse.Namespace) -> int:
     return focused_gate_command(args, {path for path in args.focus if path.strip()})
 
 
+FOCUS_CLASHES = {
+    "all": "--focus cannot be combined with --scope all",
+    HYPER_SCOPE: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
+}
+
+
 def focused_gate_command(args: argparse.Namespace, focus: set[str]) -> int:
-    if focus and args.scope == "all":
-        sys.stderr.write("--focus cannot be combined with --scope all\n")
+    clash = FOCUS_CLASHES.get(args.scope) if focus else None
+    if clash:
+        sys.stderr.write(f"{clash}\n")
         return 2
-    hard = args.scope == "hard"
-    results, ctx = run_gates_with_context(args.tier, wants_changed(args.scope, focus), parse_only(args.only), focus, hard)
+    scoped = wants_changed(args.scope, focus)
+    results, ctx = run_gates_with_context(
+        args.tier, scoped, parse_only(args.only), focus, args.scope == HARD_SCOPE, args.scope == HYPER_SCOPE
+    )
     return report_gates(args, results, ctx)
 
 
 def wants_changed(scope: str | None, focus: set[str]) -> bool:
-    return scope in ("changed", "hard") or bool(focus)
+    return scope in ("changed", HARD_SCOPE, HYPER_SCOPE) or bool(focus)
 
 
 def report_gates(args: argparse.Namespace, results: list[Result], ctx: context_module.Context) -> int:
@@ -221,13 +234,15 @@ def passed(results: list[Result]) -> bool:
     return all(result.ok for result in results)
 
 
-def hook_scope(config: config_module.Config) -> tuple[set[str], bool]:
+def hook_scope(config: config_module.Config) -> tuple[set[str], bool, bool]:
+    if os.environ.get(SCOPE_ENV) == HYPER_SCOPE:
+        return set(), False, True
     found = hook_focus(config)
     for path in filter(None, os.environ.get(FOCUS_ENV, EMPTY).split(os.pathsep)):
         entry = locate_focus(config, path)
         if entry is not None:
             found.add(entry)
-    return found, os.environ.get(SCOPE_ENV) == HARD_SCOPE
+    return found, os.environ.get(SCOPE_ENV) == HARD_SCOPE, False
 
 
 def scope_line(ctx: context_module.Context) -> str | None:

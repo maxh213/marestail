@@ -60,10 +60,26 @@ def test_pick_scope_focus_paths_enable_changed_scope(tmp_path: Path, monkeypatch
     monkeypatch.setattr(runner, "resolve_focus", lambda config, paths: paths)
     monkeypatch.setattr(runner, "hook_focus", lambda config: set())
     config = Config(root=tmp_path, raw={})
-    changed, hard, focused = runner.pick_scope(config, None, ["src/a.py"])
-    assert (changed, hard, focused) == (True, False, {"src/a.py"})
-    none, _, empty = runner.pick_scope(config, None, None)
+    assert runner.pick_scope(config, None, ["src/a.py"]) == (True, False, {"src/a.py"}, False)
+    none, _, empty, _ = runner.pick_scope(config, None, None)
     assert (none, empty) == (False, set())
+
+
+def test_pick_scope_hyper_gates_the_diff_without_focus(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, raw={})
+    assert runner.pick_scope(config, "hyper", None) == (True, False, set(), True)
+    with pytest.raises(SystemExit, match="--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else"):
+        runner.pick_scope(config, "hyper", ["a.py"])
+    with pytest.raises(SystemExit, match=r"--focus cannot be combined with --scope all$"):
+        runner.pick_scope(config, "all", ["a.py"])
+
+
+def test_share_scope_exports_hyper_with_empty_focus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_FOCUS", "stale")
+    runner.share_scope(True, False, set(), True)
+    assert (os.environ["MARESTAIL_SCOPE"], os.environ["MARESTAIL_FOCUS"]) == ("hyper", "")
+    runner.share_scope(True, True, {"a"})
+    assert os.environ["MARESTAIL_SCOPE"] == "hard"
 
 
 def test_disabled_reads_the_enabled_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,6 +107,7 @@ def test_judge_round_passes_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         ({}, "", None),
         ({"scope_changed": True, "focus": {"b.py", "a.py"}}, " --scope changed --focus a.py --focus b.py", None),
         ({"scope_changed": True, "focus": {"a.py"}, "hard": True}, " --scope hard --focus a.py", {"a.py"}),
+        ({"scope_changed": True, "hyper": True}, " --scope hyper", None),
     ],
 )
 def test_run_scope_properties(tmp_path: Path, fields: dict[str, Any], flags: str, hard_focus: set[str] | None) -> None:
@@ -109,7 +126,7 @@ def test_run_paths_and_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     first.write_text("x")
     assert (first.name, state.next_report("critic").name) == ("01-coder.md", "02-critic.md")
     assert state.gates("fast") == [Result(gate="g", ok=True, summary="s", seconds=0.0)]
-    assert gates.calls == [("fast", True, None, {"a.py"}, True)]
+    assert gates.calls == [("fast", True, None, {"a.py"}, True, False)]
 
 
 def test_judge_progress_author_requested() -> None:

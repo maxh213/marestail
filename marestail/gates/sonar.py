@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet, erlang, java, rust
-from marestail.context import Context
+from marestail.context import Context, file_level_note
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -108,7 +108,13 @@ def summarize(ctx: Context, findings: list[str], status: str) -> str:
     base = "sonar clean" if not findings else f"{len(findings)} sonar findings"
     if not ctx.scoped:
         return base
-    return f"{base} in scope (global quality gate {status}; scope: {ctx.scope_summary()})"
+    return f"{base} in scope (global quality gate {status}; scope: {ctx.scope_summary()}{hyper_notes(ctx)})"
+
+
+def hyper_notes(ctx: Context) -> str:
+    if not ctx.hyper:
+        return EMPTY
+    return file_level_note(ctx.take_file_level()) + "; duplication not gated under hyper"
 
 
 def scanner_command(ctx: Context, creds: Credentials, key: str) -> list[str]:
@@ -464,34 +470,43 @@ def issue_path(component: dict[str, Any]) -> str:
 def reopened(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, issueStatuses="ACCEPTED,FALSE_POSITIVE", ps=PAGE)
     in_scope = [issue for issue in mapping_list(data, "issues") if ctx.in_scope(issue_path(issue))]
-    return [reopen(client, issue) for issue in in_scope]
+    return [reopen(client, issue) for issue in ctx.located(in_scope, where_of)]
+
+
+def where_of(item: dict[str, Any]) -> str:
+    return f"{issue_path(item)}:{line_of(item)}"
 
 
 def reopen(client: Client, issue: dict[str, Any]) -> str:
     client.post("api/issues/do_transition", issue=issue["key"], transition="reopen")
-    where = f"{issue_path(issue)}:{line_of(issue)}"
-    return f"{where} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties"
+    return f"{where_of(issue)} {issue['rule']} was marked {issue.get('issueStatus')} in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties"
 
 
 def issues(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/issues/search", componentKeys=key, resolved="false", ps=PAGE)
-    return [
-        f"{issue_path(issue)}:{line_of(issue)} {issue['severity']} {issue['rule']}: {issue['message']}"
-        for issue in mapping_list(data, "issues")
-        if ctx.in_scope(issue_path(issue))
-    ]
+    return ctx.on_changed_lines(
+        [
+            f"{where_of(issue)} {issue['severity']} {issue['rule']}: {issue['message']}"
+            for issue in mapping_list(data, "issues")
+            if ctx.in_scope(issue_path(issue))
+        ]
+    )
 
 
 def hotspots(ctx: Context, client: Client, key: str) -> list[str]:
     data = client.get("api/hotspots/search", project=key, status="TO_REVIEW", ps=PAGE)
-    return [
-        f"{issue_path(hotspot)}:{line_of(hotspot)} hotspot: {hotspot['message']}"
-        for hotspot in mapping_list(data, "hotspots")
-        if ctx.in_scope(issue_path(hotspot))
-    ]
+    return ctx.on_changed_lines(
+        [
+            f"{where_of(hotspot)} hotspot: {hotspot['message']}"
+            for hotspot in mapping_list(data, "hotspots")
+            if ctx.in_scope(issue_path(hotspot))
+        ]
+    )
 
 
 def measures(ctx: Context, client: Client, key: str) -> list[str]:
+    if ctx.hyper:
+        return []
     if ctx.scoped:
         return scoped_duplication(ctx, client, key)
     data = client.get(MEASURES, component=key, metricKeys=f"{COVERAGE},{DUPLICATION}")

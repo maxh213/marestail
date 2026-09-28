@@ -1,3 +1,4 @@
+import ast
 import json
 from pathlib import Path
 from typing import Any
@@ -160,3 +161,65 @@ def test_exit_codes_without_the_key(tmp_path: Path) -> None:
     assert py_mutation.exit_codes(meta) == {}
     assert py_mutation.codes_field({}) == {}
     assert py_mutation.codes_field({"exit_code_by_key": {"a": 1}}) == {"a": 1}
+
+
+LEGACY = 'def double(price):\n    return price * 2\n\n\ndef label(name):\n    return "item: " + name\n\n\nclass K:\n    def meth(self, x):\n        y = x\n        return y + 1\n'
+MUTATED = (
+    "def x_label__mutmut_orig(name):\n    return 'item: ' + name\n"
+    "def x_label__mutmut_1(name):\n    return 'XXitem: XX' + name\n"
+    "def x_double__mutmut_orig(price):\n    return price * 2\n"
+    "def x_double__mutmut_1(price):\n    return price / 2\n"
+    "class K:\n"
+    "    def xǁKǁmeth__mutmut_orig(self, x):\n        y = x\n        return y + 1\n"
+    "    def xǁKǁmeth__mutmut_1(self, x):\n        y = x\n        return y - 1\n"
+)
+
+
+def legacy_tree(root: Path) -> None:
+    (root / "app").mkdir()
+    (root / "app" / "legacy.py").write_text(LEGACY)
+    (root / "mutants" / "app").mkdir(parents=True)
+    (root / "mutants" / "app" / "legacy.py").write_text(MUTATED)
+
+
+def hyper(root: Path, lines: set[int]) -> Any:
+    return make_context(root, scope_changed=True, hyper=True, changed={"app/legacy.py"}, changed_lines_map={"app/legacy.py": lines})
+
+
+def mutmut_writing(root: Path, codes: dict[str, Any]) -> Any:
+    def mutmut(command: list[str]) -> tuple[int, str]:
+        legacy_tree(root)
+        write_meta(root, "app/legacy.py.meta", codes)
+        return 0, ""
+
+    return mutmut
+
+
+CODES = {"app.legacy.x_label__mutmut_1": 0, "app.legacy.x_double__mutmut_1": 0, "app.legacy.xǁKǁmeth__mutmut_1": 1}
+
+
+def test_hyper_reports_only_mutants_on_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_mutation, mutmut_writing(tmp_path, CODES))
+    result = checked(py_mutation.run_gate(hyper(tmp_path, {6, 12})), py_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "1 of 2 mutants not killed", ["app.legacy.x_label__mutmut_1: survived"])
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_mutation, mutmut_writing(tmp_path, CODES))
+    result = checked(py_mutation.run_gate(hyper(tmp_path, {9})), py_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "no mutants on changed lines", [])
+
+
+def test_mutant_lines_fall_back_to_line_zero(tmp_path: Path) -> None:
+    legacy_tree(tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("def f(:\n")
+    lines = py_mutation.MutantLines(make_context(tmp_path))
+    assert lines.where(("app.legacy.x_gone__mutmut_1", "survived")) == "app/legacy.py:0"
+    assert lines.where(("pkg.x_f__mutmut_1", "survived")) == "pkg/__init__.py:0"
+    assert lines.body(tmp_path / "missing.py", ast.parse("def f():\n    pass\n").body[0]) == []
+
+
+def test_first_difference() -> None:
+    assert py_mutation.first_difference(["a", "b"], ["a", "c"]) == 1
+    assert py_mutation.first_difference(["a"], ["a"]) == 0

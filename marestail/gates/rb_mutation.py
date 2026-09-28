@@ -2,10 +2,11 @@ import json
 import re
 import time
 from collections import Counter
+from functools import partial
 from pathlib import Path
 from typing import Any
 
-from marestail.context import Context, MutationScope, is_benchmark
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
 from marestail.report import Result, elapsed
 from marestail.ruby import SKIP_DIRS, bundle, listify, relative
 from marestail.shell import run, tail
@@ -78,7 +79,7 @@ def stdout_result(ctx: Context, code: int, output: str, started: float, note: st
     match = RESULTS_LINE.search(output)
     if not match:
         return Result(GATE, False, f"mutant produced no report (exit {code})", tail(output), elapsed(started))
-    return verdict(int(match.group(1)), stdout_findings(output, ctx), output, started, note)
+    return verdict(int(match.group(1)), ctx.located(stdout_findings(output, ctx), failure_where), output, started, note)
 
 
 def newest_report(created: set[Path]) -> dict[str, Any] | None:
@@ -93,8 +94,11 @@ def session_result(ctx: Context, created: set[Path], output: str, started: float
     report = newest_report(created)
     if report is None:
         return Result(GATE, False, "mutant session report unreadable", tail(output), elapsed(started))
-    total, failures = session_failures(report, ctx)
-    return verdict(total, failures, output, started, note)
+    subjects = list_field(report, SUBJECT_RESULTS)
+    kept = ctx.located(subjects, partial(subject_where, ctx))
+    if subjects and not kept:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    return verdict(*session_failures(kept, ctx), output, started, note)
 
 
 def list_field(data: dict[str, Any], key: str) -> list[Any]:
@@ -111,10 +115,14 @@ def text_field(data: dict[str, Any], key: str) -> str:
     return value if isinstance(value, str) else EMPTY
 
 
-def session_failures(report: dict[str, Any], ctx: Context) -> tuple[int, list[Failure]]:
+def subject_where(ctx: Context, subject: dict[str, Any]) -> str:
+    return f"{relative(text_field(subject, SOURCE_PATH), ctx)}:{label(text_field(subject, IDENTIFICATION))[1]}"
+
+
+def session_failures(subjects: list[dict[str, Any]], ctx: Context) -> tuple[int, list[Failure]]:
     total = 0
     failures: list[Failure] = []
-    for subject in list_field(report, SUBJECT_RESULTS):
+    for subject in subjects:
         total += len(list_field(subject, COVERAGE_RESULTS))
         failures.extend(subject_failures(subject, ctx))
     return total, failures
@@ -145,6 +153,10 @@ def verdict(total: int, failures: list[Failure], output: str, started: float, no
 
 def with_note(summary: str, note: str) -> str:
     return f"{summary} {note}" if note else summary
+
+
+def failure_where(failure: Failure) -> str:
+    return f"{failure[0]}:{failure[1]}"
 
 
 def stdout_findings(output: str, ctx: Context) -> list[Failure]:

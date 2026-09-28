@@ -118,3 +118,15 @@ def test_run_gate_caps_findings(tmp_path: Path, fake_run: Any) -> None:
     )
     assert len(result.findings) == 60
     assert result.findings[-1].startswith("a.rb:59")
+
+
+def test_hyper_counts_edges_without_a_line_as_file_level(tmp_path: Path, fake_run: Any) -> None:
+    write_sources(tmp_path)
+    fake_run(ruby, [(0, json.dumps(edges(tmp_path)))])
+    lines = {"app/models/user.rb": {4}, "lib/tool.rb": {1}}
+    ctx = make_context(tmp_path, {"ruby": {"ruby": "rb"}}, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    result = checked(rb_deps.run_gate(ctx), rb_deps.GATE)
+    assert result.findings == [
+        "app/models/user.rb:4 app/models/user.rb must not depend on app/controllers/users_controller.rb (UsersController)"
+    ]
+    assert ctx.file_level == 1

@@ -625,3 +625,88 @@ def test_issue_and_component_paths() -> None:
     client: Any = FakeClient(lambda path, params: {})
     issue = {"key": "I1", "component": "p:a.py", "rule": "r1", "issueStatus": "ACCEPTED", "line": 7}
     assert sonar.reopen(client, issue).startswith("a.py:7 ")
+
+
+HYPER_ISSUES: dict[str, Any] = {
+    "accepted": [
+        {"key": "A1", "component": "proj:app/legacy.py", "line": 6, "rule": "python:S3", "issueStatus": "ACCEPTED"},
+        {"key": "A2", "component": "proj:app/legacy.py", "line": 9, "rule": "python:S4", "issueStatus": "FALSE_POSITIVE"},
+    ],
+    "open": [
+        {"component": "proj:app/legacy.py", "line": 2, "severity": "MAJOR", "rule": "python:S1481", "message": "old"},
+        {"component": "proj:app/legacy.py", "line": 6, "severity": "MAJOR", "rule": "python:S1481", "message": "new"},
+        {"component": "proj:app/legacy.py", "severity": "MINOR", "rule": "python:S1451", "message": "Add a header"},
+    ],
+    "hotspots": [
+        {"component": "proj:app/legacy.py", "line": 1, "message": "check import"},
+        {"component": "proj:app/legacy.py", "line": 9, "message": "old hotspot"},
+    ],
+}
+
+
+def hyper_responder(issues: dict[str, Any], measures: list[dict[str, Any]] | None = None) -> Responder:
+    def respond(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies: dict[str, dict[str, Any]] = {
+            "api/qualitygates/project_status": {"projectStatus": {"status": "ERROR"}},
+            "api/hotspots/search": {"hotspots": issues["hotspots"]},
+            "api/measures/component": {"component": {"measures": measures or []}},
+            "api/measures/component_tree": {
+                "components": [{"path": "app/legacy.py", "measures": [{"metric": "duplicated_lines_density", "value": "12.0"}]}]
+            },
+        }
+        if path == "api/issues/search":
+            return {"issues": issues["accepted"] if "issueStatuses" in params else issues["open"]}
+        return replies[path]
+
+    return respond
+
+
+def hyper_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, respond: Responder, raw: dict[str, Any]
+) -> tuple[Any, list[FakeClient]]:
+    made = install_client(monkeypatch, respond)
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
+    ctx = make_context(
+        tmp_path,
+        {"sonar": {"project_key": KEY}, **raw},
+        scope_changed=True,
+        hyper=True,
+        changed={"app/legacy.py"},
+        changed_lines_map={"app/legacy.py": {1, 6}},
+    )
+    return sonar.run_gate(ctx), made
+
+
+def test_hyper_filters_issues_by_line_and_skips_duplication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, made = hyper_analysis(tmp_path, monkeypatch, hyper_responder(HYPER_ISSUES), {})
+    assert made[0].posts == [("api/issues/do_transition", {"issue": "A1", "transition": "reopen"})]
+    assert result.findings == [
+        "app/legacy.py:6 python:S3 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties",
+        "app/legacy.py:6 MAJOR python:S1481: new",
+        "app/legacy.py:1 hotspot: check import",
+    ]
+    assert result.summary == (
+        "3 sonar findings in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; "
+        "1 file-level findings not gated under hyper; duplication not gated under hyper)"
+    )
+    assert all("component_tree" not in path for path, _ in made[0].gets)
+
+
+def test_hyper_clean_sonar_still_says_duplication_is_not_gated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_analysis(tmp_path, monkeypatch, hyper_responder({"accepted": [], "open": [], "hotspots": []}), {})
+    assert (result.ok, result.findings) == (True, [])
+    assert result.summary == (
+        "sonar clean in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; duplication not gated under hyper)"
+    )
+
+
+def test_hyper_language_diagnostics_still_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    empty = {"accepted": [], "open": [], "hotspots": []}
+    respond = hyper_responder(empty, [{"metric": "ncloc_language_distribution", "value": "java=40;py=12"}])
+    result, _ = hyper_analysis(tmp_path, monkeypatch, respond, {"java": {}})
+    assert (result.ok, result.findings) == (
+        False,
+        ["marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists"],
+    )
+    assert "file-level" not in result.summary

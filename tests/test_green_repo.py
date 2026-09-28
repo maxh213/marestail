@@ -488,8 +488,8 @@ def test_unchecked_mutants_fail_the_mutation_gate(tmp_path: Path) -> None:
     folder = tmp_path / "mutants"
     folder.mkdir()
     (folder / "a.py.meta").write_text(json.dumps({"exit_code_by_key": {"pkg.fn__mutmut_1": None}}))
-    total, survivors = py_mutation.surviving(make_context(tmp_path), [])
-    assert (total, survivors) == (1, ["pkg.fn__mutmut_1: not checked"])
+    result = py_mutation.judged(py_mutation.mutant_statuses(folder, ()), "", 0.0)
+    assert (result.ok, result.summary, result.findings) == (False, "1 of 1 mutants not killed", ["pkg.fn__mutmut_1: not checked"])
 
 
 def test_full_tier_runs_mutation_before_sonar() -> None:
@@ -632,9 +632,14 @@ def test_mutmut_kills_mutants_on_a_tiny_package(tmp_path: Path) -> None:
         text=True,
         timeout=180,
     )
-    total, survivors = py_mutation.surviving(make_context(tmp_path), [])
+    total, survivors = surviving(tmp_path, [])
     assert total > 0, completed.stdout + completed.stderr
     assert survivors == [], survivors
+
+
+def surviving(root: Path, patterns: list[str]) -> tuple[int, list[str]]:
+    statuses = py_mutation.mutant_statuses(root / "mutants", tuple(map(py_mutation.mutant_prefix, patterns)))
+    return len(statuses), [f"{name}: {status}" for name, status in statuses if status not in py_mutation.PASSING]
 
 
 def package_mutant_patterns() -> list[str]:
@@ -662,7 +667,7 @@ def test_this_package_kills_its_own_mutants() -> None:
         text=True,
         timeout=7200,
     )
-    total, survivors = py_mutation.surviving(make_context(ROOT), PACKAGE_MUTANTS)
+    total, survivors = surviving(ROOT, PACKAGE_MUTANTS)
     assert total > 0, completed.stdout + completed.stderr
     assert [item for item in survivors if "not checked" in item] == []
     assert survivors == []

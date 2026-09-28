@@ -21,7 +21,7 @@ def run_gate(ctx: Context) -> Result:
     if error:
         return Result(GATE, False, "dependency scanner failed", [error], elapsed(started))
     relative = relative_edges(ctx, edges)
-    findings = layer_findings(ctx, relative) + cycle_findings(ctx, relative)
+    findings = ctx.on_changed_lines(layer_findings(ctx, relative)) + cycle_findings(ctx, relative)
     summary = f"{len(findings)} dependency breaks" if findings else "layer contracts kept, no module cycles"
     return Result(GATE, not findings, summary, capped(findings), elapsed(started))
 

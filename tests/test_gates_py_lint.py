@@ -69,6 +69,38 @@ def test_path_exclusions_at_repo_root(tmp_path: Path) -> None:
     ]
 
 
-def test_relevant_caps_lines() -> None:
-    output = "\n".join(f"e{n}" for n in range(70))
-    assert py_lint.relevant(output) == [f"e{n}" for n in range(60)]
+def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_lint, [(1, "\n".join(f"e{n}" for n in range(70))), (0, ""), (0, "")])
+    result = checked(py_lint.run_gate(make_context(tmp_path)), py_lint.GATE)
+    assert result.findings == [f"ruff: e{n}" for n in range(60)]
+
+
+def hyper(root: Path) -> Any:
+    return make_context(root, scope_changed=True, hyper=True, changed={"app/legacy.py"}, changed_lines_map={"app/legacy.py": {6}})
+
+
+def test_hyper_keeps_only_findings_on_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    ruff_out = (
+        "app/legacy.py:1:1: I001 [*] Import block is un-sorted\n"
+        "app/legacy.py:6:34: E711 Comparison to `None`\n"
+        "[*] 2 fixable with the `--fix` option.\n"
+    )
+    format_out = "unformatted: File would be reformatted\n  --> app/legacy.py:14:13\n1 file would be reformatted\n"
+    fake_run(py_lint, [(1, ruff_out), (1, format_out), (1, "app/legacy.py:6: error: bad\napp/legacy.py:9: error: old\n")])
+    result = checked(py_lint.run_gate(hyper(tmp_path)), py_lint.GATE)
+    assert result.findings == ["ruff: app/legacy.py:6:34: E711 Comparison to `None`", "mypy: app/legacy.py:6: error: bad"]
+    assert (result.ok, result.summary) == (False, "2 problems")
+
+
+def test_hyper_passes_when_only_old_lines_fail(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(py_lint, [(1, "app/legacy.py:1:8: F401 unused\n"), (0, ""), (0, "")])
+    result = checked(py_lint.run_gate(hyper(tmp_path)), py_lint.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "ruff, ruff format, mypy clean", [])
+
+
+def test_hyper_keeps_crash_output_unfiltered(tmp_path: Path, fake_run: Any) -> None:
+    missing = f"{tmp_path}/.venv/bin/ruff: not found (install it)"
+    fake_run(py_lint, [(127, missing), (127, missing), (2, "app/legacy.py:1: error: config broken\n")])
+    result = checked(py_lint.run_gate(hyper(tmp_path)), py_lint.GATE)
+    assert result.findings == [f"ruff: {missing}", f"format: {missing}", "mypy: app/legacy.py:1: error: config broken"]
+    assert (result.ok, result.summary) == (False, "3 problems")

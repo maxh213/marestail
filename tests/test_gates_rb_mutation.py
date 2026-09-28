@@ -207,7 +207,7 @@ def test_split_label_keeps_an_empty_path() -> None:
 
 def test_session_failures_defaults_missing_keys(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
-    assert rb_mutation.session_failures({}, ctx) == (0, [])
+    assert rb_mutation.session_failures([], ctx) == (0, [])
     assert rb_mutation.list_field({}, rb_mutation.SUBJECT_RESULTS) == []
     assert rb_mutation.list_field({rb_mutation.SUBJECT_RESULTS: 1}, rb_mutation.SUBJECT_RESULTS) == []
     assert rb_mutation.text_field({"kind": "evil"}, "kind") == "evil"
@@ -271,3 +271,33 @@ def test_label_keeps_colons_in_the_owner() -> None:
 )
 def test_identifications(output: str, expected: list[tuple[str, str, str]]) -> None:
     assert rb_mutation.identifications(output) == expected
+
+
+def hyper(root: Path, lines: set[int]) -> Any:
+    ctx = scoped(root)
+    ctx.hyper = True
+    ctx.changed_lines_map = {"app/models/user.rb": lines}
+    return ctx
+
+
+def test_session_hyper_counts_only_subjects_on_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rb_mutation, writes_session(tmp_path, json.dumps(session(tmp_path))))
+    ctx = hyper(tmp_path, {3})
+    result = checked(rb_mutation.run_gate(ctx), rb_mutation.GATE)
+    assert (result.ok, result.summary) == (False, "4 of 5 mutants not killed")
+    assert result.findings == [
+        "app/models/user.rb:3 User#name: 3 mutants survived",
+        "app/models/user.rb:3 User#name: 1 neutral mutant failed, tests do not pass unmutated",
+    ]
+
+
+def test_session_hyper_passes_when_no_subject_starts_on_a_changed_line(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rb_mutation, writes_session(tmp_path, json.dumps(session(tmp_path))))
+    result = checked(rb_mutation.run_gate(hyper(tmp_path, {9})), rb_mutation.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "no mutants on changed lines", [])
+
+
+def test_stdout_hyper_keeps_failures_on_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(rb_mutation, [(0, ""), (1, stdout_report(tmp_path))])
+    result = checked(rb_mutation.run_gate(hyper(tmp_path, {3})), rb_mutation.GATE)
+    assert result.findings == ["app/models/user.rb:3 User#name: 2 mutants survived"]

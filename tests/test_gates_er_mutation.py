@@ -274,3 +274,16 @@ def test_check_mutant_runs_when_remaining_is_the_floor(tmp_path: Path, monkeypat
     er_mutation.check_mutant(job, mutant, 60)
     assert seen == [60]
     assert mutant["status"] == "killed"
+
+
+def test_hyper_runs_only_mutants_on_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    mutants = [mutant(tmp_path, ident, ident) for ident in range(1, 4)]
+    lines = {"src/a.erl": {2}}
+    result = run(tmp_path, fake_run, mutants, [(0, "")] * 6, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert shape(result) == ("er.mutation", False, "1 of 1 mutants not killed", ["src/a.erl:2 comparison mutant survived: < -> >="])
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    lines = {"src/a.erl": {9}}
+    result = run(tmp_path, fake_run, [mutant(tmp_path, 1)], [], scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert shape(result) == ("er.mutation", True, "no mutants on changed lines", [])

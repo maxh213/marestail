@@ -30,7 +30,7 @@ def run_gate(ctx: Context) -> Result:
     data, error = dotnet.scan(ctx, "deps", files)
     if error:
         return Result(GATE, False, error, [], elapsed(started))
-    findings = scoped(ctx, layer_findings(ctx, layers, data) + cycle_findings(data["edges"]))
+    findings = scoped(ctx, ctx.on_changed_lines(layer_findings(ctx, layers, data)) + cycle_findings(data["edges"]))
     return Result(GATE, not findings, summary(findings), findings[:MAX_LINES], elapsed(started))
 
 

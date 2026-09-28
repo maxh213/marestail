@@ -433,7 +433,7 @@ def test_verify_worker_clean(repo: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     report = state.next_report("coder")
     report.write_text("done")
     assert runner.verify_worker(state, Worker("coder", "fast"), report, runner.head(state.config)) == ""
-    assert calls == [("fast", False, None, set(), False)]
+    assert calls == [("fast", False, None, set(), False, False)]
 
 
 def test_verify_worker_collects_problems(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

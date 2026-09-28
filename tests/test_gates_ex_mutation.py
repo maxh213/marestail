@@ -158,3 +158,17 @@ def test_mutation_list_missing_key_is_empty() -> None:
 def test_status_reads_lowercase() -> None:
     assert ex_mutation.status({"status": "KiLLed"}) == "killed"
     assert ex_mutation.status({}) == ""
+
+
+def test_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake_run(ex_mutation, [(0, ""), (1, report([*MUTATIONS[:2], {"location": {"file": "lib/a.ex"}, "status": "Survived"}]))])
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {4}})
+    result = checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)
+    assert shape(result) == ("ex.mutation", False, "1 of 1 mutants not killed", ["lib/a.ex:4 Arithmetic Survived: + -> -"])
+    assert ctx.file_level == 1
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake_run(ex_mutation, [(0, ""), (1, report(MUTATIONS[:1]))])
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {9}})
+    assert shape(checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)) == ("ex.mutation", True, "no mutants on changed lines", [])

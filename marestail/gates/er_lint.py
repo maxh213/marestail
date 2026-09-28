@@ -72,7 +72,7 @@ def lint_findings(output: str, ctx: Context) -> list[str]:
     findings = erlc_findings(output, ctx)
     if not findings:
         return [line for line in output.splitlines() if line.strip()]
-    return erlang.in_scope_findings(ctx, findings)
+    return ctx.on_changed_lines(erlang.in_scope_findings(ctx, findings))
 
 
 def erlc_findings(output: str, ctx: Context) -> list[str]:

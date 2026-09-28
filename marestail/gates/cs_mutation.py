@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import dotnet
-from marestail.context import Context
+from marestail.context import NO_CHANGED_MUTANTS, Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -76,7 +76,7 @@ def stryker(ctx: Context, pair: tuple[Path, Path], targets: list[str], run_info:
     report = out / REPORT
     if not report.exists():
         return Result(GATE, False, dotnet.hint(code, output) or missing(output, code), tail(output), elapsed(started))
-    return verdict(load_mutants(ctx, report), output, note, started)
+    return verdict(ctx, load_mutants(ctx, report), output, (note, started))
 
 
 def restore_failure(ctx: Context, started: float) -> Result | None:
@@ -115,11 +115,23 @@ def listed_mutants(data: dict[str, Any]) -> Any:
     return data["mutants"]
 
 
-def verdict(mutants: list[tuple[str, dict[str, Any]]], output: str, note: str, started: float) -> Result:
+def verdict(ctx: Context, mutants: list[tuple[str, dict[str, Any]]], output: str, run_info: tuple[str, float]) -> Result:
+    note, started = run_info
     if not mutants:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
-    return Result(GATE, not findings, summary(len(findings), len(mutants), note), findings, elapsed(started))
+    kept = ctx.located(mutants, placed)
+    if not kept:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    findings = failures(kept)
+    return Result(GATE, not findings, summary(len(findings), len(kept), note), findings, elapsed(started))
+
+
+def failures(mutants: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    return [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
+
+
+def placed(entry: tuple[str, dict[str, Any]]) -> str:
+    return describe(*entry)
 
 
 def summary(failed: int, total: int, note: str) -> str:

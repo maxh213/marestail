@@ -1,10 +1,11 @@
 import shutil
 import time
 import xml.etree.ElementTree as ET
+from functools import partial
 from pathlib import Path
 
 from marestail import java
-from marestail.context import Context, MutationScope
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -64,6 +65,12 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     mutants = viable(report)
     if not mutants:
         return Result(GATE, False, NO_MUTANTS, tail(output), elapsed(started))
+    return judged(ctx, ctx.located(mutants, partial(describe, ctx)), note, started)
+
+
+def judged(ctx: Context, mutants: list[ET.Element], note: str, started: float) -> Result:
+    if not mutants:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     findings = survivors(ctx, mutants)
     return Result(GATE, not findings, summarise(len(findings), len(mutants), note), findings, elapsed(started))
 

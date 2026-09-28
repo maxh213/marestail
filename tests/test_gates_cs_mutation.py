@@ -258,3 +258,22 @@ def test_load_mutants_without_files_key(tmp_path: Path) -> None:
     report.write_text("{}")
     ctx = project(tmp_path)
     assert cs_mutation.load_mutants(ctx, report) == []
+
+
+def test_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mutants = [mutant("Killed", 7), mutant("Survived", 7), mutant("Survived", 9), {"status": "Survived", "mutatorName": "Block"}]
+    install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, *mutants)))
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {7}})
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
+        "cs.mutation",
+        False,
+        "1 of 2 mutants not killed",
+        ["App/A.cs:7 Equality Survived: a != b"],
+    )
+    assert ctx.file_level == 1
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, mutant("Survived", 9))))
+    ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {7}})
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == ("cs.mutation", True, "no mutants on changed lines", [])

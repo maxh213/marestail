@@ -43,7 +43,7 @@ def clippy_or_failure(code: int, output: str, ctx: Context) -> list[str]:
     findings = clippy_findings(output, ctx)
     if code != 0 and not findings:
         return [f"cargo clippy failed: {output.strip()[-OUTPUT_TAIL:]}"]
-    return findings
+    return ctx.on_changed_lines(findings)
 
 
 def clippy_findings(output: str, ctx: Context) -> list[str]:
@@ -121,4 +121,6 @@ def format_findings(ctx: Context) -> list[str]:
 
 def unformatted(paths: list[str], ctx: Context) -> list[str]:
     relative = [rust.rel(ctx, path) for path in paths]
-    return [f"{path}:1 not rustfmt formatted; run cargo fmt" for path in relative if ctx.in_scope(path)]
+    return ctx.on_changed_lines(
+        [f"{path}:{ctx.placeholder_line} not rustfmt formatted; run cargo fmt" for path in relative if ctx.in_scope(path)]
+    )

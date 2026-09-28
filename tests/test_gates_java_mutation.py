@@ -262,3 +262,19 @@ def test_before_dollar_keeps_the_outer_class() -> None:
 def test_viable(tmp_path: Path) -> None:
     report = write(tmp_path / "m.xml", f"<mutations>{mutation('NON_VIABLE')}{mutation('SURVIVED')}{mutation('KILLED')}</mutations>")
     assert [m.get("status") for m in java_mutation.viable(report)] == ["SURVIVED", "KILLED"]
+
+
+def test_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(tmp_path)
+    fake_mvn(monkeypatch, [mutation("KILLED", line="9"), mutation("SURVIVED", "app.App$Inner", "9"), mutation("SURVIVED", line="4")])
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={APP}, changed_lines_map={APP: {9}})
+    result = checked(java_mutation.run_gate(ctx), java_mutation.GATE)
+    assert fields(result)[1:4] == (False, "1 of 2 mutants not killed", [f"{APP}:9 run: removed call to helper survived"])
+
+
+def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(tmp_path)
+    fake_mvn(monkeypatch, [mutation("SURVIVED", line="4")])
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={APP}, changed_lines_map={APP: {9}})
+    result = checked(java_mutation.run_gate(ctx), java_mutation.GATE)
+    assert fields(result)[1:4] == (True, "no mutants on changed lines", [])

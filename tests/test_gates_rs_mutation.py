@@ -165,3 +165,18 @@ def test_verdict_caps_findings(tmp_path: Path) -> None:
     report = {"outcomes": [mutant("a.rs", n, "f", "n", "MissedMutant") for n in range(70)]}
     result = rs_mutation.verdict(make_context(tmp_path), report, "", 0.0)
     assert (result.summary, len(result.findings)) == ("70 of 70 mutants not killed", 60)
+
+
+def test_verdict_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"a.rs"}, changed_lines_map={"a.rs": {3}})
+    report = {
+        "outcomes": [
+            mutant("a.rs", 3, "f", "n", "MissedMutant"),
+            mutant("a.rs", 3, "f", "n", "CaughtMutant"),
+            mutant("a.rs", 9, "f", "n", "MissedMutant"),
+        ]
+    }
+    result = rs_mutation.verdict(ctx, report, "", 0.0)
+    assert (result.ok, result.summary, result.findings) == (False, "1 of 2 mutants not killed", ["a.rs:3 f: n survived"])
+    report = {"outcomes": [mutant("a.rs", 9, "f", "n", "MissedMutant")]}
+    assert rs_mutation.verdict(ctx, report, "", 0.0).summary == "no mutants on changed lines"

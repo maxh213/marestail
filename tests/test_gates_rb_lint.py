@@ -106,3 +106,11 @@ def test_parse_under_ruby_root(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"ruby": {"root": "web"}})
     output = json.dumps({"files": [{"path": "app/a.rb", "offenses": [{"cop_name": "C", "message": "m", "location": {"line": 2}}]}]})
     assert rb_lint.parse(output, ctx) == ["web/app/a.rb:2 C: m"]
+
+
+def test_parse_hyper_keeps_changed_lines(tmp_path: Path) -> None:
+    lines = {"lib/tool.rb": {9}}
+    ctx = make_context(tmp_path, {"ruby": {"root": "."}}, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+    assert rb_lint.parse(rubocop_report(tmp_path), ctx) == ["lib/tool.rb:9 Style/X: "]
+    ctx.changed_lines_map = {"lib/tool.rb": {1}}
+    assert rb_lint.parse(rubocop_report(tmp_path), ctx) == []

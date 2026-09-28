@@ -28,7 +28,7 @@ def run_gate(ctx: Context) -> Result:
     code, output = scan(ctx, "deps", files, extra=[str(ctx.root)])
     if code != 0:
         return Result(GATE, False, "dependency scanner failed", output.splitlines()[-10:], elapsed(started))
-    findings = violations(scanned(output), load_layers(ctx), ctx)
+    findings = ctx.on_changed_lines(violations(scanned(output), load_layers(ctx), ctx))
     summary = f"{len(findings)} layer breaks" if findings else "layer contracts kept"
     return Result(GATE, not findings, summary, capped(findings), elapsed(started))
 
@@ -42,7 +42,7 @@ def edge_violations(edge: dict[str, Any], layers: list[dict[str, Any]], ctx: Con
     dst = relative(edge.get("to", ""), ctx)
     if not ctx.in_scope(src):
         return []
-    message = f"{src}:{edge.get('line', 1)} {src} must not depend on {dst} ({edge.get('constant', '')})"
+    message = f"{src}:{edge.get('line', ctx.placeholder_line)} {src} must not depend on {dst} ({edge.get('constant', '')})"
     return [message for layer in layers if breaks(src, dst, layer)]
 
 

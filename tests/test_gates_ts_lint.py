@@ -165,3 +165,52 @@ def test_list_field_defaults_and_rejects_a_non_list() -> None:
 
 def test_meaningful_drops_npm_noise_and_blank_lines() -> None:
     assert ts_lint.meaningful("npm notice a\n  \nnpm warn b\nnpm WARN c\n real\n") == [" real"]
+
+
+def hyper(root: Path) -> Any:
+    changed = {"web/src/a.ts", "web/src/b.ts"}
+    return make_context(root, TS, scope_changed=True, hyper=True, changed=changed, changed_lines_map={"web/src/a.ts": {3}})
+
+
+def test_hyper_eslint_keeps_changed_lines_and_counts_messages_without_a_line(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_lint, [(1, eslint_report(tmp_path))])
+    ctx = hyper(tmp_path)
+
+    assert ts_lint.eslint_findings(ctx) == ["web/src/a.ts:3 no-var: Use let."]
+    assert ctx.file_level == 2
+
+
+def test_hyper_eslint_passes_when_only_old_lines_fail(tmp_path: Path, fake_run: Any) -> None:
+    report = [{"filePath": "src/a.ts", "messages": [{"line": 1, "ruleId": "no-unused-vars", "message": "unused"}]}]
+    fake_run(ts_lint, [(1, json.dumps(report))])
+
+    assert ts_lint.eslint_findings(hyper(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("Oops: crashed", ["eslint: Oops: crashed"]),
+        ("npm warn []", ["marestail.toml:1 eslint exited 2 without a message"]),
+        ("[]", ["eslint: []"]),
+    ],
+)
+def test_hyper_eslint_crash_still_fails(tmp_path: Path, fake_run: Any, output: str, expected: list[str]) -> None:
+    fake_run(ts_lint, [(2, output)])
+
+    assert ts_lint.eslint_findings(hyper(tmp_path)) == expected
+
+
+def test_hyper_tsc_keeps_changed_lines(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_lint, [(2, "src/a.ts(3,2): error A\nsrc/a.ts(1,1): error B\n")])
+
+    assert ts_lint.tsc_findings(hyper(with_tsconfig(tmp_path))) == ["web/src/a.ts:3 error A"]
+
+
+def test_hyper_missing_tsconfig_still_fails(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_lint)
+    ctx = make_context(tmp_path, {"ts": {"root": ".", "tsconfig": "missing.json"}}, scope_changed=True, hyper=True, changed={"a.ts"})
+
+    result = checked(ts_lint.run_gate(ctx), ts_lint.GATE)
+
+    assert (result.ok, result.findings) == (False, ["marestail.toml:1 [ts] tsconfig = 'missing.json' does not exist under ."])

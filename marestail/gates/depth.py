@@ -8,7 +8,7 @@ from marestail.report import Result, elapsed
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     modules = [module for module in depth.analyse(ctx.config) if ctx.in_scope(module.path)]
-    findings = depth.rule_breaks(modules)
+    findings = ctx.on_changed_lines(depth.rule_breaks(modules))
     return Result("depth", not findings, summary(modules, findings), findings, elapsed(started))
 
 

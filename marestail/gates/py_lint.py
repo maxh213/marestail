@@ -9,6 +9,7 @@ MAX_LINES = 60
 RUFF = "ruff"
 FORMAT = "format"
 MYPY = "mypy"
+FINDINGS = 1
 
 
 def run_gate(ctx: Context) -> Result:
@@ -31,7 +32,11 @@ def command_findings(label: str, command: list[str], ctx: Context) -> list[str]:
     code, output = run(command, cwd=ctx.root, timeout=900)
     if code == 0:
         return []
-    return [f"{label}: {line}" for line in relevant(output)]
+    return [f"{label}: {line}" for line in gated(code, relevant(output), ctx)[:MAX_LINES]]
+
+
+def gated(code: int, lines: list[str], ctx: Context) -> list[str]:
+    return ctx.on_changed_lines(lines) if code == FINDINGS else lines
 
 
 def commands(ctx: Context) -> list[tuple[str, list[str]]]:
@@ -70,5 +75,4 @@ def mypy_targets(ctx: Context) -> list[str]:
 
 
 def relevant(output: str) -> list[str]:
-    lines = [line for line in output.splitlines() if line.strip() and not line.startswith(("Found ", "warning:"))]
-    return lines[:MAX_LINES]
+    return [line for line in output.splitlines() if line.strip() and not line.startswith(("Found ", "warning:"))]

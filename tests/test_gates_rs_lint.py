@@ -127,3 +127,11 @@ def test_primary_span_without_a_list() -> None:
 def test_compiler_message_rejects_a_non_dict_message() -> None:
     assert rs_lint.compiler_message(json.dumps({"reason": "compiler-message", "message": "nope"})) is None
     assert rs_lint.compiler_message(json.dumps({"reason": "build-finished"})) is None
+
+
+def test_hyper_keeps_changed_lines_and_counts_unformatted_files(tmp_path: Path, fake_run: Any) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"src/main.rs"}, changed_lines_map={"src/main.rs": {8}})
+    assert rs_lint.clippy_or_failure(1, clippy_output(tmp_path), ctx) == []
+    fake_run(rust, [(1, "src/lib.rs\nsrc/main.rs\n")])
+    assert rs_lint.format_findings(ctx) == []
+    assert ctx.file_level == 1

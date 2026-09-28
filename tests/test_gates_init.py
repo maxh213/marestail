@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from marestail import gates
+from marestail.context import Context
 from marestail.gates import Gate
 from marestail.report import Result
 from tests.conftest import make_context
@@ -134,6 +135,16 @@ def test_run_one_passes_the_context(tmp_path: Path) -> None:
     assert (result.gate, result.ok, result.summary) == ("x", True, "ok")
 
 
+def test_run_one_appends_the_file_level_count(tmp_path: Path) -> None:
+    def run(ctx: Context) -> Result:
+        ctx.file_level += 2
+        return Result("x", False, "1 problems", ["a.py:6 x"], 0.0)
+
+    ctx = make_context(tmp_path, file_level=5)
+    result = gates.run_one(Gate("x", "fast", None, run), ctx)
+    assert (result.summary, ctx.file_level) == ("1 problems; 2 file-level findings not gated under hyper", 0)
+
+
 def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:
     seen: list[tuple[object, ...]] = []
 
@@ -143,8 +154,9 @@ def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...
         only: set[str] | None,
         focus: set[str] | None = None,
         hard: bool = False,
+        hyper: bool = False,
     ) -> tuple[list[Result], str]:
-        seen.append((tier, scope_changed, only, focus, hard))
+        seen.append((tier, scope_changed, only, focus, hard, hyper))
         return [Result("g", True, "ok", [], 0.0)], "ctx"
 
     monkeypatch.setattr(gates, "run_gates_with_context", fake)
@@ -153,11 +165,11 @@ def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...
 
 def test_run_gates_forwards_every_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = capture_run_gates(monkeypatch)
-    assert gates.run_gates("full", True, {"docs"}, {"src"}, True) == [Result("g", True, "ok", [], 0.0)]
-    assert seen == [("full", True, {"docs"}, {"src"}, True)]
+    assert gates.run_gates("full", True, {"docs"}, {"src"}, True, True) == [Result("g", True, "ok", [], 0.0)]
+    assert seen == [("full", True, {"docs"}, {"src"}, True, True)]
 
 
 def test_run_gates_defaults_are_unfocused_and_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = capture_run_gates(monkeypatch)
     assert gates.run_gates("fast", False, None) == [Result("g", True, "ok", [], 0.0)]
-    assert seen == [("fast", False, None, None, False)]
+    assert seen == [("fast", False, None, None, False, False)]

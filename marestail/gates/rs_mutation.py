@@ -1,11 +1,12 @@
 import json
 import shutil
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from marestail import rust
-from marestail.context import Context
+from marestail.context import NO_CHANGED_MUTANTS, Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
 
@@ -96,6 +97,12 @@ def verdict(ctx: Context, report: dict[str, Any], output: str, started: float) -
     viable = viable_mutants(outcomes)
     if not viable:
         return Result(GATE, False, "no viable mutants were generated", tail(output), elapsed(started))
+    return judged(ctx, ctx.located(viable, partial(describe, ctx)), started)
+
+
+def judged(ctx: Context, viable: list[Outcome], started: float) -> Result:
+    if not viable:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     survived = survivors(viable)
     findings = [describe(ctx, o) for o in survived]
     return Result(GATE, not survived, mutation_summary(survived, viable), findings[:MAX_FINDINGS], elapsed(started))
