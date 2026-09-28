@@ -34,6 +34,24 @@ JUDGE_SCOPE = (
     "refactor, a rename or a cleanup, naming the file and line."
 )
 
+HYPER_SCOPE = (
+    "This run is hyper-scoped. Make the smallest change that does what the task asks. Leave the code you touch a little "
+    "better than you found it. Leave code the change does not touch exactly as it is, including code you would like to "
+    "improve. The gates measure only the lines that change."
+)
+HYPER_ROLE_SCOPE = {
+    "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
+    "changed lines can reach.",
+    "critic": "Bounce a scenario that would force a change outside the fix.",
+    "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
+    "Write the tests the repository can already run, in the style it already uses. Write as many as you need.",
+    "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
+    "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
+    "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "
+    "dependency.",
+    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change.",
+}
+
 
 def worker_prompt(
     config: Config,
@@ -45,13 +63,14 @@ def worker_prompt(
     label: str = EMPTY,
     gate_flags: str = EMPTY,
     hard_focus: set[str] | None = None,
+    hyper: bool = False,
 ) -> str:
     return PARAGRAPH.join(
         [
             role_text(worker.name),
             *qa_app_note(config, worker),
             section(TASK, task.read_text()),
-            *hard_scope(hard_focus, WORKER_SCOPE),
+            *scope_section(worker.name, hard_focus, WORKER_SCOPE, hyper),
             section("Specification files", spec_listing(config, task_name)),
             section(HANDOFFS, handoffs(config, task_name)),
             section("Finishing", finishing(config, worker, task_name, report, label, gate_flags)),
@@ -76,12 +95,13 @@ def judge_prompt(
     trees: str = EMPTY,
     feedback: str = EMPTY,
     hard_focus: set[str] | None = None,
+    hyper: bool = False,
 ) -> str:
     return PARAGRAPH.join(
         [
             role_text(judge.name),
             section(TASK, task.read_text()),
-            *hard_scope(hard_focus, JUDGE_SCOPE),
+            *scope_section(judge.name, hard_focus, JUDGE_SCOPE, hyper),
             section(SPECIFICATION, judge_specification(config, judge, task_name)),
             *optional_section("Gate report", gate_report),
             *optional_section("Trees", trees),
@@ -107,6 +127,16 @@ def section(title: str, body: str) -> str:
 
 def optional_section(title: str, body: str) -> list[str]:
     return [section(title, body)] if body else []
+
+
+def scope_section(name: str, focus: set[str] | None, template: str, hyper: bool) -> list[str]:
+    if hyper:
+        return [section("Scope", hyper_text(name))]
+    return hard_scope(focus, template)
+
+
+def hyper_text(name: str) -> str:
+    return " ".join([HYPER_SCOPE, HYPER_ROLE_SCOPE.get(name, EMPTY)]).strip()
 
 
 def hard_scope(focus: set[str] | None, template: str) -> list[str]:

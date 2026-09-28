@@ -207,7 +207,7 @@ def run_pipeline(
     os.environ["MARESTAIL_TASK"] = Path(task).stem
     state = make_run(config, task, retries, agent, picked, scoped)
     perf_trees.record_start(config, state.task_name)
-    outcome = run_steps(state, window(start, stop), auto)
+    outcome = run_steps(state, window(start, stop, state.scope_name), auto)
     print(proposals_summary(state))
     if state.perf_changes:
         print(state.perf_changes)
@@ -433,7 +433,7 @@ def stall_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
 
 
 def rework(state: Run, judge: Judge, target: str | None, report: str) -> bool:
-    worker = find(target or judge.bounce_to)
+    worker = find(target or judge.bounce_to, state.scope_name)
     return isinstance(worker, Worker) and run_worker(state, worker, report)
 
 
@@ -483,7 +483,16 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
     reset_attempt(state)
     print(f"== {worker.name} ({report.stem}) attempt {attempt}")
     prompt = prompts.worker_prompt(
-        state.config, worker, state.task, state.task_name, report, feedback, agent_label(state), state.gate_flags, state.hard_focus
+        state.config,
+        worker,
+        state.task,
+        state.task_name,
+        report,
+        feedback,
+        agent_label(state),
+        state.gate_flags,
+        state.hard_focus,
+        state.hyper,
     )
     invoke(state, report.stem, prompt)
     problems = verify_worker(state, worker, report, before)
@@ -616,7 +625,7 @@ def judge_attempt(
     blob = session_output(state, report)
     if judge.name == PERF and asked_to_author(report, blob):
         return (AUTHOR, None, ""), feedback
-    parsed = parse_verdict(report, blob)
+    parsed = parse_verdict(report, blob, state.scope_name)
     if parsed is None:
         print(f"{judge.name} wrote no verdict; retrying")
         return None, no_verdict_feedback(report)
@@ -626,7 +635,9 @@ def judge_attempt(
 
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
     trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
-    prompt = prompts.judge_prompt(state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus)
+    prompt = prompts.judge_prompt(
+        state.config, judge, state.task, state.task_name, report, gate_report, trees, feedback, state.hard_focus, state.hyper
+    )
     before = head(state.config)
     invoke(state, report.stem, prompt)
     discard_edits(state.config, keep=report, writes=judge_writes(judge))
@@ -826,17 +837,17 @@ def gate_for(state: Run, tier: str | None) -> tuple[str, bool, list[Result]]:
     return render(results), all(result.ok for result in results), results
 
 
-def parse_verdict(report: Path, extra: str = EMPTY) -> tuple[str, str | None] | None:
+def parse_verdict(report: Path, extra: str = EMPTY, mode: str | None = None) -> tuple[str, str | None] | None:
     blob = read_or_empty(report) + NEWLINE + extra
     match = VERDICT_LINE.search(blob)
     if not match:
         return None
-    return match.group(1).upper(), known_target(match.group(2))
+    return match.group(1).upper(), known_target(match.group(2), mode)
 
 
-def known_target(raw: str | None) -> str | None:
+def known_target(raw: str | None, mode: str | None = None) -> str | None:
     target = raw.lower() if raw else None
-    return target if target in names() else None
+    return target if target in names(mode) else None
 
 
 def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:

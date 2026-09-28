@@ -49,3 +49,62 @@ def test_step_defaults() -> None:
     judge = Judge("j", "sonar", bounce_to="w")
     assert (worker.audit, worker.pause_after) == (False, False)
     assert (judge.bounces, judge.pause_after, judge.writes, judge.pinned_bounce, judge.optional) == (0, False, (), False, False)
+
+
+HYPER_ROLES = ["specifier", "critic", "coder", "architect", "hardener", "qa"]
+
+
+def test_steps_default_to_the_whole_pipeline() -> None:
+    assert pipeline.steps() is pipeline.PIPELINE
+    assert pipeline.steps("hard") is pipeline.PIPELINE
+
+
+def test_hyper_steps_drop_cleaner_practices_and_perf_and_gate_workers_full() -> None:
+    assert pipeline.names("hyper") == HYPER_ROLES
+    assert [step.tier for step in pipeline.steps("hyper")] == [None, None, "full", "full", "full", "qa"]
+    assert pipeline.find("coder", "hyper") == Worker("coder", "full", audit=True)
+    assert pipeline.find("hardener", "hyper") is pipeline.find("hardener")
+
+
+def test_hyper_step_only_changes_coder_and_architect() -> None:
+    assert pipeline.hyper_step(pipeline.find("architect")) == Worker("architect", "full")
+    assert pipeline.hyper_step(pipeline.find("qa")) is pipeline.find("qa")
+
+
+def test_find_under_hyper_rejects_a_dropped_role() -> None:
+    with pytest.raises(SystemExit, match=r"^unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa$"):
+        pipeline.find("cleaner", "hyper")
+
+
+@pytest.mark.parametrize(
+    ("start", "stop", "expected"),
+    [
+        (None, None, HYPER_ROLES),
+        ("coder", "architect", ["coder", "architect"]),
+        ("hardener", "qa", ["hardener", "qa"]),
+    ],
+)
+def test_window_under_hyper(start: str | None, stop: str | None, expected: list[str]) -> None:
+    assert [step.name for step in pipeline.window(start, stop, "hyper")] == expected
+
+
+@pytest.mark.parametrize(
+    ("start", "stop", "mode", "role", "choices"),
+    [
+        ("cleaner", None, "hyper", "cleaner", ", ".join(HYPER_ROLES)),
+        (None, "cleaner", "hyper", "cleaner", ", ".join(HYPER_ROLES)),
+        ("bogus", None, None, "bogus", "specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"),
+        (None, "bogus", "changed", "bogus", "specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"),
+    ],
+)
+def test_window_rejects_an_unknown_role(start: str | None, stop: str | None, mode: str | None, role: str, choices: str) -> None:
+    with pytest.raises(SystemExit) as raised:
+        pipeline.window(start, stop, mode)
+    assert str(raised.value) == f"unknown role {role}; choose from {choices}"
+
+
+def test_check_role() -> None:
+    assert pipeline.check_role(None, "hyper") is None
+    assert pipeline.check_role("qa", "hyper") is None
+    with pytest.raises(SystemExit):
+        pipeline.check_role("perf", "hyper")

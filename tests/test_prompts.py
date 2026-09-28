@@ -310,3 +310,81 @@ def test_perf_author_prompt_minimal(repo: Path) -> None:
         "## 02-critic",
         "# Authoring",
     ]
+
+
+HYPER_ROLE_SENTENCES = {
+    "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
+    "changed lines can reach.",
+    "critic": "Bounce a scenario that would force a change outside the fix.",
+    "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
+    "Write the tests the repository can already run, in the style it already uses. Write as many as you need.",
+    "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
+    "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
+    "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "
+    "dependency.",
+    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change.",
+}
+HYPER_ALL = (
+    "This run is hyper-scoped. Make the smallest change that does what the task asks. Leave the code you touch a little "
+    "better than you found it. Leave code the change does not touch exactly as it is, including code you would like to "
+    "improve. The gates measure only the lines that change."
+)
+
+
+def add_role(role: str) -> None:
+    write(prompts.ROLES_DIR / f"{role}.md", f"You are the {role}.\n")
+
+
+def hyper_prompt(repo: Path, role: str) -> str:
+    add_role(role)
+    step = find(role, "hyper")
+    task = repo / "tasks" / "t.md"
+    if isinstance(step, Judge):
+        return prompts.judge_prompt(config(repo), step, task, "t", report(repo, "05"), "", hyper=True)
+    return prompts.worker_prompt(config(repo), step, task, "t", report(repo, "03"), "", "", " --scope hyper", hyper=True)
+
+
+@pytest.mark.parametrize("role", ["specifier", "critic", "coder", "architect", "hardener", "qa"])
+def test_hyper_prompt_carries_its_scope_section(repo: Path, role: str) -> None:
+    text = hyper_prompt(repo, role)
+    scope = next(part for part in text.split("\n\n") if part.startswith("# Scope\n"))
+    own = HYPER_ROLE_SENTENCES.get(role)
+    assert scope == "# Scope\n" + " ".join(filter(None, [HYPER_ALL, own]))
+    assert [sentence in text for name, sentence in HYPER_ROLE_SENTENCES.items() if name != role] == [False] * (4 + (own is None))
+    assert "This run has a hard scope" not in text
+
+
+@pytest.mark.parametrize("role", ["coder", "architect"])
+def test_hyper_coder_and_architect_run_the_full_tier(repo: Path, role: str) -> None:
+    text = hyper_prompt(repo, role)
+    assert "Run `marestail gate --tier full --scope hyper` and keep working until it prints GATE PASSED." in text
+    assert "--tier fast" not in text
+    assert "--tier sonar" not in text
+
+
+def test_hyper_architect_keeps_to_the_code_the_change_touches(repo: Path) -> None:
+    text = hyper_prompt(repo, "architect")
+    assert "Apply the boy scout rule to the code this change touches, and only that code." in text
+    assert "Do not reshape, move or rename anything the change does not touch." in text
+
+
+def test_scope_section(repo: Path) -> None:
+    assert prompts.scope_section("coder", {"src"}, "{paths}", True) == ["# Scope\n" + prompts.hyper_text("coder")]
+    assert prompts.scope_section("coder", {"src"}, "in {paths}", False) == ["# Scope\nin `src`"]
+    assert prompts.scope_section("coder", None, "{paths}", False) == []
+
+
+def test_hyper_text() -> None:
+    assert prompts.hyper_text("qa") == HYPER_ALL
+    assert prompts.hyper_text("critic") == HYPER_ALL + " Bounce a scenario that would force a change outside the fix."
+
+
+@pytest.mark.parametrize(("role", "tier"), [("coder", "fast"), ("architect", "sonar")])
+def test_prompts_outside_hyper_keep_the_hard_scope(repo: Path, role: str, tier: str) -> None:
+    add_role(role)
+    text = prompts.worker_prompt(
+        config(repo), cast(Worker, find(role)), repo / "tasks" / "t.md", "t", report(repo, "03"), "", "", " --scope hard", {"src"}
+    )
+    assert f"Run `marestail gate --tier {tier} --scope hard`" in text
+    assert "This run is hyper-scoped" not in text
+    assert "# Scope\n" + prompts.WORKER_SCOPE.format(paths="`src`") in text

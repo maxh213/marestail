@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import prompts, ran_against, runner
+from marestail import pipeline, prompts, ran_against, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -590,6 +590,7 @@ def test_run_worker_succeeds_after_feedback(
         "m e",
         " --scope hard --focus a.py",
         {"a.py"},
+        False,
     )
     assert worker_env["invoke"].calls == [(state, "01-coder", "PROMPT"), (state, "01-coder", "PROMPT")]
     assert verify.calls[1] == (state, CODER, reports[1], "before")
@@ -786,7 +787,7 @@ def test_judge_attempt_records_bounce(tmp_path: Path, judge_env: dict[str, Any],
     state, report, outcome = attempt_judge(tmp_path, judge)
     assert outcome == (("BOUNCE", "coder", "VERDICT: bounce coder\n1. fix"), "")
     assert judge_env["prompt"].calls == [
-        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}),
+        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}, False),
     ]
     assert judge_env["discard"].calls == [(state.config, ("keep", report), ("writes", ("docs/**",)))]
     assert judge_env["stage"].calls == [(state.config, ("docs/**",))]
@@ -1259,3 +1260,66 @@ def test_make_run_carries_hyper(tmp_path: Path) -> None:
     config = Config(root=tmp_path, raw={})
     state = runner.make_run(config, tmp_path / "t.md", 0, None, (None, None, None), (True, False, set(), True))
     assert (state.scope_changed, state.hard, state.focus, state.hyper) == (True, False, set(), True)
+
+
+def test_run_pipeline_hyper_runs_the_short_pipeline(pipeline_env: dict[str, Any]) -> None:
+    runner.run_pipeline(Path("t.md"), None, None, True, "x", 1, scope="hyper")
+    window = pipeline_env["window"]
+    assert [step.name for step in window] == ["specifier", "critic", "coder", "architect", "hardener", "qa"]
+    assert [step.tier for step in window] == [None, None, "full", "full", "full", "qa"]
+
+
+@pytest.mark.parametrize(("start", "stop"), [("cleaner", None), (None, "cleaner")])
+def test_run_pipeline_hyper_rejects_a_role_it_lacks(pipeline_env: dict[str, Any], start: str | None, stop: str | None) -> None:
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), start, stop, True, "x", 1, scope="hyper")
+    assert str(raised.value) == "unknown role cleaner; choose from specifier, critic, coder, architect, hardener, qa"
+    assert "window" not in pipeline_env
+
+
+@pytest.mark.parametrize(("start", "stop"), [("bogus", None), (None, "bogus")])
+def test_run_pipeline_rejects_an_unknown_role(pipeline_env: dict[str, Any], start: str | None, stop: str | None) -> None:
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), start, stop, True, "x", 1)
+    assert str(raised.value) == (
+        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"
+    )
+    assert "window" not in pipeline_env
+
+
+@pytest.mark.parametrize(("scope", "focus"), [("hard", ["src.py"]), ("changed", None), ("all", None)])
+def test_run_pipeline_outside_hyper_keeps_all_nine_roles(pipeline_env: dict[str, Any], scope: str, focus: list[str] | None) -> None:
+    runner.run_pipeline(Path("t.md"), None, None, True, "x", 1, scope=scope, focus=focus)
+    window = pipeline_env["window"]
+    assert [step.name for step in window] == pipeline.names()
+    assert [step.tier for step in window if step.tier] == ["fast", "sonar", "sonar", "full", "qa"]
+
+
+def test_known_target_follows_the_mode() -> None:
+    assert runner.known_target("Cleaner") == "cleaner"
+    assert runner.known_target("cleaner", "hyper") is None
+    assert runner.known_target("coder", "hyper") == "coder"
+
+
+def test_parse_verdict_under_hyper_drops_a_role_it_lacks(tmp_path: Path) -> None:
+    report = tmp_path / "r.md"
+    report.write_text("VERDICT: BOUNCE cleaner")
+    assert runner.parse_verdict(report, "", "hyper") == ("BOUNCE", None)
+    assert runner.parse_verdict(report, "", "hard") == ("BOUNCE", "cleaner")
+
+
+def test_judge_loop_under_hyper_sends_a_refused_bounce_to_a_full_tier_coder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("PASS", None, "ok"))
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(tmp_path, scope_changed=True, hyper=True)
+    assert runner.run_judge_loop(state, find("hardener")) is True
+    assert worker.calls == [(state, Worker("coder", "full", audit=True), "1. a")]
+
+
+def test_judge_attempt_under_hyper_refuses_a_bounce_to_cleaner(tmp_path: Path, judge_env: dict[str, Any]) -> None:
+    judge_env["files"] = {"01-hardener.md": "VERDICT: BOUNCE cleaner\n1. tidy"}
+    state = make_state(tmp_path, scope_changed=True, hyper=True)
+    report = state.next_report("hardener")
+    outcome = runner.judge_attempt(state, find("hardener", "hyper"), report, ("", True, []), None, "")
+    assert outcome[0][:2] == ("BOUNCE", None)
+    assert judge_env["prompt"].calls[0][-1] is True
