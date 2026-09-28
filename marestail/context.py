@@ -1,6 +1,6 @@
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,7 +11,12 @@ from marestail.config import Config, focus_paths
 CHANGED = "changed"
 HYPER = "hyper"
 NO_CHANGED_MUTANTS = "no mutants on changed lines"
-LOCATED = re.compile(r"(?P<path>[^\s:()]+):(?P<line>\d+)")
+TOKEN_BREAKS = re.compile(r"[\s()]+")
+DIGITS = "0123456789"
+FOCUS_CLASHES = {
+    "all": "--focus cannot be combined with --scope all",
+    HYPER: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
+}
 DEFAULT_BASE = "origin/master"
 BENCHMARKS = "perf"
 
@@ -189,7 +194,7 @@ class Context:
         return 0 if self.hyper else 1
 
     def on_changed_lines(self, findings: list[str]) -> list[str]:
-        return [finding for finding in findings if self.keeps(finding)]
+        return self.located(findings, str)
 
     def located(self, records: list[Any], where: Callable[[Any], str]) -> list[Any]:
         if not self.hyper:
@@ -199,10 +204,10 @@ class Context:
     def keeps(self, finding: str) -> bool:
         if not self.hyper:
             return True
-        match = LOCATED.search(finding)
-        if match is None:
+        place = location(finding)
+        if place is None:
             return self.dropped_file_level(any(token in self.changed for token in finding.split()))
-        return self.kept_line(match["path"], int(match["line"]))
+        return self.kept_line(*place)
 
     def kept_line(self, path: str, line: int) -> bool:
         if line == 0:
@@ -253,6 +258,24 @@ def diff_context(config: Config, scoped: bool, focused: set[str]) -> Context:
     changed = changed_files(config.root, base)
     lines = changed_lines(config.root, base)
     return Context(config=config, scope_changed=True, changed=changed, focus=focused, changed_lines_map=lines)
+
+
+def location(finding: str) -> tuple[str, int] | None:
+    return next(filter(None, map(token_location, TOKEN_BREAKS.split(finding))), None)
+
+
+def token_location(token: str) -> tuple[str, int] | None:
+    parts = token.split(":")
+    pairs = zip(parts, map(leading_digits, parts[1:]), strict=False)
+    return next(((path, int(line)) for path, line in pairs if path and line), None)
+
+
+def leading_digits(text: str) -> str:
+    return text[: len(text) - len(text.lstrip(DIGITS))]
+
+
+def focus_clash(scope: str | None, focus: Collection[str]) -> str | None:
+    return FOCUS_CLASHES.get(scope) if focus and scope else None
 
 
 def file_level_note(count: int) -> str:

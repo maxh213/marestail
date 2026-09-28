@@ -359,3 +359,33 @@ def test_diff_context_reads_configured_git_base(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(context, "changed_lines", lambda root, base: {})
     context.diff_context(Config(root=tmp_path, raw={}), True, set())
     assert bases == [context.DEFAULT_BASE]
+
+
+@pytest.mark.parametrize(
+    ("scope", "focus", "clash"),
+    [
+        ("all", {"x"}, "--focus cannot be combined with --scope all"),
+        ("hyper", {"x"}, "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else"),
+        ("hyper", set(), None),
+        ("hard", {"x"}, None),
+        (None, {"x"}, None),
+    ],
+)
+def test_focus_clash_names_scopes_that_refuse_focus(scope: str | None, focus: set[str], clash: str | None) -> None:
+    assert context.focus_clash(scope, focus) == clash
+
+
+@pytest.mark.parametrize(
+    ("finding", "place"),
+    [
+        ("ruff: app/a.py:6:34: E711 comparison", ("app/a.py", 6)),
+        ("--> app/a.py:14:13", ("app/a.py", 14)),
+        ("compile: warning (lib/x.ex:3)", ("lib/x.ex", 3)),
+        ("a:b:3 text", ("b", 3)),
+        ("::3 text", None),
+        ("app/a.py:x no line", None),
+        ("no location at all", None),
+    ],
+)
+def test_location_reads_the_first_path_and_line(finding: str, place: tuple[str, int] | None) -> None:
+    assert context.location(finding) == place

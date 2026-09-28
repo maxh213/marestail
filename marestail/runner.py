@@ -32,7 +32,7 @@ from marestail.backends import (
     kilo_variant,
 )
 from marestail.config import Config
-from marestail.context import hook_focus, resolve_focus
+from marestail.context import focus_clash, hook_focus, resolve_focus
 from marestail.gates import run_gates
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
@@ -257,12 +257,6 @@ def focus_list(focus: list[str] | None) -> list[str]:
     return [path for path in focus or [] if path.strip()]
 
 
-FOCUS_CLASHES = {
-    "all": "--focus cannot be combined with --scope all",
-    HYPER: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
-}
-
-
 def pick_scope(config: Config, scope: str | None, focus: list[str] | None) -> tuple[bool, bool, set[str], bool]:
     paths = focus_list(focus)
     refuse_focus(scope, paths)
@@ -273,8 +267,9 @@ def pick_scope(config: Config, scope: str | None, focus: list[str] | None) -> tu
 
 
 def refuse_focus(scope: str | None, paths: list[str]) -> None:
-    if paths and scope in FOCUS_CLASHES:
-        raise SystemExit(FOCUS_CLASHES[scope])
+    clash = focus_clash(scope, paths)
+    if clash:
+        raise SystemExit(clash)
 
 
 def scoped_focus(config: Config, scope_changed: bool, hard: bool, paths: list[str]) -> set[str]:

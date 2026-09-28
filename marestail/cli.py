@@ -200,14 +200,8 @@ def gate_command(args: argparse.Namespace) -> int:
     return focused_gate_command(args, {path for path in args.focus if path.strip()})
 
 
-FOCUS_CLASHES = {
-    "all": "--focus cannot be combined with --scope all",
-    HYPER_SCOPE: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
-}
-
-
 def focused_gate_command(args: argparse.Namespace, focus: set[str]) -> int:
-    clash = FOCUS_CLASHES.get(args.scope) if focus else None
+    clash = context_module.focus_clash(args.scope, focus)
     if clash:
         sys.stderr.write(f"{clash}\n")
         return 2
