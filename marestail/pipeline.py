@@ -23,7 +23,7 @@ class Judge:
 
 Step = Worker | Judge
 
-PIPELINE: list[Step] = [
+_PIPELINE: list[Step] = [
     Worker("specifier", None),
     Judge("critic", None, bounce_to="specifier", pause_after=True),
     Worker("coder", "fast", audit=True),
@@ -37,18 +37,18 @@ PIPELINE: list[Step] = [
 
 
 HYPER = "hyper"
-HYPER_DROPPED = ("cleaner", "practices", "perf")
-HYPER_FULL_TIER = ("coder", "architect")
+_HYPER_DROPPED = ("cleaner", "practices", "perf")
+_HYPER_FULL_TIER = ("coder", "architect")
 
 
 def steps(mode: str | None = None) -> list[Step]:
     if mode != HYPER:
-        return PIPELINE
-    return [hyper_step(step) for step in PIPELINE if step.name not in HYPER_DROPPED]
+        return _PIPELINE
+    return [_hyper_step(step) for step in _PIPELINE if step.name not in _HYPER_DROPPED]
 
 
-def hyper_step(step: Step) -> Step:
-    return replace(step, tier="full") if step.name in HYPER_FULL_TIER else step
+def _hyper_step(step: Step) -> Step:
+    return replace(step, tier="full") if step.name in _HYPER_FULL_TIER else step
 
 
 def names(mode: str | None = None) -> list[str]:
@@ -62,31 +62,31 @@ def find(name: str, mode: str | None = None) -> Step:
     raise SystemExit(f"unknown role {name}; choose from {', '.join(names(mode))}")
 
 
-def check_role(name: str | None, mode: str | None) -> None:
+def _check_role(name: str | None, mode: str | None) -> None:
     if name is not None:
         find(name, mode)
 
 
-def started(taking: bool, step: Step, start: str | None) -> bool:
+def _started(taking: bool, step: Step, start: str | None) -> bool:
     return taking or step.name == start
 
 
-def taken(taking: bool, step: Step) -> list[Step]:
+def _taken(taking: bool, step: Step) -> list[Step]:
     return [step] if taking else []
 
 
-def stop_here(taking: bool, step: Step, stop: str | None) -> bool:
+def _stop_here(taking: bool, step: Step, stop: str | None) -> bool:
     return taking and stop is not None and step.name == stop
 
 
 def window(start: str | None, stop: str | None, mode: str | None = None) -> list[Step]:
-    check_role(start, mode)
-    check_role(stop, mode)
+    _check_role(start, mode)
+    _check_role(stop, mode)
     taking = start is None
     chosen: list[Step] = []
     for step in steps(mode):
-        taking = started(taking, step, start)
-        chosen.extend(taken(taking, step))
-        if stop_here(taking, step, stop):
+        taking = _started(taking, step, start)
+        chosen.extend(_taken(taking, step))
+        if _stop_here(taking, step, stop):
             break
     return chosen

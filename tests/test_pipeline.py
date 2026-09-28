@@ -34,14 +34,14 @@ def test_window_slices_inclusively(start: str | None, stop: str | None, expected
 
 def test_window_helpers() -> None:
     coder = pipeline.find("coder")
-    assert pipeline.started(False, coder, "coder") is True
-    assert pipeline.started(False, coder, "qa") is False
-    assert pipeline.started(True, coder, "qa") is True
-    assert pipeline.taken(True, coder) == [coder]
-    assert pipeline.taken(False, coder) == []
-    assert pipeline.stop_here(True, coder, "coder") is True
-    assert pipeline.stop_here(True, coder, None) is False
-    assert pipeline.stop_here(False, coder, "coder") is False
+    assert pipeline._started(False, coder, "coder") is True
+    assert pipeline._started(False, coder, "qa") is False
+    assert pipeline._started(True, coder, "qa") is True
+    assert pipeline._taken(True, coder) == [coder]
+    assert pipeline._taken(False, coder) == []
+    assert pipeline._stop_here(True, coder, "coder") is True
+    assert pipeline._stop_here(True, coder, None) is False
+    assert pipeline._stop_here(False, coder, "coder") is False
 
 
 def test_step_defaults() -> None:
@@ -55,8 +55,8 @@ HYPER_ROLES = ["specifier", "critic", "coder", "architect", "hardener", "qa"]
 
 
 def test_steps_default_to_the_whole_pipeline() -> None:
-    assert pipeline.steps() is pipeline.PIPELINE
-    assert pipeline.steps("hard") is pipeline.PIPELINE
+    assert pipeline.steps() is pipeline._PIPELINE
+    assert pipeline.steps("hard") is pipeline._PIPELINE
 
 
 def test_hyper_steps_drop_cleaner_practices_and_perf_and_gate_workers_full() -> None:
@@ -67,8 +67,8 @@ def test_hyper_steps_drop_cleaner_practices_and_perf_and_gate_workers_full() -> 
 
 
 def test_hyper_step_only_changes_coder_and_architect() -> None:
-    assert pipeline.hyper_step(pipeline.find("architect")) == Worker("architect", "full")
-    assert pipeline.hyper_step(pipeline.find("qa")) is pipeline.find("qa")
+    assert pipeline._hyper_step(pipeline.find("architect")) == Worker("architect", "full")
+    assert pipeline._hyper_step(pipeline.find("qa")) is pipeline.find("qa")
 
 
 def test_find_under_hyper_rejects_a_dropped_role() -> None:
@@ -104,7 +104,7 @@ def test_window_rejects_an_unknown_role(start: str | None, stop: str | None, mod
 
 
 def test_check_role() -> None:
-    pipeline.check_role(None, "hyper")
-    pipeline.check_role("qa", "hyper")
+    pipeline._check_role(None, "hyper")
+    pipeline._check_role("qa", "hyper")
     with pytest.raises(SystemExit):
-        pipeline.check_role("perf", "hyper")
+        pipeline._check_role("perf", "hyper")

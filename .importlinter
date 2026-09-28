@@ -241,3 +241,12 @@ forbidden_modules =
     marestail.depth
     marestail.freeze
     marestail.timeline
+
+[importlinter:contract:pipeline-belongs-to-orchestration]
+name = The role list and how a scope reshapes it are known only to the runner and the prompt builder
+type = protected
+protected_modules =
+    marestail.pipeline
+allowed_importers =
+    marestail.runner
+    marestail.prompts
