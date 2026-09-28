@@ -114,10 +114,36 @@ type = protected
 protected_modules =
     marestail.gates._cycles
     marestail.gates._crap
+    marestail.gates._hyper_crap
     marestail.gates._coverage
     marestail.gates._serve
 allowed_importers =
     marestail.gates
+
+[importlinter:contract:crap-belongs-to-crap-gates]
+name = CRAP scoring and the hyper no-worse-than-base rules are private to the CRAP gates
+type = protected
+protected_modules =
+    marestail.gates._crap
+    marestail.gates._hyper_crap
+allowed_importers =
+    marestail.gates._hyper_crap
+    marestail.gates.py_crap
+    marestail.gates.ts_crap
+    marestail.gates.rb_crap
+    marestail.gates.rs_crap
+    marestail.gates.cs_crap
+    marestail.gates.java_crap
+    marestail.gates.ex_crap
+    marestail.gates.er_crap
+
+[importlinter:contract:hyper-crap-above-crap]
+name = Hyper CRAP builds on CRAP scoring, never the other way
+type = forbidden
+source_modules =
+    marestail.gates._crap
+forbidden_modules =
+    marestail.gates._hyper_crap
 
 [importlinter:contract:serve-belongs-to-qa]
 name = The app lifecycle is private to the qa gate

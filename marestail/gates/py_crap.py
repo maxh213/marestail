@@ -9,6 +9,7 @@ from marestail.gates._coverage import scoped_lines as scoped_lines
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
+from marestail.gates._crap import crap_score
 from marestail.gates._crap import describe as describe
 from marestail.gates._hyper_crap import Hyper, judged
 from marestail.report import Result, elapsed
@@ -87,7 +88,7 @@ def flatten(blocks: list[Block]) -> list[Block]:
 
 def score(file: str, block: Block, covered: float) -> Block:
     complexity = block["complexity"]
-    crap = complexity**2 * (1 - covered) ** 3 + complexity
+    crap = crap_score(complexity, covered)
     return {"file": file, "line": block["lineno"], "name": block["name"], "cc": complexity, "cov": covered, "crap": crap}
 
 

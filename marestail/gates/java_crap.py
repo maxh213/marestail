@@ -5,6 +5,7 @@ from marestail import java
 from marestail.context import Context
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
+from marestail.gates._crap import crap_score
 from marestail.gates._hyper_crap import Hyper, covered_member, judged, member_units
 from marestail.report import Result, elapsed
 
@@ -70,7 +71,7 @@ def score(ctx: Context, member: dict[str, Any], coverage: dict[str, Any]) -> dic
         "name": member["name"],
         "cc": complexity,
         "cov": covered,
-        CRAP: complexity**2 * (1 - covered) ** 3 + complexity,
+        CRAP: crap_score(complexity, covered),
     }
 
 

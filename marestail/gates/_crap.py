@@ -9,6 +9,10 @@ KEY = "crap_max"
 DEFAULT = 4
 
 
+def crap_score(complexity: float, covered: float) -> float:
+    return complexity**2 * (1 - covered) ** 3 + complexity
+
+
 def above(scored: list[Scored], limit: float) -> list[Scored]:
     return sorted((entry for entry in scored if entry["crap"] > limit), key=crap_order)
 
@@ -40,5 +44,5 @@ def file_percent_score(fn: Scored, file_cov: dict[str, Any], ctx: Context) -> Sc
         "name": fn["name"],
         "complexity": complexity,
         "cov": covered,
-        "crap": complexity**2 * (1 - covered) ** 3 + complexity,
+        "crap": crap_score(complexity, covered),
     }

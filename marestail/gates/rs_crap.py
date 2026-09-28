@@ -8,6 +8,7 @@ from marestail.context import Context
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
+from marestail.gates._crap import crap_score
 from marestail.gates._crap import describe as describe
 from marestail.gates._hyper_crap import Hyper, judged, unhit_lines, unit
 from marestail.report import Result, elapsed
@@ -69,7 +70,7 @@ def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[st
         "name": fn["name"],
         "cc": complexity,
         "cov": covered,
-        "crap": complexity**2 * (1 - covered) ** 3 + complexity,
+        "crap": crap_score(complexity, covered),
     }
 
 
