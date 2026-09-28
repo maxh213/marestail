@@ -42,7 +42,11 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     tracked; a tracked one is left byte-for-byte and install prints
     `no Stop hook for <backend>: <path> is tracked` (backend `claude`, `agy`, `grok`, `cursor`).
   - Hyper install never writes `.gitignore`, `CLAUDE.md` or `AGENTS.md`, tracked or not.
-  - Stdout, in order: an optional Grok trust line; `left tracked files alone: <paths>`
+  - Hyper install trusts <target> for Grok as today (`trust_grok_folder`), whether or
+    not a Grok hook was written and also when npm fails; a refused non-git target is
+    not trusted. When <target> was not yet trusted in `$GROK_HOME/trusted_folders.toml`
+    it prints `trusted <target> for grok project hooks`, else nothing.
+  - Stdout, in order: the Grok trust line when printed; `left tracked files alone: <paths>`
     (comma+space separated, sorted, every tracked path install would have written or
     edited, including `.gitignore`, `CLAUDE.md`, `AGENTS.md`, `marestail.toml`,
     `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md` and hook files; omitted when
@@ -77,7 +81,7 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     And that commit tracks `.gitignore` holding exactly `node_modules/\n`
     And that commit tracks `CLAUDE.md` holding exactly `team rules\n`
     And a fake `npm` first on PATH that records its argv and cwd, prints `npm out` to stdout and `npm err` to stderr, creates `.marestail/tooling/node_modules/.bin/`, and exits 0
-    And GROK_HOME points at a fresh empty directory
+    And GROK_HOME points at a directory whose `trusted_folders.toml` already trusts <target>, so no trust line is printed unless a scenario says otherwise
 
   Scenario: a hyper install leaves the working tree clean
     When I run `marestail install --scope hyper <target>`
@@ -88,6 +92,26 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     And stdout is exactly the two lines `left tracked files alone: .gitignore, CLAUDE.md` and `installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude`
     And stderr is empty
     And `.marestail/tooling/npm.log` contains `npm out` and `npm err`
+
+  Scenario: a first hyper install trusts the folder for Grok
+    Given GROK_HOME points at a fresh empty directory instead
+    When I run `marestail install --scope hyper <target>`
+    Then stdout is exactly these lines in order:
+      | trusted <target> for grok project hooks |
+      | left tracked files alone: .gitignore, CLAUDE.md |
+      | installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude |
+    And `$GROK_HOME/trusted_folders.toml` has `trusted = true` under `[folders."<target>"]`
+    And a second `marestail install --scope hyper <target>` prints no trust line
+
+  Scenario: npm failing still trusts the folder for Grok
+    Given GROK_HOME points at a fresh empty directory instead
+    And the fake npm exits 1
+    When I run `marestail install --scope hyper <target>`
+    Then the exit code is 1
+    And stdout is exactly these lines in order:
+      | trusted <target> for grok project hooks |
+      | left tracked files alone: .gitignore, CLAUDE.md |
+      | npm install --prefix .marestail/tooling failed (exit 1); everything else is installed, see .marestail/tooling/npm.log |
 
   Scenario: everything install wrote is hidden by the local exclude file
     When I run `marestail install --scope hyper <target>`
@@ -246,7 +270,7 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     When I run `marestail install --scope hyper <plain>`
     Then the exit code is 1
     And stdout is `marestail install --scope hyper needs a git repository: <plain>`
-    And <plain> is still empty
+    And <plain> is still empty and GROK_HOME's `trusted_folders.toml` does not mention <plain>
 
   Scenario: npm failing is reported
     Given the fake npm exits 1

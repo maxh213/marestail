@@ -1,6 +1,6 @@
 # QA procedure: `marestail install --scope hyper` commits nothing
 
-Start in the marestail-green repo root with `.venv` active and `bin/` on PATH, and run `export M=$PWD` there. Step 1 moves you into `$T`; later steps say when to change directory.
+Start in the marestail-green repo root with `.venv` active and `bin/` on PATH, and run `export M=$PWD` there. Step 1 moves you into `$T`; later steps say when to change directory. `$G` starts empty, so the first install into any folder prints `trusted <folder> for grok project hooks` as its first line; later installs into that folder do not.
 
 1. Build the target and a fake npm:
    ```sh
@@ -13,7 +13,7 @@ Start in the marestail-green repo root with `.venv` active and `bin/` on PATH, a
    ```
    Expected: `git status --porcelain` prints nothing.
 2. `marestail install --scope hyper $T; echo "exit=$?"; cat .marestail/tooling/npm.log`
-   Expected: exactly `left tracked files alone: .gitignore, CLAUDE.md`, then `installed into /tmp/mt-hyper with --scope hyper; nothing to commit, see .git/info/exclude`, then `exit=0`; no `npm out`/`npm err` before `exit=0`; npm.log holds `npm out` and `npm err`.
+   Expected: exactly `trusted /tmp/mt-hyper for grok project hooks`, then `left tracked files alone: .gitignore, CLAUDE.md`, then `installed into /tmp/mt-hyper with --scope hyper; nothing to commit, see .git/info/exclude`, then `exit=0`; no `npm out`/`npm err` before `exit=0`; npm.log holds `npm out` and `npm err`; `grep -A1 mt-hyper $G/trusted_folders.toml` shows `trusted = true`.
 3. `git status --porcelain; cat .gitignore CLAUDE.md; ls AGENTS.md package.json sonar-project.properties .claude/settings.json`
    Expected: status prints nothing; the files print `node_modules/` and `team rules`; all four `ls` targets are missing.
 4. `sed -n '/# marestail (install --scope hyper)/,/# end marestail/p' .git/info/exclude`
@@ -35,7 +35,7 @@ Start in the marestail-green repo root with `.venv` active and `bin/` on PATH, a
 11. `NPM_EXIT=1 marestail install --scope hyper $T > /tmp/mt-npm.out; echo "exit=$?"; tail -1 /tmp/mt-npm.out`
     Expected: last line `npm install --prefix .marestail/tooling failed (exit 1); everything else is installed, see .marestail/tooling/npm.log`; no `installed into` line; `exit=1`.
 12. `marestail install --scope hyper /tmp/mt-hyper-plain; echo "exit=$?"; ls -A /tmp/mt-hyper-plain`
-    Expected: `marestail install --scope hyper needs a git repository: /tmp/mt-hyper-plain`; `exit=1`; nothing listed.
+    Expected: `marestail install --scope hyper needs a git repository: /tmp/mt-hyper-plain` and no trust line; `exit=1`; nothing listed; `grep -c mt-hyper-plain $G/trusted_folders.toml` prints `0`.
 13. Other installs, each into a git repo:
     ```sh
     cd $M && for d in a b c; do rm -rf /tmp/mt-$d && git init -q /tmp/mt-$d && sha1sum /tmp/mt-$d/.git/info/exclude > /tmp/mt-$d.sum; done
@@ -50,8 +50,8 @@ Start in the marestail-green repo root with `.venv` active and `bin/` on PATH, a
 15. Jest target: `rm -rf /tmp/mt-jest && git init -q /tmp/mt-jest && printf '[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n' > /tmp/mt-jest/marestail.toml && marestail install --scope hyper /tmp/mt-jest >/dev/null; ls /tmp/mt-jest/.marestail/tooling; grep -e jest -e vitest /tmp/mt-jest/.marestail/tooling/package.json /tmp/mt-jest/.marestail/tooling/stryker.config.json`
     Expected: no `vitest.config.ts` and no `jest.config.*` listed; the only matches are `@stryker-mutator/jest-runner` in package.json and `"testRunner": "jest"` and `"plugins": ["@stryker-mutator/jest-runner"]` in the Stryker config.
 16. Kept files: `cd $T && printf 'ours\n' > PERFORMANCE.md && mkdir -p .claude && printf '{}\n' > .claude/settings.local.json && git add -f PERFORMANCE.md .claude/settings.local.json && git commit -qm ours && marestail install --scope hyper $T; cat PERFORMANCE.md .claude/settings.local.json; git status --porcelain`
-    Expected: stdout lines `left tracked files alone: .claude/settings.local.json, .cursor/hooks.json, .gitignore, CLAUDE.md, PERFORMANCE.md`, `no Stop hook for claude: .claude/settings.local.json is tracked`, `no Stop hook for cursor: .cursor/hooks.json is tracked`, then the `installed into` line; the files print `ours` and `{}`; status prints nothing.
+    Expected: no trust line (step 2 already trusted `$T`); stdout lines `left tracked files alone: .claude/settings.local.json, .cursor/hooks.json, .gitignore, CLAUDE.md, PERFORMANCE.md`, `no Stop hook for claude: .claude/settings.local.json is tracked`, `no Stop hook for cursor: .cursor/hooks.json is tracked`, then the `installed into` line; the files print `ours` and `{}`; status prints nothing.
 17. Tooling-less config: `rm -rf /tmp/mt-old && git init -q /tmp/mt-old && printf '[ts]\nroot = "."\n' > /tmp/mt-old/marestail.toml && marestail install --scope hyper /tmp/mt-old; cat /tmp/mt-old/marestail.toml`
-    Expected: stdout has `marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it` just before the last `installed into /tmp/mt-old ...` line; the file is still `[ts]` / `root = "."`.
+    Expected: first line `trusted /tmp/mt-old for grok project hooks` (a new folder); stdout has `marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it` just before the last `installed into /tmp/mt-old ...` line; the file is still `[ts]` / `root = "."`.
 18. `cd $M && grep -n -A20 'Installing into a repository that does not use marestail' README.md`
     Expected: the section shows `marestail install --scope hyper`, names `.git/info/exclude` and `.marestail/tooling`, says a reviewer sees only the fix and its tests, and says Python venv and tool lookups are unchanged for now.
