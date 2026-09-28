@@ -5,6 +5,7 @@ from typing import Any
 
 from marestail.context import Context
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
+from marestail.javascript import config_flag, tool, tooling_file
 from marestail.javascript import rel as relative
 from marestail.report import Result, elapsed
 from marestail.shell import run
@@ -29,10 +30,17 @@ def run_gate(ctx: Context) -> Result:
 
 
 def tsc_findings(ctx: Context) -> list[str]:
+    tooling = tooling_file(ctx, "tsconfig.json")
+    if tooling is not None:
+        return tsc_run(ctx, str(tooling))
     name = str(ctx.ts("tsconfig", "tsconfig.app.json"))
     if not (ctx.ts_root() / name).exists():
         return [f"marestail.toml:1 [ts] tsconfig = {name!r} does not exist under {relative(str(ctx.ts_root()), ctx)}"]
-    code, output = run(["npx", "tsc", "--noEmit", "-p", name], cwd=ctx.ts_root(), timeout=900)
+    return tsc_run(ctx, name)
+
+
+def tsc_run(ctx: Context, tsconfig: str) -> list[str]:
+    code, output = run([*tool(ctx, "tsc"), "--noEmit", "-p", tsconfig], cwd=ctx.ts_root(), timeout=900)
     return [] if code == 0 else tsc_report(output, ctx)
 
 
@@ -93,7 +101,8 @@ def eslint_lines(output: str) -> list[str]:
 
 def eslint_command(ctx: Context) -> list[str]:
     benchmarks = ["--ignore-pattern", "perf/"] if ctx.ts_root().resolve() == ctx.root.resolve() else []
-    return ["npx", "eslint", ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
+    config = config_flag(ctx, "-c", "eslint.config.mjs")
+    return [*tool(ctx, "eslint"), *config, ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
 
 
 def parse(output: str) -> list[Any] | None:

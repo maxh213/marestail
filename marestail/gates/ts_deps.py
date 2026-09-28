@@ -2,6 +2,7 @@ import re
 import time
 
 from marestail.context import Context
+from marestail.javascript import config_or, tool
 from marestail.javascript import rel as relative
 from marestail.report import Result, elapsed
 from marestail.shell import run
@@ -12,9 +13,9 @@ MAX_LINES = 60
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    config = ctx.ts("depcruise_config", ".dependency-cruiser.cjs")
+    config = config_or(ctx, ".dependency-cruiser.cjs", ctx.ts("depcruise_config", ".dependency-cruiser.cjs"))
     source = ctx.ts("source", "src")
-    command = ["npx", "depcruise", "--config", config, "--output-type", "err", source]
+    command = [*tool(ctx, "depcruise"), "--config", config, "--output-type", "err", source]
     code, output = run(command, cwd=ctx.ts_root(), timeout=600)
     findings, ok = outcome(output, ctx, code)
     summary = "dependency rules kept" if ok else "dependency rules broken"

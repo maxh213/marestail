@@ -55,6 +55,7 @@ export PATH="$PATH:/path/to/marestail/bin"
 cd your-repo
 marestail install .          # full install: marestail.toml, sonar-project.properties, Gate section in CLAUDE.md / AGENTS.md, PERFORMANCE.md, Stop hooks
 marestail install . --scope hard   # leaves CLAUDE.md and AGENTS.md alone; implies --gitignore-generated
+marestail install . --scope hyper  # touches no tracked file: everything hidden by .git/info/exclude, tooling under .marestail/tooling
 marestail install . --gitignore-generated   # also gitignore features/, qa/, tasks/, PERFORMANCE.md, perf/ and the Stop-hook configs, for repos where not everyone runs marestail
 
 marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail
@@ -95,6 +96,25 @@ Hermes pipeline runs (`--agent hermes`) use `hermes chat --query-file <prompt fi
 Junie pipeline runs (`--agent junie`) use `junie --skip-update-check --input-format=json --output-format=json -p <repo root> --model=<model> --effort=<effort>`, with the prompt sent on stdin as one JSON object `{"task": "<prompt>"}`; `--model` is passed only when the run has a model, and `--effort` only for `low`, `medium` or `high`. A judge `VERDICT:` line inside the JSON `result` still counts. Junie has no command Stop hook; the runner's four-hour cap is the timeout.
 
 `install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `install --scope hard` leaves `CLAUDE.md` and `AGENTS.md` alone (does not create or append them) and implies `--gitignore-generated`. On a full install, `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
+
+## Installing into a repository that does not use marestail
+
+Use `marestail install --scope hyper` when nobody else on the team runs marestail and the pull request must hold the fix and its tests and nothing else:
+
+```sh
+cd shared-repo
+marestail install --scope hyper .
+git status --porcelain       # prints nothing
+marestail run tasks/001.md --scope hyper
+```
+
+It does everything `--scope hard` does and then goes further. It changes no tracked file: `.gitignore`, `CLAUDE.md`, `AGENTS.md` and any hook file the repo already tracks are left byte-for-byte, and install prints which tracked files it left alone. Everything it writes (`marestail.toml` at the root, `tasks/`, `guidance/`, `PERFORMANCE.md`, the Stop-hook configs, `.marestail/`) is hidden by one marked block in git's local exclude file, `.git/info/exclude` (the path `git rev-parse --git-path info/exclude` prints). That file is never committed and is shared by every worktree of the clone. Running install again leaves one block. The target needs to be a git repository; anything else is refused before a file is written.
+
+TypeScript tooling lives out of tree under `.marestail/tooling`: its own `package.json` and `node_modules`, installed with `npm install --prefix .marestail/tooling` (npm's output goes to `.marestail/tooling/npm.log`). It also holds the ESLint, tsconfig, dependency-cruiser, Stryker, knip, Vitest and Sonar configs, except for any kind the repo already has. The target's own `package.json` and lockfile are not touched. A new `marestail.toml` gets `[ts] tooling = ".marestail/tooling"`. With that key set, every gate runs the binaries in `.marestail/tooling/node_modules/.bin` and passes the tooling configs by path: ESLint `-c`, `tsc -p`, depcruise `--config`, the Stryker config argument, knip `--config`, vitest `--config`, the complexity, depth and comments scanners' `typescript` lookup, and Sonar's `-Dproject.settings=`. A config missing from `.marestail/tooling` falls back to the repo's own. A jest repo keeps its own jest. An existing `marestail.toml` is never edited, and install prints a line telling you to add the key. With the key unset, every gate looks where it looks today.
+
+The Claude Stop hook goes to `.claude/settings.local.json`. A hook file that is already tracked is left alone, and install says `no Stop hook for <backend>`. The runner already untracks any excluded file a worker force-adds, so marestail files cannot slip into a commit during a run.
+
+A reviewer of the pull request sees only the fix and its tests. They will not see `marestail.toml`, Sonar properties, guidance, task files, tool configs, a lockfile, a `.gitignore` block or agent docs. A repository that already committed marestail files keeps them, because hyper removes nothing. Python targets still keep their venv and their tool lookups where they are today; moving those out of tree is left for a later task.
 
 ## Watch
 

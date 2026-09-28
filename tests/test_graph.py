@@ -76,6 +76,23 @@ def test_ts_graph_defaults(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> 
     assert fake.options == [{"cwd": tmp_path}]
 
 
+def test_ts_graph_with_tooling(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(graph, [(0, ""), (0, "")])
+    folder = tmp_path / ".marestail" / "tooling"
+    raw = {"ts": {"tooling": ".marestail/tooling"}}
+    depcruise = str(folder / "node_modules" / ".bin" / "depcruise")
+
+    graph.ts_graph(config(tmp_path, raw))
+    folder.mkdir(parents=True)
+    (folder / ".dependency-cruiser.cjs").write_text("")
+    graph.ts_graph(config(tmp_path, raw))
+
+    assert fake.calls == [
+        [depcruise, "--config", ".dependency-cruiser.cjs", "--output-type", "text", "src"],
+        [depcruise, "--config", str(folder / ".dependency-cruiser.cjs"), "--output-type", "text", "src"],
+    ]
+
+
 def test_elixir_graph(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     fake = fake_run(graph, [(0, "==> app\nlib/a.ex\n└── lib/b.ex\n")])
     assert graph.elixir_graph(config(tmp_path, {"elixir": {"root": "app"}})) == "## Elixir modules\nlib/a.ex\n└── lib/b.ex"

@@ -120,21 +120,27 @@ def test_depth_command(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pyte
 
 
 @pytest.mark.parametrize(
-    ("argv", "generated", "hard"),
+    ("argv", "generated", "hard", "hyper"),
     [
-        (["install"], False, False),
-        (["install", "sub", "--gitignore-generated"], True, False),
-        (["install", "--scope", "hard"], False, True),
-        (["install", "--scope", "all"], False, False),
-        (["install", "--scope", "changed"], False, False),
+        (["install"], False, False, False),
+        (["install", "sub", "--gitignore-generated"], True, False, False),
+        (["install", "--scope", "hard"], False, True, False),
+        (["install", "--scope", "all"], False, False, False),
+        (["install", "--scope", "changed"], False, False, False),
+        (["install", "--scope", "hyper"], False, False, True),
     ],
 )
-def test_install_command(repo: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str], generated: bool, hard: bool) -> None:
-    fake = Recorder(None)
+def test_install_command(repo: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str], generated: bool, hard: bool, hyper: bool) -> None:
+    fake = Recorder(0)
     monkeypatch.setattr(install, "install", fake)
     assert cli.main(argv) == 0
     target = repo / argv[1] if len(argv) > 1 and not argv[1].startswith("-") else repo
-    assert fake.calls == [(target, ("gitignore_generated", generated), ("hard", hard))]
+    assert fake.calls == [(target, ("gitignore_generated", generated), ("hard", hard), ("hyper", hyper))]
+
+
+def test_install_command_returns_the_install_exit_code(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install, "install", Recorder(1))
+    assert cli.main(["install", "--scope", "hyper"]) == 1
 
 
 @pytest.mark.parametrize("action", ["up", "down"])

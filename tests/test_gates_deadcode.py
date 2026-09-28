@@ -125,6 +125,23 @@ def test_ts_findings(tmp_path: Path, fake_run: Any) -> None:
     assert fake.options == [{"cwd": tmp_path / "web", "timeout": 900}]
 
 
+def test_ts_findings_with_tooling(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(deadcode, [(0, "{}"), (0, "{}")])
+    folder = tmp_path / ".marestail" / "tooling"
+    ctx = make_context(tmp_path, {"ts": {"tooling": ".marestail/tooling"}})
+    knip = str(folder / "node_modules" / ".bin" / "knip")
+
+    deadcode.ts_findings(ctx)
+    folder.mkdir(parents=True)
+    (folder / "knip.json").write_text("{}")
+    deadcode.ts_findings(ctx)
+
+    assert fake.calls == [
+        [knip, "--reporter", "json", "--no-progress"],
+        [knip, "--config", str(folder / "knip.json"), "--reporter", "json", "--no-progress"],
+    ]
+
+
 def test_ts_kinds_can_be_configured(tmp_path: Path, fake_run: Any) -> None:
     fake_run(deadcode, [(0, json.dumps(KNIP))])
 

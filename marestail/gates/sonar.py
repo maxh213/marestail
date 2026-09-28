@@ -7,6 +7,7 @@ from typing import Any
 
 from marestail import dotnet, erlang, java, rust
 from marestail.context import Context
+from marestail.javascript import tooling_file
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 from marestail.sonar.client import Client, credentials
@@ -152,8 +153,14 @@ def scanner_properties(ctx: Context, key: str) -> list[str]:
         f"-Dsonar.projectBaseDir={root}",
         f"-Dsonar.working.directory={root}/.marestail/scannerwork",
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
+        *settings_property(ctx),
         *java_properties(ctx),
     ]
+
+
+def settings_property(ctx: Context) -> list[str]:
+    settings = tooling_file(ctx, PROPERTIES_FILE)
+    return [] if settings is None else [f"-Dproject.settings={settings}"]
 
 
 def git_mounts(ctx: Context) -> list[str]:
@@ -197,7 +204,7 @@ def split_patterns(value: str) -> list[str]:
 
 
 def project_properties(ctx: Context) -> list[tuple[str, str]]:
-    path = ctx.root / PROPERTIES_FILE
+    path = tooling_file(ctx, PROPERTIES_FILE) or ctx.root / PROPERTIES_FILE
     return properties(path.read_text()) if path.exists() else []
 
 

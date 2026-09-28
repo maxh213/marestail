@@ -9,6 +9,7 @@ from typing import Any
 
 from marestail.context import Context
 from marestail.gates._coverage import finding_file
+from marestail.javascript import config_flag, tool
 from marestail.report import Result, elapsed
 from marestail.shell import run
 
@@ -123,7 +124,8 @@ def ts_findings(ctx: Context) -> list[str]:
         return []
     ts_root = ctx.ts_root()
     kinds = ctx.config.get("deadcode", "ts_kinds", TS_KINDS)
-    _, output = run(["npx", "--yes", "knip", "--reporter", "json", "--no-progress"], cwd=ts_root, timeout=900)
+    command = [*tool(ctx, "knip", ("npx", "--yes")), *config_flag(ctx, "--config", "knip.json")]
+    _, output = run([*command, "--reporter", "json", "--no-progress"], cwd=ts_root, timeout=900)
     start = output.find("{")
     if start < 0:
         return [failed("knip produced no report", output)]

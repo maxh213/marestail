@@ -6,7 +6,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import TS_COVERAGE_DIR
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
-from marestail.javascript import labelled
+from marestail.javascript import config_flag, labelled, tool
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
@@ -66,9 +66,9 @@ def read_coverage(ctx: Context) -> dict[str, Any]:
 def vitest_command(ctx: Context) -> list[str]:
     report_dir = ctx.work / COVERAGE_DIR
     return [
-        "npx",
-        chosen_runner(ctx),
+        *tool(ctx, chosen_runner(ctx)),
         "run",
+        *config_flag(ctx, "--config", "vitest.config.ts"),
         "--coverage.enabled=true",
         "--coverage.all=true",
         "--coverage.reporter=json",

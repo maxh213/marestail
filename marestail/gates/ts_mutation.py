@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
+from marestail.javascript import config_flag, tool
 from marestail.javascript import rel as relative
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
@@ -32,7 +33,7 @@ def mutated(ctx: Context, scope: MutationScope, started: float) -> Result:
     mutate = targets(ctx, changed_sources(ctx, scope.files or []))
     if scope.mode != "full" and not mutate:
         return Result.skipped(GATE, "no changed typescript sources")
-    return stryker_result(ctx, scope, mutation_command(mutate), started)
+    return stryker_result(ctx, scope, mutation_command(ctx, mutate), started)
 
 
 def drop_tree(path: Path) -> None:
@@ -68,8 +69,18 @@ def survivor_result(survivors: list[str], note: str, started: float) -> Result:
     return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
-def mutation_command(mutate: list[str]) -> list[str]:
-    command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
+def mutation_command(ctx: Context, mutate: list[str]) -> list[str]:
+    config = config_flag(ctx, "run", "stryker.config.json")
+    command = [
+        *tool(ctx, "stryker"),
+        *(config or ["run"]),
+        "--reporters",
+        "json,progress",
+        "--tempDirName",
+        TEMP_DIR,
+        "--cleanTempDir",
+        "always",
+    ]
     if mutate:
         command += ["--mutate", ",".join(mutate)]
     return command

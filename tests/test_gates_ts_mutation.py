@@ -125,9 +125,22 @@ def test_survivor_summary_with_a_note(tmp_path: Path) -> None:
     assert (result.ok, result.summary) == (False, "1 surviving mutants (note)")
 
 
-def test_mutation_command() -> None:
-    assert ts_mutation.mutation_command([]) == BASE
-    assert ts_mutation.mutation_command(["a.ts", "b.ts"]) == [*BASE, "--mutate", "a.ts,b.ts"]
+def test_mutation_command(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, TS)
+
+    assert ts_mutation.mutation_command(ctx, []) == BASE
+    assert ts_mutation.mutation_command(ctx, ["a.ts", "b.ts"]) == [*BASE, "--mutate", "a.ts,b.ts"]
+
+
+def test_mutation_command_uses_the_tooling_config(tmp_path: Path) -> None:
+    tooling = tmp_path / ".marestail" / "tooling"
+    ctx = make_context(tmp_path, {"ts": {"root": ".", "tooling": ".marestail/tooling"}})
+    stryker = str(tooling / "node_modules" / ".bin" / "stryker")
+
+    assert ts_mutation.mutation_command(ctx, []) == [stryker, *BASE[2:]]
+    tooling.mkdir(parents=True)
+    (tooling / "stryker.config.json").write_text("{}")
+    assert ts_mutation.mutation_command(ctx, []) == [stryker, "run", str(tooling / "stryker.config.json"), *BASE[3:]]
 
 
 def test_changed_sources_drop_tests_specs_and_benchmarks(tmp_path: Path) -> None:

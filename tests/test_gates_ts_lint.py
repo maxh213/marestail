@@ -214,3 +214,64 @@ def test_hyper_missing_tsconfig_still_fails(tmp_path: Path, fake_run: Any) -> No
     result = checked(ts_lint.run_gate(ctx), ts_lint.GATE)
 
     assert (result.ok, result.findings) == (False, ["marestail.toml:1 [ts] tsconfig = 'missing.json' does not exist under ."])
+
+
+TOOLED = {"ts": {"root": ".", "tooling": ".marestail/tooling"}}
+
+
+def tooling(root: Path, *names: str) -> Path:
+    folder = root / ".marestail" / "tooling"
+    folder.mkdir(parents=True)
+    for name in names:
+        (folder / name).write_text("{}")
+    return folder
+
+
+def test_tooling_configs_drive_tsc_and_eslint(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_lint, [(0, ""), (0, "[]")])
+    folder = tooling(tmp_path, "tsconfig.json", "eslint.config.mjs")
+    bin_dir = folder / "node_modules" / ".bin"
+
+    result = checked(ts_lint.run_gate(make_context(tmp_path, TOOLED)), ts_lint.GATE)
+
+    assert result.ok
+    assert fake.calls == [
+        [str(bin_dir / "tsc"), "--noEmit", "-p", str(folder / "tsconfig.json")],
+        [
+            str(bin_dir / "eslint"),
+            "-c",
+            str(folder / "eslint.config.mjs"),
+            ".",
+            "--ignore-pattern",
+            "perf/",
+            "--max-warnings",
+            "0",
+            "--format",
+            "json",
+        ],
+    ]
+    assert fake.options == [{"cwd": tmp_path, "timeout": 900}] * 2
+
+
+def test_tooling_without_configs_falls_back_to_the_repo_ones(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_lint, [(0, ""), (0, "[]")])
+    bin_dir = tooling(tmp_path) / "node_modules" / ".bin"
+    (tmp_path / "tsconfig.build.json").write_text("{}")
+    raw = {"ts": {**TOOLED["ts"], "tsconfig": "tsconfig.build.json"}}
+
+    checked(ts_lint.run_gate(make_context(tmp_path, raw)), ts_lint.GATE)
+
+    assert fake.calls == [
+        [str(bin_dir / "tsc"), "--noEmit", "-p", "tsconfig.build.json"],
+        [str(bin_dir / "eslint"), ".", "--ignore-pattern", "perf/", "--max-warnings", "0", "--format", "json"],
+    ]
+
+
+def test_tooling_without_a_tsconfig_still_reports_the_missing_repo_one(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_lint, [(0, "[]")])
+    tooling(tmp_path)
+    raw = {"ts": {**TOOLED["ts"], "tsconfig": "tsconfig.build.json"}}
+
+    result = checked(ts_lint.run_gate(make_context(tmp_path, raw)), ts_lint.GATE)
+
+    assert result.findings == ["marestail.toml:1 [ts] tsconfig = 'tsconfig.build.json' does not exist under ."]

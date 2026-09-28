@@ -276,6 +276,25 @@ def test_scanner_exclusions(tmp_path: Path, text: str, expected: str) -> None:
     assert sonar.scanner_exclusions(make_context(tmp_path)) == expected
 
 
+def test_tooling_properties_drive_settings_and_exclusions(tmp_path: Path) -> None:
+    folder = tmp_path / ".marestail" / "tooling"
+    folder.mkdir(parents=True)
+    (tmp_path / "sonar-project.properties").write_text("sonar.exclusions=b/**\n")
+    ctx = make_context(tmp_path, {"ts": {"tooling": ".marestail/tooling"}})
+
+    assert sonar.settings_property(ctx) == []
+    assert sonar.scanner_exclusions(ctx) == "b/**,perf/**"
+    (folder / "sonar-project.properties").write_text("sonar.exclusions=a/**\n")
+    assert sonar.settings_property(ctx) == [f"-Dproject.settings={folder / 'sonar-project.properties'}"]
+    assert sonar.scanner_exclusions(ctx) == "a/**,perf/**"
+    assert f"-Dproject.settings={folder / 'sonar-project.properties'}" in sonar.scanner_properties(ctx, "k")
+
+
+def test_settings_property_is_empty_without_tooling(tmp_path: Path) -> None:
+    (tmp_path / "sonar-project.properties").write_text("")
+    assert sonar.settings_property(make_context(tmp_path)) == []
+
+
 def declared_exclusions(text: str) -> list[str]:
     prefix = "sonar.exclusions="
     line = next(line for line in text.splitlines() if line.startswith(prefix))

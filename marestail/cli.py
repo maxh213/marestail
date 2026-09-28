@@ -58,7 +58,11 @@ HELP_AGENT = f"agent backend ({', '.join(AGENT_CHOICES[:-1])}, or {AGENT_CHOICES
 HELP_ONLY = "comma separated gate names"
 HELP_HOOK = "behave as a Claude Code Stop hook"
 HELP_GITIGNORE = "add the files marestail generates to the target's .gitignore"
-HELP_INSTALL_SCOPE = "hard leaves CLAUDE.md and AGENTS.md alone and implies --gitignore-generated; all and changed install as today"
+HELP_INSTALL_SCOPE = (
+    "hard leaves CLAUDE.md and AGENTS.md alone and implies --gitignore-generated; "
+    "hyper also touches no tracked file, hides everything through .git/info/exclude and puts tooling under .marestail/tooling; "
+    "all and changed install as today"
+)
 HELP_REFRESH = "seconds between redraws"
 HELP_WATCH_ALL = "show every repo with a .marestail directory, not just those with a running pipeline"
 HELP_WATCH_PATHS = "directories to scan for repos with a .marestail directory"
@@ -426,8 +430,8 @@ def default_watch_roots() -> list[Path]:
 def install_command(args: argparse.Namespace) -> int:
     from marestail.install import install
 
-    install(Path(args.target).resolve(), gitignore_generated=args.gitignore_generated, hard=args.scope == HARD_SCOPE)
-    return 0
+    target = Path(args.target).resolve()
+    return install(target, gitignore_generated=args.gitignore_generated, hard=args.scope == HARD_SCOPE, hyper=args.scope == HYPER_SCOPE)
 
 
 def graph_command(args: argparse.Namespace) -> int:

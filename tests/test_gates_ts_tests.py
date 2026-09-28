@@ -52,6 +52,23 @@ def test_vitest_command(tmp_path: Path) -> None:
     ]
 
 
+def test_vitest_command_with_tooling(tmp_path: Path) -> None:
+    folder = tmp_path / ".marestail" / "tooling"
+    ctx = make_context(tmp_path, {"ts": {"tooling": ".marestail/tooling"}})
+    vitest = str(folder / "node_modules" / ".bin" / "vitest")
+
+    assert ts_tests.vitest_command(ctx)[:3] == [vitest, "run", "--coverage.enabled=true"]
+    folder.mkdir(parents=True)
+    (folder / "vitest.config.ts").write_text("")
+    assert ts_tests.vitest_command(ctx)[:5] == [vitest, "run", "--config", str(folder / "vitest.config.ts"), "--coverage.enabled=true"]
+
+
+def test_jest_command_ignores_tooling(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"ts": {"runner": "jest", "tooling": ".marestail/tooling"}})
+
+    assert ts_tests.jest_command(ctx)[:2] == [str(tmp_path / "node_modules" / ".bin" / "jest"), "--ci"]
+
+
 @pytest.mark.parametrize(
     ("ts", "globs"),
     [

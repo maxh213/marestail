@@ -1,0 +1,7 @@
+{
+  "testRunner": "@RUNNER@",
+  "plugins": ["@stryker-mutator/@RUNNER@-runner"],
+@OPTIONS@  "mutate": @MUTATE@,
+  "ignorePatterns": [".marestail"],
+  "coverageAnalysis": "perTest"
+}

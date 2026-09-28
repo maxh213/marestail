@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from marestail import javascript
 from marestail.config import Config
 from marestail.context import Context
 from marestail.shell import run
@@ -67,11 +68,11 @@ def ts_graph(config: Config) -> str:
     if config.section("ts") is None:
         return ""
     ts_root = config.root / config.get("ts", "root", HERE)
+    ctx = Context(config=config)
     command = [
-        "npx",
-        "depcruise",
+        *javascript.tool(ctx, "depcruise"),
         "--config",
-        config.get("ts", "depcruise_config", ".dependency-cruiser.cjs"),
+        javascript.config_or(ctx, ".dependency-cruiser.cjs", config.get("ts", "depcruise_config", ".dependency-cruiser.cjs")),
         "--output-type",
         "text",
         config.get("ts", "source", "src"),

@@ -93,3 +93,18 @@ def test_in_scope_violation(tmp_path: Path, line: str, expected: bool) -> None:
     ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts"})
 
     assert ts_deps.in_scope_violation(line, ctx) is expected
+
+
+@pytest.mark.parametrize(("configured", "expected"), [(True, "tooling"), (False, ".dependency-cruiser.js")])
+def test_tooling_binary_and_config(tmp_path: Path, fake_run: Any, configured: bool, expected: str) -> None:
+    fake = fake_run(ts_deps, [(0, "")])
+    folder = tmp_path / ".marestail" / "tooling"
+    folder.mkdir(parents=True)
+    if configured:
+        (folder / ".dependency-cruiser.cjs").write_text("")
+    raw = {"ts": {"root": ".", "tooling": ".marestail/tooling", "depcruise_config": ".dependency-cruiser.js"}}
+
+    checked(ts_deps.run_gate(make_context(tmp_path, raw)), "ts.deps")
+
+    config = str(folder / ".dependency-cruiser.cjs") if expected == "tooling" else expected
+    assert fake.calls == [[str(folder / "node_modules" / ".bin" / "depcruise"), "--config", config, "--output-type", "err", "src"]]
