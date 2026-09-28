@@ -33,7 +33,9 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     sonar: `sonar-project.properties`.
     `package.json` under <T> is always written.
   - `[ts] runner = "jest"`: install writes no jest config and adds no jest; jest comes
-    from the target's own `node_modules`, as today.
+    from the target's own `node_modules`, as today. <T>'s `tsconfig.json` then takes
+    its jest globals from the target: `"typeRoots": ["<P>/node_modules/@types"]` and no
+    `types` key, so `@types/jest` in <R> is seen when present.
   - It then runs `npm install --prefix .marestail/tooling` with the target as cwd.
     npm's stdout and stderr both go to `.marestail/tooling/npm.log` (replaced each
     run) and never to marestail's stdout or stderr.
@@ -47,10 +49,15 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     not trusted. When <target> was not yet trusted in `$GROK_HOME/trusted_folders.toml`
     it prints `trusted <target> for grok project hooks`, else nothing.
   - Stdout, in order: the Grok trust line when printed; `left tracked files alone: <paths>`
-    (comma+space separated, sorted, every tracked path install would have written or
-    edited, including `.gitignore`, `CLAUDE.md`, `AGENTS.md`, `marestail.toml`,
-    `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md` and hook files; omitted when
-    there are none); the `no Stop hook` lines, sorted by path; when the root
+    (comma+space separated, sorted by byte order, omitted when empty). The candidates
+    are exactly `.gitignore`, `AGENTS.md`, `CLAUDE.md`, `marestail.toml`,
+    `sonar-project.properties`, `tasks/README.md`, `PERFORMANCE.md`, `guidance/ts.md`,
+    `guidance/cs.md`, `.claude/settings.local.json`, `.agents/hooks.json`,
+    `.grok/hooks/marestail-gate.json` and `.cursor/hooks.json`; each is listed when
+    tracked, and no other path is ever listed (not `.claude/settings.json`, not a repo
+    config such as `web/eslint.config.js`). A tracked root `sonar-project.properties`
+    is listed and, per the kind rule, <T> gets no `sonar-project.properties`;
+    then the `no Stop hook` lines, sorted by path; when the root
     `marestail.toml` (new or existing) has no `tooling` under `[ts]`, the line
     `marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it`;
     and last either `installed into <target> with --scope hyper; nothing to commit, see <exclude>`
@@ -222,8 +229,35 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
     Given <target> has an untracked `marestail.toml` holding exactly `[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n`
     When I run `marestail install --scope hyper <target>`
     Then `.marestail/tooling/package.json` devDependencies are the pinned ones without `vitest`, `@vitest/coverage-v8` and `@stryker-mutator/vitest-runner`, plus `"@stryker-mutator/jest-runner": "^9.0.0"`
-    And `.marestail/tooling/stryker.config.json` has `"testRunner": "jest"`, `"plugins": ["@stryker-mutator/jest-runner"]` and no `vitest` key
-    And `.marestail/tooling/tsconfig.json` has `"types": []`
+    And `.marestail/tooling/stryker.config.json` is exactly
+      """
+      {
+        "testRunner": "jest",
+        "plugins": ["@stryker-mutator/jest-runner"],
+        "jest": { "projectType": "custom" },
+        "mutate": ["app/**/*.ts", "app/**/*.tsx", "!app/**/*.test.*", "!app/**/*.spec.*"],
+        "ignorePatterns": [".marestail"],
+        "coverageAnalysis": "perTest"
+      }
+      """
+    And `.marestail/tooling/tsconfig.json` is exactly
+      """
+      {
+        "compilerOptions": {
+          "target": "ES2022",
+          "module": "ESNext",
+          "moduleResolution": "Bundler",
+          "jsx": "react-jsx",
+          "strict": true,
+          "noEmit": true,
+          "skipLibCheck": true,
+          "esModuleInterop": true,
+          "typeRoots": ["../../web/node_modules/@types"]
+        },
+        "include": ["../../web/app"]
+      }
+      """
+    And with `web/node_modules/@types/jest/index.d.ts` declaring `describe`, a test file `web/app/a.test.ts` calling `describe` gets no tsc finding from `<b>/tsc --noEmit -p <T>/tsconfig.json`
     And no `vitest.config.ts` and no `jest.config.*` exists under `.marestail/tooling/`
     And the ts.tests command is `<target>/web/node_modules/.bin/jest --ci --coverage ...` exactly as today
 
@@ -252,6 +286,16 @@ Feature: `marestail install --scope hyper` leaves nothing of marestail in the ta
       | left tracked files alone: .claude/settings.local.json, .gitignore, CLAUDE.md, PERFORMANCE.md, marestail.toml |
       | no Stop hook for claude: .claude/settings.local.json is tracked |
       | marestail.toml has no [ts] tooling; add tooling = ".marestail/tooling" under [ts] so the gates use it |
+      | installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude |
+    And the exit code is 0 and `git status --porcelain` prints nothing
+
+  Scenario: a tracked root Sonar file is listed and not duplicated into tooling
+    Given the commit also tracks `sonar-project.properties` holding exactly `sonar.projectKey=ours\n` and `web/eslint.config.js` holding exactly `export default [];\n`
+    When I run `marestail install --scope hyper <target>`
+    Then `sonar-project.properties` is still exactly `sonar.projectKey=ours\n`
+    And `.marestail/tooling/sonar-project.properties` does not exist
+    And stdout is exactly these lines in order:
+      | left tracked files alone: .gitignore, CLAUDE.md, sonar-project.properties |
       | installed into <target> with --scope hyper; nothing to commit, see .git/info/exclude |
     And the exit code is 0 and `git status --porcelain` prints nothing
 
