@@ -470,7 +470,7 @@ def package_json(tooling: Tooling) -> str:
 
 
 def eslint_text(tooling: Tooling) -> str:
-    return fill("eslint.config.mjs", {"SOURCES": tooling.each_source(SOURCE_FILES)})
+    return fill("lint.mjs", {"SOURCES": tooling.each_source(SOURCE_FILES)})
 
 
 def type_setting(tooling: Tooling) -> str:
@@ -481,7 +481,7 @@ def type_setting(tooling: Tooling) -> str:
 
 def tsconfig_text(tooling: Tooling) -> str:
     include = json_list([f"{tooling.up}/{source}" for source in tooling.sources])
-    return fill(TSCONFIG, {"TYPES": type_setting(tooling), "INCLUDE": include})
+    return fill("types.json", {"TYPES": type_setting(tooling), "INCLUDE": include})
 
 
 def depcruise_text(tooling: Tooling) -> str:
@@ -490,7 +490,7 @@ def depcruise_text(tooling: Tooling) -> str:
 
 
 def vitest_text(tooling: Tooling) -> str:
-    return fill(VITEST_CONFIG, {"TESTS": tooling.each_source(TEST_FILES), "SOURCES": tooling.each_source(SOURCE_FILES)})
+    return fill("vitest.ts", {"TESTS": tooling.each_source(TEST_FILES), "SOURCES": tooling.each_source(SOURCE_FILES)})
 
 
 def runner_options(tooling: Tooling) -> str:
@@ -503,11 +503,11 @@ def runner_options(tooling: Tooling) -> str:
 
 def stryker_text(tooling: Tooling) -> str:
     runner = "jest" if tooling.jest else "vitest"
-    return fill("stryker.config.json", {"RUNNER": runner, "OPTIONS": runner_options(tooling), "MUTATE": tooling.each_source(MUTATED_FILES)})
+    return fill("mutation.json", {"RUNNER": runner, "OPTIONS": runner_options(tooling), "MUTATE": tooling.each_source(MUTATED_FILES)})
 
 
 def knip_text(tooling: Tooling) -> str:
-    return fill("knip.json", {"ENTRY": tooling.each_source(ENTRY_FILES), "SOURCES": tooling.each_source(SOURCE_FILES)})
+    return fill("deadcode.json", {"ENTRY": tooling.each_source(ENTRY_FILES), "SOURCES": tooling.each_source(SOURCE_FILES)})
 
 
 def sonar_line(line: str) -> str:
