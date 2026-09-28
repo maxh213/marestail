@@ -180,7 +180,7 @@ HYPER_COVERAGE = {
 }
 
 
-def hyper_run(tmp_path: Path, fake_run: Any, monkeypatch: Any, base: dict[str, Any] | str, lines: set[int]) -> Any:
+def hyper_run(tmp_path: Path, fake_run: Any, monkeypatch: Any, base: Any, lines: set[int]) -> Any:
     (tmp_path / ".marestail").mkdir()
     (tmp_path / ".marestail" / "py-coverage.json").write_text(json.dumps(HYPER_COVERAGE))
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "base source")
