@@ -19,32 +19,36 @@ Work in a scratch directory. `M` is the marestail-green checkout. The stub actio
 4. Open `../prompts/05.txt`.
    Expected: the first line is `You are the blast judge. You judge the diff; you never edit it.` The file has `# Diff stat` (listing `src.py`), `# Diff` (containing `+def add_one(x):`) and `# Hunks` (containing `src.py:1-2 — the fix needs it`), and no `# Gate report`.
 5. `grep -l 'Add a `## Hunks` section' ../prompts/*.txt`.
-   Expected: exactly `03.txt` and `04.txt`. Then check that `06.txt` contains `Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier.`
-   This repo is now "prepared". Before each of steps 6 to 12, empty `../prompts`, write the plan, and run the command from the repo.
+   Expected: exactly `03.txt` and `04.txt`; no other prompt has that sentence. Then check that `06.txt` contains `Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier.`
+   This repo is now "prepared". Run `git log --oneline -1` and note the line as P (its hash is `<P>`).
+   Steps 6 to 14 each start from P: first `git reset --hard <P>` and `git clean -fdq -e .marestail`, then check that `git log --oneline -1` prints P; then empty `../prompts`, write the plan, and run the command from the repo.
 6. Plan `code rename`. Run `python3 $M/marestail/cli.py run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1`.
    Expected: stdout contains `util.py -> helpers.py: renamed or moved; under hyper no file may be renamed, moved or deleted`, then `pipeline stopped at coder`, and the exit code is 1.
-   Then `git reset --hard HEAD~1`, which undoes the stub's commit so the next step starts clean.
-7. Repeat step 6 with plan `code reindent`.
-   Expected: stdout contains `util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is`, and the exit code is 1. Reset as in step 6.
-8. Repeat step 6 with plan `code miss-util`.
-   Expected: stdout contains `util.py:3-3: not listed under ## Hunks`, and the exit code is 1. Reset as in step 6.
+7. Plan `code reindent`, the step 6 command.
+   Expected: stdout contains `util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is` and does not contain `util.py:2-4: not listed under ## Hunks`. The exit code is 1.
+8. Plan `code miss-util`, the step 6 command.
+   Expected: stdout contains `util.py:3-3: not listed under ## Hunks`, and the exit code is 1.
 9. Plan `code package explain` then `code`. Run the step 6 command with `--retries 2`.
    Expected: stdout contains `package.json: frozen, reverted. Your reason was recorded as`. `git log --format=%B` shows `Revert change to frozen files by NN-coder, recorded as a proposal` and `Proposed by NN-coder: package.json`. `git cat-file -e HEAD:package.json` fails. The last line is `pipeline complete`.
-10. Plan `code five-tests`. Run the step 6 command.
+10. Plan `code five-tests`, the step 6 command.
     Expected: exit code 0 and `pipeline complete`, and `ls tests` lists five `test_*.py` files.
 11. Plan `code`, then `architect extract`. Run with `--scope hyper --from coder --to architect --auto --retries 1`.
     Expected: exit code 0 and `pipeline complete`. `sed -n 5p src.py` prints `def increment(x):`.
-12. Plan `architect`, `judge BOUNCE coder`, `code`, `judge PASS`, `judge PASS`. Run with `--scope hyper --from architect --to hardener --auto --retries 2`.
+12. Plan `code five-tests`, then `architect no-hunks`. Run the step 11 command.
+    Expected: the `== ` lines are coder, architect. stdout contains `util.py:3-3: not listed under ## Hunks` and `pipeline stopped at architect`, and the exit code is 1.
+13. Plan `architect`, `judge BOUNCE coder`, `code`, `judge PASS`, `judge PASS`. Run with `--scope hyper --from architect --to hardener --auto --retries 2`.
     Expected: the `== ` lines are architect, blast, coder, blast, hardener, and the run ends `pipeline complete`.
-    Repeat with `judge BOUNCE architect`, `architect` in place of `judge BOUNCE coder`, `code`.
+    Reset to P and repeat with `judge BOUNCE architect`, `architect` in place of `judge BOUNCE coder`, `code`.
     Expected: architect, blast, architect, blast, hardener.
-13. Plan `code no-hunks package reindent`. Run the step 6 command with `--scope changed` in place of `--scope hyper`.
+    Reset to P and repeat with plan `architect`, `judge BOUNCE hardener`.
+    Expected: the `== ` lines are architect, blast; stdout contains `pipeline stopped at blast`; the exit code is 1.
+14. Plan `code no-hunks package reindent`. Run the step 6 command with `--scope changed` in place of `--scope hyper`.
     Expected: exit code 0 and `pipeline complete`, `git show HEAD:package.json` prints `{}`, and stdout contains no `not listed under ## Hunks`.
-14. In a fresh fixture (steps 1 and 2), use plan `specify`, `judge PASS`, `code`, `worker cleaner`, `worker architect`, `judge PASS`, `worker qa`, and run `python3 $M/marestail/cli.py run tasks/t.md --scope hard --focus src.py --auto --retries 2`.
+15. In a fresh fixture (steps 1 and 2), use plan `specify`, `judge PASS`, `code`, `worker cleaner`, `worker architect`, `judge PASS`, `worker qa`, and run `python3 $M/marestail/cli.py run tasks/t.md --scope hard --focus src.py --auto --retries 2`.
     Expected: all nine roles are visited, there is no `== blast` line, and the run ends `pipeline complete`.
-15. `python3 $M/marestail/cli.py run tasks/t.md --from blast --auto` in that fixture.
+16. `python3 $M/marestail/cli.py run tasks/t.md --from blast --auto` in that fixture.
     Expected: exit code 1 and stderr `unknown role blast; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa`.
-16. Open `$M/README.md` at `## Pipeline`.
-    Expected: a row `| blast | judge | — | none |` sits between perf and hardener. The text below the table says what `—` means in the Gate column. The hyper section names the four tool rules and has one `boy scout` sentence and one `no line budget` sentence.
-17. `cd $M && python3 tools/test-run-hyper.py`.
+17. Open `$M/README.md` at `## Pipeline`.
+    Expected: a row `| blast | judge | — | none |` sits between perf and hardener. The paragraph below the table that begins `The Gate column is` (the hyper section) says `that pipeline is specifier, critic, coder, architect, blast, hardener, qa` and what `—` means in the Gate column, names the four tool rules and has one `boy scout` sentence and one `no line budget` sentence.
+18. `cd $M && python3 tools/test-run-hyper.py`.
     Expected: the last line is `run hyper ok`.

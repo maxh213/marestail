@@ -6,22 +6,24 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
   The hunk check runs after every coder and architect attempt under hyper, next to the freeze check.
   It reads `git diff -U0 -M <start>..HEAD`, where <start> is the commit HEAD pointed at when `marestail run`
   started. It ignores `features/**`, `qa/**` and `.marestail/**`. A hunk's range is `s-e`, taken from the
-  new side of its `@@` header (`+s,c` gives `s` to `s+c-1`; a deletion with `c=0` gives `s-s`).
+  new side of its `@@` header: `+s,c` gives `s` to `s+c-1`, `+s` with no count gives `s-s`,
+  and a deletion with `c=0` gives `s-s`.
   It emits one finding per problem:
     - rename or move: `<old> -> <new>: renamed or moved; under hyper no file may be renamed, moved or deleted`
     - deletion:       `<path>: deleted; under hyper no file may be renamed, moved or deleted`
     - whitespace:     `<path>:<s>-<e>: whitespace or formatting only; under hyper leave code the fix does not need as it is`
-                      (a hunk that is in `git diff -U0` and missing from `git diff -U0 -w`; applies to every file)
+                      (a hunk that is in `git diff -U0` and missing from `git diff -U0 -w`; applies to every file.
+                      Such a hunk gets this finding only, never the unlisted one as well)
     - unlisted:       `<path>:<s>-<e>: not listed under ## Hunks`
                       (a hunk in a non-test file that no `## Hunks` line of this role's handoff covers.
                       A line covers a hunk when it has the same path and an overlapping `s-e`. Extra lines are fine.)
-  The handoff checked is the one this role just wrote. The architect lists every non-test hunk since <start>,
-  including the coder's.
+  The handoff checked is the one this role just wrote. The architect's `## Hunks` must list every non-test hunk
+  since <start>, the coder's included; a coder hunk the architect leaves out is an unlisted finding against the architect.
   A test file has a path segment `tests`, `test`, `spec` or `__tests__`, or a name matching `test_*`,
   `*_test.*`, `*.test.*` or `*.spec.*`. A source file is any other file with extension
   .py .ts .tsx .js .jsx .mjs .cjs .rb .rs .cs .java .ex .exs .erl .hrl that the freeze list does not already cover.
   Any other changed file is frozen under hyper. It is reverted and recorded exactly as a frozen file is
-  today, with the same texts. Every other finding sends the attempt back to the same role. The runner never
+  today, with the same texts. Every other finding sends the attempt back to the role that was checked, coder or architect. The runner never
   reverts part of a file.
 
   `tools/stub-claude` actions that this feature relies on. Each `code` variant does what `code` does today, plus the listed extra:
@@ -32,11 +34,16 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     `code reindent`          lines 2-4 of util.py gain 4 more leading spaces each
     `code miss-util`         util.py line 3 becomes `        return 2`; `## Hunks` still lists only src.py:1-2
     `code package explain`   adds `package.json` containing `{}`, plus the `## Config change` section `explain` writes today
-    `code five-tests`        leaves src.py as it is, changes only util.py line 3 to `        return 2`, writes
-                             tests/test_src.py plus tests/test_a.py to tests/test_d.py; `## Hunks` is `- util.py:3-3 — the fix needs it`
+    `code five-tests`        the one exception: it skips the src.py write. It changes only util.py line 3 to `        return 2`,
+                             writes tests/test_src.py plus tests/test_a.py to tests/test_d.py; `## Hunks` is `- util.py:3-3 — the fix needs it`
     `architect`              empty commit; handoff `architect done` with `## Hunks` `- src.py:1-2 — the fix needs it`
+    `architect no-hunks`     empty commit; handoff `architect done` with no `## Hunks` section
     `architect extract`      src.py becomes the six lines `def add_one(x):`, `    return increment(x)`, ``, ``,
                              `def increment(x):`, `    return x + 1`; `## Hunks` is `- src.py:1-6 — boy scout: named the increment in add_one`
+
+  Blast is not pinned: `VERDICT: BOUNCE` goes to the coder, and `VERDICT: BOUNCE <role>` follows today's rework rule.
+  A worker role (coder, architect, or specifier) reruns and then blast judges again. A role that is not a worker,
+  such as hardener, reruns nothing and the run prints `pipeline stopped at blast`.
 
   Background:
     Given the 009 fixture repo, plus `util.py` committed in `init` with the four lines
@@ -63,7 +70,7 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
 
   Scenario: roles/blast.md is short and says what to judge
     Then `roles/blast.md` starts with `You are the blast judge. You judge the diff; you never edit it.`
-    And the rest of the file is the paragraph from the task, starting `Judge whether this change stays inside the code the fix touches.` and ending `Say which hunk and what the smallest change is.`
+    And the rest of the file is the paragraph from the task, starting `Judge whether this change stays inside the code the fix touches.` and ending `Say which hunk and what the smaller change is.`
 
   Scenario Outline: blast routes its verdict
     Given STUB_PLAN is <plan>
@@ -76,6 +83,14 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
       | `architect`, `judge PASS`, `judge PASS`                                       | architect, blast, hardener                     |
       | `architect`, `judge BOUNCE coder`, `code`, `judge PASS`, `judge PASS`         | architect, blast, coder, blast, hardener       |
       | `architect`, `judge BOUNCE architect`, `architect`, `judge PASS`, `judge PASS` | architect, blast, architect, blast, hardener   |
+      | `architect`, `judge BOUNCE specifier`, `specify`, `judge PASS`, `judge PASS`  | architect, blast, specifier, blast, hardener   |
+      | `architect`, `judge BOUNCE`, `code`, `judge PASS`, `judge PASS`               | architect, blast, coder, blast, hardener       |
+
+  Scenario: blast bouncing to a role that is not a worker stops the run
+    Given STUB_PLAN is `architect`, `judge BOUNCE hardener`
+    When I run `marestail run tasks/t.md --scope hyper --from architect --to hardener --auto --retries 2` in a prepared repo
+    Then the `== <role> (` lines name, in order, architect, blast
+    And stdout contains `pipeline stopped at blast` and the exit code is 1
 
   Scenario Outline: the hunk check bounces the coder with one finding per problem
     Given STUB_PLAN is `<action>`
@@ -89,6 +104,19 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
       | code delete     | util.py: deleted; under hyper no file may be renamed, moved or deleted                                |
       | code reindent   | util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is     |
       | code miss-util  | util.py:3-3: not listed under ## Hunks                                                                |
+
+  Scenario: a whitespace-only hunk gets the whitespace finding and no unlisted finding
+    Given STUB_PLAN is `code reindent`
+    When I run `marestail run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1` in a prepared repo
+    Then stdout contains `util.py:2-4: whitespace or formatting only`
+    And stdout does not contain `util.py:2-4: not listed under ## Hunks`
+
+  Scenario: the hunk check bounces the architect when its ## Hunks leaves out the coder's hunk
+    Given STUB_PLAN is `code five-tests`, `architect no-hunks`
+    When I run `marestail run tasks/t.md --scope hyper --from coder --to architect --auto --retries 1` in a prepared repo
+    Then the `== <role> (` lines name, in order, coder, architect
+    And stdout contains `util.py:3-3: not listed under ## Hunks`
+    And stdout contains `pipeline stopped at architect` and the exit code is 1
 
   Scenario: a coder that edits package.json has it reverted and recorded as a proposal
     Given STUB_PLAN is `code package explain`, `code`
@@ -135,7 +163,7 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
   Scenario: coder and architect are told to write ## Hunks under hyper only
     Given the hyper run of the first scenario
     Then prompts 03 (coder) and 04 (architect) contain "Add a `## Hunks` section to your handoff: one line per hunk outside the tests, `path:start-end — why`, where why is `the fix needs it` or `boy scout: <what got better> in <the touched function>`."
-    And no other prompt of that run contains `## Hunks` except prompt 05 (blast)
+    And no other prompt of that run contains "Add a `## Hunks` section"
     And no prompt of a `--scope hard --focus src.py` run contains "Add a `## Hunks` section"
 
   Scenario: the hardener under hyper may not grow the diff
@@ -176,7 +204,8 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
   Scenario: README describes the judge, the four rules, the boy scout rule and why there is no line budget
     Then README's pipeline table has the row `| blast | judge | — | none |` between the perf and hardener rows
     And the table's hyper column reads none, none, full, —, full, —, —, none, full, qa
-    And the paragraph under the table says that in the Gate column `—` means the step runs only under hyper
+    And the hyper section, the paragraph under the table that begins `The Gate column is`, says `that pipeline is specifier, critic, coder, architect, blast, hardener, qa`
+    And the hyper section says that in the Gate column `—` means the step runs only under hyper
     And the hyper section names the four tool rules: renamed, moved or deleted files; whitespace or formatting only hunks; files that are neither a source file nor a test file; non-test hunks missing from `## Hunks`
     And the hyper section has one sentence containing `boy scout` and one sentence containing `no line budget`
 
