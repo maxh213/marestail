@@ -390,3 +390,8 @@ def test_focus_clash_names_scopes_that_refuse_focus(scope: str | None, focus: se
 )
 def test_location_reads_the_first_path_and_line(finding: str, place: tuple[str, int] | None) -> None:
     assert _location.location(finding) == place
+
+
+def test_path_and_digits_pairs_a_path_with_the_digits_after_it() -> None:
+    assert _location.path_and_digits("a.py", "12:3") == ("a.py", "12")
+    assert _location.path_and_digits("a.py", "x1") == ("a.py", "")

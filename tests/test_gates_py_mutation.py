@@ -223,3 +223,29 @@ def test_mutant_lines_fall_back_to_line_zero(tmp_path: Path) -> None:
 def test_first_difference() -> None:
     assert py_mutation.first_difference(["a", "b"], ["a", "c"]) == 1
     assert py_mutation.first_difference(["a"], ["a"]) == 0
+    assert py_mutation.first_difference(["a"], ["a", "b"]) == 0
+
+
+def test_module_file_finds_a_nested_package(tmp_path: Path) -> None:
+    (tmp_path / "pkg" / "sub").mkdir(parents=True)
+    (tmp_path / "pkg" / "sub" / "__init__.py").write_text("")
+    assert py_mutation.module_file(tmp_path, "pkg.sub") == Path("pkg/sub/__init__.py")
+    (tmp_path / "pkg" / "mod.py").write_text("")
+    assert py_mutation.module_file(tmp_path, "pkg.mod") == Path("pkg/mod.py")
+
+
+def test_mutant_lines_need_the_source_the_original_and_the_mutant(tmp_path: Path) -> None:
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "m.py").write_text("def a__mutmut_b(v):\n    return v + 1\n\n\ndef c(v):\n    return v\n")
+    (tmp_path / "mutants" / "app").mkdir(parents=True)
+    (tmp_path / "mutants" / "app" / "m.py").write_text(
+        "def x_a__mutmut_b__mutmut_orig(v):\n    return v + 1\n"
+        "def x_a__mutmut_b__mutmut_1(v):\n    return v - 1\n"
+        "def x_c__mutmut_1(v):\n    return None\n"
+        "def x_d__mutmut_orig(v):\n    return v\n"
+        "def x_d__mutmut_1(v):\n    return None\n"
+    )
+    lines = py_mutation.MutantLines(make_context(tmp_path))
+    assert lines.where(("app.m.x_a__mutmut_b__mutmut_1", "survived")) == "app/m.py:2"
+    assert lines.where(("app.m.x_c__mutmut_1", "survived")) == "app/m.py:0"
+    assert lines.where(("app.m.x_d__mutmut_1", "survived")) == "app/m.py:0"

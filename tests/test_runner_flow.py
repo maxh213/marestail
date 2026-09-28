@@ -1253,3 +1253,9 @@ def test_fold_handoff_forwards_used(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     report.write_text("body")
     runner.fold_handoff(Config(root=tmp_path, raw={}), "coder", report, "before", "L", {"O"})
     assert seen == [{"O"}]
+
+
+def test_make_run_carries_hyper(tmp_path: Path) -> None:
+    config = Config(root=tmp_path, raw={})
+    state = runner.make_run(config, tmp_path / "t.md", 0, None, (None, None, None), (True, False, set(), True))
+    assert (state.scope_changed, state.hard, state.focus, state.hyper) == (True, False, set(), True)

@@ -208,3 +208,8 @@ def test_hyper_missing_report_still_fails(tmp_path: Path, fake_run: Any) -> None
 def test_spans_group_consecutive_lines() -> None:
     assert ts_mutation.spans([1, 2, 3, 7, 9, 10]) == [[1, 3], [7, 7], [9, 10]]
     assert ts_mutation.spans([]) == []
+
+
+def test_hyper_targets_skip_a_source_with_no_changed_lines(tmp_path: Path) -> None:
+    ctx = hyper(tmp_path, {"web/src/a.ts": {3}})
+    assert ts_mutation.targets(ctx, ["src/a.ts", "src/b.ts"]) == ["src/a.ts:3-3"]

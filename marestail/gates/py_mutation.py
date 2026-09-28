@@ -2,6 +2,8 @@ import ast
 import json
 import shutil
 import time
+from itertools import compress, count
+from operator import ne
 from pathlib import Path
 from typing import Any
 
@@ -189,4 +191,4 @@ def named(body: list[ast.stmt], name: str) -> Definition | None:
 
 
 def first_difference(original: list[str], mutant: list[str]) -> int:
-    return next((index for index, (before, after) in enumerate(zip(original, mutant, strict=False)) if before != after), 0)
+    return next(compress(count(), map(ne, original, mutant)), 0)

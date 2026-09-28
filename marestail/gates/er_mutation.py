@@ -97,7 +97,7 @@ def generate(job: Job) -> Result:
 def mutants_found(job: Job, mutants: list[dict[str, Any]]) -> Result:
     if not mutants:
         return nothing_to_mutate(job)
-    kept = job.ctx.on_changed_lines(mutants, partial(describe, job.ctx, status=SURVIVED))
+    kept = job.ctx.on_changed_lines(mutants, partial(mutant_where, job.ctx))
     if not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], job.elapsed())
     apply_cap(kept, job.ctx)
@@ -237,8 +237,11 @@ def mark_skipped(mutants: list[dict[str, Any]], keep: set[Any]) -> None:
 
 
 def describe(ctx: Context, mutant: dict[str, Any], status: str) -> str:
-    path = erlang.rel(ctx, mutant["file"])
-    return f"{path}:{mutant['line']} {mutant['operator']} mutant {status}: {mutant['original']} -> {mutant['replacement']}"
+    return f"{mutant_where(ctx, mutant)} {mutant['operator']} mutant {status}: {mutant['original']} -> {mutant['replacement']}"
+
+
+def mutant_where(ctx: Context, mutant: dict[str, Any]) -> str:
+    return f"{erlang.rel(ctx, mutant['file'])}:{mutant['line']}"
 
 
 def write_report(ctx: Context, mutants: list[dict[str, Any]]) -> None:

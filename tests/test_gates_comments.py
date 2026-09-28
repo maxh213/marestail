@@ -391,8 +391,8 @@ def test_structured_scan_receives_context(tmp_path: Path, monkeypatch: pytest.Mo
     assert seen == [ctx]
 
 
-def hyper(root: Path, lines: dict[str, set[int]]) -> Any:
-    return make_context(root, EVERYWHERE, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+def hyper(root: Path, lines: dict[str, set[int]], extra: dict[str, Any] | None = None) -> Any:
+    return make_context(root, {**EVERYWHERE, **(extra or {})}, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
 
 
 def test_hyper_python_keeps_only_comments_and_docstrings_on_changed_lines(tmp_path: Path) -> None:
@@ -414,8 +414,7 @@ def test_hyper_scanner_findings_are_filtered_but_failures_kept(tmp_path: Path, f
     source = write(tmp_path, "a.ts", "// x\n")
     reply = json.dumps([{"file": str(source), "line": 1, "text": "// old"}, {"file": str(source), "line": 4, "text": "// new"}])
     fake_run(javascript, [(0, reply), (2, "boom src/a.ts:9")])
-    ctx = hyper(tmp_path, {"a.ts": {4}})
-    ctx.config.raw["ts"] = {"root": "."}
+    ctx = hyper(tmp_path, {"a.ts": {4}}, {"ts": {"root": "."}})
 
     assert comments.ts_findings(ctx) == ["a.ts:4 comment: // new"]
     assert comments.ts_findings(ctx) == ["comment scanner failed: boom src/a.ts:9"]
@@ -426,8 +425,13 @@ def test_hyper_structured_and_markup_findings_are_filtered(tmp_path: Path, monke
     write(tmp_path, "b.css", "/* old */\n/* new */\n")
     found = [{"file": "A.java", "line": 1, "text": "// old"}, {"file": "A.java", "line": 2, "text": "// new"}]
     monkeypatch.setattr(java, "scan", reject_none(lambda ctx, mode, paths: (found, None)))
-    ctx = hyper(tmp_path, {"A.java": {2}, "b.css": {2}})
-    ctx.config.raw["java"] = {}
+    ctx = hyper(tmp_path, {"A.java": {2}, "b.css": {2}}, {"java": {}})
 
     assert comments.java_findings(ctx) == ["A.java:2 comment: // new"]
     assert comments.markup_findings(ctx) == ["b.css:2 comment: /* new */"]
+
+
+def test_untokenizable_python_is_reported_once_outside_hyper(tmp_path: Path) -> None:
+    write(tmp_path, "a.py", "x = (\n")
+
+    assert comments.python_findings(make_context(tmp_path, EVERYWHERE)) == ["a.py:0 comment: could not tokenize"]

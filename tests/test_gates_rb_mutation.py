@@ -301,3 +301,11 @@ def test_stdout_hyper_keeps_failures_on_changed_lines(tmp_path: Path, fake_run: 
     fake_run(rb_mutation, [(0, ""), (1, stdout_report(tmp_path))])
     result = checked(rb_mutation.run_gate(hyper(tmp_path, {3})), rb_mutation.GATE)
     assert result.findings == ["app/models/user.rb:3 User#name: 2 mutants survived"]
+
+
+def test_session_hyper_locates_subjects_by_source_path(tmp_path: Path, fake_run: Any) -> None:
+    report = session(tmp_path)
+    report["subject_results"][0]["identification"] = "User#name:lib/user.rb:3"
+    fake_run(rb_mutation, writes_session(tmp_path, json.dumps(report)))
+    result = checked(rb_mutation.run_gate(hyper(tmp_path, {3})), rb_mutation.GATE)
+    assert (result.ok, result.summary) == (False, "4 of 5 mutants not killed")

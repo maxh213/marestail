@@ -179,4 +179,5 @@ def test_verdict_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path) -> N
     result = rs_mutation.verdict(ctx, report, "", 0.0)
     assert (result.ok, result.summary, result.findings) == (False, "1 of 2 mutants not killed", ["a.rs:3 f: n survived"])
     report = {"outcomes": [mutant("a.rs", 9, "f", "n", "MissedMutant")]}
-    assert rs_mutation.verdict(ctx, report, "", 0.0).summary == "no mutants on changed lines"
+    passed = checked(rs_mutation.verdict(ctx, report, "", 0.0), rs_mutation.GATE)
+    assert (passed.ok, passed.summary, passed.findings) == (True, "no mutants on changed lines", [])
