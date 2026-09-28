@@ -44,6 +44,19 @@ Feature: `marestail run --scope hyper` runs a short pipeline
       | --from |
       | --to   |
 
+  Scenario Outline: --from or --to an unknown role is an error in every mode
+    Given STUB_PLAN is `code`
+    When I run `marestail run tasks/t.md <flag> bogus --auto` in a fresh fixture
+    Then the exit code is 1
+    And stderr contains `unknown role bogus; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa`
+    And stdout does not contain `pipeline complete`
+    And no prompt was saved and STUB_PLAN still reads `code`
+
+    Examples:
+      | flag   |
+      | --from |
+      | --to   |
+
   Scenario Outline: --from and --to with roles that exist under hyper still work
     Given STUB_PLAN is <plan>
     When I run `marestail run tasks/t.md --scope hyper --from <from> --to <to> --auto --retries 2` in a prepared repo
@@ -121,8 +134,18 @@ Feature: `marestail run --scope hyper` runs a short pipeline
 
   Scenario: README shows which roles run under hyper
     When I read the table under `## Pipeline` in README.md
-    Then it has a `hyper` column
-    And that column marks specifier, critic, coder, architect, hardener and qa as running, with `full` for coder and architect, and cleaner, practices and perf as not running
+    Then it has a `hyper` column after `Gate`, whose cells are
+      | Step      | hyper |
+      | specifier | none  |
+      | critic    | none  |
+      | coder     | full  |
+      | cleaner   | —     |
+      | architect | full  |
+      | practices | —     |
+      | perf      | —     |
+      | hardener  | full  |
+      | qa        | qa    |
+    And the paragraph under the table says the hyper column is the tier each step runs under `--scope hyper`, and that `—` means the step does not run under hyper
 
   Scenario: the diagnostic scripts keep passing
     When I run `python3 tools/test-run-hyper.py`
