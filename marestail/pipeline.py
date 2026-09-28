@@ -38,7 +38,7 @@ PIPELINE: list[Step] = [
 
 HYPER = "hyper"
 HYPER_DROPPED = ("cleaner", "practices", "perf")
-HYPER_FULL = ("coder", "architect")
+HYPER_FULL_TIER = ("coder", "architect")
 
 
 def steps(mode: str | None = None) -> list[Step]:
@@ -48,7 +48,7 @@ def steps(mode: str | None = None) -> list[Step]:
 
 
 def hyper_step(step: Step) -> Step:
-    return replace(step, tier="full") if step.name in HYPER_FULL else step
+    return replace(step, tier="full") if step.name in HYPER_FULL_TIER else step
 
 
 def names(mode: str | None = None) -> list[str]:

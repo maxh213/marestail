@@ -40,7 +40,7 @@ from marestail.perf import review as perf_review
 from marestail.perf import samples as perf_samples
 from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
-from marestail.pipeline import Judge, Step, Worker, find, names, window
+from marestail.pipeline import HYPER, Judge, Step, Worker, find, names, window
 from marestail.report import Result, elapsed, render
 from marestail.shell import ensure_dir, run
 
@@ -63,7 +63,6 @@ ALLOW_EMPTY = "--allow-empty"
 UNMATCHED = "--ignore-unmatch"
 COMMIT = "commit"
 CHANGED = "changed"
-HYPER = "hyper"
 CACHED = "--cached"
 NAME_ONLY = "--name-only"
 CHECKOUT = "checkout"
