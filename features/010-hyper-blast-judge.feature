@@ -19,6 +19,10 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     - unlisted:       `<path>:<s>-<e>: not listed under ## Hunks`
                       (a hunk in a non-test file that no `## Hunks` line of this role's handoff covers.
                       A line covers a hunk when it has the same path and an overlapping `s-e`. Extra lines are fine.)
+  The `## Hunks` section runs from its heading to the next `## ` heading or the end of the handoff. A line of it counts
+  when, after optional leading spaces and an optional `- ` or `* `, it starts with `<path>:<s>-<e>` or `<path>:<s>`;
+  `<path>:<s>` means `s-s`. Everything after the range is ignored, so `—`, `-`, `:` or no separator all work.
+  Any other line of the section is ignored.
   A renamed, moved or deleted file gets its rename or delete finding only; none of its hunks, such as the
   `-1,4 +0,0` hunk of a deleted file, gets a whitespace or unlisted finding.
   The handoff checked is the one this role just wrote. The architect's `## Hunks` must list every non-test hunk
@@ -39,13 +43,22 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     `code reindent-fix`      lines 2-4 of util.py gain 4 more leading spaces each and line 3 becomes `            return 2`;
                              `## Hunks` also lists `- util.py:2-4 — the fix needs it`
     `code miss-util`         util.py line 3 becomes `        return 2`; `## Hunks` still lists only src.py:1-2
+    `code miss-util bare`    as `code miss-util`, and `## Hunks` also has the unbulleted line `util.py:3-3 — the fix needs it`
+    `code miss-util single`  as `code miss-util`, and `## Hunks` also has the line `* util.py:3 - the fix needs it`
     `code package explain`   adds `package.json` containing `{}`, plus the `## Config change` section `explain` writes today
     `code five-tests`        the one exception: it skips the src.py write. It changes only util.py line 3 to `        return 2`,
                              writes tests/test_src.py plus tests/test_a.py to tests/test_d.py; `## Hunks` is `- util.py:3-3 — the fix needs it`
     `architect`              empty commit; handoff `architect done` with `## Hunks` `- src.py:1-2 — the fix needs it`
     `architect no-hunks`     empty commit; handoff `architect done` with no `## Hunks` section
+    `architect util`         empty commit; handoff `architect done` with `## Hunks` `- util.py:3-3 — the fix needs it`
     `architect extract`      src.py becomes the six lines `def add_one(x):`, `    return increment(x)`, ``, ``,
                              `def increment(x):`, `    return x + 1`; `## Hunks` is `- src.py:1-6 — boy scout: named the increment in add_one`
+
+  The blast prompt's `# Diff stat` is `git diff --stat <start>..HEAD` and its `# Diff` is `git diff <start>..HEAD`,
+  both with the hunk check's `features/**`, `qa/**` and `.marestail/**` exclusions; either is `none` when empty.
+  Its `# Hunks` holds, for the latest coder handoff and then the latest architect handoff in this run's handoff folder,
+  a `## <handoff file stem>` line followed by that handoff's `## Hunks` lines. A handoff with no section is left out,
+  and `# Hunks` is `none` when neither has one.
 
   Blast is not pinned: `VERDICT: BOUNCE` goes to the coder, and `VERDICT: BOUNCE <role>` follows today's rework rule.
   A worker role (coder, architect, or specifier) reruns and then blast judges again. A role that is not a worker,
@@ -68,11 +81,25 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     Given the run of the previous scenario
     Then prompt 05 starts with `You are the blast judge.`
     And it has a `# Task` section containing `# Add one`
-    And it has a `# Diff stat` section whose text contains `src.py`
+    And it has a `# Diff stat` section whose text contains `src.py` and neither `features/t.feature` nor `qa/t.md`
     And it has a `# Diff` section whose text contains `+def add_one(x):`
     And it has a `# Hunks` section whose text contains `src.py:1-2 — the fix needs it`
     And it has no `# Gate report` section
     And its `# Scope` section is the shared hyper text alone, with no role sentence from 009
+
+  Scenario: the blast prompt shows only what changed since this run started
+    Given STUB_PLAN is `code five-tests`, `architect util`, `judge PASS`, `judge PASS`
+    When I run `marestail run tasks/t.md --scope hyper --from coder --to hardener --auto --retries 1` in a prepared repo
+    Then the exit code is 0 and the last non-empty stdout line is `pipeline complete`
+    And the blast prompt's `# Diff` contains `+        return 2` and does not contain `+def add_one(x):`
+    And its `# Diff stat` contains `util.py` and `tests/test_a.py` and does not contain `src.py |`
+    And its `# Hunks` contains `## 01-coder`, then `- util.py:3-3 — the fix needs it`, then `## 02-architect`, then `- util.py:3-3 — the fix needs it`
+
+  Scenario: the blast prompt says none when there is no diff and no hunks
+    Given STUB_PLAN is `architect no-hunks`, `judge PASS`
+    When I run `marestail run tasks/t.md --scope hyper --from architect --to blast --auto --retries 1` in a prepared repo
+    Then the exit code is 0
+    And the blast prompt's `# Diff stat`, `# Diff` and `# Hunks` sections are each `none`
 
   Scenario: roles/blast.md is short and says what to judge
     Then `roles/blast.md` starts with `You are the blast judge. You judge the diff; you never edit it.`
@@ -113,6 +140,17 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
       | code delete     | util.py: deleted; under hyper no file may be renamed, moved or deleted                                | not listed under ## Hunks             |
       | code reindent   | util.py:2-4: whitespace or formatting only; under hyper leave code the fix does not need as it is     | not listed under ## Hunks             |
       | code miss-util  | util.py:3-3: not listed under ## Hunks                                                                | whitespace or formatting only         |
+
+  Scenario Outline: a ## Hunks line counts without a bullet, a dash separator or an end line
+    Given STUB_PLAN is `<action>`
+    When I run `marestail run tasks/t.md --scope hyper --from coder --to coder --auto --retries 1` in a prepared repo
+    Then stdout does not contain `not listed under ## Hunks`
+    And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
+
+    Examples:
+      | action                 |
+      | code miss-util bare    |
+      | code miss-util single  |
 
   Scenario: a hunk that re-indents and also changes a line is not whitespace-only
     Given STUB_PLAN is `code reindent-fix`

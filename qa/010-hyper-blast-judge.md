@@ -17,7 +17,7 @@ Work in a scratch directory. `M` is the marestail-green checkout. The stub actio
    `python3 $M/marestail/cli.py run tasks/t.md --scope hyper --auto --retries 2`.
    Expected: the `== ` lines name specifier, critic, coder, architect, blast, hardener, qa in that order. `../prompts` holds 7 files. The last line is `pipeline complete` and the exit code is 0.
 4. Open `../prompts/05.txt`.
-   Expected: the first line is `You are the blast judge. You judge the diff; you never edit it.` The file has `# Diff stat` (listing `src.py`), `# Diff` (containing `+def add_one(x):`) and `# Hunks` (containing `src.py:1-2 — the fix needs it`), and no `# Gate report`.
+   Expected: the first line is `You are the blast judge. You judge the diff; you never edit it.` The file has `# Diff stat` (listing `src.py`, and neither `features/t.feature` nor `qa/t.md`), `# Diff` (containing `+def add_one(x):`) and `# Hunks` (containing `src.py:1-2 — the fix needs it`), and no `# Gate report`.
 5. `grep -l 'Add a `## Hunks` section' ../prompts/*.txt`.
    Expected: exactly `03.txt` and `04.txt`; no other prompt has that sentence. Then check that `06.txt` contains `Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier.`
    This repo is now "prepared". Run `git log --oneline -1` and note the line as P (its hash is `<P>`).
@@ -32,6 +32,8 @@ Work in a scratch directory. `M` is the marestail-green checkout. The stub actio
    Expected: stdout contains no `whitespace or formatting only`, the last line is `pipeline complete` and the exit code is 0.
 8. Plan `code miss-util`, the step 6 command.
    Expected: stdout contains `util.py:3-3: not listed under ## Hunks` and no `whitespace or formatting only`, and the exit code is 1.
+   Reset to P and repeat with plan `code miss-util bare`, then again with `code miss-util single`.
+   Expected each time: stdout contains no `not listed under ## Hunks`, the last line is `pipeline complete` and the exit code is 0.
 9. Plan `code package explain` then `code`. Run the step 6 command with `--retries 2`.
    Expected: stdout contains `package.json: frozen, reverted. Your reason was recorded as`. `git log --format=%B` shows `Revert change to frozen files by NN-coder, recorded as a proposal` and `Proposed by NN-coder: package.json`. `git cat-file -e HEAD:package.json` fails. The last line is `pipeline complete`.
 10. Plan `code five-tests`, the step 6 command.
@@ -40,6 +42,10 @@ Work in a scratch directory. `M` is the marestail-green checkout. The stub actio
     Expected: exit code 0 and `pipeline complete`. `sed -n 5p src.py` prints `def increment(x):`.
 12. Plan `code five-tests`, then `architect no-hunks`. Run the step 11 command.
     Expected: the `== ` lines are coder, architect. stdout contains `util.py:3-3: not listed under ## Hunks` and `pipeline stopped at architect`, and the exit code is 1.
+    Reset to P and repeat with plan `code five-tests`, `architect util`, `judge PASS`, `judge PASS` and `--to hardener` in place of `--to architect`.
+    Expected: `pipeline complete`. In the blast prompt (`../prompts/03.txt`), `# Diff` contains `+        return 2` and not `+def add_one(x):`; `# Diff stat` lists `util.py` and `tests/test_a.py` but not `src.py`; `# Hunks` shows `## 01-coder` and `## 02-architect`, each followed by `- util.py:3-3 — the fix needs it`.
+    Reset to P and run plan `architect no-hunks`, `judge PASS` with `--scope hyper --from architect --to blast --auto --retries 1`.
+    Expected: exit code 0; in the blast prompt `# Diff stat`, `# Diff` and `# Hunks` each read `none`.
 13. Plan `architect`, `judge BOUNCE coder`, `code`, `judge PASS`, `judge PASS`. Run with `--scope hyper --from architect --to hardener --auto --retries 2`.
     Expected: the `== ` lines are architect, blast, coder, blast, hardener, and the run ends `pipeline complete`.
     Reset to P and repeat with `judge BOUNCE architect`, `architect` in place of `judge BOUNCE coder`, `code`.
