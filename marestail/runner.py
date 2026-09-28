@@ -49,7 +49,6 @@ BOUNCE = "BOUNCE"
 AUTHOR = "AUTHOR"
 PERF = "perf"
 BLAST = "blast"
-HUNK_CHECKED = ("coder", "architect")
 QA = "qa"
 CONFIG_CHANGE = "## Config change"
 MISSING_RAN_AGAINST = ran_against.MISSING
@@ -80,6 +79,7 @@ NEWLINE = "\n"
 RENAME_MARK = " -> "
 HEAD_REF = "HEAD"
 ALL_FILES = "-A"
+RESTORE = "restore"
 QUIET = "-q"
 RECURSIVE = "-r"
 DOUBLE_DASH = "--"
@@ -903,7 +903,7 @@ def frozen_changes(config: Config, worker: Worker, before: str, touched: list[st
 
 
 def hunk_checked(state: Run, worker: Worker) -> bool:
-    return state.hyper and worker.name in HUNK_CHECKED
+    return state.hyper and worker.name in hunks.CHECKED_ROLES
 
 
 def hunk_problems(state: Run, worker: Worker, report: Path) -> list[str]:
@@ -978,7 +978,7 @@ def revert(config: Config, before: str, paths: list[str], message: str) -> None:
 
 def revert_commands(before: str, paths: list[str], message: str) -> list[list[str]]:
     return [
-        [GIT, "restore", f"--source={before}", "--staged", "--worktree", DOUBLE_DASH, *paths],
+        [GIT, RESTORE, f"--source={before}", "--staged", "--worktree", DOUBLE_DASH, *paths],
         [GIT, COMMIT, QUIET, MESSAGE_FLAG, message],
     ]
 

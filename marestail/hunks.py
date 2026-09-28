@@ -8,7 +8,7 @@ from marestail.shell import run
 
 Hunk = tuple[str, int, int]
 
-EXCLUDED = ["--", ".", ":(exclude)features", ":(exclude)qa", ":(exclude).marestail"]
+PATHSPEC = ["--", ".", ":(exclude)features", ":(exclude)qa", ":(exclude).marestail"]
 FILE_HEADER = re.compile(r"^diff --git ", re.MULTILINE)
 NEW_PATH = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 HUNK_HEADER = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
@@ -22,34 +22,35 @@ UNLISTED = f"not listed under {HUNKS_HEADING}"
 MOVED_STATUS = ("R", "D")
 DELETED = "D"
 TAB = "\t"
+CHECKED_ROLES = ("coder", "architect")
 
 
 def problems(config: Config, start: str, handoff: str) -> list[str]:
-    moved = dict(moved_files(config, start))
-    changed = changed_hunks(config, start, set(moved.values()))
-    loose = whitespace_only(changed, parse_hunks(git_diff(config, start, "-U0", "-M", "-w")))
-    unlisted = unlisted_hunks(changed, loose, listed_hunks(handoff))
-    return list(moved) + findings(loose, WHITESPACE) + findings(unlisted, UNLISTED)
+    move_findings = dict(moved_files(config, start))
+    changed = changed_hunks(config, start, set(move_findings.values()))
+    reformatted = whitespace_only(changed, parse_hunks(git_diff(config, start, "-U0", "-M", "-w")))
+    unlisted = unlisted_hunks(changed, reformatted, listed_hunks(handoff))
+    return list(move_findings) + findings(reformatted, WHITESPACE) + findings(unlisted, UNLISTED)
 
 
 def changed_hunks(config: Config, start: str, skipped: set[str]) -> list[Hunk]:
     return [hunk for hunk in parse_hunks(git_diff(config, start, "-U0", "-M")) if hunk[0] not in skipped]
 
 
-def whitespace_only(changed: list[Hunk], kept: list[Hunk]) -> list[Hunk]:
-    return [hunk for hunk in changed if not covered(hunk, kept)]
+def whitespace_only(changed: list[Hunk], substantive: list[Hunk]) -> list[Hunk]:
+    return [hunk for hunk in changed if not covered(hunk, substantive)]
 
 
-def unlisted_hunks(changed: list[Hunk], loose: list[Hunk], listed: list[Hunk]) -> list[Hunk]:
-    return [hunk for hunk in changed if unlisted_hunk(hunk, loose, listed)]
+def unlisted_hunks(changed: list[Hunk], reformatted: list[Hunk], listed: list[Hunk]) -> list[Hunk]:
+    return [hunk for hunk in changed if unlisted_hunk(hunk, reformatted, listed)]
 
 
-def unlisted_hunk(hunk: Hunk, loose: list[Hunk], listed: list[Hunk]) -> bool:
-    return hunk not in loose and needs_listing(hunk[0]) and not covered(hunk, listed)
+def unlisted_hunk(hunk: Hunk, reformatted: list[Hunk], listed: list[Hunk]) -> bool:
+    return hunk not in reformatted and needs_listing(hunk[0]) and not covered(hunk, listed)
 
 
 def git_diff(config: Config, start: str, *options: str) -> str:
-    _, output = run(["git", "diff", *options, f"{start}..HEAD", *EXCLUDED], cwd=config.root)
+    _, output = run(["git", "diff", *options, f"{start}..HEAD", *PATHSPEC], cwd=config.root)
     return output
 
 
@@ -98,10 +99,10 @@ def findings(hunks: list[Hunk], problem: str) -> list[str]:
 
 def listed_hunks(handoff: str) -> list[Hunk]:
     matches = [LISTED.match(line) for line in hunks_section(handoff)]
-    return [listed(match) for match in matches if match]
+    return [listed_hunk(match) for match in matches if match]
 
 
-def listed(match: re.Match[str]) -> Hunk:
+def listed_hunk(match: re.Match[str]) -> Hunk:
     start = int(match.group(2))
     return match.group(1), start, int(match.group(3) or start)
 
@@ -118,15 +119,15 @@ def review(config: Config, start: str, handoffs: Path) -> dict[str, str]:
     return {
         "Diff stat": git_diff(config, start, "--stat").strip(),
         "Diff": git_diff(config, start).strip(),
-        "Hunks": "\n".join(filter(None, (listing(handoffs, role) for role in ("coder", "architect")))),
+        "Hunks": "\n".join(filter(None, (latest_listing(handoffs, role) for role in CHECKED_ROLES))),
     }
 
 
-def listing(handoffs: Path, role: str) -> str:
+def latest_listing(handoffs: Path, role: str) -> str:
     reports = sorted(handoffs.glob(f"*-{role}.md"))
-    return section_of(reports[-1]) if reports else ""
+    return hunks_listing(reports[-1]) if reports else ""
 
 
-def section_of(report: Path) -> str:
+def hunks_listing(report: Path) -> str:
     body = [line for line in hunks_section(report.read_text()) if line.strip()]
     return "\n".join([f"## {report.stem}", *body]) if body else ""

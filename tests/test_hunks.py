@@ -164,7 +164,7 @@ def test_review_is_empty_without_changes_or_handoffs(repo: tuple[Config, str], t
     assert hunks.review(config, start, tmp_path / "missing") == {"Diff stat": "", "Diff": "", "Hunks": ""}
 
 
-def test_section_of_a_handoff_without_hunks(tmp_path: Path) -> None:
+def test_hunks_listing_of_a_handoff_without_hunks(tmp_path: Path) -> None:
     report = tmp_path / "02-architect.md"
     report.write_text("## Hunks\n\n")
-    assert hunks.section_of(report) == ""
+    assert hunks.hunks_listing(report) == ""
