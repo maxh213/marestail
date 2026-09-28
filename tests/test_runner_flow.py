@@ -1312,7 +1312,7 @@ def test_judge_loop_under_hyper_sends_a_refused_bounce_to_a_full_tier_coder(tmp_
     patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("PASS", None, "ok"))
     worker = patch(monkeypatch, runner, "run_worker", True)
     state = make_state(tmp_path, scope_changed=True, hyper=True)
-    assert runner.run_judge_loop(state, find("hardener")) is True
+    assert runner.run_judge_loop(state, cast(Judge, find("hardener"))) is True
     assert worker.calls == [(state, Worker("coder", "full", audit=True), "1. a")]
 
 
@@ -1320,6 +1320,7 @@ def test_judge_attempt_under_hyper_refuses_a_bounce_to_cleaner(tmp_path: Path, j
     judge_env["files"] = {"01-hardener.md": "VERDICT: BOUNCE cleaner\n1. tidy"}
     state = make_state(tmp_path, scope_changed=True, hyper=True)
     report = state.next_report("hardener")
-    outcome = runner.judge_attempt(state, find("hardener", "hyper"), report, ("", True, []), None, "")
-    assert outcome[0][:2] == ("BOUNCE", None)
+    verdict, _ = runner.judge_attempt(state, cast(Judge, find("hardener", "hyper")), report, ("", True, []), None, "")
+    assert verdict is not None
+    assert verdict[:2] == ("BOUNCE", None)
     assert judge_env["prompt"].calls[0][-1] is True

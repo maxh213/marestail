@@ -104,7 +104,7 @@ def test_window_rejects_an_unknown_role(start: str | None, stop: str | None, mod
 
 
 def test_check_role() -> None:
-    assert pipeline.check_role(None, "hyper") is None
-    assert pipeline.check_role("qa", "hyper") is None
+    pipeline.check_role(None, "hyper")
+    pipeline.check_role("qa", "hyper")
     with pytest.raises(SystemExit):
         pipeline.check_role("perf", "hyper")
