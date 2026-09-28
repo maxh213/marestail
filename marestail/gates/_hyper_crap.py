@@ -2,6 +2,7 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -119,17 +120,13 @@ def nesting_path(fn: Fn, functions: list[Fn]) -> str:
 
 
 def complexity_by_path(functions: list[Fn]) -> dict[str, int]:
-    found: dict[str, int] = {}
-    for fn in functions:
-        path = nesting_path(fn, functions)
-        found[path] = max(fn["cc"], found.get(path, 0))
-    return found
+    return {nesting_path(fn, functions): fn["cc"] for fn in sorted(functions, key=itemgetter("cc"))}
 
 
 def _base_complexities(ctx: Context, hyper: Hyper, files: list[str]) -> tuple[Bases, list[str]]:
     bases: Bases = {}
     unread: list[str] = []
-    ctx.work.mkdir(parents=True, exist_ok=True)
+    ctx.work.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=ctx.work) as temp:
         for file in files:
             _read_base(ctx, hyper, Path(temp), file, (bases, unread))

@@ -181,19 +181,25 @@ def test_describe() -> None:
     assert java_crap.describe(finding) == "A.java:7 A.m crap=12.3 (cc=3, coverage=26%)"
 
 
-def hyper_java(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None], lines: set[int]) -> Any:
+def hyper_java(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None], lines: set[int], raw: dict[str, Any] | None = None
+) -> Any:
     project(tmp_path)
     replies = [(MEMBERS, None), base_reply]
     seen: list[list[Path]] = []
+    calls: list[tuple[Context, str]] = []
 
     def scan(ctx: Context, mode: str, paths: list[Path], extra: list[str] | None = None) -> tuple[Any, str | None]:
+        calls.append((ctx, mode))
         seen.append(paths)
         return replies.pop(0)
 
     monkeypatch.setattr(java, "scan", reject_none(scan))
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "class X {}\n")
-    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={APP}, changed_lines_map={APP: lines})
-    return checked(java_crap.run_gate(ctx), java_crap.GATE), seen
+    ctx = make_context(tmp_path, raw, scope_changed=True, hyper=True, changed={APP}, changed_lines_map={APP: lines})
+    result = checked(java_crap.run_gate(ctx), java_crap.GATE)
+    assert calls == [(ctx, "complexity"), (ctx, "complexity")]
+    return result, seen
 
 
 def test_hyper_names_uncovered_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -215,3 +221,8 @@ def test_hyper_passes_no_worse_member(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_hyper_base_scan_error_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result, _ = hyper_java(tmp_path, monkeypatch, (None, "java not found"), {4})
     assert result.summary.endswith(f"; no base complexity for {APP}, crap_max only")
+
+
+def test_hyper_reads_crap_max_from_the_java_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_java(tmp_path, monkeypatch, (None, "java not found"), {4}, {"java": {"crap_max": 11}})
+    assert result.summary.startswith("1 innermost changed functions, 0 above CRAP 11,")

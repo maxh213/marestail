@@ -165,17 +165,39 @@ def hyper_er(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pyte
     source = str(tmp_path / "src/a.erl")
     coverage = {"files": {source: {"percent_covered": 50.0, "missing_lines": [6, 12]}}}
     ctx = project(tmp_path, coverage, scope_changed=True, hyper=True, changed={"src/a.erl"}, changed_lines_map={"src/a.erl": {6, 7}})
-    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "line\n" * 20)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "base\n" * 20)
+    copies: list[tuple[tuple[str, ...], str]] = []
 
     def reply(command: list[str]) -> tuple[int, str]:
         file = command[2]
         found = [{"file": file, "line": 2, "name": "small/0", "complexity": 1}, {"file": file, "line": 5, "name": "mid/1", "complexity": 4}]
         if file == source:
             return 0, json.dumps(found)
+        copies.append((Path(file).relative_to(ctx.work).parts[1:], Path(file).read_text()))
         return base_code, json.dumps(found[1:] if base_code == 0 else "boom")
 
-    fake_run(erlang, reply)
-    return checked(er_crap.run_gate(ctx), er_crap.GATE)
+    run = fake_run(erlang, reply)
+    result = checked(er_crap.run_gate(ctx), er_crap.GATE)
+    assert copies == [(("src", "a.erl"), "base\n" * 20)]
+    assert run.calls[1][:2] == ["escript", str(erlang.SCRIPT_DIR / "complexity.escript")]
+    assert run.options[1]["timeout"] == er_crap.COMPLEXITY_TIMEOUT
+    return result
+
+
+def test_base_units_scan_the_copy_with_the_complexity_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = project(tmp_path)
+    copy = tmp_path / "copy.erl"
+    copy.write_text("f() ->\n    ok.\n\ng() -> ok.\n")
+    asked: list[tuple[Context, str, list[str], int]] = []
+
+    def escript(context: Context, script: str, args: list[str], *, timeout: int) -> tuple[int, str]:
+        asked.append((context, script, args, timeout))
+        return 0, json.dumps([{"file": str(copy), "line": 1, "name": "f/0", "complexity": 2}])
+
+    monkeypatch.setattr(erlang, "escript", escript)
+    units = er_crap.base_units(ctx, copy)
+    assert units == [{"file": "", "line": 1, "start": 1, "end": 4, "name": "f/0", "label": "f/0", "cc": 2}]
+    assert asked == [(ctx, "complexity.escript", [str(copy)], 600)]
 
 
 def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,3 +213,20 @@ def test_hyper_base_script_failure_falls_back(tmp_path: Path, fake_run: Callable
     result = hyper_er(tmp_path, fake_run, monkeypatch, 1)
     assert result.summary.endswith("; no base complexity for src/a.erl, crap_max only")
     assert result.findings == ["src/a.erl:5 mid/1 crap=6.0 (cc=4, coverage=50%)"]
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    ctx = project(tmp_path)
+    found = [{"file": str(tmp_path / "src/b.erl"), "line": 1, "name": "plain/0", "complexity": 6}]
+    expected = {
+        "file": "src/b.erl",
+        "line": 1,
+        "start": 1,
+        "end": 5,
+        "name": "plain/0",
+        "label": "plain/0",
+        "cc": 6,
+        "cov": 1.0,
+        "missing": set(),
+    }
+    assert er_crap.hyper_units(ctx, {"files": {}}, found) == [expected]

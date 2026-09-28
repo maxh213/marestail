@@ -236,3 +236,24 @@ def test_unit_labels_methods_with_their_class() -> None:
     assert py_crap.unit("a.py", method) == {"file": "a.py", "line": 4, "start": 4, "end": 6, "name": "meth", "label": "K.meth", "cc": 2}
     closure = py_crap.unit("a.py", {"name": "f", "lineno": 7, "complexity": 1})
     assert (closure["label"], closure["end"]) == ("f", 7)
+
+
+def test_readable_leaves_the_file_to_the_caller() -> None:
+    radon = {"copy.py": [{"type": "function", "name": "f", "lineno": 2, "endline": 5, "complexity": 3}]}
+    assert py_crap.readable(radon) == [{"file": "", "line": 2, "start": 2, "end": 5, "name": "f", "label": "f", "cc": 3}]
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    radon = {"n.py": [{"type": "function", "name": "untested", "lineno": 4, "endline": 8, "complexity": 3}]}
+    expected = {
+        "file": "n.py",
+        "line": 4,
+        "start": 4,
+        "end": 8,
+        "name": "untested",
+        "label": "untested",
+        "cc": 3,
+        "cov": 0.0,
+        "missing": set(),
+    }
+    assert py_crap.hyper_units(radon, {"files": {}}, make_context(tmp_path)) == [expected]

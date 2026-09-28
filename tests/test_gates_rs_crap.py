@@ -124,3 +124,28 @@ def test_hyper_without_functions(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, scope_changed=True, hyper=True)
     result = rs_crap.crap_result(ctx, {"files": {}}, None, 0.0)
     assert (result.ok, result.summary) == (True, "0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base")
+
+
+def test_base_units_leave_the_file_to_the_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        rust, "scan", lambda ctx, mode, paths: ([{"file": "copy", "line": 1, "end": 4, "name": "half", "complexity": 4}], None)
+    )
+    units = rs_crap.base_units(make_context(tmp_path), tmp_path / "copy.rs")
+    assert units == [{"file": "", "line": 1, "start": 1, "end": 4, "name": "half", "label": "half", "cc": 4}]
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    found = [{"file": "src/lib.rs", "line": 1, "end": 4, "name": "half", "complexity": 4}]
+    expected = {
+        "file": "src/lib.rs",
+        "line": 1,
+        "start": 1,
+        "end": 4,
+        "name": "half",
+        "label": "half",
+        "cc": 4,
+        "cov": 0.0,
+        "missing": set(),
+    }
+    assert rs_crap.hyper_units(make_context(tmp_path), {"files": {}}, found) == [expected]
+    assert rs_crap.hyper_units(make_context(tmp_path), {"files": {"src/lib.rs": {}}}, found) == [expected]

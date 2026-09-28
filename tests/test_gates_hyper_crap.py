@@ -81,6 +81,11 @@ def test_nesting_path_lists_enclosing_labels_outermost_first() -> None:
     assert _hyper_crap.nesting_path(top, functions) == "top"
 
 
+def test_nesting_path_puts_the_wider_of_two_same_start_functions_first() -> None:
+    top, middle, leaf = unit("top", (1, 30), 1), unit("middle", (1, 20), 1), unit("leaf", (5, 6), 1)
+    assert _hyper_crap.nesting_path(leaf, [middle, top, leaf]) == "top.middle.leaf"
+
+
 def test_complexity_by_path_keeps_the_highest_of_twins() -> None:
     functions = [unit("f", (1, 3), 4), unit("f", (5, 9), 7), unit("f", (11, 12), 2), unit("g", (20, 21), 1)]
     assert _hyper_crap.complexity_by_path(functions) == {"f": 7, "g": 1}
@@ -148,3 +153,38 @@ def test_base_defaults_to_origin_master(tmp_path: Path, monkeypatch: pytest.Monk
     asked = bases(monkeypatch, {})
     _hyper_crap.judged(hyper_ctx(tmp_path, {"a.py": {1}}), Hyper("py.crap", 4.0, scanner({})), [unit("f", (1, 2), 1)], 0.0)
     assert asked == [(tmp_path, "origin/master", "a.py")]
+
+
+def test_crap_equal_to_the_limit_is_not_above_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bases(monkeypatch, {})
+    ctx = hyper_ctx(tmp_path, {"a.py": {1}})
+    result = _hyper_crap.judged(ctx, Hyper("py.crap", 6.0, scanner({})), [unit("f", (1, 2), 2)], 0.0)
+    assert (result.ok, result.summary, result.findings) == (
+        True,
+        "1 innermost changed functions, 0 above CRAP 6, 0 of them no worse than base",
+        [],
+    )
+
+
+def test_every_unreadable_base_file_gets_its_own_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bases(monkeypatch, {"a.py": "broken", "b.py": "broken"})
+    ctx = hyper_ctx(tmp_path, {"a.py": {1}, "b.py": {1}})
+    functions = [unit("f", (1, 2), 1, cov=1.0), unit("g", (1, 2), 1, cov=1.0, file="b.py")]
+    result = _hyper_crap.judged(ctx, Hyper("py.crap", 4.0, scanner({"broken": None})), functions, 0.0)
+    notes = "; no base complexity for a.py, crap_max only; no base complexity for b.py, crap_max only"
+    assert result.summary == "2 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base" + notes
+
+
+def test_base_functions_nest_whatever_file_the_scanner_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bases(monkeypatch, {"a.py": "base"})
+    scan = scanner({"base": [unit("outer", (1, 10), 1, file="copy"), unit("inner", (2, 5), 9, file="elsewhere")]})
+    functions = [unit("outer", (1, 10), 1, cov=1.0), unit("inner", (2, 5), 9)]
+    result = _hyper_crap.judged(hyper_ctx(tmp_path, {"a.py": {3}}), Hyper("py.crap", 4.0, scan), functions, 0.0)
+    assert (result.ok, result.findings) == (True, [])
+
+
+def test_covered_member_without_line_data_misses_nothing() -> None:
+    member = {"file": "A.cs", "line": 3, "name": "M", "startLine": 3, "endLine": 5, "complexity": 2}
+    expected = {"file": "A.cs", "line": 3, "start": 3, "end": 5, "name": "M", "label": "M", "cc": 2, "cov": 0.0, "missing": set()}
+    assert _hyper_crap.covered_member(member, {"files": {}}, 0.0) == expected
+    assert _hyper_crap.covered_member(member, {"files": {"A.cs": {}}}, 0.0) == expected

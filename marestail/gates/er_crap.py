@@ -90,9 +90,9 @@ def touches_hunk(fn: dict[str, Any], ends: dict[tuple[str, int], int], ctx: Cont
     return any(fn["line"] <= line <= end for line in gated)
 
 
-def ranged(file: str, functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def ranged(functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ends = function_ends(functions)
-    return [er_unit(file, fn, ends[(fn["file"], fn["line"])]) for fn in functions]
+    return [er_unit("", fn, ends[(fn["file"], fn["line"])]) for fn in functions]
 
 
 def er_unit(file: str, fn: dict[str, Any], end: int) -> dict[str, Any]:
@@ -111,6 +111,6 @@ def covered_unit(ctx: Context, fn: dict[str, Any], end: int, file_cov: dict[str,
 
 def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
     code, output = erlang.escript(ctx, "complexity.escript", [str(copy)], timeout=COMPLEXITY_TIMEOUT)
-    if erlang.trouble(code, output, "complexity script failed"):
+    if code != 0:
         return None
-    return ranged("", json.loads(output))
+    return ranged(json.loads(output))

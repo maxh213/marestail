@@ -44,8 +44,8 @@ def fresh_caches(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class FakeScan:
-    def __init__(self, reply: tuple[Any, str | None]) -> None:
-        self.reply = reply
+    def __init__(self, *replies: tuple[Any, str | None]) -> None:
+        self.replies = list(replies)
         self.calls: list[tuple[str, list[Path]]] = []
         self.contexts: list[Any] = []
 
@@ -54,7 +54,7 @@ class FakeScan:
             raise TypeError("ctx")
         self.contexts.append(ctx)
         self.calls.append((mode, paths))
-        return self.reply
+        return self.replies.pop(0) if self.replies[1:] else self.replies[0]
 
 
 def install(monkeypatch: pytest.MonkeyPatch, reply: tuple[Any, str | None]) -> FakeScan:
@@ -192,18 +192,18 @@ def test_default_crap_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert view(checked(cs_crap.run_gate(ctx), cs_crap.GATE)) == ("cs.crap", True, "1 members, 0 above CRAP 4", [])
 
 
-def hyper_cs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None]) -> tuple[Result, list[list[Path]]]:
-    replies = [(MEMBERS, None), base_reply]
-    seen: list[list[Path]] = []
-
-    def scan(ctx: Any, mode: str, paths: list[Path]) -> tuple[Any, str | None]:
-        seen.append(paths)
-        return replies.pop(0)
-
-    monkeypatch.setattr(dotnet, "scan", scan)
+def hyper_cs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[Any, str | None], limits: dict[str, Any] | None = None
+) -> tuple[Result, list[list[Path]]]:
+    fake = FakeScan((MEMBERS, None), base_reply)
+    monkeypatch.setattr(dotnet, "scan", fake)
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "class A {}\n")
     ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"App/A.cs"}, changed_lines_map={"App/A.cs": {4}})
-    return checked(cs_crap.run_gate(ctx), cs_crap.GATE), seen
+    ctx.config.raw["dotnet"] = {"crap_max": 4} if limits is None else limits
+    result = checked(cs_crap.run_gate(ctx), cs_crap.GATE)
+    assert [mode for mode, _ in fake.calls] == ["complexity", "complexity"]
+    assert fake.contexts == [ctx, ctx]
+    return result, [paths for _, paths in fake.calls]
 
 
 def test_hyper_names_uncovered_changed_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,3 +221,10 @@ def test_hyper_base_scan_error_falls_back(tmp_path: Path, monkeypatch: pytest.Mo
     result, _ = hyper_cs(tmp_path, monkeypatch, (None, "C# scanner failed"))
     assert result.summary.endswith("; no base complexity for App/A.cs, crap_max only")
     assert result.findings == ["App/A.cs:3 High crap=10.5 (cc=6, coverage=50%)"]
+
+
+def test_hyper_reads_crap_max_from_the_dotnet_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_cs(tmp_path, monkeypatch, (None, "C# scanner failed"), {"crap_max": 11})
+    assert result.summary.startswith("2 innermost changed functions, 0 above CRAP 11,")
+    default, _ = hyper_cs(tmp_path / "default", monkeypatch, (None, "C# scanner failed"), {})
+    assert default.summary.startswith("2 innermost changed functions, 1 above CRAP 4,")

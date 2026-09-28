@@ -163,3 +163,10 @@ def test_hyper_scanner_failure_on_base_falls_back(tmp_path: Path, fake_run: Any,
 
 def test_missed_lines_are_statement_starts_with_no_hits() -> None:
     assert ts_crap.missed_lines(file_coverage({1: 0, 2: 3, 5: 0}, {})) == {1, 5}
+
+
+def test_base_units_leave_the_file_to_the_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    found = [{"file": "copy.ts", "line": 1, "endLine": 30, "name": "loadPaymentPopup", "complexity": 4}]
+    monkeypatch.setattr(javascript, "scan", lambda ctx, mode, files: (0, json.dumps(found)))
+    units = ts_crap.base_units(make_context(tmp_path, TS), tmp_path / "copy.ts")
+    assert units == [{"file": "", "line": 1, "start": 1, "end": 30, "name": "loadPaymentPopup", "label": "loadPaymentPopup", "cc": 4}]

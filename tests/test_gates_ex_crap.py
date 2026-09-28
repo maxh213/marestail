@@ -99,8 +99,12 @@ def hyper_ex(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pyte
     ctx = project(tmp_path, coverage, scope_changed=True, hyper=True, changed={"app/lib/a.ex"}, changed_lines_map={"app/lib/a.ex": {3}})
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "defmodule A do\nend\n")
     head = [{"file": source, "line": 2, "end_line": 8, "name": "big/2", "complexity": 5}]
-    fake_run(elixir, [(0, json.dumps(head)), base_reply])
-    return checked(ex_crap.run_gate(ctx), ex_crap.GATE)
+    run = fake_run(elixir, [(0, json.dumps(head)), base_reply])
+    result = checked(ex_crap.run_gate(ctx), ex_crap.GATE)
+    assert run.calls[1][:2] == ["elixir", str(elixir.script("complexity"))]
+    assert Path(run.calls[1][2]).relative_to(ctx.work).parts[1:] == ("app", "lib", "a.ex")
+    assert run.options[1]["timeout"] == 600
+    return result
 
 
 def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,3 +121,25 @@ def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Callable[
 def test_hyper_base_script_failure_falls_back(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
     result = hyper_ex(tmp_path, fake_run, monkeypatch, (1, "boom"))
     assert result.summary.endswith("; no base complexity for app/lib/a.ex, crap_max only")
+
+
+def test_base_units_leave_the_file_to_the_caller(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake_run(elixir, [(0, json.dumps([{"file": "copy.ex", "line": 2, "end_line": 5, "name": "f/0", "complexity": 3}]))])
+    units = ex_crap.base_units(project(tmp_path), tmp_path / "copy.ex")
+    assert units == [{"file": "", "line": 2, "start": 2, "end": 5, "name": "f/0", "label": "f/0", "cc": 3}]
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    found = [{"file": "lib/a.ex", "line": 2, "end_line": 4, "name": "small/0", "complexity": 1}]
+    expected = {
+        "file": "lib/a.ex",
+        "line": 2,
+        "start": 2,
+        "end": 4,
+        "name": "small/0",
+        "label": "small/0",
+        "cc": 1,
+        "cov": 1.0,
+        "missing": set(),
+    }
+    assert ex_crap.hyper_units(project(tmp_path), {"files": {}}, found) == [expected]

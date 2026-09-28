@@ -264,3 +264,32 @@ def test_hyper_base_scanner_failure_falls_back(tmp_path: Path, fake_run: Any, mo
 )
 def test_missed_reads_line_hits_then_missing_lines(file_cov: dict[str, Any], expected: set[int]) -> None:
     assert rb_crap.missed({"start": 1, "end": 4}, file_cov) == expected
+
+
+def test_missed_keeps_to_the_unit_range() -> None:
+    assert rb_crap.missed({"start": 3, "end": 4}, {"lines": [0, 0, 1, 1, 0]}) == set()
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    write_tree(tmp_path)
+    found = [{"file": str(tmp_path / "lib" / "tool.rb"), "line": 2, "name": "User#a", "complexity": 3}]
+    expected = {
+        "file": "lib/tool.rb",
+        "line": 2,
+        "start": 2,
+        "end": 4,
+        "name": "User#a",
+        "label": "User#a",
+        "cc": 3,
+        "cov": 1.0,
+        "missing": set(),
+    }
+    assert rb_crap.hyper_units(make_context(tmp_path), {"files": {}}, found) == [expected]
+
+
+def test_base_units_read_a_copy_that_is_not_utf8(tmp_path: Path, fake_run: Any) -> None:
+    copy = tmp_path / "copy.rb"
+    copy.write_bytes(b"\xff\ndef a\n  1\nend\n")
+    fake_run(ruby, [(0, json.dumps([{"file": str(copy), "line": 2, "name": "a", "complexity": 1}]))])
+    units = rb_crap.base_units(make_context(tmp_path, {"ruby": {"ruby": "rb"}}), copy)
+    assert units == [{"file": "", "line": 2, "start": 2, "end": 4, "name": "a", "label": "a", "cc": 1}]
