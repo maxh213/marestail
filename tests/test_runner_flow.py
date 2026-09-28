@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import pipeline, prompts, ran_against, runner
+from marestail import hunks, pipeline, prompts, ran_against, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -1055,6 +1055,20 @@ def test_judge_session_without_trees_uses_empty_section(tmp_path: Path, monkeypa
     runner.judge_session(state, CRITIC, report, "gate", None, "fb")
     assert section.calls == []
     assert prompt.calls[0][6] == ""
+    assert prompt.calls[0][-1] is None
+
+
+def test_judge_session_gives_blast_the_review_since_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(tmp_path, hyper=True, start="s0")
+    report = tmp_path / "05-blast.md"
+    review = patch(monkeypatch, hunks, "review", {"Diff stat": "DS", "Diff": "D", "Hunks": "H"})
+    prompt = patch(monkeypatch, prompts, "judge_prompt", "PROMPT")
+    patch(monkeypatch, runner, "head", "abc")
+    patch(monkeypatch, runner, "invoke")
+    patch(monkeypatch, runner, "discard_edits")
+    runner.judge_session(state, Judge("blast", None, bounce_to="coder"), report, "", None, "")
+    assert review.calls == [(state.config, "s0", state.handoffs)]
+    assert prompt.calls[0][-1] == {"Diff stat": "DS", "Diff": "D", "Hunks": "H"}
 
 
 def test_parse_verdict_without_extra_reads_the_report(tmp_path: Path) -> None:

@@ -584,6 +584,20 @@ def test_verify_worker_under_hyper_bounces_hunk_findings(repo: Path) -> None:
     assert problems == "src.py:1-2: not listed under ## Hunks"
 
 
+def test_hunk_problems_puts_one_finding_per_line(repo: Path) -> None:
+    write(repo, "old.py", "a = 1\n")
+    commit_all(repo, "old")
+    state = make_state(repo, hyper=True, start=runner.head(Config(root=repo, raw={})))
+    git(repo, "mv", "old.py", "new.py")
+    write(repo, "src.py", "x = 1\n")
+    commit_all(repo, "code")
+    report = state.next_report("coder")
+    report.write_text("done")
+    assert runner.hunk_problems(state, Worker("coder", None), report) == [
+        "old.py -> new.py: renamed or moved; under hyper no file may be renamed, moved or deleted\nsrc.py:1-1: not listed under ## Hunks"
+    ]
+
+
 def test_verify_worker_skips_the_hunk_check_outside_hyper_and_for_other_roles(repo: Path) -> None:
     write(repo, "src.py", "x = 1\n")
     commit_all(repo, "code")

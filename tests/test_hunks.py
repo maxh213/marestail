@@ -61,6 +61,35 @@ def test_problems_reports_a_rename_alone(repo: tuple[Config, str]) -> None:
     assert hunks.problems(config, start, "") == [f"util.py -> helpers.py: renamed or moved; {NO_MOVES}"]
 
 
+def test_problems_reports_a_whitespace_hunk_next_to_a_real_change(repo: tuple[Config, str]) -> None:
+    config, start = repo
+    change(config, {"util.py": UTIL.replace("    if", "        if").replace("return 0", "return 5")})
+    assert hunks.problems(config, start, "") == [
+        f"util.py:2-2: {hunks._WHITESPACE}",
+        "util.py:4-4: not listed under ## Hunks",
+    ]
+
+
+@pytest.mark.parametrize("renames", ["true", "false"])
+def test_problems_reports_a_renamed_and_edited_file_only_as_a_rename(repo: tuple[Config, str], renames: str) -> None:
+    config, start = repo
+    git(config.root, "config", "diff.renames", renames)
+    git(config.root, "mv", "util.py", "helpers.py")
+    write(config.root, "helpers.py", UTIL.replace("    if", "        if").replace("return 1", "return 2"))
+    commit_all(config.root, "move")
+    assert hunks.problems(config, start, "") == [f"util.py -> helpers.py: renamed or moved; {NO_MOVES}"]
+
+
+def test_problems_names_renamed_paths_with_spaces(repo: tuple[Config, str]) -> None:
+    config, _ = repo
+    write(config.root, "my util.py", UTIL)
+    commit_all(config.root, "spaced")
+    start = git(config.root, "rev-parse", "HEAD").strip()
+    git(config.root, "mv", "my util.py", "my helpers.py")
+    commit_all(config.root, "move")
+    assert hunks.problems(config, start, "") == [f"my util.py -> my helpers.py: renamed or moved; {NO_MOVES}"]
+
+
 def test_problems_reports_a_deletion_alone(repo: tuple[Config, str]) -> None:
     config, start = repo
     git(config.root, "rm", "-q", "util.py")
@@ -157,6 +186,13 @@ def test_review_holds_the_diff_since_start_and_the_latest_hunks(repo: tuple[Conf
     assert "features" not in review["Diff stat"]
     assert "+        return 2" in review["Diff"]
     assert review["Hunks"] == "## 03-coder\n- util.py:3-3 — why"
+
+
+def test_review_lists_the_coder_then_the_architect(repo: tuple[Config, str], tmp_path: Path) -> None:
+    config, start = repo
+    write(tmp_path, "01-coder.md", "## Hunks\n- util.py:3-3 — why\n")
+    write(tmp_path, "02-architect.md", "## Hunks\n- util.py:1-4 — boy scout\n")
+    assert hunks.review(config, start, tmp_path)["Hunks"] == "## 01-coder\n- util.py:3-3 — why\n## 02-architect\n- util.py:1-4 — boy scout"
 
 
 def test_review_is_empty_without_changes_or_handoffs(repo: tuple[Config, str], tmp_path: Path) -> None:

@@ -16,7 +16,6 @@ _PATHSPEC = ["--", ".", ":(exclude)features", ":(exclude)qa", ":(exclude).marest
 _FILE_HEADER = re.compile(r"^diff --git ", re.MULTILINE)
 _NEW_PATH = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 _HUNK_HEADER = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
-_FIRST_HUNK = "\n@@"
 _LISTED = re.compile(r"^\s*(?:[-*] )?([^\s:]+):(\d+)(?:-(\d+))?")
 _HUNKS_HEADING = "## Hunks"
 _HEADING = "## "
@@ -31,13 +30,13 @@ _TAB = "\t"
 def problems(config: Config, start: str, handoff: str) -> list[str]:
     move_findings = dict(_moved_files(config, start))
     changed = _changed_hunks(config, start, set(move_findings.values()))
-    reformatted = _whitespace_only(changed, _parse_hunks(_git_diff(config, start, "-U0", "-M", "-w")))
+    reformatted = _whitespace_only(changed, _parse_hunks(_git_diff(config, start, "-U0", "-w")))
     unlisted = _unlisted_hunks(changed, reformatted, _listed_hunks(handoff))
     return list(move_findings) + _findings(reformatted, _WHITESPACE) + _findings(unlisted, _UNLISTED)
 
 
 def _changed_hunks(config: Config, start: str, skipped: set[str]) -> list[_Hunk]:
-    return [hunk for hunk in _parse_hunks(_git_diff(config, start, "-U0", "-M")) if hunk[0] not in skipped]
+    return [hunk for hunk in _parse_hunks(_git_diff(config, start, "-U0")) if hunk[0] not in skipped]
 
 
 def _whitespace_only(changed: list[_Hunk], substantive: list[_Hunk]) -> list[_Hunk]:
@@ -73,7 +72,7 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
 
 
 def _chunk_hunks(chunk: str) -> list[_Hunk]:
-    path = _NEW_PATH.search(chunk.split(_FIRST_HUNK, 1)[0])
+    path = _NEW_PATH.search(chunk)
     if path is None:
         return []
     return [(path.group(1), *_span(match)) for match in _HUNK_HEADER.finditer(chunk)]
