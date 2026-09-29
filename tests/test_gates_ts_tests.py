@@ -321,7 +321,7 @@ def test_hyper_test_cmd_passes_on_exit_zero_and_reads_no_coverage(tmp_path: Path
         [],
     )
     assert fake.calls == [["bash", "-lc", "node t.js"]]
-    assert fake.options[0]["cwd"] == tmp_path
+    assert fake.options == [{"cwd": tmp_path, "timeout": 1800}]
 
 
 def test_hyper_test_cmd_failure_shows_the_last_lines(tmp_path: Path, fake_run: Any) -> None:

@@ -7,7 +7,7 @@ import pytest
 from marestail import javascript
 from marestail.gates import _hyper_crap, _stryker, ts_crap
 from marestail.report import Result
-from tests.conftest import checked, make_context, untimed
+from tests.conftest import checked, make_context, reject_none, untimed
 
 TS = {"ts": {"root": "web"}}
 
@@ -215,7 +215,7 @@ def proven(monkeypatch: pytest.MonkeyPatch, proof: _stryker.Proof, base: str | N
         seen.append(mutate)
         return proof
 
-    monkeypatch.setattr(ts_crap, "command_proof", fake_proof)
+    monkeypatch.setattr(ts_crap, "command_proof", reject_none(fake_proof))
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: base)
     return seen
 
@@ -269,7 +269,12 @@ def test_mutation_proof_fails_when_stryker_left_no_report(tmp_path: Path, fake_r
 
     result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
 
-    assert (result.ok, result.summary, result.findings) == (False, "stryker produced no report (exit 127)", ["stryker: not found"])
+    assert (result.gate, result.ok, result.summary, result.findings) == (
+        "ts.crap",
+        False,
+        "stryker produced no report (exit 127)",
+        ["stryker: not found"],
+    )
     assert fake.calls == []
 
 
@@ -310,3 +315,15 @@ def test_ignored_lines_hold_only_punctuation(text: str, ignored: bool) -> None:
 def test_with_unprovable_leaves_a_result_without_findings_alone() -> None:
     result = Result(ts_crap.GATE, True, "s", ["a"])
     assert ts_crap.with_unprovable(result, []) == Result(ts_crap.GATE, True, "s", ["a"])
+
+
+def test_with_unprovable_adds_its_findings_after_the_existing_ones() -> None:
+    result = Result(ts_crap.GATE, False, "s", ["a"])
+    assert ts_crap.with_unprovable(result, ["b", "c"]) == Result(
+        ts_crap.GATE, False, "s; 2 changed lines not provable by mutation", ["a", "b", "c"]
+    )
+
+
+def test_mutated_files_are_distinct_sorted_paths_without_ranges() -> None:
+    mutate = ["b.js:3-4", "a:b.js:1-1", "b.js:9-9", "a.js:2-2"]
+    assert ts_crap.mutated_files(mutate) == ["a.js", "a:b.js", "b.js"]

@@ -272,6 +272,42 @@ def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_pat
     assert not (tmp_path / "web" / _stryker.COMMAND_TEMP).exists()
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_command_config_writes_the_pinned_text(tmp_path: Path, existing: bool) -> None:
+    if existing:
+        (tmp_path / ".marestail" / "stryker").mkdir(parents=True)
+    ctx = command_context(tmp_path, {"web/src/a.js": {7}})
+
+    path = _stryker.command_config(ctx, ["src/a.js:7-7"])
+
+    report = json.dumps(str(tmp_path / ".marestail" / "stryker" / "mutation.json"))
+    assert path == tmp_path / ".marestail" / "stryker" / "command.config.json"
+    assert path.read_text() == (
+        "{\n"
+        '  "testRunner": "command",\n'
+        '  "commandRunner": {\n'
+        '    "command": "node t.js"\n'
+        "  },\n"
+        '  "coverageAnalysis": "off",\n'
+        '  "reporters": [\n'
+        '    "json",\n'
+        '    "progress"\n'
+        "  ],\n"
+        '  "jsonReporter": {\n'
+        f'    "fileName": {report}\n'
+        "  },\n"
+        '  "tempDirName": ".marestail/stryker-tmp",\n'
+        '  "cleanTempDir": "always",\n'
+        '  "ignorePatterns": [\n'
+        '    ".marestail"\n'
+        "  ],\n"
+        '  "mutate": [\n'
+        '    "src/a.js:7-7"\n'
+        "  ]\n"
+        "}\n"
+    )
+
+
 def test_command_proof_hints_when_nothing_is_killed(tmp_path: Path, fake_run: Any) -> None:
     report = {"files": {"src/a.js": {"mutants": [mutant("Survived", 7), mutant("Survived", 7, "y"), mutant("Survived", 3)]}}}
     fake_run(_stryker, command_stryker(tmp_path, report))
