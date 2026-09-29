@@ -434,11 +434,15 @@ def test_run_session_records_agent_and_rate_limit(repo: Path, monkeypatch: pytes
 
 
 def test_run_session_grok_locked_remembers_empty_summary(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner, "LIMIT_WAIT_SECONDS", 0)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
     state = make_state(repo, agent="grok")
     state.folder.mkdir(parents=True, exist_ok=True)
     prompt = state.folder / "x.prompt.md"
     prompt.write_text("p")
     monkeypatch.setattr(runner, "run_backend", lambda *args: (1, "always-approve is disabled by policy"))
+    assert runner.limited_session(state, "x", "p", prompt) is False
+    assert state.attempt_waits == []
     assert runner.run_session(state, "x", "p", prompt) is True
     assert state.attempt_agent is not None
     assert state.attempt_agent["backend"] == "grok"

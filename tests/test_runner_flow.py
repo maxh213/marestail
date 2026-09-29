@@ -1136,7 +1136,8 @@ def test_invoke_gives_up_after_waits(tmp_path: Path, invoke_env: dict[str, Any],
     assert capsys.readouterr().out.splitlines()[-1] == "   x: still rate limited after 2 waits"
 
 
-def test_invoke_stops_when_grok_is_locked(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:
+def test_invoke_stops_when_grok_is_locked(tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    monkeypatch.setattr(runner, "LIMIT_WAITS", 1)
     invoke_env["backend"].replies = [(1, "always-approve is disabled by policy")]
     runner.invoke(make_state(tmp_path, agent="grok"), "x", "p")
     assert invoke_env["sleep"].calls == []

@@ -32,7 +32,12 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(folder))
     monkeypatch.delenv("GROK_HOME", raising=False)
     monkeypatch.setattr(time, "time", lambda: 1234.9)
+    monkeypatch.setattr(_hyper, "install_hyper", refuse_hyper)
     return folder
+
+
+def refuse_hyper(path: Path) -> int:
+    raise AssertionError(f"hyper install was not asked for: {path}")
 
 
 @pytest.fixture
@@ -450,6 +455,11 @@ def test_install_reports_a_failed_playwright_step(
     fake_run(_install, replies)
     assert install.install(target) == 1
     assert capsys.readouterr().out.splitlines()[-1] == message
+
+
+def test_refuse_hyper_fails_the_test(tmp_path: Path) -> None:
+    with pytest.raises(AssertionError, match="hyper install was not asked for"):
+        refuse_hyper(tmp_path)
 
 
 def test_playwright_is_the_only_js_dependency() -> None:
