@@ -42,7 +42,7 @@ def run_gate(ctx: Context) -> Result:
     if ctx.timeouts_fail("ts"):
         survivors += [finding(name, mutant) for name, mutant in timed_out]
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
-    summary += f" ({len(timed_out)} by timeout)" if timed_out and not ctx.timeouts_fail("ts") else ""
+    summary += f" ({len(timed_out)} killed by timeout)" if timed_out and not ctx.timeouts_fail("ts") else ""
     summary += f" {scope.note}" if scope.note else ""
     summary += outcome.where
     return Result("ts.mutation", not survivors, summary, survivors, time.time() - started)

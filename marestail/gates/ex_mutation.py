@@ -73,7 +73,7 @@ def run_gate(ctx: Context) -> Result:
     findings = [describe(ctx, m) for m in mutations if m.get("status", "").lower() not in passing]
     counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
     summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
-    summary += f" ({timed_out} by timeout)" if timed_out and not ctx.timeouts_fail("elixir") else ""
+    summary += f" ({timed_out} killed by timeout)" if timed_out and not ctx.timeouts_fail("elixir") else ""
     summary += f" {scope.note}" if scope.note else ""
     summary += outcome.where
     return Result("ex.mutation", not findings, summary, findings, time.time() - started)

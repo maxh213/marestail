@@ -57,7 +57,7 @@ def run_gate(ctx: Context) -> Result:
     timed_out = [m for m in mutants if m[1]["status"] == "Timeout"]
     findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD or (strict and mutant["status"] == "Timeout")]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
-    summary += f" ({len(timed_out)} by timeout)" if timed_out and not strict else ""
+    summary += f" ({len(timed_out)} killed by timeout)" if timed_out and not strict else ""
     summary += f" {scope.note}" if scope.note else ""
     return Result("cs.mutation", not findings, summary, findings, time.time() - started)
 

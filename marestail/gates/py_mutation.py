@@ -39,7 +39,7 @@ def run_gate(ctx: Context) -> Result:
     if total == 0:
         return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
-    summary += f" ({timed_out} by timeout)" if timed_out and not ctx.timeouts_fail("python") else ""
+    summary += f" ({timed_out} killed by timeout)" if timed_out and not ctx.timeouts_fail("python") else ""
     summary += f" {scope.note}" if scope.note else ""
     summary += outcome.where
     return Result("py.mutation", not survivors, summary, survivors, time.time() - started)
