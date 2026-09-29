@@ -9,15 +9,28 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     Exit 0: `[ok  ] ts.tests       test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd`.
     Exit n != 0: `[FAIL] ts.tests       test_cmd exited <n>` with the command's last 30 non-blank output lines as findings.
     No coverage report is read and coverage never fails the gate.
-  - ts.mutation runs `<T>/node_modules/.bin/stryker run <config>` from `.marestail/tooling` (011), where <config> is a file
-    the gate writes under `.marestail/` holding `"testRunner": "command"`, `"commandRunner": {"command": "<test_cmd>"}`,
-    `"coverageAnalysis": "off"` and `mutate` set to the changed line ranges (007) of changed `.js .mjs .cjs .ts .tsx`
-    files that are not tests. Stryker's report and temp dir also live under `.marestail/`.
+  - ts.mutation runs Stryker with cwd = the ts root (as today); only the binary comes from
+    `<tooling>/node_modules/.bin/stryker` (011). It passes one argument, a config the gate writes to
+    `<repo>/.marestail/stryker/command.config.json` holding `"testRunner": "command"`,
+    `"commandRunner": {"command": "<test_cmd>"}`, `"coverageAnalysis": "off"`, `"reporters": ["json", "progress"]`,
+    `"jsonReporter": {"fileName": "<repo>/.marestail/stryker/mutation.json"}`,
+    `"tempDirName": ".marestail/stryker-tmp"`, `"cleanTempDir": "always"`, `"ignorePatterns": [".marestail"]` and
+    `mutate` set to the changed line ranges (007) of changed `.js .mjs .cjs .ts .tsx` files that are not tests.
+    `ignorePatterns` keeps `.marestail/` (tooling, earlier reports) out of every sandbox; the temp dir still lives
+    under `.marestail/` and is removed afterwards. Nothing lands in `reports/` or `.stryker-tmp/`.
     Only mutants that start on a changed line are counted or reported. Summaries:
     `all mutants killed (proof: mutation via [hyper] test_cmd)`,
     `<k> surviving mutants (proof: mutation via [hyper] test_cmd)` (fails), or
-    `no mutants on changed lines` when none start on a changed line (passes). A missing or crashing
-    Stryker fails with today's text `stryker produced no report (exit <n>)`.
+    `no mutants on changed lines` when none start on a changed line (passes).
+    When at least one mutant survives and none is killed, the first finding is
+    `hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, or no assertion depends on the changed lines`.
+  - No report: Stryker exit 0 with no report means zero mutants (`no mutants on changed lines`, and ts.crap marks every
+    changed line not provable). Any other exit with no report fails ts.mutation and ts.crap with today's text
+    `stryker produced no report (exit <n>)` (007). No changed non-test JS/TS file: Stryker does not run,
+    ts.mutation is `[skip] no changed typescript sources` and ts.crap is `[skip] no files in scope`, as today.
+  - Stryker switches mutants through `process.env` of the global the code runs in. So a test that loads code with
+    `vm` must pass `process` into the sandbox, e.g. `vm.runInNewContext(src, { module: { exports: {} }, process })`.
+    The gate does not patch `vm`.
   - ts.crap needs no coverage file. It takes per-line proof from the same Stryker run as ts.mutation (one run per
     `marestail gate` call, even with `--only ts.crap`). A changed line is covered when it has at least one killed
     mutant and no other mutant; a changed line with a surviving mutant is not covered; a function's coverage is its
@@ -64,7 +77,7 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
   Scenario: an asserted changed line passes, proven by mutation
     Given on "fix" line 7 is `  return state === "open" || state === "opening";`
     And "fix" adds `client/embed/popUp.test.js`, a Node script using `assert`, `fs`, `vm` and a home-made `it`,
-      that loads popUp.js with `vm.runInNewContext` and asserts `isOpen("opening") === true`,
+      that loads popUp.js with `vm.runInNewContext(src, { module: { exports: {} }, process })` and asserts `isOpen("opening") === true`,
       `isOpen("open") === true` and `isOpen("closed") === false`, printing `ok - <name>` per case
     When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
     Then the output contains `scope: hyper: ` and the line `proof: mutation via [hyper] test_cmd; coverage not measured`
@@ -80,27 +93,40 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
     Then `ts.tests` is `[ok  ]` with the advisory summary
     And `ts.mutation` is `[FAIL]` with a summary matching `^\d+ surviving mutants \(proof: mutation via \[hyper\] test_cmd\)$`
-    And every ts.mutation finding starts with `client/embed/popUp.js:7 `
+    And its first finding is the `hint: no mutant was killed; ...` line and every other finding starts with `client/embed/popUp.js:7 `
     And `ts.crap` is `[FAIL]` with the finding `client/embed/popUp.js:6 isOpen crap=6.0 (cc=2, coverage=0%); changed lines not covered: 7`
     And the last line is `GATE FAILED: ts.crap, ts.mutation` and the exit code is 1
 
+  Scenario: a vm test that does not pass process kills nothing, and the gate says why
+    Given the change and asserting test of the first scenario, but the sandbox is `{ module: { exports: {} } }`
+    When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.mutation`
+    Then `ts.tests` is `[ok  ]` with the advisory summary, because the test itself passes
+    And `ts.mutation` is `[FAIL]` with a summary matching `^\d+ surviving mutants \(proof: mutation via \[hyper\] test_cmd\)$`
+    And its first finding is `hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, or no assertion depends on the changed lines`
+
   Scenario: mutants on unchanged lines are never reported
-    Given the assertion-free change of the scenario above
+    Given the assertion-free change of the scenario "the same change with the assertions removed"
     When I run `marestail gate --tier full --scope hyper --only ts.mutation`
     Then no finding contains `popUp.js:2` or `popUp.js:3`, although nothing tests `popUpUrl`
 
   Scenario: a changed line with no mutants is not provable by mutation
-    Given on "fix" only line 3 changes, to `  return String(url);`, and popUp.test.js asserts
+    Given on "fix" only line 3 changes, to `  return String(url);`, and popUp.test.js (sandbox passes `process`) asserts
       `popUpUrl("https://x", "a") === "https://x/embed/a"`
+    And Stryker, finding no mutant in `client/embed/popUp.js:3-3`, may exit 0 without writing a report
     When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
     Then it contains `[ok  ] ts.mutation    no mutants on changed lines`
     And `ts.crap` is `[ok  ]`, its summary ends `; 1 changed lines not provable by mutation`,
       and it shows the finding `client/embed/popUp.js:3 not provable by mutation`
     And the last line is `GATE PASSED`
 
+  Scenario: no changed source file means Stryker does not run
+    Given on "fix" only `client/embed/popUp.test.js` is added
+    When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
+    Then it contains `[skip] ts.mutation    no changed typescript sources` and `[skip] ts.crap        no files in scope`
+
   Scenario: a failing test_cmd fails the tests gate with its last lines
     Given the change of the first scenario and a test asserting `isOpen("opening") === false`
-    When I run `marestail gate --tier full --scope hyper --only ts.tests`
+    When I run `marestail gate --tier full --scope hyper --only ts.tests` (ts.tests behaves the same under `--tier fast`)
     Then it contains `[FAIL] ts.tests       test_cmd exited 1`
     And its findings include a line containing `AssertionError`
     And the exit code is 1
@@ -124,15 +150,19 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     And under hyper with `test_cmd` set the rules above apply instead
 
   Scenario: the hyper prompts carry the rule about tests
+    Given TESTS_RULE is `Tests must run with a command the repository already supports, in the style its existing tests use; find that out first. If the repository has a runner, use it. If it has tests but no runner, write the same kind of script. If it has no tests at all, write dependency-free tests for the language's standard runtime and say so in your handoff. A test that loads code with vm must pass process into the sandbox, so mutation testing can switch mutants.`
     When the coder's prompt is built under `--scope hyper`
-    Then its `# Scope` section contains `Tests must run with a command the repository already supports, in the style its existing tests use; find that out first. If the repository has a runner, use it. If it has tests but no runner, write the same kind of script. If it has no tests at all, write dependency-free tests for the language's standard runtime and say so in your handoff.`
+    Then its `# Scope` body is exactly HYPER_SCOPE, a space, and
+      `Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. <TESTS_RULE> Write as many as you need. <HUNKS_INSTRUCTION>`
+    And it no longer contains `Write the tests the repository can already run, in the style it already uses.`, which TESTS_RULE replaces
     When the hardener's prompt is built under `--scope hyper`
-    Then its `# Scope` section contains that same text and `Rule on every changed line the gate reports as not provable by mutation.`
-    And prompts outside hyper are byte-identical to today's
+    Then its `# Scope` body is exactly HYPER_SCOPE, a space, today's hardener sentences, a space, TESTS_RULE, a space, and
+      `Rule on every changed line the gate reports as not provable by mutation.`
+    And prompts outside hyper, and the other roles' hyper prompts, are byte-identical to today's
 
   Scenario: the diagnostic scripts and README
     When I run `python3 tools/test-hyper-test-cmd.py`
     Then it exits 0 and its last line is `hyper test_cmd ok`
     And every other `tools/test-*.py` keeps its current result (`tools/test-perf.py` still exits 1 as in 000)
     And README's `--scope hyper` text states the rule about tests, documents `[hyper] test_cmd` with the example above,
-      and contains `mutation stands in for coverage`
+      contains `mutation stands in for coverage`, and says a vm-loaded test must `pass process into the sandbox`
