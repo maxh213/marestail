@@ -12,6 +12,7 @@ from marestail.shell import tail
 REPORT = "reports/mutation/mutation.json"
 INCREMENTAL = "reports/stryker-incremental.json"
 TEMP_DIR = ".stryker-tmp"
+TIMEOUT = 7200
 BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 
 
@@ -30,7 +31,7 @@ def run_gate(ctx: Context) -> Result:
     report.unlink(missing_ok=True)
     try:
         pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
-        outcome = remote.run_mutation(ctx, "ts.mutation", command, ctx.ts_root(), timeout=7200, pull=pull)
+        outcome = remote.run_mutation(ctx, "ts.mutation", command, ctx.ts_root(), timeout=TIMEOUT, pull=pull)
         if not report.exists():
             return Result("ts.mutation", False, f"stryker produced no report (exit {outcome.code}){outcome.where}", tail(outcome.output), time.time() - started)
         survivors = surviving(json.loads(report.read_text()), ctx)
@@ -49,6 +50,7 @@ def concurrency(ctx: Context) -> int | None:
 
 def mutation_command(mutate: list[str], concurrency: int | None = None, incremental: bool = False) -> list[str]:
     command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
+    command += ["--dryRunTimeoutMinutes", str(TIMEOUT // 60)]
     if concurrency:
         command += ["--concurrency", str(concurrency)]
     if incremental:
