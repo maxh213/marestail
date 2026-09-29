@@ -200,10 +200,11 @@ def ssh_options(found: Settings) -> list[str]:
     ]
 
 
-def ssh(found: Settings, ip: str, remote: str, timeout: int | None = None) -> tuple[int, str]:
+def ssh(found: Settings, ip: str, remote: str, timeout: int | None = None, tty: bool = False) -> tuple[int, str]:
+    hangup = ["-tt", "-q"] if tty else []
     try:
         completed = subprocess.run(
-            ["ssh", *ssh_options(found), f"{found.user}@{ip}", remote],
+            ["ssh", *hangup, *ssh_options(found), f"{found.user}@{ip}", remote],
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
@@ -251,17 +252,24 @@ def fetch(found: Settings, ip: str, root: Path, path: str) -> None:
 
 
 def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
-    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", **found.env, **(env or {})}
+    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1", **found.env, **(env or {})}
     flags = " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
+    job = uuid.uuid4().hex
+    session = f"/tmp/marestail-job-{job}"
     inner = shlex.join(command)
     if timeout:
         inner = f"timeout -k 30 {int(timeout)} {inner}"
-    inner = f"{PREPARE}; {inner}"
-    docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} bash -c {shlex.quote(inner)}"
-    marker = f"{BUSY}/{uuid.uuid4().hex}"
+    inner = f"echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
+    docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} setsid -w bash -c {shlex.quote(inner)}"
+    stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
+    cleanup = f"sg docker -c {shlex.quote(f'docker exec {found.container} bash -c {shlex.quote(stop)}')}"
+    marker = f"{BUSY}/{job}"
     queued = f"flock {JOB_LOCK} sg docker -c {shlex.quote(docker)}"
-    script = f"echo $$ > {marker}; {queued}; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
-    return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None)
+    script = (
+        f"echo $$ > {marker}; stop() {{ {cleanup} >/dev/null 2>&1; rm -f {marker}; }}; trap 'stop; exit 129' HUP INT TERM; "
+        f"{queued} & wait $!; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
+    )
+    return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None, tty=True)
 
 
 def record(entry: dict) -> None:
