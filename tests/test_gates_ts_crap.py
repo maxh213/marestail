@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail import javascript
-from marestail.gates import _hyper_crap, ts_crap, ts_mutation
+from marestail.gates import _hyper_crap, _stryker, ts_crap
 from marestail.report import Result
 from tests.conftest import checked, make_context, untimed
 
@@ -208,20 +208,20 @@ def command_ctx(root: Path, lines: dict[str, set[int]]) -> Any:
     return make_context(root, COMMAND, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
 
 
-def proven(monkeypatch: pytest.MonkeyPatch, proof: ts_mutation.Proof, base: str | None = None) -> list[Any]:
+def proven(monkeypatch: pytest.MonkeyPatch, proof: _stryker.Proof, base: str | None = None) -> list[Any]:
     seen: list[Any] = []
 
-    def fake_proof(ctx: Any, mutate: list[str]) -> ts_mutation.Proof:
+    def fake_proof(ctx: Any, mutate: list[str]) -> _stryker.Proof:
         seen.append(mutate)
         return proof
 
-    monkeypatch.setattr(ts_mutation, "command_proof", fake_proof)
+    monkeypatch.setattr(ts_crap, "command_proof", fake_proof)
     monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: base)
     return seen
 
 
 def test_mutation_proof_scores_an_asserted_line_as_covered(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = proven(monkeypatch, ts_mutation.Proof(0, "", {"files": {"client/popUp.js": {"mutants": [mutant("Killed", 7)] * 3}}}))
+    seen = proven(monkeypatch, _stryker.Proof(0, "", {"files": {"client/popUp.js": {"mutants": [mutant("Killed", 7)] * 3}}}))
     fake = fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS))])
     ctx = command_ctx(tmp_path, {"client/popUp.js": {7}, "client/popUp.test.js": {1, 2}})
 
@@ -239,7 +239,7 @@ def test_mutation_proof_scores_an_asserted_line_as_covered(tmp_path: Path, fake_
 
 def test_mutation_proof_fails_a_line_whose_mutants_survive(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     report = {"files": {"client/popUp.js": {"mutants": [mutant("Survived", 7), mutant("Survived", 2)]}}}
-    proven(monkeypatch, ts_mutation.Proof(0, "", report), base=POP_UP)
+    proven(monkeypatch, _stryker.Proof(0, "", report), base=POP_UP)
     fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS)), (0, json.dumps(POP_UP_FUNCTIONS))])
 
     result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
@@ -250,7 +250,7 @@ def test_mutation_proof_fails_a_line_whose_mutants_survive(tmp_path: Path, fake_
 def test_mutation_proof_reports_lines_with_no_mutants_as_not_provable(
     tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    proven(monkeypatch, ts_mutation.Proof(0, "", None))
+    proven(monkeypatch, _stryker.Proof(0, "", None))
     size = [function("client/size.js", "sizeOf", 1, 6, 3)]
     fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS + size))])
 
@@ -264,7 +264,7 @@ def test_mutation_proof_reports_lines_with_no_mutants_as_not_provable(
 
 
 def test_mutation_proof_fails_when_stryker_left_no_report(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    proven(monkeypatch, ts_mutation.Proof(127, "stryker: not found", None))
+    proven(monkeypatch, _stryker.Proof(127, "stryker: not found", None))
     fake = fake_run(javascript)
 
     result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
@@ -274,7 +274,7 @@ def test_mutation_proof_fails_when_stryker_left_no_report(tmp_path: Path, fake_r
 
 
 def test_mutation_proof_skips_when_no_source_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = proven(monkeypatch, ts_mutation.Proof(0, "", None))
+    seen = proven(monkeypatch, _stryker.Proof(0, "", None))
 
     result = untimed(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.test.js": {1}})), ts_crap.GATE)
 
@@ -282,7 +282,7 @@ def test_mutation_proof_skips_when_no_source_changed(tmp_path: Path, monkeypatch
 
 
 def test_mutation_proof_shows_a_failing_complexity_script(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    proven(monkeypatch, ts_mutation.Proof(0, "", None))
+    proven(monkeypatch, _stryker.Proof(0, "", None))
     fake_run(javascript, [(1, "\n".join(f"line {n}" for n in range(12)))])
 
     result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)

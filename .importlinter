@@ -127,6 +127,7 @@ protected_modules =
     marestail.gates._hyper_crap
     marestail.gates._coverage
     marestail.gates._serve
+    marestail.gates._stryker
 allowed_importers =
     marestail.gates
 
@@ -154,6 +155,67 @@ source_modules =
     marestail.gates._crap
 forbidden_modules =
     marestail.gates._hyper_crap
+
+[importlinter:contract:stryker-belongs-to-ts-mutation-and-crap]
+name = Running Stryker and reading its report are private to the TS mutation and CRAP gates, which share one run under the hyper test_cmd
+type = protected
+protected_modules =
+    marestail.gates._stryker
+allowed_importers =
+    marestail.gates.ts_mutation
+    marestail.gates.ts_crap
+
+[importlinter:contract:gates-are-independent]
+name = Gates never import one another; work two gates share lives in a private gate helper
+type = independence
+modules =
+    marestail.gates.comments
+    marestail.gates.cs_crap
+    marestail.gates.cs_deps
+    marestail.gates.cs_lint
+    marestail.gates.cs_mutation
+    marestail.gates.cs_tests
+    marestail.gates.deadcode
+    marestail.gates.depth
+    marestail.gates.docs
+    marestail.gates.er_crap
+    marestail.gates.er_deps
+    marestail.gates.er_lint
+    marestail.gates.er_mutation
+    marestail.gates.er_tests
+    marestail.gates.ex_crap
+    marestail.gates.ex_deps
+    marestail.gates.ex_lint
+    marestail.gates.ex_mutation
+    marestail.gates.ex_tests
+    marestail.gates.java_crap
+    marestail.gates.java_deps
+    marestail.gates.java_lint
+    marestail.gates.java_mutation
+    marestail.gates.java_tests
+    marestail.gates.py_crap
+    marestail.gates.py_deps
+    marestail.gates.py_lint
+    marestail.gates.py_mutation
+    marestail.gates.py_runtime
+    marestail.gates.py_tests
+    marestail.gates.qa
+    marestail.gates.rb_crap
+    marestail.gates.rb_deps
+    marestail.gates.rb_lint
+    marestail.gates.rb_mutation
+    marestail.gates.rb_tests
+    marestail.gates.rs_crap
+    marestail.gates.rs_deps
+    marestail.gates.rs_lint
+    marestail.gates.rs_mutation
+    marestail.gates.rs_tests
+    marestail.gates.sonar
+    marestail.gates.ts_crap
+    marestail.gates.ts_deps
+    marestail.gates.ts_lint
+    marestail.gates.ts_mutation
+    marestail.gates.ts_tests
 
 [importlinter:contract:serve-belongs-to-qa]
 name = The app lifecycle is private to the qa gate

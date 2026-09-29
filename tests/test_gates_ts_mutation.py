@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from marestail.context import MutationScope
-from marestail.gates import ts_mutation
+from marestail.gates import _stryker, ts_mutation
 from tests.conftest import checked, make_context, untimed
 
 TS = {"ts": {"root": "web"}}
@@ -48,7 +48,7 @@ def test_bad_setting_is_an_error(tmp_path: Path) -> None:
 
 
 def test_nothing_changed_is_skipped(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(ts_mutation)
+    fake = fake_run(_stryker)
 
     result = untimed(
         ts_mutation.run_gate(make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.test.ts", "perf/b.ts"})), ts_mutation.GATE
@@ -68,7 +68,7 @@ def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
         }
     }
     seen: list[bool] = []
-    fake = fake_run(ts_mutation, stryker(tmp_path, report, seen))
+    fake = fake_run(_stryker, stryker(tmp_path, report, seen))
 
     result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
 
@@ -86,7 +86,7 @@ def test_full_run_reports_survivors(tmp_path: Path, fake_run: Any) -> None:
 
 def test_missing_report_fails_and_cleans_up(tmp_path: Path, fake_run: Any) -> None:
     prepare(tmp_path)
-    fake_run(ts_mutation, stryker(tmp_path, None, []))
+    fake_run(_stryker, stryker(tmp_path, None, []))
 
     result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
 
@@ -99,7 +99,7 @@ def test_scoped_run_mutates_changed_sources(tmp_path: Path, fake_run: Any) -> No
         (tmp_path / "web" / "src").mkdir(parents=True, exist_ok=True)
         (tmp_path / "web" / "src" / name).write_text("")
     report = {"files": {"src/a.ts": {"mutants": [mutant("Survived", 4)]}, "src/other.ts": {"mutants": [mutant("Survived", 1)]}}}
-    fake = fake_run(ts_mutation, stryker(tmp_path, report, []))
+    fake = fake_run(_stryker, stryker(tmp_path, report, []))
     ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/src/a.ts", "web/src/b.ts"})
 
     result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
@@ -112,7 +112,7 @@ def test_all_killed_with_a_note(tmp_path: Path, fake_run: Any, monkeypatch: pyte
     (tmp_path / "web").mkdir()
     ctx = make_context(tmp_path, TS)
     monkeypatch.setattr(ctx, "mutation_files", lambda *args: MutationScope("full", note="(no base main; full run)"))
-    fake_run(ts_mutation, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Killed", 1)]}}}, []))
+    fake_run(_stryker, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Killed", 1)]}}}, []))
 
     result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
 
@@ -146,7 +146,7 @@ def test_mutation_command_uses_the_tooling_config(tmp_path: Path) -> None:
 def test_changed_sources_drop_tests_specs_and_benchmarks(tmp_path: Path) -> None:
     files = ["web/src/a.ts", "web/src/a.test.ts", "web/src/a.spec.tsx", "web/perf/x.ts", "perf/y.ts"]
 
-    assert ts_mutation.changed_sources(make_context(tmp_path, TS), files) == ["src/a.ts", "perf/x.ts"]
+    assert _stryker.changed_sources(make_context(tmp_path, TS), files) == ["src/a.ts", "perf/x.ts"]
 
 
 def test_surviving_skips_out_of_scope_files(tmp_path: Path) -> None:
@@ -171,18 +171,18 @@ def test_replacement_text_defaults_and_clips() -> None:
 
 
 def test_json_map_and_list_defaults() -> None:
-    assert ts_mutation.json_map({}, "files") == {}
-    assert ts_mutation.json_list({}, "mutants") == []
+    assert _stryker.json_map({}, "files") == {}
+    assert _stryker.json_list({}, "mutants") == []
 
 
 def test_drop_tree_skips_a_missing_path(tmp_path: Path) -> None:
     missing = tmp_path / "gone"
-    ts_mutation.drop_tree(missing)
+    _stryker.drop_tree(missing)
     assert not missing.exists()
     present = tmp_path / "tmp"
     present.mkdir()
     (present / "x").write_text("x")
-    ts_mutation.drop_tree(present)
+    _stryker.drop_tree(present)
     assert not present.exists()
 
 
@@ -193,7 +193,7 @@ def hyper(root: Path, lines: dict[str, set[int]]) -> Any:
 
 def test_hyper_mutates_and_reports_only_changed_lines(tmp_path: Path, fake_run: Any) -> None:
     report = {"files": {"src/a.ts": {"mutants": [mutant("Survived", 9), mutant("Survived", 10, ""), mutant("Killed", 11)]}}}
-    fake = fake_run(ts_mutation, stryker(tmp_path, report, []))
+    fake = fake_run(_stryker, stryker(tmp_path, report, []))
     ctx = hyper(tmp_path, {"web/src/a.ts": {10, 11, 14}, "web/src/a.test.ts": {1}})
 
     result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
@@ -203,7 +203,7 @@ def test_hyper_mutates_and_reports_only_changed_lines(tmp_path: Path, fake_run: 
 
 
 def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(ts_mutation, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Survived", 9)]}}}, []))
+    fake_run(_stryker, stryker(tmp_path, {"files": {"src/a.ts": {"mutants": [mutant("Survived", 9)]}}}, []))
 
     result = checked(ts_mutation.run_gate(hyper(tmp_path, {"web/src/a.ts": {10}})), ts_mutation.GATE)
 
@@ -211,7 +211,7 @@ def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fa
 
 
 def test_hyper_missing_report_still_fails(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(ts_mutation, stryker(tmp_path, None, []))
+    fake_run(_stryker, stryker(tmp_path, None, []))
 
     result = checked(ts_mutation.run_gate(hyper(tmp_path, {"web/src/a.ts": {10}})), ts_mutation.GATE)
 
@@ -219,13 +219,13 @@ def test_hyper_missing_report_still_fails(tmp_path: Path, fake_run: Any) -> None
 
 
 def test_spans_group_consecutive_lines() -> None:
-    assert ts_mutation.spans([1, 2, 3, 7, 9, 10]) == [[1, 3], [7, 7], [9, 10]]
-    assert ts_mutation.spans([]) == []
+    assert _stryker.spans([1, 2, 3, 7, 9, 10]) == [[1, 3], [7, 7], [9, 10]]
+    assert _stryker.spans([]) == []
 
 
 def test_hyper_targets_skip_a_source_with_no_changed_lines(tmp_path: Path) -> None:
     ctx = hyper(tmp_path, {"web/src/a.ts": {3}})
-    assert ts_mutation.targets(ctx, ["src/a.ts", "src/b.ts"]) == ["src/a.ts:3-3"]
+    assert _stryker.targets(ctx, ["src/a.ts", "src/b.ts"]) == ["src/a.ts:3-3"]
 
 
 TOOLING = ".marestail/tooling"
@@ -239,9 +239,9 @@ def command_context(root: Path, lines: dict[str, set[int]]) -> Any:
 
 def command_stryker(root: Path, report: dict[str, Any] | None, code: int = 0) -> Any:
     def reply(command: list[str]) -> tuple[int, str]:
-        (root / "web" / ts_mutation.COMMAND_TEMP).mkdir(parents=True)
+        (root / "web" / _stryker.COMMAND_TEMP).mkdir(parents=True)
         if report is not None:
-            (root / ".marestail" / ts_mutation.COMMAND_REPORT).write_text(json.dumps(report))
+            (root / ".marestail" / _stryker.COMMAND_REPORT).write_text(json.dumps(report))
         return code, "stryker log"
 
     return reply
@@ -249,7 +249,7 @@ def command_stryker(root: Path, report: dict[str, Any] | None, code: int = 0) ->
 
 def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_path: Path, fake_run: Any) -> None:
     report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 2)]}}}
-    fake = fake_run(ts_mutation, command_stryker(tmp_path, report))
+    fake = fake_run(_stryker, command_stryker(tmp_path, report))
     ctx = command_context(tmp_path, {"web/src/a.js": {7}, "web/src/a.test.js": {1}, "web/src/b.py": {1}})
 
     result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
@@ -269,12 +269,12 @@ def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_pat
         "ignorePatterns": [".marestail"],
         "mutate": ["src/a.js:7-7"],
     }
-    assert not (tmp_path / "web" / ts_mutation.COMMAND_TEMP).exists()
+    assert not (tmp_path / "web" / _stryker.COMMAND_TEMP).exists()
 
 
 def test_command_proof_hints_when_nothing_is_killed(tmp_path: Path, fake_run: Any) -> None:
     report = {"files": {"src/a.js": {"mutants": [mutant("Survived", 7), mutant("Survived", 7, "y"), mutant("Survived", 3)]}}}
-    fake_run(ts_mutation, command_stryker(tmp_path, report))
+    fake_run(_stryker, command_stryker(tmp_path, report))
 
     result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
 
@@ -289,7 +289,7 @@ def test_command_proof_hints_when_nothing_is_killed(tmp_path: Path, fake_run: An
 
 def test_command_proof_gives_no_hint_when_a_mutant_is_killed(tmp_path: Path, fake_run: Any) -> None:
     report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 7)]}}}
-    fake_run(ts_mutation, command_stryker(tmp_path, report))
+    fake_run(_stryker, command_stryker(tmp_path, report))
 
     result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
 
@@ -298,7 +298,7 @@ def test_command_proof_gives_no_hint_when_a_mutant_is_killed(tmp_path: Path, fak
 
 @pytest.mark.parametrize("report", [None, {"files": {"src/a.js": {"mutants": [mutant("Survived", 2)]}}}])
 def test_command_proof_with_no_mutants_on_changed_lines_passes(tmp_path: Path, fake_run: Any, report: dict[str, Any] | None) -> None:
-    fake_run(ts_mutation, command_stryker(tmp_path, report))
+    fake_run(_stryker, command_stryker(tmp_path, report))
 
     result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
 
@@ -306,7 +306,7 @@ def test_command_proof_with_no_mutants_on_changed_lines_passes(tmp_path: Path, f
 
 
 def test_command_proof_without_a_report_after_a_failure_fails(tmp_path: Path, fake_run: Any) -> None:
-    fake_run(ts_mutation, [(127, "stryker: not found")])
+    fake_run(_stryker, [(127, "stryker: not found")])
 
     result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
 
@@ -314,7 +314,7 @@ def test_command_proof_without_a_report_after_a_failure_fails(tmp_path: Path, fa
 
 
 def test_command_proof_skips_when_only_tests_changed(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(ts_mutation)
+    fake = fake_run(_stryker)
 
     result = untimed(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.test.js": {1}})), ts_mutation.GATE)
 
@@ -323,18 +323,18 @@ def test_command_proof_skips_when_only_tests_changed(tmp_path: Path, fake_run: A
 
 
 def test_command_proof_runs_once_per_context(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(ts_mutation, command_stryker(tmp_path, None))
+    fake = fake_run(_stryker, command_stryker(tmp_path, None))
     ctx = command_context(tmp_path, {"web/src/a.js": {7}})
 
-    first = ts_mutation.command_proof(ctx, ["src/a.js:7-7"])
+    first = _stryker.command_proof(ctx, ["src/a.js:7-7"])
 
-    assert ts_mutation.command_proof(ctx, ["src/a.js:7-7"]) is first
+    assert _stryker.command_proof(ctx, ["src/a.js:7-7"]) is first
     assert (first.code, first.report, len(fake.calls)) == (0, None, 1)
 
 
 def test_command_targets_include_javascript_but_not_tests(tmp_path: Path) -> None:
     ctx = command_context(tmp_path, {"web/src/a.js": {1, 2}, "web/src/b.cjs": {4}, "web/src/a.test.js": {1}, "web/x.md": {1}})
-    assert ts_mutation.command_targets(ctx) == ["src/a.js:1-2", "src/b.cjs:4-4"]
+    assert _stryker.command_targets(ctx) == ["src/a.js:1-2", "src/b.cjs:4-4"]
 
 
 def test_suffixes_widen_only_under_test_cmd(tmp_path: Path) -> None:
@@ -344,5 +344,5 @@ def test_suffixes_widen_only_under_test_cmd(tmp_path: Path) -> None:
 
 def test_line_statuses_group_every_mutant_by_start_line(tmp_path: Path) -> None:
     report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 7), mutant("Killed", 3)]}, "src/b.js": {}}}
-    statuses = ts_mutation.line_statuses(report, command_context(tmp_path, {}))
+    statuses = _stryker.Proof(0, "", report).line_statuses(command_context(tmp_path, {}))
     assert {name: dict(lines) for name, lines in statuses.items()} == {"web/src/a.js": {7: {"Killed", "Survived"}, 3: {"Killed"}}}

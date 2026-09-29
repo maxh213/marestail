@@ -6,7 +6,6 @@ from typing import Any
 
 from marestail import javascript
 from marestail.context import Context
-from marestail.gates import ts_mutation
 from marestail.gates._coverage import TS_COVERAGE_DIR
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
@@ -14,13 +13,13 @@ from marestail.gates._crap import above as above
 from marestail.gates._crap import crap_score
 from marestail.gates._crap import describe as describe
 from marestail.gates._hyper_crap import Hyper, changed_in, innermost, judged, unit
+from marestail.gates._stryker import KILLED, LineStatuses, Proof, command_proof, command_targets
 from marestail.report import Result, elapsed
-from marestail.shell import tail
 
 GATE = "ts.crap"
 IGNORED_LINE = re.compile(r"^[\s{}()\[\];,]*$")
 UNPROVABLE = "{file}:{line} not provable by mutation"
-ONLY_KILLED = {ts_mutation.KILLED}
+ONLY_KILLED = {KILLED}
 
 
 def run_gate(ctx: Context) -> Result:
@@ -134,12 +133,12 @@ def hyper_rules(ctx: Context) -> Hyper:
 
 
 def mutation_crap(ctx: Context, started: float) -> Result:
-    mutate = ts_mutation.command_targets(ctx)
+    mutate = command_targets(ctx)
     if not mutate:
         return Result.skipped(GATE, "no files in scope")
-    proof = ts_mutation.command_proof(ctx, mutate)
+    proof = command_proof(ctx, mutate)
     if proof.failed:
-        return Result(GATE, False, ts_mutation.no_report(proof.code), tail(proof.output), elapsed(started))
+        return proof.failure(GATE, started)
     return scanned_crap(ctx, mutated_files(mutate), proof, started)
 
 
@@ -147,17 +146,17 @@ def mutated_files(mutate: list[str]) -> list[str]:
     return sorted({target.rsplit(":", 1)[0] for target in mutate})
 
 
-def scanned_crap(ctx: Context, files: list[str], proof: ts_mutation.Proof, started: float) -> Result:
+def scanned_crap(ctx: Context, files: list[str], proof: Proof, started: float) -> Result:
     code, output = javascript.scan(ctx, "complexity", files)
     if code != 0:
         return complexity_failed(output, started)
-    statuses = ts_mutation.line_statuses(proof.report or {}, ctx)
+    statuses = proof.line_statuses(ctx)
     functions = [proved(ctx, ts_unit(javascript.rel(fn["file"], ctx), fn), statuses) for fn in json.loads(output)]
     result = judged(ctx, hyper_rules(ctx), functions, started)
     return with_unprovable(result, unprovable(ctx, functions))
 
 
-def proved(ctx: Context, fn: dict[str, Any], statuses: dict[str, dict[int, set[str]]]) -> dict[str, Any]:
+def proved(ctx: Context, fn: dict[str, Any], statuses: LineStatuses) -> dict[str, Any]:
     lines = provable_lines(ctx, fn)
     by_line = statuses.get(fn["file"], {})
     return {**fn, **line_proof(covered_lines(lines, by_line), missing_lines(lines, by_line), lines)}

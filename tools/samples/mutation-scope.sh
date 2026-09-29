@@ -26,7 +26,7 @@ from marestail.config import Config
 from marestail.context import Context
 from marestail import dotnet
 from marestail import erlang
-from marestail.gates import cs_mutation, er_mutation, ex_mutation, py_mutation, rb_mutation, ts_mutation
+from marestail.gates import _stryker, cs_mutation, er_mutation, ex_mutation, py_mutation, rb_mutation, ts_mutation
 
 FAILED = []
 
@@ -102,7 +102,7 @@ def check_default(root):
     check("py: mutant patterns from changed module only, tests excluded", patterns == ["fresh.*"], str(patterns))
     subjects = rb_mutation.changed_subjects(ctx, scopes["ruby"].files)
     check("rb: subjects from changed file", subjects == ["Fresh*"], str(subjects))
-    mutate = ts_mutation.changed_sources(ctx, scopes["ts"].files)
+    mutate = ts_mutation.mutation_targets(ctx, scopes["ts"].files)
     ts_args = ts_mutation.mutation_command(ctx, mutate)
     check("ts: --mutate carries changed source, excludes spec", "--mutate" in ts_args and ts_args[ts_args.index("--mutate") + 1] == "src/fresh.ts", str(ts_args))
     targets = cs_mutation.mutation_targets(ctx, scopes["dotnet"].files)
@@ -167,7 +167,7 @@ def check_missing_base(root):
     ctx = ctx_for(root, raw)
     scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
     check("missing base resolves full with note", scope.mode == "full" and scope.note == "(no base origin/missing; full run)", str(scope))
-    real_run = ts_mutation.run
+    real_run = _stryker.run
     captured = {}
 
     def fake_run(command, cwd, **kw):
@@ -177,13 +177,13 @@ def check_missing_base(root):
         report.write_text(json.dumps({"files": {}}))
         return 0, ""
 
-    ts_mutation.run = fake_run
+    _stryker.run = fake_run
     try:
         result = ts_mutation.run_gate(ctx)
         check("missing base: full run without --mutate", "--mutate" not in captured.get("command", []), str(captured.get("command")))
         check("missing base: note in summary", result.ok and result.summary == "all mutants killed (no base origin/missing; full run)", result.summary)
     finally:
-        ts_mutation.run = real_run
+        _stryker.run = real_run
 
 
 def check_invalid_value(root):

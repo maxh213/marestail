@@ -724,7 +724,7 @@ def gates_skip_benchmarks() -> None:
         )
         expect("py-lint-changed", py_lint.changed_python(changed), ["src/app.py"])
         expect("py-mutation-changed", py_mutation.mutant_patterns(changed, ["perf/bench_x.py", "src/app.py"]), ["src.app.*"])
-        expect("ts-mutation-changed", ts_mutation.changed_sources(changed, ["perf/bench.ts", "src/app.ts"]), ["src/app.ts"])
+        expect("ts-mutation-changed", ts_mutation.mutation_targets(changed, ["perf/bench.ts", "src/app.ts"]), ["src/app.ts"])
 
 
 def sonar_scanner_excludes_benchmarks() -> None:
