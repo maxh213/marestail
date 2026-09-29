@@ -32,12 +32,20 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     `vm` must pass `process` into the sandbox, e.g. `vm.runInNewContext(src, { module: { exports: {} }, process })`.
     The gate does not patch `vm`.
   - ts.crap needs no coverage file. It takes per-line proof from the same Stryker run as ts.mutation (one run per
-    `marestail gate` call, even with `--only ts.crap`). A changed line is covered when it has at least one killed
-    mutant and no other mutant; a changed line with a surviving mutant is not covered; a function's coverage is its
-    covered changed lines over its changed lines that have mutants. The 008 rules then apply unchanged.
-    A changed line with no mutants is neither: it adds the finding `<path>:<line> not provable by mutation`,
-    does not fail the gate, and the summary ends `; <n> changed lines not provable by mutation`.
-  - Under the `scope:` header the report prints `proof: mutation via [hyper] test_cmd; coverage not measured`.
+    `marestail gate` call, even with `--only ts.crap`). It scores only files in that run's `mutate` set, so test files
+    are never scored. Its lines are the provable-by-shape lines: changed lines (007) inside an innermost changed
+    function (008), minus blank lines and lines holding only `{ } ( ) [ ] ; ,` and whitespace. Changed lines outside
+    every function are ignored by ts.crap (ts.mutation still counts mutants that start on them).
+    Each such line is covered (at least one killed mutant and no other mutant), not covered (it has a mutant that is
+    not killed), or not provable (no mutant starts on it). A function's coverage is its covered lines over its lines
+    that are covered or not covered, and its "changed lines not covered" are its not-covered lines; the 008 rules then
+    apply unchanged. A function with no covered and no not-covered line is not scored: it is left out of the
+    `<n> innermost changed functions` count and gets no CRAP finding.
+    Each not-provable line adds the finding `<path>:<line> not provable by mutation`, sorted by path then line, after
+    any CRAP findings; these never fail the gate, and the summary ends `; <n> changed lines not provable by mutation`.
+  - The report prints `proof: mutation via [hyper] test_cmd; coverage not measured` on the line directly after
+    `scope: <summary>` and before the blank line. `--json` output keeps today's keys and adds no proof key; the proof
+    shows only in the gate summaries above.
   - A known runner is `vitest` or `jest` in `dependencies` or `devDependencies` of `<R>/package.json`. Under hyper with
     no `test_cmd` and no known runner, ts.tests fails with summary
     `hyper: set [hyper] test_cmd to the command that runs this repository's tests`.
@@ -72,6 +80,17 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
       9
       10 module.exports = { popUpUrl: popUpUrl, isOpen: isOpen };
       """
+    And "main" commits `client/embed/size.js`, whose `sizeOf` has cc=3:
+      """
+      1  function sizeOf(kind) {
+      2    if (kind === "wide") return 800;
+      3    if (kind === "tall") return 600;
+      4    var fallback = 400;
+      5    return fallback;
+      6  }
+      7
+      8  module.exports = { sizeOf: sizeOf };
+      """
     And a branch "fix" checked out from "main"
 
   Scenario: an asserted changed line passes, proven by mutation
@@ -80,7 +99,7 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
       that loads popUp.js with `vm.runInNewContext(src, { module: { exports: {} }, process })` and asserts `isOpen("opening") === true`,
       `isOpen("open") === true` and `isOpen("closed") === false`, printing `ok - <name>` per case
     When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
-    Then the output contains `scope: hyper: ` and the line `proof: mutation via [hyper] test_cmd; coverage not measured`
+    Then the line starting `scope: hyper: ` is directly followed by `proof: mutation via [hyper] test_cmd; coverage not measured` and then a blank line
     And it contains `[ok  ] ts.tests       test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd`
     And it contains `[ok  ] ts.mutation    all mutants killed (proof: mutation via [hyper] test_cmd)`
     And it contains `[ok  ] ts.crap        1 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base`
@@ -109,14 +128,21 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     When I run `marestail gate --tier full --scope hyper --only ts.mutation`
     Then no finding contains `popUp.js:2` or `popUp.js:3`, although nothing tests `popUpUrl`
 
-  Scenario: a changed line with no mutants is not provable by mutation
-    Given on "fix" only line 3 changes, to `  return String(url);`, and popUp.test.js (sandbox passes `process`) asserts
-      `popUpUrl("https://x", "a") === "https://x/embed/a"`
-    And Stryker, finding no mutant in `client/embed/popUp.js:3-3`, may exit 0 without writing a report
+  Scenario: changed lines with no mutants are not provable, and their functions are not scored
+    Given on "fix" these lines change, none of which gets a mutant:
+      | file                  | line | new text                     | why it matters                              |
+      | client/embed/popUp.js | 3    | `  return String(url);`      | inside popUpUrl (cc=1)                      |
+      | client/embed/popUp.js | 4    | `};`                         | only punctuation, ignored                   |
+      | client/embed/popUp.js | 9    | `var loaded = 1;`            | outside every function, ignored             |
+      | client/embed/size.js  | 5    | `  return Number(fallback);` | inside sizeOf (cc=3): 0% would give crap=12 |
+    And popUp.test.js (sandbox passes `process`) asserts `popUpUrl("https://x", "a") === "https://x/embed/a"`
+      and `sizeOf("square") === 400`
+    And Stryker, finding no mutant in the `mutate` ranges, may exit 0 without writing a report
     When I run `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
     Then it contains `[ok  ] ts.mutation    no mutants on changed lines`
-    And `ts.crap` is `[ok  ]`, its summary ends `; 1 changed lines not provable by mutation`,
-      and it shows the finding `client/embed/popUp.js:3 not provable by mutation`
+    And it contains `[ok  ] ts.crap        0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base; 2 changed lines not provable by mutation`
+    And ts.crap's findings are exactly `client/embed/popUp.js:3 not provable by mutation` then `client/embed/size.js:5 not provable by mutation`
+    And no finding mentions `crap=`, `popUp.js:4` or `popUp.js:9`
     And the last line is `GATE PASSED`
 
   Scenario: no changed source file means Stryker does not run

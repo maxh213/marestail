@@ -9,6 +9,7 @@ Start in the marestail-green root with `.venv` active and `bin/` on PATH; `expor
    printf '.marestail/\nmarestail.toml\n' >> .git/info/exclude
    printf '[git]\nbase = "main"\n\n[ts]\nroot = "."\ntooling = ".marestail/tooling"\n\n[hyper]\ntest_cmd = "for f in client/embed/*.test.js; do node \\"$f\\" || exit 1; done"\n' > marestail.toml
    printf 'function popUpUrl(base, id) {\n  var url = base + "/embed/" + id;\n  return url;\n}\n\nfunction isOpen(state) {\n  return state === "open" || state === "shown";\n}\n\nmodule.exports = { popUpUrl: popUpUrl, isOpen: isOpen };\n' > client/embed/popUp.js
+   printf 'function sizeOf(kind) {\n  if (kind === "wide") return 800;\n  if (kind === "tall") return 600;\n  var fallback = 400;\n  return fallback;\n}\n\nmodule.exports = { sizeOf: sizeOf };\n' > client/embed/size.js
    git add client && git commit -qm seed && git checkout -qb fix
    npm install --prefix .marestail/tooling @stryker-mutator/core typescript >/dev/null
    ```
@@ -30,16 +31,23 @@ Start in the marestail-green root with `.venv` active and `bin/` on PATH; `expor
    ```
    Expected: three `ok - ` lines, exit 0.
 3. `marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation; echo "exit=$?"`
-   Expected: `proof: mutation via [hyper] test_cmd; coverage not measured`; `[ok  ] ts.tests       test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd`; `[ok  ] ts.mutation    all mutants killed (proof: mutation via [hyper] test_cmd)`; `[ok  ] ts.crap` with `0 above CRAP 4`; `GATE PASSED`; `exit=0`.
+   Expected: the `scope: hyper: ...` line, directly followed by `proof: mutation via [hyper] test_cmd; coverage not measured`, then a blank line; `[ok  ] ts.tests       test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd`; `[ok  ] ts.mutation    all mutants killed (proof: mutation via [hyper] test_cmd)`; `[ok  ] ts.crap` with `0 above CRAP 4`; `GATE PASSED`; `exit=0`.
 4. `git status --porcelain; ls package.json reports .stryker-tmp .marestail/stryker-tmp; cat .marestail/stryker/command.config.json`
    Expected: only `M client/embed/popUp.js` and `?? client/embed/popUp.test.js`; all four `ls` targets missing; the config shows `"testRunner": "command"`, the test_cmd and `"ignorePatterns": [".marestail"]`.
 5. `cp client/embed/popUp.test.js /tmp/mt-good.js && sed -i 's/, process }/ }/' client/embed/popUp.test.js && node client/embed/popUp.test.js && marestail gate --tier full --scope hyper --only ts.tests,ts.mutation; echo "exit=$?"`
    Expected: the test still prints three `ok - ` lines; ts.tests `[ok  ]`; `[FAIL] ts.mutation` with `surviving mutants (proof: mutation via [hyper] test_cmd)` and first finding `hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, or no assertion depends on the changed lines`; `exit=1`.
 6. `cp /tmp/mt-good.js client/embed/popUp.test.js && sed -i 's/assert.strictEqual(\(.*\), \(true\|false\))/\1/' client/embed/popUp.test.js && marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation; echo "exit=$?"`
    Expected: ts.tests `[ok  ]` with the advisory; `[FAIL] ts.mutation` with `surviving mutants`, the same `hint:` first finding, every other finding starting `client/embed/popUp.js:7 `, none mentioning `popUp.js:2` or `popUp.js:3`; `[FAIL] ts.crap` with `client/embed/popUp.js:6 isOpen crap=6.0 (cc=2, coverage=0%); changed lines not covered: 7`; `GATE FAILED: ts.crap, ts.mutation`; `exit=1`.
-7. `git checkout -q client/embed/popUp.js && sed -i '3s/return url;/return String(url);/' client/embed/popUp.js && printf 'const assert=require("assert"),fs=require("fs"),vm=require("vm"),path=require("path");const s={module:{exports:{}},process};vm.runInNewContext(fs.readFileSync(path.join(__dirname,"popUp.js"),"utf8"),s);assert.strictEqual(s.module.exports.popUpUrl("https://x","a"),"https://x/embed/a");console.log("ok - url");\n' > client/embed/popUp.test.js && marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
-   Expected: `[ok  ] ts.mutation    no mutants on changed lines` (whether or not Stryker wrote a report); `[ok  ] ts.crap` whose summary ends `; 1 changed lines not provable by mutation` with finding `client/embed/popUp.js:3 not provable by mutation`; `GATE PASSED`.
-8. `git checkout -q client/embed/popUp.js && marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
+7. Change only lines that get no mutant (popUp.js 3 inside popUpUrl, 4 punctuation, 9 outside every function; size.js 5 inside sizeOf, cc=3) and test both files:
+   ```sh
+   git checkout -q client/embed/popUp.js
+   sed -i -e '3s/return url;/return String(url);/' -e '4s/^}$/};/' -e '9s/^$/var loaded = 1;/' client/embed/popUp.js
+   sed -i '5s/return fallback;/return Number(fallback);/' client/embed/size.js
+   printf 'const assert=require("assert"),fs=require("fs"),vm=require("vm"),path=require("path");\nfunction load(f){const s={module:{exports:{}},process};vm.runInNewContext(fs.readFileSync(path.join(__dirname,f),"utf8"),s);return s.module.exports;}\nassert.strictEqual(load("popUp.js").popUpUrl("https://x","a"),"https://x/embed/a");console.log("ok - url");\nassert.strictEqual(load("size.js").sizeOf("square"),400);console.log("ok - size");\n' > client/embed/popUp.test.js
+   marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation
+   ```
+   Expected: `[ok  ] ts.mutation    no mutants on changed lines` (whether or not Stryker wrote a report); `[ok  ] ts.crap        0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base; 2 changed lines not provable by mutation`, with exactly the findings `client/embed/popUp.js:3 not provable by mutation` and `client/embed/size.js:5 not provable by mutation` (no `crap=`, no `popUp.js:4`, no `popUp.js:9`); `GATE PASSED`.
+8. `git checkout -q client/embed && marestail gate --tier full --scope hyper --only ts.tests,ts.crap,ts.mutation`
    Expected: `[skip] ts.mutation    no changed typescript sources`; `[skip] ts.crap        no files in scope`.
 9. `sed -i 's/"https:\/\/x\/embed\/a"/"wrong"/' client/embed/popUp.test.js && marestail gate --tier full --scope hyper --only ts.tests; echo "exit=$?"`
    Expected: `[FAIL] ts.tests       test_cmd exited 1`, a finding containing `AssertionError`; `exit=1`.
