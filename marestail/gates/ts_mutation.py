@@ -11,8 +11,8 @@ from marestail.gates._stryker import (
     all_mutants,
     command_proof,
     execute,
-    mutation_targets,
 )
+from marestail.gates._stryker import mutation_targets as mutation_targets
 from marestail.javascript import config_flag, tool
 from marestail.report import Result, elapsed
 
