@@ -9,7 +9,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import tomllib
@@ -304,7 +304,7 @@ def status_command(_args) -> int:
     print(f"offloaded gates: {', '.join(found.gates) or 'none'}")
     if status == "RUNNING" and ip:
         for line in running_jobs(found, ip):
-            print(f"  running: {line}")
+            print(f"  {line}")
     now = datetime.now(timezone.utc)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     entries = usage()
@@ -334,6 +334,7 @@ for f in /var/lib/marestail/busy.d/*; do
   state=running; pgrep -P "$p" -x flock >/dev/null && ! pgrep -f "docker exec -w $repo" >/dev/null && state=queued
   echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
 done
+echo "idle $(( $(date +%s) - $(stat -c %Y /var/lib/marestail/last) )) $(grep -oP '^IDLE_MIN=\K[0-9]+' /usr/local/bin/marestail-idle-check)"
 """
 
 
@@ -342,12 +343,19 @@ def running_jobs(found: Settings, ip: str) -> list[str]:
     if code != 0:
         return []
     jobs = []
+    idle = None
     for line in output.splitlines():
         parts = line.split()
         if len(parts) == 4:
             repo, tool, age, state = parts
-            jobs.append(f"{tool} for {Path(repo).name}, {age}" + (" (queued)" if state == "queued" else ""))
-    return jobs
+            jobs.append(f"running: {tool} for {Path(repo).name}, {age}" + (" (queued)" if state == "queued" else ""))
+        elif len(parts) == 3 and parts[0] == "idle":
+            idle = (int(parts[1]), int(parts[2]))
+    if jobs or idle is None:
+        return jobs
+    seconds, limit = idle
+    off = datetime.now(timezone.utc).astimezone() + timedelta(seconds=max(0, limit * 60 - seconds))
+    return [f"no jobs: idle for {seconds // 60} min, powers itself off after {limit} idle min (about {off:%H:%M})"]
 
 
 def instances(found: Settings, entries: list[dict]) -> dict[str, float]:
