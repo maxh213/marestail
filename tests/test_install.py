@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from marestail import _install, install
+from marestail import _hyper, _install, install
 
 TEMPLATES = _install.TEMPLATES
 GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
@@ -161,6 +161,19 @@ def test_install_twice_changes_nothing(home: Path, target: Path) -> None:
     before = {path: path.read_text() for path in target.rglob("*") if path.is_file()}
     install.install(target, gitignore_generated=True)
     assert {path: path.read_text() for path in target.rglob("*") if path.is_file()} == before
+
+
+def test_install_is_classic_unless_hyper_is_asked(home: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hyper_calls: list[Path] = []
+
+    def fake_hyper(path: Path) -> int:
+        hyper_calls.append(path)
+        return 7
+
+    monkeypatch.setattr(_hyper, "install_hyper", fake_hyper)
+    assert install.install(target) == 0
+    assert hyper_calls == []
+    assert (target / "marestail.toml").read_text() == (TEMPLATES / "marestail.toml").read_text()
 
 
 def test_install_for_dotnet_and_csharp(home: Path, target: Path) -> None:
