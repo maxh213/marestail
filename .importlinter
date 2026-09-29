@@ -229,13 +229,14 @@ allowed_importers =
     marestail.gates.visual
 
 [importlinter:contract:visual-has-one-entry-point]
-name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge and records are private
+name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge, judge prompt and records are private
 type = protected
 protected_modules =
     marestail.gates.visual._model
     marestail.gates.visual._spec
     marestail.gates.visual._capture
     marestail.gates.visual._judge
+    marestail.gates.visual._pictures
 allowed_importers =
     marestail.gates.visual
 
@@ -278,6 +279,18 @@ forbidden_modules =
     marestail.worktree
     marestail.shell
 
+[importlinter:contract:visual-judge-prompt-reads-files-only]
+name = The visual judge's prompt section reads the block and the captured records only; it never captures, judges geometry or starts the app
+type = forbidden
+source_modules =
+    marestail.gates.visual._pictures
+forbidden_modules =
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+
 [importlinter:contract:visual-capture-never-judges]
 name = Capturing writes pictures and geometry and never decides what a finding is
 type = forbidden
@@ -285,6 +298,7 @@ source_modules =
     marestail.gates.visual._capture
 forbidden_modules =
     marestail.gates.visual._judge
+    marestail.gates.visual._pictures
 
 [importlinter:contract:worktree-belongs-to-baselines]
 name = Detached baseline worktrees and the task's start commit are used only by the perf trees and the visual gate

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail.config import Config
-from marestail.gates.visual import pictures
+from marestail.gates import visual
 
 BLOCK = "# QA\n\n```visual\nroute: /donate.html\nselector: #widget\nsymptom: the widget is 440px wide\n```\n"
 VIEWPORTS = {"desktop": "1440x900", "phone": "390x844@2 touch"}
@@ -36,11 +36,11 @@ def record(x: float = 434, overlaps: list[str] | None = None, box: bool = True) 
 
 def test_skip_reason_names_the_missing_file_or_block(tmp_path: Path) -> None:
     config = config_for(tmp_path, None)
-    assert pictures.skip_reason(config, "t") == "visual: no qa/t.md; skipping"
+    assert visual.judge_skip(config, "t") == "visual: no qa/t.md; skipping"
     config_for(tmp_path, "# QA\n\n1. open\n")
-    assert pictures.skip_reason(config, "t") == "visual: no block in qa/t.md; skipping"
+    assert visual.judge_skip(config, "t") == "visual: no block in qa/t.md; skipping"
     config_for(tmp_path)
-    assert pictures.skip_reason(config, "t") == ""
+    assert visual.judge_skip(config, "t") == ""
 
 
 def test_section_lists_every_picture_and_the_geometry(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_section_lists_every_picture_and_the_geometry(tmp_path: Path) -> None:
         shoot(tmp_path, tree, "desktop", record(overlaps=["#a", "#b"] if tree == "head" else None))
     shoot(tmp_path, "base", "phone", record(x=0.5), ("element",))
     shoot(tmp_path, "head", "phone", record(box=False))
-    lines = pictures.section(config, "t", "").splitlines()
+    lines = visual.judge_section(config, "t", "").splitlines()
     assert lines[:2] == ["Symptom: the widget is 440px wide", "## Pictures"]
     assert lines[2:10] == [
         "- .marestail/runs/t/visual/base/desktop/element.png",
@@ -81,7 +81,7 @@ def test_section_lists_every_picture_and_the_geometry(tmp_path: Path) -> None:
 def test_section_without_pictures_keeps_the_geometry_alone(tmp_path: Path) -> None:
     config = config_for(tmp_path, "# QA\n\n```visual\nroute: /\nselector: #w\n```\n")
     shoot(tmp_path, "head", "desktop", record())
-    section = pictures.section(config, "t", "kilo")
+    section = visual.judge_section(config, "t", "kilo")
     lines = section.splitlines()
     assert lines[:2] == [
         "Symptom: none given in qa/t.md",
@@ -94,4 +94,4 @@ def test_section_without_pictures_keeps_the_geometry_alone(tmp_path: Path) -> No
 
 def test_section_for_an_unreadable_block_points_at_the_gate(tmp_path: Path) -> None:
     config = config_for(tmp_path, "# QA\n\n```visual\nroute: /\n```\n")
-    assert pictures.section(config, "t", "") == "The visual block in qa/t.md could not be read; the gate report says why."
+    assert visual.judge_section(config, "t", "") == "The visual block in qa/t.md could not be read; the gate report says why."

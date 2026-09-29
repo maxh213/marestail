@@ -8,7 +8,7 @@ import pytest
 from marestail import prompts, runner
 from marestail import route as dandelion
 from marestail.config import Config
-from marestail.gates.visual import pictures
+from marestail.gates import visual as visual_gate
 from marestail.pipeline import Judge
 from marestail.route import Choice
 from marestail.runner import Run
@@ -104,7 +104,7 @@ def test_gated_verdict_sends_a_hardener_bounce_from_visual_to_the_coder(tmp_path
 
 
 def test_review_for_visual_shows_pictures_to_a_backend_that_can_read_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    section = patch(monkeypatch, pictures, "section", "SECTION")
+    section = patch(monkeypatch, visual_gate, "judge_section", "SECTION")
     assert runner.review_for(make_state(tmp_path), VISUAL) == {"Visual": "SECTION"}
     assert runner.review_for(make_state(tmp_path, agent="kilo"), VISUAL) == {"Visual": "SECTION"}
     assert [call[1:] for call in section.calls] == [("t", ""), ("t", "kilo")]
@@ -114,7 +114,7 @@ def test_review_for_visual_shows_pictures_to_a_backend_that_can_read_them(tmp_pa
 def test_judge_session_builds_the_visual_prompt_for_the_judge_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sessions: Recorder
 ) -> None:
-    patch(monkeypatch, pictures, "section", "SECTION")
+    patch(monkeypatch, visual_gate, "judge_section", "SECTION")
     prompt = patch(monkeypatch, prompts, "judge_prompt", "PROMPT")
     patch(monkeypatch, runner, "head", "abc")
     patch(monkeypatch, runner, "discard_edits")

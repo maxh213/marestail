@@ -23,6 +23,10 @@ _DEFAULT_CAPTURE_TIMEOUT = 30
 _DEFAULT_SETUP_TIMEOUT = 900
 
 
+def visual_dir(config: Config, task: str) -> Path:
+    return config.work / "runs" / task / "visual"
+
+
 def _qa_file(config: Config, task: str) -> Path:
     return config.root / "qa" / f"{task}.md"
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from marestail.config import Config
 from marestail.gates.visual import _spec as spec_module
-from marestail.gates.visual._capture import visual_dir
+from marestail.gates.visual._spec import visual_dir
 
 _TREES = ("base", "head")
 _SHOTS = ("element.png", "viewport.png")
@@ -17,12 +17,12 @@ _BLIND = "The pictures could not be shown: {backend} cannot read images. Judge f
 _Record = dict[str, Any] | None
 
 
-def skip_reason(config: Config, task: str) -> str:
+def judge_skip(config: Config, task: str) -> str:
     problem = spec_module.block_problem(config, task)
     return f"visual: {problem}; skipping" if problem else ""
 
 
-def section(config: Config, task: str, blind_backend: str) -> str:
+def judge_section(config: Config, task: str, blind_backend: str) -> str:
     spec, _ = spec_module.load(config, task)
     if spec is None:
         return _UNREADABLE.format(task=task)

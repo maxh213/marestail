@@ -12,6 +12,7 @@ from marestail import worktree
 from marestail.config import Config
 from marestail.gates import _serve
 from marestail.gates.visual import _capture as capture
+from marestail.gates.visual import _spec as spec_module
 from marestail.gates.visual._model import Block, Settings, Shot, Spec, Tree, TreeRun, Viewport
 from tests.conftest import FakeRun
 
@@ -75,7 +76,7 @@ def worktrees(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
 
 
 def test_visual_dir(tmp_path: Path) -> None:
-    assert capture.visual_dir(Config(tmp_path, {}), "t") == tmp_path / ".marestail" / "runs" / "t" / "visual"
+    assert spec_module.visual_dir(Config(tmp_path, {}), "t") == tmp_path / ".marestail" / "runs" / "t" / "visual"
 
 
 def test_tool_problems(monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
@@ -95,7 +96,7 @@ def test_capture_trees_runs_base_then_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun], worktrees: list[tuple[str, Any]]
 ) -> None:
     config = Config(tmp_path, {})
-    stale = capture.visual_dir(config, "t") / "base" / "old.png"
+    stale = spec_module.visual_dir(config, "t") / "base" / "old.png"
     stale.parent.mkdir(parents=True)
     stale.write_text("x")
     serve = FakeServe()
@@ -119,8 +120,8 @@ def test_capture_trees_runs_base_then_head(
     assert head.shots["desktop"] == Shot([{"box": {"x": 0}}, {"box": {"x": 1}}], None)
     payload = json.loads(fake.calls[0][3])
     assert payload["url"] == "http://localhost:3401/donate.html"
-    assert payload["out"] == str(capture.visual_dir(config, "t") / "base" / "desktop")
-    assert json.loads(fake.calls[3][3])["out"] == str(capture.visual_dir(config, "t") / "head" / "phone")
+    assert payload["out"] == str(spec_module.visual_dir(config, "t") / "base" / "desktop")
+    assert json.loads(fake.calls[3][3])["out"] == str(spec_module.visual_dir(config, "t") / "head" / "phone")
     assert fake.options[0]["timeout"] == 60 + 3 * 4 * 3
 
 

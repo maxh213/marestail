@@ -9,6 +9,7 @@ from marestail import worktree
 from marestail.config import Config
 from marestail.gates import _serve
 from marestail.gates.visual._model import Shot, Spec, Tree, TreeRun, Viewport
+from marestail.gates.visual._spec import visual_dir
 from marestail.shell import run, tail
 
 _JS_DIR = Path(__file__).resolve().parent.parent.parent / "js"
@@ -21,10 +22,6 @@ _CHROMIUM_MISSING = "Playwright Chromium missing; run marestail install"
 _CHECK_TIMEOUT = 120
 _NODE_STARTUP_SECONDS = 60
 _WAITS_PER_LOAD = 4
-
-
-def visual_dir(config: Config, task: str) -> Path:
-    return config.work / "runs" / task / "visual"
 
 
 def tool_problems() -> list[str]:

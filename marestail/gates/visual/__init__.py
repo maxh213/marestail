@@ -9,7 +9,10 @@ from marestail.gates.visual import _capture as capture
 from marestail.gates.visual import _judge as judge
 from marestail.gates.visual import _spec as spec_module
 from marestail.gates.visual._model import Spec, TreeRun
+from marestail.gates.visual._pictures import judge_section, judge_skip
 from marestail.report import Result, elapsed
+
+__all__ = ["capture_command", "judge_section", "judge_skip", "run_gate"]
 
 _GATE = "visual"
 _TASK_ENV = "MARESTAIL_TASK"
@@ -99,7 +102,7 @@ def _report_capture(config: Config, spec: Spec, runs: list[TreeRun]) -> int:
 
 
 def _folder_lines(config: Config, spec: Spec, runs: list[TreeRun]) -> list[str]:
-    root = capture.visual_dir(config, spec.task)
+    root = spec_module.visual_dir(config, spec.task)
     folders = [(run.tree.folder, name) for run in runs for name in run.shots]
     return [f"{folder} {name}: {_shown_path(config, root / folder / name)}" for folder, name in folders]
 

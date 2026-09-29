@@ -35,7 +35,7 @@ from marestail.backends import (
 from marestail.config import Config
 from marestail.context import focus_clash, hook_focus, resolve_focus
 from marestail.gates import run_gates
-from marestail.gates.visual import pictures
+from marestail.gates import visual as visual_gate
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
 from marestail.perf import review as perf_review
@@ -409,7 +409,7 @@ def skip_reason(state: Run, judge: Judge) -> str:
 
 
 def visual_skip(state: Run, judge: Judge) -> str:
-    return pictures.skip_reason(state.config, state.task_name) if judge.name == VISUAL else ""
+    return visual_gate.judge_skip(state.config, state.task_name) if judge.name == VISUAL else ""
 
 
 def disabled(state: Run, judge: Judge) -> bool:
@@ -688,7 +688,7 @@ def built_judge_prompt(state: Run, judge: Judge, report: Path, texts: tuple[str,
 
 def review_for(state: Run, judge: Judge) -> dict[str, str] | None:
     if judge.name == VISUAL:
-        return {"Visual": pictures.section(state.config, state.task_name, blind_backend(state))}
+        return {"Visual": visual_gate.judge_section(state.config, state.task_name, blind_backend(state))}
     return blast_review(state, judge)
 
 
