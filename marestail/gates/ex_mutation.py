@@ -1,6 +1,7 @@
 import json
 import time
 
+from marestail import remote
 from marestail.context import Context
 from marestail.gates.ex_lint import scoped_sources
 from marestail.report import Result
@@ -23,7 +24,8 @@ def run_gate(ctx: Context) -> Result:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
         return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    code, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    outcome = remote.run_mutation(ctx, "ex.mutation", command(ctx, files), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    output = outcome.output
     start = output.find("{")
     if start < 0:
         return Result("ex.mutation", False, "muex produced no report", tail(output), time.time() - started)
@@ -38,6 +40,7 @@ def run_gate(ctx: Context) -> Result:
     counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
     summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
     summary += f" {scope.note}" if scope.note else ""
+    summary += outcome.where
     return Result("ex.mutation", not findings, summary, findings, time.time() - started)
 
 
@@ -57,7 +60,7 @@ def command(ctx: Context, files: list[str]) -> list[str]:
     preset = ctx.elixir("muex_preset")
     if preset:
         parts += ["--preset", str(preset)]
-    concurrency = ctx.elixir("muex_concurrency", 4)
+    concurrency = remote.workers(ctx, "ex.mutation", ctx.elixir("muex_concurrency", 4))
     if concurrency:
         parts += ["--concurrency", str(concurrency)]
     max_mutations = ctx.elixir("muex_max_mutations")

@@ -3,10 +3,11 @@ import shutil
 import time
 from pathlib import Path
 
+from marestail import remote
 from marestail.context import Context
 from marestail.perf.scope import is_benchmark
 from marestail.report import Result
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 STATUS_BY_EXIT_CODE = {
     1: "killed", 3: "killed", 0: "survived", 5: "no tests", 33: "no tests", 34: "skipped", 35: "suspicious",
@@ -25,11 +26,13 @@ def run_gate(ctx: Context) -> Result:
     if scope.mode != "full" and not patterns:
         return Result.skipped("py.mutation", "no changed python sources")
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
-    workers = str(ctx.python("mutation_workers", 4))
-    code, output = run(
-        [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", workers],
-        cwd=ctx.python_root(), timeout=7200,
+    workers = str(remote.workers(ctx, "py.mutation", ctx.python("mutation_workers", 4)))
+    mutants = str((ctx.python_root() / "mutants").relative_to(ctx.root))
+    outcome = remote.run_mutation(
+        ctx, "py.mutation", [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", workers],
+        ctx.python_root(), timeout=7200, pull=(mutants,),
     )
+    code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
         return Result("py.mutation", False, "mutmut failed", tail(output), time.time() - started)
     total, survivors = surviving(ctx, patterns)
@@ -37,6 +40,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
     summary += f" {scope.note}" if scope.note else ""
+    summary += outcome.where
     return Result("py.mutation", not survivors, summary, survivors, time.time() - started)
 
 
