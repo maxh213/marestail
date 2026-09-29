@@ -39,6 +39,10 @@ class Proof:
     output: str
     report: dict[str, Any] | None
 
+    @property
+    def failed(self) -> bool:
+        return self.report is None and self.code != 0
+
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
@@ -107,16 +111,14 @@ def command_config(ctx: Context, mutate: list[str]) -> Path:
     return path
 
 
-def no_report(proof: Proof) -> str:
-    return f"stryker produced no report (exit {proof.code})"
+def no_report(code: int) -> str:
+    return f"stryker produced no report (exit {code})"
 
 
 def proven(ctx: Context, proof: Proof, started: float) -> Result:
-    if proof.report is not None:
-        return proof_verdict(placed(proof.report, ctx), started)
-    if proof.code == 0:
-        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    return Result(GATE, False, no_report(proof), tail(proof.output), elapsed(started))
+    if proof.failed:
+        return Result(GATE, False, no_report(proof.code), tail(proof.output), elapsed(started))
+    return proof_verdict(placed(proof.report or EMPTY_MAP, ctx), started)
 
 
 def proof_verdict(mutants: list[Placed], started: float) -> Result:
@@ -156,7 +158,7 @@ def stryker_result(ctx: Context, scope: MutationScope, command: list[str], start
     try:
         code, output = run(command, cwd=ctx.ts_root(), timeout=7200)
         if not report.exists():
-            return Result(GATE, False, f"stryker produced no report (exit {code})", tail(output), elapsed(started))
+            return Result(GATE, False, no_report(code), tail(output), elapsed(started))
         data = json.loads(report.read_text())
     finally:
         drop_tree(temp)

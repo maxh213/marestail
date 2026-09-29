@@ -20,7 +20,7 @@ from marestail.shell import tail
 GATE = "ts.crap"
 IGNORED_LINE = re.compile(r"^[\s{}()\[\];,]*$")
 UNPROVABLE = "{file}:{line} not provable by mutation"
-KILLED = {ts_mutation.KILLED}
+ONLY_KILLED = {ts_mutation.KILLED}
 
 
 def run_gate(ctx: Context) -> Result:
@@ -40,8 +40,12 @@ def coverage_crap(ctx: Context, started: float) -> Result:
         return Result.skipped(GATE, "no files in scope")
     code, output = javascript.scan(ctx, "complexity", files)
     if code != 0:
-        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], elapsed(started))
+        return complexity_failed(output, started)
     return crap_result(ctx, coverage, json.loads(output), started)
+
+
+def complexity_failed(output: str, started: float) -> Result:
+    return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], elapsed(started))
 
 
 def scoped_files(coverage: dict[str, Any], ctx: Context) -> list[str]:
@@ -49,9 +53,9 @@ def scoped_files(coverage: dict[str, Any], ctx: Context) -> list[str]:
 
 
 def crap_result(ctx: Context, coverage: dict[str, Any], parsed: list[dict[str, Any]], started: float) -> Result:
-    limit = float(ctx.ts(KEY, DEFAULT))
     if ctx.hyper:
-        return judged(ctx, hyper_rules(ctx, limit), hyper_units(coverage, parsed, ctx), started)
+        return judged(ctx, hyper_rules(ctx), hyper_units(coverage, parsed, ctx), started)
+    limit = crap_limit(ctx)
     functions = touched_scores(ctx, coverage, parsed)
     worst = above(functions, limit)
     summary = f"{len(functions)} functions, {len(worst)} above CRAP {limit:g}"
@@ -121,8 +125,12 @@ def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
     return [ts_unit("", fn) for fn in json.loads(output)]
 
 
-def hyper_rules(ctx: Context, limit: float) -> Hyper:
-    return Hyper(GATE, limit, lambda copy: base_units(ctx, copy))
+def crap_limit(ctx: Context) -> float:
+    return float(ctx.ts(KEY, DEFAULT))
+
+
+def hyper_rules(ctx: Context) -> Hyper:
+    return Hyper(GATE, crap_limit(ctx), lambda copy: base_units(ctx, copy))
 
 
 def mutation_crap(ctx: Context, started: float) -> Result:
@@ -130,8 +138,8 @@ def mutation_crap(ctx: Context, started: float) -> Result:
     if not mutate:
         return Result.skipped(GATE, "no files in scope")
     proof = ts_mutation.command_proof(ctx, mutate)
-    if proof.report is None and proof.code != 0:
-        return Result(GATE, False, ts_mutation.no_report(proof), tail(proof.output), elapsed(started))
+    if proof.failed:
+        return Result(GATE, False, ts_mutation.no_report(proof.code), tail(proof.output), elapsed(started))
     return scanned_crap(ctx, mutated_files(mutate), proof, started)
 
 
@@ -142,10 +150,10 @@ def mutated_files(mutate: list[str]) -> list[str]:
 def scanned_crap(ctx: Context, files: list[str], proof: ts_mutation.Proof, started: float) -> Result:
     code, output = javascript.scan(ctx, "complexity", files)
     if code != 0:
-        return Result(GATE, False, "complexity script failed", output.splitlines()[-10:], elapsed(started))
+        return complexity_failed(output, started)
     statuses = ts_mutation.line_statuses(proof.report or {}, ctx)
     functions = [proved(ctx, ts_unit(javascript.rel(fn["file"], ctx), fn), statuses) for fn in json.loads(output)]
-    result = judged(ctx, hyper_rules(ctx, float(ctx.ts(KEY, DEFAULT))), functions, started)
+    result = judged(ctx, hyper_rules(ctx), functions, started)
     return with_unprovable(result, unprovable(ctx, functions))
 
 
@@ -156,11 +164,11 @@ def proved(ctx: Context, fn: dict[str, Any], statuses: dict[str, dict[int, set[s
 
 
 def covered_lines(lines: set[int], by_line: dict[int, set[str]]) -> set[int]:
-    return {line for line in lines if by_line.get(line) == KILLED}
+    return {line for line in lines if by_line.get(line) == ONLY_KILLED}
 
 
 def missing_lines(lines: set[int], by_line: dict[int, set[str]]) -> set[int]:
-    return {line for line in lines if by_line.get(line, KILLED) - KILLED}
+    return {line for line in lines if by_line.get(line, ONLY_KILLED) - ONLY_KILLED}
 
 
 def line_proof(covered: set[int], missing: set[int], lines: set[int]) -> dict[str, Any]:
