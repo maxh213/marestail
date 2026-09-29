@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from marestail.shell import ensure_dir
+from marestail.shell import ensure_dir, run
 
 PERFORMANCE = "PERFORMANCE.md"
 CONFIG = "marestail.toml"
@@ -17,6 +17,8 @@ HOOKS = "hooks"
 STOP = "Stop"
 AGY_GATE = "marestail-gate"
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+JS_DIR = Path(__file__).resolve().parent / "js"
+VISUAL_STEPS = (["npm", "install"], ["npx", "playwright", "install", "chromium"])
 GITIGNORE_LINES = [
     ".marestail/",
     "mutants/",
@@ -73,6 +75,7 @@ __all__ = [
     "merge_hook",
     "trust_grok_folder",
     "uses_csharp",
+    "visual_browser",
     "write_tree",
 ]
 
@@ -124,6 +127,25 @@ def uses_dotnet(target: Path) -> bool:
         return False
     with config.open("rb") as handle:
         return "dotnet" in tomllib.load(handle)
+
+
+def visual_browser(target: Path) -> int:
+    if not visual_enabled(target):
+        return 0
+    for step in VISUAL_STEPS:
+        code, _ = run(step, cwd=JS_DIR, timeout=1800)
+        if code != 0:
+            print(f"{' '.join(step)} failed (exit {code}); everything else is installed")
+            return 1
+    return 0
+
+
+def visual_enabled(target: Path) -> bool:
+    config = target / CONFIG
+    if not config.exists():
+        return False
+    section = tomllib.loads(config.read_text()).get("visual")
+    return isinstance(section, dict) and section.get("enabled", True) is not False
 
 
 def uses_csharp(target: Path) -> bool:

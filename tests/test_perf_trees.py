@@ -6,12 +6,23 @@ from typing import Any
 
 import pytest
 
+from marestail import worktree
 from marestail.config import Config
 from marestail.perf import trees
 from marestail.shell import run as real_run
 from tests.conftest import FakeRun, commit_all, git
 
 TABLE = "| Task | Commit | Date | Rows | t p50 | u p95 |\n|---|---|---|---|---|---|\n| a | b | c | d | 1 | 2 |\n"
+
+
+@pytest.fixture
+def fake_run(fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeRun]:
+    def install(module: object, replies: Any = None) -> FakeRun:
+        fake = fake_run(module, replies)
+        monkeypatch.setattr(worktree, "run", fake)
+        return fake
+
+    return install
 
 
 def config_at(root: Path, **perf: Any) -> Config:

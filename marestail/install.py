@@ -14,4 +14,4 @@ def install(target: Path, gitignore_generated: bool = False, hard: bool = False,
     impl.extend_gitignore(target / ".gitignore", impl.generated_ignore(gitignore_generated, hard))
     impl.trust_grok_folder(target)
     print(impl.done_message(target, hard))
-    return 0
+    return impl.visual_browser(target)

@@ -83,6 +83,7 @@ GATE_SPECS: tuple[tuple[str, str, str | None, str], ...] = (
     ("java.mutation", FULL, JAVA, "java_mutation"),
     ("sonar", SONAR, SONAR, "sonar"),
     ("qa", QA, QA, "qa"),
+    ("visual", QA, "visual", "qa.visual"),
 )
 RUN_GATE = "run_gate"
 

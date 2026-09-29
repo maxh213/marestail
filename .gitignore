@@ -25,3 +25,4 @@ reports/mutation/
 .stryker-tmp/
 .idea/
 .vscode/
+marestail/js/node_modules/

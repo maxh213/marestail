@@ -396,3 +396,47 @@ def test_extend_gitignore_leaves_complete_file_alone(tmp_path: Path) -> None:
     path.write_text("\n".join(_install.GITIGNORE_LINES))
     _install.extend_gitignore(path, [])
     assert path.read_text() == "\n".join(_install.GITIGNORE_LINES)
+
+
+@pytest.mark.parametrize(
+    ("toml", "steps"),
+    [
+        ("[visual]\nenabled = true\n", [["npm", "install"], ["npx", "playwright", "install", "chromium"]]),
+        ("[visual]\nport = 3400\n", [["npm", "install"], ["npx", "playwright", "install", "chromium"]]),
+        ("[visual]\nenabled = false\n", []),
+        ("[qa]\ncmd = 'true'\n", []),
+        ("visual = 1\n", []),
+    ],
+)
+def test_install_fetches_playwright_only_when_visual_is_on(
+    home: Path, target: Path, toml: str, steps: list[list[str]], fake_run: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (target / "marestail.toml").write_text(toml)
+    fake = fake_run(_install)
+    assert install.install(target) == 0
+    assert fake.calls == steps
+    assert all(option["cwd"] == ROOT / "marestail" / "js" for option in fake.options)
+
+
+def test_visual_enabled_without_a_config(target: Path) -> None:
+    assert _install.visual_enabled(target) is False
+
+
+@pytest.mark.parametrize(
+    ("replies", "message"),
+    [
+        ([(1, "")], "npm install failed (exit 1); everything else is installed"),
+        ([(0, ""), (1, "")], "npx playwright install chromium failed (exit 1); everything else is installed"),
+    ],
+)
+def test_install_reports_a_failed_playwright_step(
+    home: Path, target: Path, replies: list[tuple[int, str]], message: str, fake_run: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (target / "marestail.toml").write_text("[visual]\nenabled = true\n")
+    fake_run(_install, replies)
+    assert install.install(target) == 1
+    assert capsys.readouterr().out.splitlines()[-1] == message
+
+
+def test_playwright_is_the_only_js_dependency() -> None:
+    assert read_json(ROOT / "marestail" / "js" / "package.json")["dependencies"].keys() == {"playwright"}

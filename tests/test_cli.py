@@ -18,6 +18,7 @@ from marestail import context as context_module
 from marestail import gates as gates_module
 from marestail.context import Context
 from marestail.gates import Gate
+from marestail.gates.qa import visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup
@@ -102,7 +103,7 @@ def test_main_requires_a_command(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_help_lists_commands_in_order() -> None:
     text = cli.build_parser().format_help()
-    assert "{gate,run,install,sonar,watch,perf,route,graph,depth}" in text
+    assert "{gate,run,install,sonar,watch,perf,visual,route,graph,depth}" in text
     assert "print the subscription to use now: runs dandelion" in " ".join(text.split())
 
 
@@ -780,7 +781,7 @@ def test_root_parser_help_and_subcommands() -> None:
     action = subparsers_action(parser)
     assert action.dest == "command"
     assert action.required is True
-    assert list(action.choices) == ["gate", "run", "install", "sonar", "watch", "perf", "route", "graph", "depth"]
+    assert list(action.choices) == ["gate", "run", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
     help_by_name = choice_help(parser)
     assert help_by_name["gate"] == "run the gates against the current repo"
     assert help_by_name["run"] == "run the role pipeline on a task"
@@ -944,3 +945,15 @@ def test_scope_line_adds_the_proof_line_under_test_cmd(repo: Path) -> None:
     assert cli.scope_line(ctx) == "hyper: 0 changed lines in 0 files\nproof: mutation via [hyper] test_cmd; coverage not measured"
     assert cli.scope_line(make_context(repo, {"ts": {}}, scope_changed=True, hyper=True)) == "hyper: 0 changed lines in 0 files"
     assert "proof:" not in to_json([], ctx.scope_name, ctx.focus)
+
+
+def test_visual_capture_takes_the_task_or_the_env(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    seen: list[tuple[Path, str]] = []
+    monkeypatch.setattr(visual, "capture_command", lambda config, task: seen.append((config.root, task)) or 0)
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    assert cli.main(["visual", "capture"]) == 2
+    assert capsys.readouterr().err == "no task; pass one or set MARESTAIL_TASK\n"
+    assert cli.main(["visual", "capture", "t"]) == 0
+    monkeypatch.setenv("MARESTAIL_TASK", "u")
+    assert cli.main(["visual", "capture"]) == 0
+    assert seen == [(repo, "t"), (repo, "u")]

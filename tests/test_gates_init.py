@@ -26,7 +26,7 @@ def expected_registry() -> list[tuple[str, str, str | None]]:
     fast.insert(4, ("py.runtime", "fast", "python"))
     shared = [("comments", "fast", None), ("depth", "fast", None), ("deadcode", "fast", None), ("docs", "fast", "docs")]
     mutation = [(f"{prefix}.mutation", "full", section) for prefix, section in LANGUAGES]
-    return [*fast, *shared, *mutation, ("sonar", "sonar", "sonar"), ("qa", "qa", "qa")]
+    return [*fast, *shared, *mutation, ("sonar", "sonar", "sonar"), ("qa", "qa", "qa"), ("visual", "qa", "visual")]
 
 
 def test_registry_order_and_tiers() -> None:
@@ -66,9 +66,9 @@ def test_tiers_for_unknown() -> None:
 
 
 def test_select_by_tier() -> None:
-    assert [gate.name for gate in gates.select("qa", None) if gate.tier != "fast"] == ["qa"]
+    assert [gate.name for gate in gates.select("qa", None) if gate.tier != "fast"] == ["qa", "visual"]
     assert len(gates.select("fast", set())) == 37
-    assert len(gates.select("all", None)) == 47
+    assert len(gates.select("all", None)) == 48
 
 
 def test_select_only() -> None:

@@ -10,6 +10,9 @@ from typing import Any
 from marestail.config import Config
 from marestail.perf import settings, table
 from marestail.shell import run, tail
+from marestail.worktree import add as add_worktree
+from marestail.worktree import head, start_commit, start_file
+from marestail.worktree import remove as remove_worktree
 
 NO_PRE_MARESTAIL = "no commit before marestail.toml; skipping the pre-marestail row"
 CONTROL = "control"
@@ -64,32 +67,12 @@ def active(config: Config) -> dict[str, Tree] | None:
     return {entry["tree"]: Tree(entry["tree"], entry["sha"], Path(entry["path"])) for entry in data["trees"]}
 
 
-def start_file(config: Config, task: str) -> Path:
-    return config.work / "runs" / task / "start-commit"
-
-
-def head(config: Config) -> str:
-    _, output = run(["git", "rev-parse", "HEAD"], cwd=config.root)
-    return output.strip()
-
-
 def record_start(config: Config, task: str) -> None:
     path = start_file(config, task)
     if path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(head(config) + "\n")
-
-
-def start_commit(config: Config, task: str) -> tuple[str, str]:
-    path = start_file(config, task)
-    if path.exists():
-        return path.read_text().strip(), ""
-    base = config.get("git", "base", "origin/master")
-    code, output = run(["git", "merge-base", base, "HEAD"], cwd=config.root)
-    if code == 0:
-        return output.strip(), f"no recorded start commit for {task}; using git merge-base {base} HEAD"
-    return head(config), f"no recorded start commit for {task} and no merge-base with {base}; using HEAD"
 
 
 def archive_start(config: Config, task: str, destination: Path | None) -> None:
@@ -149,7 +132,7 @@ def add_optional_trees(config: Config, session: Session, start: str, pre: str | 
 def add_tree(config: Config, session: Session, name: str, sha: str) -> None:
     path = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     session.trees.append(Tree(name, sha, path))
-    code, output = run(["git", "worktree", "add", "--detach", str(path), sha], cwd=config.root)
+    code, output = add_worktree(config.root, path, sha)
     if code != 0:
         raise RuntimeError(f"git worktree add for the {name} tree at {sha} failed: {' '.join(tail(output, 5))}")
     setup = config.get("perf", "setup")
@@ -176,7 +159,7 @@ def close(config: Config, session: Session) -> None:
     for tree in session.trees:
         if tree.name == "head":
             continue
-        run(["git", "worktree", "remove", "--force", str(tree.path)], cwd=config.root)
+        remove_worktree(config.root, tree.path)
         shutil.rmtree(tree.path, ignore_errors=True)
     run(["git", "worktree", "prune"], cwd=config.root)
     trees_file(config).unlink(missing_ok=True)

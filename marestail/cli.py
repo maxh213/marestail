@@ -96,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
+    add_visual(commands.add_parser("visual", help="photograph and measure the page at the base commit and at HEAD"))
     commands.add_parser(
         "route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False
     )
@@ -128,6 +129,23 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(
         handler=perf_db_command
     )
+
+
+def add_visual(parser: argparse.ArgumentParser) -> None:
+    actions = parser.add_subparsers(dest="visual_command", required=True)
+    capture = actions.add_parser("capture", help="write the pictures and geometry of both trees; judges nothing")
+    capture.add_argument("task", nargs="?", help="the task stem; defaults to MARESTAIL_TASK")
+    capture.set_defaults(handler=visual_capture_command)
+
+
+def visual_capture_command(args: argparse.Namespace) -> int:
+    from marestail.gates.qa import visual
+
+    task = args.task or os.environ.get("MARESTAIL_TASK")
+    if not task:
+        sys.stderr.write("no task; pass one or set MARESTAIL_TASK\n")
+        return 2
+    return visual.capture_command(config_module.load(Path.cwd()), task)
 
 
 def perf_db_command(args: argparse.Namespace) -> int:
