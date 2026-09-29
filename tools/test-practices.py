@@ -192,6 +192,7 @@ def install_template():
         expect("install-no-erlang-guidance", (target / "guidance" / "er.md").exists(), False)
         expect("install-no-elixir-guidance", (target / "guidance" / "ex.md").exists(), False)
         expect("install-no-ruby-guidance", (target / "guidance" / "rb.md").exists(), False)
+        expect("install-no-python-guidance", (target / "guidance" / "py.md").exists(), False)
         (target / "src").mkdir()
         (target / "src" / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
         with quiet():
@@ -217,6 +218,19 @@ def install_template():
         ruby = target / "guidance" / "rb.md"
         expect("install-creates-ruby-guidance", ruby.is_file(), True)
         expect("install-ruby-guidance-matches", ruby.read_text(), (ROOT / "templates" / "guidance" / "rb.md").read_text())
+        (target / "server").mkdir()
+        (target / "server" / "requirements.txt").write_text("Flask==2.3.2\n")
+        with quiet():
+            install.install(target)
+        python = target / "guidance" / "py.md"
+        expect("install-creates-python-guidance-from-python-root", python.is_file(), True)
+        expect("install-python-guidance-matches", python.read_text(), (ROOT / "templates" / "guidance" / "py.md").read_text())
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp)
+        (target / "pyproject.toml").write_text("[project]\nname = \"box\"\n")
+        with quiet():
+            install.install(target)
+        expect("install-creates-python-guidance-from-pyproject", (target / "guidance" / "py.md").is_file(), True)
 
 
 def rulebook_content():
@@ -261,6 +275,18 @@ def ruby_rulebook_content():
         expect(f"rb mentions {needle}", needle in text, True)
 
 
+def python_rulebook_content():
+    text = (ROOT / "templates" / "guidance" / "py.md").read_text()
+    ids = [int(n) for n in re.findall(r"\*\*PY-(\d+)", text)]
+    expect("py-rule-count", len(ids) >= 40, True)
+    expect("py-rule-contiguous", ids, list(range(1, len(ids) + 1)))
+    expect("py-rule-lines", len(text.splitlines()) <= 250, True)
+    for heading in ["## GoF patterns, the Python way", "## Python-native idioms", "## Concurrency", "## Web & architecture"]:
+        expect(f"py heading {heading}", heading in text, True)
+    for needle in ["typing.Protocol", "functools.singledispatch", "contextmanager", "TaskGroup", "Unit of Work", "timeout=", "py.runtime"]:
+        expect(f"py mentions {needle}", needle in text, True)
+
+
 def elixir_rulebook_content():
     text = (ROOT / "templates" / "guidance" / "ex.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*EX-(\d+)", text)]
@@ -288,4 +314,5 @@ if __name__ == "__main__":
     erlang_rulebook_content()
     elixir_rulebook_content()
     ruby_rulebook_content()
+    python_rulebook_content()
     print("practices ok")

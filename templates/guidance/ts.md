@@ -1,6 +1,6 @@
 # TypeScript best practices
 
-Applied by the marestail `practices` judge to `*.ts`/`*.tsx` changes. Verified against TypeScript 5.8+, React 19.2, Next.js 16, Node 24 LTS (September 2026). React rules apply only to React code; Next.js rules only in a Next.js app.
+Applied by the marestail `practices` judge to `*.ts`/`*.tsx` changes, and to plain `*.js`/`*.jsx` changes minus the rules that are about types. Verified against TypeScript 5.8+, React 19.2, Next.js 16, Node 24 LTS (September 2026). React rules apply only to React code; Next.js rules only in a Next.js app.
 
 Ground rules: TypeScript's type system is structural and types are erased at runtime — any matching shape satisfies an interface, and no interface check exists at runtime. OOP territory shrinks toward the UI: never classes in React components, hooks, stores, or route handlers; classes shine in the domain model, data access, and the error hierarchy that crosses every layer.
 
@@ -37,6 +37,7 @@ Ground rules: TypeScript's type system is structural and types are erased at run
 - **TS-26 — commit to OOP or don't.** NestJS-style DI/decorators are legitimate when fully adopted; don't half-do OOP on Express.
 
 Decision table: pure contract → `interface`; contract + shared implementation + `instanceof` → `abstract class`; closed cases → union + `switch`; errors → `class extends Error`; config/data shapes → `type` + schema at the boundary; behavior without state → function.
+- **TS-49 — name the condition.** A compound or non-obvious condition in an `if`, ternary, or `while` is extracted into a function or const whose name says what it means in the domain: `if (userHasDonated(event))`, not `if (event.data === 'donated' || event.data?.status === 'donated')`. Since the code has no comments, the name is the only explanation a reader gets. Negated names (`isNotValid`) are a finding; negate a positive name at the call site.
 
 ## React
 

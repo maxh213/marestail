@@ -9,6 +9,7 @@ TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 GITIGNORE_LINES = [".marestail/", "mutants/", ".scannerwork/", ".venv/", ".coverage", "reports/mutation/", ".stryker-tmp/", "StrykerOutput/", ".sonarqube/", ".idea/", ".vscode/"]
 GITIGNORE_GENERATED_LINES = ["features/", "qa/", "tasks/", "PERFORMANCE.md", "perf/", ".claude/settings.json", ".agents/hooks.json", ".grok/", ".cursor/hooks.json"]
 GATE_MARKER = "marestail gate"
+PYTHON_MARKERS = ("pyproject.toml", "requirements.txt", "setup.py")
 
 
 def install(target: Path, gitignore_generated: bool = False) -> None:
@@ -29,6 +30,8 @@ def install(target: Path, gitignore_generated: bool = False) -> None:
         copy_if_missing(TEMPLATES / "guidance" / "ex.md", target / "guidance" / "ex.md")
     if uses_ruby(target):
         copy_if_missing(TEMPLATES / "guidance" / "rb.md", target / "guidance" / "rb.md")
+    if uses_python(target):
+        copy_if_missing(TEMPLATES / "guidance" / "py.md", target / "guidance" / "py.md")
     claude = target / "CLAUDE.md"
     agents = target / "AGENTS.md"
     append_instructions(claude)
@@ -64,6 +67,18 @@ def uses_elixir(target: Path) -> bool:
 
 def uses_ruby(target: Path) -> bool:
     return (target / "Gemfile").is_file()
+
+
+def uses_python(target: Path) -> bool:
+    return any((folder / name).is_file() for folder in {target, python_root(target)} for name in PYTHON_MARKERS)
+
+
+def python_root(target: Path) -> Path:
+    config = target / "marestail.toml"
+    if not config.exists():
+        return target
+    with config.open("rb") as handle:
+        return target / tomllib.load(handle).get("python", {}).get("root", ".")
 
 
 def copy_if_missing(source: Path, destination: Path) -> None:
