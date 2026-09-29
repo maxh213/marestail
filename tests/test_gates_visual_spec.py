@@ -1,3 +1,4 @@
+import fnmatch
 import re
 from pathlib import Path
 from typing import Any
@@ -41,9 +42,8 @@ def write_qa(root: Path, text: str, task: str = "t") -> None:
 
 
 def test_skip_reason_in_order(tmp_path: Path) -> None:
-    assert spec_module.skip_reason(config_with(tmp_path, {"enabled": False}), None) == "skipped: [visual] enabled = false"
+    assert spec_module.skip_reason(config_with(tmp_path, {"enabled": False}), "") == "skipped: [visual] enabled = false"
     config = config_with(tmp_path, {"enabled": True})
-    assert spec_module.skip_reason(config, None) == "skipped: no task; set MARESTAIL_TASK"
     assert spec_module.skip_reason(config, "") == "skipped: no task; set MARESTAIL_TASK"
     assert spec_module.skip_reason(config, "t") == "visual: no qa/t.md; skipped"
     write_qa(tmp_path, "no block here\n```python\nx\n```\n")
@@ -51,6 +51,7 @@ def test_skip_reason_in_order(tmp_path: Path) -> None:
     write_qa(tmp_path, BLOCK)
     assert spec_module.skip_reason(config, "t") is None
     assert spec_module.skip_reason(config_with(tmp_path, {}), "t") is None
+    assert spec_module.skip_reason(config_with(tmp_path, {"port": 3400}), "") == "skipped: no task; set MARESTAIL_TASK"
 
 
 def test_block_lines_takes_the_first_visual_fence() -> None:
@@ -67,6 +68,7 @@ def test_block_lines_takes_the_first_visual_fence() -> None:
     ]
     assert spec_module._block_lines("~~~ visual\nroute: /\n") == ["route: /"]
     assert spec_module._block_lines("```visualise\nroute: /\n```\n") is None
+    assert spec_module._block_lines("```visual\nroute: /\nselector: #w") == ["route: /", "selector: #w"]
 
 
 def test_load_reads_block_and_settings(tmp_path: Path) -> None:
@@ -83,6 +85,7 @@ def test_load_reads_block_and_settings(tmp_path: Path) -> None:
         "setup_timeout": 7,
         "ready_timeout": 9,
         "start": "yarn dev",
+        "ready": "/health",
     }
     spec, problems = spec_module.load(config_with(tmp_path, visual), "t")
     assert problems == []
@@ -100,7 +103,7 @@ def test_load_reads_block_and_settings(tmp_path: Path) -> None:
         symptom="the corner is round",
     )
     settings = spec.settings
-    assert (settings.start, settings.setup, settings.ready, settings.port) == ("yarn dev", "yarn", "/", 3500)
+    assert (settings.start, settings.setup, settings.ready, settings.port) == ("yarn dev", "yarn", "/health", 3500)
     assert settings.env == {"CMS_URL": "https://cms", "N": "1"}
     assert settings.viewports == [
         Viewport("desktop", 1440, 900, 1, False),
@@ -151,6 +154,10 @@ def test_selector_with_colons_keeps_its_value(tmp_path: Path) -> None:
     spec, _ = spec_module.load(config_with(tmp_path, {}), "t")
     assert spec is not None
     assert (spec.block.selector, spec.block.scroll) == ("a:hover", True)
+    write_qa(tmp_path, "```visual\nroute: /\nselector: #w\nscroll: false\n```\n")
+    spec, _ = spec_module.load(config_with(tmp_path, {}), "t")
+    assert spec is not None
+    assert spec.block.scroll is False
 
 
 @pytest.mark.parametrize(
@@ -170,3 +177,13 @@ def test_selector_with_colons_keeps_its_value(tmp_path: Path) -> None:
 )
 def test_glob_regex_follows_fnmatchcase(pattern: str, url: str, matches: bool) -> None:
     assert bool(re.search(spec_module._glob_regex(pattern), url)) is matches
+
+
+GLOB_PATTERNS = ["[a]", "[]a]", "[!]a]", "[]", "[!]", "[", "[a", "[!a", "*[x", "[a-c]", "[!a-c]", "[\\]", "[^a]", "a[[]b", "[a]b]"]
+GLOB_TEXTS = ["a", "b", "c", "d", "]", "[", "!", "^", "\\", "[x", "a[x", "[]", "[!]", "[a", "[!a", "a[b", "ab]", "b]", "[\\]", "X", "XX"]
+
+
+@pytest.mark.parametrize("pattern", GLOB_PATTERNS)
+def test_glob_regex_agrees_with_fnmatchcase_on_brackets(pattern: str) -> None:
+    regex = spec_module._glob_regex(pattern)
+    assert [text for text in GLOB_TEXTS if re.search(regex, text)] == [text for text in GLOB_TEXTS if fnmatch.fnmatchcase(text, pattern)]

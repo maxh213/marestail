@@ -145,7 +145,7 @@ def visual_enabled(target: Path) -> bool:
     if not config.exists():
         return False
     section = tomllib.loads(config.read_text()).get("visual")
-    return isinstance(section, dict) and section.get("enabled", True) is not False
+    return isinstance(section, dict) and bool(section.get("enabled", True))
 
 
 def uses_csharp(target: Path) -> bool:

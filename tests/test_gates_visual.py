@@ -28,19 +28,21 @@ def repo(tmp_path: Path, block: str | None = BLOCK) -> Path:
     return tmp_path
 
 
-def fake_capture(monkeypatch: pytest.MonkeyPatch, head: dict[str, Any], problems: list[str] | None = None) -> list[tuple[str, int]]:
-    seen: list[tuple[str, int]] = []
+def fake_capture(monkeypatch: pytest.MonkeyPatch, head: dict[str, Any], problems: list[str] | None = None) -> list[tuple[Any, ...]]:
+    seen: list[tuple[Any, ...]] = []
+
+    def start_commit(config: Config, task: str) -> tuple[str, str]:
+        seen.append(("start", config.root, task))
+        return "abc", "no recorded start commit for t; using git merge-base main HEAD"
 
     def trees(config: Config, spec: Any, sha: str, captures: int) -> tuple[TreeRun, TreeRun]:
-        seen.append((sha, captures))
+        seen.append((config.root, spec.task, sha, captures))
         base = TreeRun(Tree("base", "base", config.root), problems or [], {"desktop": Shot([GEOMETRY, GEOMETRY], None)})
         return base, TreeRun(Tree("head", "HEAD", config.root), [], {"desktop": Shot([head, head], None)})
 
     monkeypatch.setattr(visual.capture, "capture_trees", trees)
     monkeypatch.setattr(visual.capture, "tool_problems", list)
-    monkeypatch.setattr(
-        worktree, "start_commit", lambda config, task: ("abc", "no recorded start commit for t; using git merge-base main HEAD")
-    )
+    monkeypatch.setattr(worktree, "start_commit", start_commit)
     return seen
 
 
@@ -61,8 +63,11 @@ def test_gate_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_gate_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen = fake_capture(monkeypatch, GEOMETRY)
-    assert gate(repo(tmp_path), {"visual": VISUAL}, "t", monkeypatch) == ("visual", True, "1 viewport, geometry holds", [])
-    assert seen == [("abc", 2)]
+    monkeypatch.setattr(visual, "elapsed", lambda started: 7.5)
+    monkeypatch.setenv("MARESTAIL_TASK", "t")
+    result = visual.run_gate(make_context(repo(tmp_path), {"visual": VISUAL}))
+    assert (result.ok, result.summary, result.findings, result.seconds) == (True, "1 viewport, geometry holds", [], 7.5)
+    assert seen == [("start", tmp_path, "t"), (tmp_path, "t", "abc", 2)]
     raw = {"visual": {**VISUAL, "viewports": {"desktop": "1440x900", "phone": "390x844@2 touch"}}}
     monkeypatch.setattr(visual.capture, "capture_trees", lambda config, spec, sha, captures: (two_views(config), two_views(config)))
     assert gate(tmp_path, raw, "t", monkeypatch)[2] == "2 viewports, geometry holds"
@@ -118,7 +123,7 @@ def test_capture_command_prints_note_and_folders(
 ) -> None:
     seen = fake_capture(monkeypatch, GEOMETRY)
     assert visual.capture_command(Config(repo(tmp_path), {"visual": VISUAL}), "t") == 0
-    assert seen == [("abc", 1)]
+    assert seen == [("start", tmp_path, "t"), (tmp_path, "t", "abc", 1)]
     assert capsys.readouterr().out == (
         "no recorded start commit for t; using git merge-base main HEAD\n"
         "base desktop: .marestail/runs/t/visual/base/desktop\n"
@@ -136,6 +141,6 @@ def test_capture_command_without_note_and_with_problems(
 
 
 def test_capture_command_malformed_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = repo(tmp_path, "```visual\nroute: /\n```\n")
+    root = repo(tmp_path, "```visual\nroute: /\ncolour: red\n```\n")
     assert visual.capture_command(Config(root, {"visual": VISUAL}), "t") == 2
-    assert capsys.readouterr().out == "qa/t.md visual block: missing selector\n"
+    assert capsys.readouterr().out == "qa/t.md visual block: missing selector\nqa/t.md visual block: unknown key colour\n"

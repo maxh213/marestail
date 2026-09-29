@@ -962,3 +962,18 @@ def test_visual_capture_takes_the_task_or_the_env(repo: Path, monkeypatch: pytes
     monkeypatch.setenv("MARESTAIL_TASK", "u")
     assert cli.main(["visual", "capture"]) == 0
     assert seen == [(repo, "t"), (repo, "u")]
+
+
+def test_visual_parser_defaults_and_help() -> None:
+    parser = cli.build_parser()
+    assert choice_help(parser)["visual"] == "photograph and measure the page at the base commit and at HEAD"
+    visual_parser = subparser("visual")
+    action = subparsers_action(visual_parser)
+    assert (action.dest, action.required) == ("visual_command", True)
+    with pytest.raises(SystemExit):
+        parse_argv(parser, ["visual"])
+    assert choice_help(visual_parser) == {"capture": "write the pictures and geometry of both trees; judges nothing"}
+    capture = nested_parser(visual_parser, "capture")
+    assert {action.dest: action.help for action in capture._actions}["task"] == "the task stem; defaults to MARESTAIL_TASK"
+    assert parser.parse_args(["visual", "capture", "t"]).visual_command == "capture"
+    assert capture.parse_args([]).task is None

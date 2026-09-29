@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from marestail.gates.visual import _judge as judge
 from marestail.gates.visual._model import Block, Settings, Shot, Spec, Tree, TreeRun, Viewport
 
@@ -191,3 +193,44 @@ def test_viewports_in_config_order() -> None:
     base = tree_run("base", ("desktop", stable()), ("phone", stable()))
     head = tree_run("HEAD", ("desktop", wide), ("phone", wide))
     assert [line.split(":")[0] for line in judge.findings(base, head, spec)] == ["phone", "desktop"]
+
+
+def test_stability_holds_at_exactly_the_tolerance() -> None:
+    near = geometry(box=box(x=436), scrollWidth=1442, clientWidth=1438)
+    assert judge._same(geometry(), near, 2) is True
+    assert judge._same(geometry(), geometry(box=box(x=437)), 2) is False
+    assert judge._same(geometry(), geometry(scrollWidth=1443), 2) is False
+    assert judge._same(geometry(), geometry(overlaps=["p#text"]), 2) is False
+
+
+def test_stability_needs_the_same_named_boxes() -> None:
+    with pytest.raises(ValueError, match="zip"):
+        judge._same(geometry(), geometry(must_not_change={}), 2)
+
+
+def test_unstable_reports_the_first_two_of_more_captures() -> None:
+    first, second = geometry(box=box(width=500)), geometry(box=box(width=900))
+    assert judge._unstable_lines("desktop", "HEAD", [first, second, geometry()], 2) == [
+        "desktop: unstable at HEAD: two captures gave different geometry",
+        f"  first: {json.dumps(first)}",
+        f"  second: {json.dumps(second)}",
+    ]
+
+
+def test_inside_holds_at_exactly_the_tolerance() -> None:
+    spec = make_spec(unchanged=[])
+    assert judged(stable(), stable(geometry(box=box(width=574))), spec) == []
+    assert judged(stable(), stable(geometry(box=box(x=432))), spec) == []
+    assert judged(stable(), stable(geometry(box=box(width=575))), spec) == ["desktop: #widget is 575px wide, .col is 572px (base: 440px)"]
+    assert judged(stable(), stable(geometry(box=box(x=431, width=441))), spec) == [
+        "desktop: #widget left edge is 431px, .col left edge is 434px (base: 434px)"
+    ]
+    assert judged(stable(), stable(geometry(box=box(x=569))), spec) == [
+        "desktop: #widget right edge is 1009px, .col right edge is 1006px (base: 874px)"
+    ]
+
+
+def test_unchanged_holds_at_exactly_the_tolerance() -> None:
+    spec = make_spec(inside="")
+    assert judged(stable(), stable(geometry(box=box(x=436))), spec) == []
+    assert judged(stable(), stable(geometry(box=box(x=437))), spec) == ["desktop: #widget x-centre moved 3px (base: 654px, HEAD: 657px)"]

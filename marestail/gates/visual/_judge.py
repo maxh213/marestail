@@ -164,11 +164,12 @@ def _inside_lines(name: str, block: Block, base: _Geometry, head: _Geometry, tol
 
 
 def _edge_lines(name: str, block: Block, base: _Box, box: _Box, outer: _Box, tolerance: int) -> list[str]:
-    sides = [("left", _MEASURES["left"], -1), ("right", _MEASURES["right"], 1)]
+    left, right = _MEASURES["left"], _MEASURES["right"]
+    overshoots = [("left", left, left(outer) - left(box)), ("right", right, right(box) - right(outer))]
     return [
         f"{name}: {block.selector} {side} edge is {_px(edge(box))}px, {block.inside} {side} edge is {_px(edge(outer))}px (base: {_px(edge(base))}px)"
-        for side, edge, sign in sides
-        if (edge(box) - edge(outer)) * sign > tolerance
+        for side, edge, overshoot in overshoots
+        if overshoot > tolerance
     ]
 
 

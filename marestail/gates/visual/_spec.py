@@ -1,4 +1,5 @@
 import re
+from itertools import takewhile
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ _MEASURES = ("x-centre", "y-centre", "left", "right", "top", "bottom", "width", 
 _FENCES = ("```", "~~~")
 _VIEWPORT = re.compile(r"^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?( touch)?$")
 _WILDCARDS = {"*": "[\\s\\S]*", "?": "[\\s\\S]"}
+_GLOB_TOKEN = re.compile(r"\[(!?+\]?+[^\]]*)\]|([\s\S])")
+_CLASS_SPECIALS = re.compile(r"([\\\[\]^])")
 _DEFAULT_PORT = 3400
 _DEFAULT_READY = "/"
 _DEFAULT_READY_TIMEOUT = 180
@@ -24,10 +27,10 @@ def _qa_file(config: Config, task: str) -> Path:
     return config.root / "qa" / f"{task}.md"
 
 
-def skip_reason(config: Config, task: str | None) -> str | None:
-    if config.get(SECTION, "enabled", True) is False:
+def skip_reason(config: Config, task: str) -> str | None:
+    if not config.get(SECTION, "enabled", True):
         return "skipped: [visual] enabled = false"
-    if not task:
+    if task == "":
         return "skipped: no task; set MARESTAIL_TASK"
     return _missing_block(config, task)
 
@@ -44,8 +47,7 @@ def _block_lines(text: str) -> list[str] | None:
     starts = [index for index, line in enumerate(lines) if _opens_block(line)]
     if not starts:
         return None
-    body = lines[starts[0] + 1 :]
-    return body[: _closing(body)]
+    return list(takewhile(_inside_block, lines[starts[0] + 1 :]))
 
 
 def _opens_block(line: str) -> bool:
@@ -53,8 +55,8 @@ def _opens_block(line: str) -> bool:
     return stripped.startswith(_FENCES) and stripped[3:].strip() == SECTION
 
 
-def _closing(body: list[str]) -> int:
-    return next((index for index, line in enumerate(body) if line.strip().startswith(_FENCES)), len(body))
+def _inside_block(line: str) -> bool:
+    return not line.strip().startswith(_FENCES)
 
 
 def load(config: Config, task: str) -> tuple[Spec | None, list[str]]:
@@ -118,7 +120,7 @@ def _make_block(values: dict[str, str]) -> Block:
     return Block(
         route=values["route"],
         selector=values["selector"],
-        scroll=values.get("scroll", "false").lower() == "true",
+        scroll=_flag(values.get("scroll")),
         wait=values.get("wait", ""),
         styles=_listed(values.get("styles", "")),
         inside=values.get("inside", ""),
@@ -126,6 +128,10 @@ def _make_block(values: dict[str, str]) -> Block:
         must_not_change=_listed(values.get("must_not_change", "")),
         symptom=values.get("symptom", ""),
     )
+
+
+def _flag(value: str | None) -> bool:
+    return value is not None and value.lower() == "true"
 
 
 def _make_settings(config: Config, viewports: list[Viewport]) -> Settings:
@@ -159,26 +165,21 @@ def _ready_timeout(config: Config, section: dict[str, Any]) -> int:
 
 
 def _glob_regex(pattern: str) -> str:
-    parts = []
-    index = 0
-    while index < len(pattern):
-        part, index = _glob_part(pattern, index)
-        parts.append(part)
-    return "^" + "".join(parts) + "$"
+    return "^" + "".join(_token_regex(match) for match in _GLOB_TOKEN.finditer(pattern)) + "$"
 
 
-def _glob_part(pattern: str, index: int) -> tuple[str, int]:
-    char = pattern[index]
-    if char in _WILDCARDS:
-        return _WILDCARDS[char], index + 1
-    if char == "[":
-        return _bracket(pattern, index)
-    return re.escape(char), index + 1
+def _token_regex(match: re.Match[str]) -> str:
+    body, char = match.groups()
+    if body is not None:
+        return _bracket(body)
+    return _WILDCARDS.get(char) or re.escape(char)
 
 
-def _bracket(pattern: str, index: int) -> tuple[str, int]:
-    end = pattern.find("]", index + 2)
-    if end < 0:
-        return re.escape("["), index + 1
-    body = pattern[index + 1 : end]
-    return "[" + ("^" + body[1:] if body.startswith("!") else body) + "]", end + 1
+def _bracket(body: str) -> str:
+    if body.startswith("!"):
+        return "[^" + _members(body[1:]) + "]"
+    return "[" + _members(body) + "]"
+
+
+def _members(body: str) -> str:
+    return _CLASS_SPECIALS.sub(r"\\\1", body)

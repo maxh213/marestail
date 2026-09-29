@@ -3,6 +3,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -418,3 +419,45 @@ def test_run_cmd_and_qa_result(tmp_path: Path, fake_run: Callable[..., FakeRun])
 def test_qa_cwd(tmp_path: Path) -> None:
     assert qa._qa_cwd(make_context(tmp_path, {"qa": {"cwd": "web"}})) == tmp_path / "web"
     assert qa._qa_cwd(make_context(tmp_path, {"qa": {}})) == tmp_path / "."
+
+
+@pytest.fixture
+def bash_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    real = subprocess.Popen
+    seen: list[list[str]] = []
+
+    def popen(args: list[str], *rest: Any, **options: Any) -> Any:
+        seen.append(list(args))
+        return real(["sh", *args[1:]], *rest, **options)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    return seen
+
+
+def test_run_logged_merges_env_and_stderr_into_the_log(tmp_path: Path, bash_calls: list[list[str]]) -> None:
+    log = tmp_path / "logs" / "setup.log"
+    command = "echo out; echo err >&2; echo $RUN_LOGGED_PROBE; exit 3"
+    assert _serve.run_logged(command, tmp_path, {"RUN_LOGGED_PROBE": "probe"}, log, 30) == 3
+    assert log.read_text() == "out\nerr\nprobe\n"
+    assert bash_calls == [["bash", "-lc", command]]
+
+
+@pytest.mark.usefixtures("bash_calls")
+def test_run_logged_leads_its_own_session(tmp_path: Path) -> None:
+    log = tmp_path / "setup.log"
+    command = f'exec {sys.executable} -c "import os; print(os.getsid(0) == os.getpid())"'
+    assert _serve.run_logged(command, tmp_path, {}, log, 30) == 0
+    assert log.read_text() == "True\n"
+
+
+@pytest.mark.usefixtures("bash_calls")
+def test_run_logged_times_out_and_kills_the_group(tmp_path: Path) -> None:
+    log = tmp_path / "setup.log"
+    pid_file = tmp_path / "pid"
+    sleeper = f'{sys.executable} -c "import time; time.sleep(60)"'
+    assert _serve.run_logged(f"{sleeper} & echo $! > {pid_file}; echo started; wait", tmp_path, {}, log, 1) is None
+    assert log.read_text() == "started\n"
+    pid = int(pid_file.read_text())
+    time.sleep(0.5)
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)

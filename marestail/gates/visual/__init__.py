@@ -19,21 +19,22 @@ _HAND_CAPTURES = 1
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    task = os.environ.get(_TASK_ENV)
+    task = os.environ.get(_TASK_ENV, "")
     skip = spec_module.skip_reason(ctx.config, task)
-    if skip or not task:
-        return Result(_GATE, True, skip or "")
-    findings, count = _gate_findings(ctx.config, task)
-    return Result(_GATE, not findings, _verdict(findings, count), findings, elapsed(started))
+    if skip is not None:
+        return Result(_GATE, True, skip)
+    findings, verdict = _gate_findings(ctx.config, task)
+    return Result(_GATE, not findings, verdict, findings, elapsed(started))
 
 
-def _gate_findings(config: Config, task: str) -> tuple[list[str], int]:
+def _gate_findings(config: Config, task: str) -> tuple[list[str], str]:
     spec, problems = _checked(config, task)
     if spec is None:
-        return problems, 0
+        return problems, _failed_verdict(problems)
     sha, _ = worktree.start_commit(config, task)
     base, head = capture.capture_trees(config, spec, sha, _GATE_CAPTURES)
-    return _with_symptom(judge.findings(base, head, spec), spec), len(spec.settings.viewports)
+    findings = _with_symptom(judge.findings(base, head, spec), spec)
+    return findings, _verdict(findings, len(spec.settings.viewports))
 
 
 def _checked(config: Config, task: str) -> tuple[Spec | None, list[str]]:
@@ -52,8 +53,12 @@ def _with_symptom(findings: list[str], spec: Spec) -> list[str]:
 
 def _verdict(findings: list[str], count: int) -> str:
     if findings:
-        return f"{_finding_count(findings)} visual findings"
+        return _failed_verdict(findings)
     return f"{count} viewport{_plural(count)}, geometry holds"
+
+
+def _failed_verdict(findings: list[str]) -> str:
+    return f"{_finding_count(findings)} visual findings"
 
 
 def _finding_count(lines: list[str]) -> int:

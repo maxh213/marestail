@@ -416,6 +416,7 @@ def test_install_fetches_playwright_only_when_visual_is_on(
     assert install.install(target) == 0
     assert fake.calls == steps
     assert all(option["cwd"] == ROOT / "marestail" / "js" for option in fake.options)
+    assert all(option["timeout"] == 1800 for option in fake.options)
 
 
 def test_visual_enabled_without_a_config(target: Path) -> None:

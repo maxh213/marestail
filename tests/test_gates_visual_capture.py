@@ -29,7 +29,7 @@ def make_spec(setup: str = "", timeout: int = 900, viewports: list[Viewport] | N
 
 def node_reply(*failures: str | None) -> tuple[int, str]:
     captures = [{"geometry": {"box": {"x": index}}, "failure": failure} for index, failure in enumerate(failures)]
-    return 0, "warning\n" + json.dumps({"captures": captures}) + "\n"
+    return 0, "warning\nnotice\n" + json.dumps({"captures": captures}) + "\n"
 
 
 class FakeServe:
@@ -62,11 +62,12 @@ def worktrees(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     seen: list[tuple[str, Any]] = []
 
     def add(root: Path, path: Path, sha: str) -> tuple[int, str]:
-        seen.append(("add", sha))
+        seen.append(("add", (root, sha)))
         return 0, ""
 
     def remove(root: Path, path: Path) -> None:
-        seen.append(("remove", path))
+        seen.append(("remove", (root, path)))
+        shutil.rmtree(path)
 
     monkeypatch.setattr(worktree, "add", add)
     monkeypatch.setattr(worktree, "remove", remove)
@@ -80,12 +81,13 @@ def test_visual_dir(tmp_path: Path) -> None:
 def test_tool_problems(monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
     assert capture.tool_problems() == ["node not found on PATH; run marestail install"]
-    monkeypatch.setattr(shutil, "which", lambda name: "/bin/node")
+    monkeypatch.setattr(shutil, "which", {"node": "/bin/node"}.get)
     fake = fake_run(capture, [(0, ""), (1, "Executable doesn't exist")])
     assert capture.tool_problems() == []
     assert capture.tool_problems() == ["Playwright Chromium missing; run marestail install"]
     assert fake.calls[0] == ["node", str(capture._SCRIPT), "--check"]
     assert fake.options[0]["cwd"] == capture._JS_DIR
+    assert fake.options[0]["timeout"] == 120
     assert (capture._JS_DIR / "visual.mjs").exists()
 
 
@@ -106,8 +108,12 @@ def test_capture_trees_runs_base_then_head(
     assert serve.calls[0][1] == base.tree.path
     assert serve.calls[0][5] == {"CMS_URL": "https://cms"}
     assert (serve.calls[0][0], serve.calls[0][3], serve.calls[0][4]) == ("serve", "/", 9)
-    assert worktrees == [("add", "abc"), ("remove", base.tree.path)]
+    assert worktrees == [("add", (tmp_path, "abc")), ("remove", (tmp_path, base.tree.path))]
     assert not base.tree.path.exists()
+    assert base.tree.path.name.startswith("marestail-visual-")
+    assert [call[6].name for call in serve.calls] == ["app.log", "app.log"]
+    assert fake.calls[0][:3] == ["node", str(capture._SCRIPT), "capture"]
+    assert json.loads(fake.calls[0][3])["captures"] == 2
     assert (base.tree.folder, base.tree.label, head.tree.folder, head.tree.label) == ("base", "base", "head", "HEAD")
     assert list(head.shots) == ["desktop", "phone"]
     assert head.shots["desktop"] == Shot([{"box": {"x": 0}}, {"box": {"x": 1}}], None)
@@ -130,13 +136,22 @@ def test_capture_trees_removes_the_worktree_on_interrupt(
     with pytest.raises(KeyboardInterrupt):
         capture.capture_trees(config, spec, "abc", 1)
     assert [kind for kind, _ in worktrees] == ["add", "remove"]
-    assert not worktrees[1][1].exists()
+    assert not worktrees[1][1][1].exists()
 
 
 def test_worktree_failure_is_a_base_problem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(worktree, "add", lambda root, path, sha: (128, "fatal: bad\nrevision"))
-    run = capture._base_run(tmp_path, Tree("base", "base", tmp_path / "wt"), "abc", make_spec(), tmp_path, 1)
-    assert run.problems == ["base: git worktree add failed (exit 128)", "  fatal: bad", "  revision"]
+    seen: list[tuple[Path, Path, str]] = []
+
+    def add(root: Path, path: Path, sha: str) -> tuple[int, str]:
+        seen.append((root, path, sha))
+        return 128, "\n".join(f"line {number}" for number in range(12))
+
+    monkeypatch.setattr(worktree, "add", add)
+    tree = Tree("base", "base", tmp_path / "wt")
+    run = capture._base_run(tmp_path, tree, "abc", make_spec(), tmp_path, 1)
+    assert seen == [(tmp_path, tmp_path / "wt", "abc")]
+    assert run.tree == tree
+    assert run.problems == ["base: git worktree add failed (exit 128)", *[f"  line {number}" for number in range(2, 12)]]
 
 
 @pytest.mark.usefixtures("sh_for_bash")
@@ -146,6 +161,7 @@ def test_setup_runs_in_the_worktree_and_reports_failure(tmp_path: Path, monkeypa
     spec = make_spec(setup="pwd; echo $CMS_URL; echo installing; exit 1")
     run = capture._base_run(tmp_path, tree, "abc", spec, tmp_path / "visual", 1)
     assert run.problems == ["base: setup failed (exit 1)", f"  {tmp_path}", "  https://cms", "  installing"]
+    assert run.tree == tree
     assert run.shots == {}
     assert (tmp_path / "visual" / "base" / "setup.log").read_text().endswith("installing\n")
 
@@ -182,6 +198,12 @@ def test_app_failure_carries_the_log_tail(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_log_detail_without_a_log(tmp_path: Path) -> None:
     assert capture._log_detail(tmp_path / "none.log") == []
+
+
+def test_log_detail_keeps_the_last_ten_lines(tmp_path: Path) -> None:
+    log = tmp_path / "app.log"
+    log.write_text("".join(f"line {number}\n" for number in range(12)))
+    assert capture._log_detail(log) == [f"  line {number}" for number in range(2, 12)]
 
 
 def test_shoot_reports_node_failures(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
