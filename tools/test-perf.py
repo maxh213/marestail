@@ -13,7 +13,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import freeze, runner
+from marestail import freeze, runner, worktree
 from marestail.config import Config
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene, results, samples, settings, table
@@ -283,9 +283,9 @@ def start_commit_recorded_once() -> None:
         perf_trees.record_start(config, "t")
         commit_change(root, "changed\n")
         perf_trees.record_start(config, "t")
-        expect("start-kept", perf_trees.start_commit(config, "t"), (first, ""))
-        perf_trees.start_file(config, "t").unlink()
-        sha, note = perf_trees.start_commit(config, "t")
+        expect("start-kept", worktree.start_commit(config, "t"), (first, ""))
+        worktree.start_file(config, "t").unlink()
+        sha, note = worktree.start_commit(config, "t")
         expect("start-fallback-sha", sha, git(root, "merge-base", "main", "HEAD"))
         expect("start-fallback-note", "git merge-base main HEAD" in note, True)
 
@@ -298,7 +298,7 @@ def start_commit_archived() -> None:
         run_state.handoffs.mkdir(parents=True)
         (run_state.handoffs / "01-coder.md").write_text("done\n")
         runner.archive_handoffs(run_state)
-        expect("start-moved", perf_trees.start_file(run_state.config, "t").exists(), False)
+        expect("start-moved", worktree.start_file(run_state.config, "t").exists(), False)
         expect("start-archived", len(list(run_state.folder.glob("handoffs-*/start-commit"))), 1)
 
 

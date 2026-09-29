@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -7,7 +8,9 @@ from typing import Any
 
 import pytest
 
+from marestail import worktree
 from marestail.config import Config
+from marestail.gates import _serve
 from marestail.gates.visual import _capture as capture
 from marestail.gates.visual._model import Block, Settings, Shot, Spec, Tree, TreeRun, Viewport
 from tests.conftest import FakeRun
@@ -57,8 +60,16 @@ def sh_for_bash(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def worktrees(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Any]]:
     seen: list[tuple[str, Any]] = []
-    monkeypatch.setattr(capture.worktree, "add", lambda root, path, sha: seen.append(("add", sha)) or (0, ""))
-    monkeypatch.setattr(capture.worktree, "remove", lambda root, path: seen.append(("remove", path)))
+
+    def add(root: Path, path: Path, sha: str) -> tuple[int, str]:
+        seen.append(("add", sha))
+        return 0, ""
+
+    def remove(root: Path, path: Path) -> None:
+        seen.append(("remove", path))
+
+    monkeypatch.setattr(worktree, "add", add)
+    monkeypatch.setattr(worktree, "remove", remove)
     return seen
 
 
@@ -67,9 +78,9 @@ def test_visual_dir(tmp_path: Path) -> None:
 
 
 def test_tool_problems(monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
-    monkeypatch.setattr(capture.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     assert capture.tool_problems() == ["node not found on PATH; run marestail install"]
-    monkeypatch.setattr(capture.shutil, "which", lambda name: "/bin/node")
+    monkeypatch.setattr(shutil, "which", lambda name: "/bin/node")
     fake = fake_run(capture, [(0, ""), (1, "Executable doesn't exist")])
     assert capture.tool_problems() == []
     assert capture.tool_problems() == ["Playwright Chromium missing; run marestail install"]
@@ -86,7 +97,7 @@ def test_capture_trees_runs_base_then_head(
     stale.parent.mkdir(parents=True)
     stale.write_text("x")
     serve = FakeServe()
-    monkeypatch.setattr(capture._serve, "ready_app", serve)
+    monkeypatch.setattr(_serve, "ready_app", serve)
     fake = fake_run(capture, lambda command: node_reply(None, None))
     base, head = capture.capture_trees(config, make_spec(viewports=[DESKTOP, PHONE]), "abc", 2)
     assert not stale.exists()
@@ -113,7 +124,7 @@ def test_capture_trees_removes_the_worktree_on_interrupt(
     def interrupted(*args: Any) -> Any:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(capture._serve, "ready_app", interrupted)
+    monkeypatch.setattr(_serve, "ready_app", interrupted)
     config = Config(tmp_path, {})
     spec = make_spec()
     with pytest.raises(KeyboardInterrupt):
@@ -123,14 +134,14 @@ def test_capture_trees_removes_the_worktree_on_interrupt(
 
 
 def test_worktree_failure_is_a_base_problem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(capture.worktree, "add", lambda root, path, sha: (128, "fatal: bad\nrevision"))
+    monkeypatch.setattr(worktree, "add", lambda root, path, sha: (128, "fatal: bad\nrevision"))
     run = capture._base_run(tmp_path, Tree("base", "base", tmp_path / "wt"), "abc", make_spec(), tmp_path, 1)
     assert run.problems == ["base: git worktree add failed (exit 128)", "  fatal: bad", "  revision"]
 
 
 @pytest.mark.usefixtures("sh_for_bash")
 def test_setup_runs_in_the_worktree_and_reports_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(capture.worktree, "add", lambda root, path, sha: (0, ""))
+    monkeypatch.setattr(worktree, "add", lambda root, path, sha: (0, ""))
     tree = Tree("base", "base", tmp_path)
     spec = make_spec(setup="pwd; echo $CMS_URL; echo installing; exit 1")
     run = capture._base_run(tmp_path, tree, "abc", spec, tmp_path / "visual", 1)
@@ -150,8 +161,8 @@ def test_setup_timeout(tmp_path: Path) -> None:
 
 @pytest.mark.usefixtures("sh_for_bash")
 def test_passing_setup_serves_the_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
-    monkeypatch.setattr(capture.worktree, "add", lambda root, path, sha: (0, ""))
-    monkeypatch.setattr(capture._serve, "ready_app", FakeServe())
+    monkeypatch.setattr(worktree, "add", lambda root, path, sha: (0, ""))
+    monkeypatch.setattr(_serve, "ready_app", FakeServe())
     fake_run(capture, lambda command: node_reply(None))
     run = capture._base_run(tmp_path, Tree("base", "base", tmp_path), "abc", make_spec(setup="true"), tmp_path / "v", 1)
     assert run.problems == []
@@ -164,7 +175,7 @@ def test_no_setup_has_no_problems(tmp_path: Path) -> None:
 
 
 def test_app_failure_carries_the_log_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(capture._serve, "ready_app", FakeServe({"head": "app exited with 3 before answering"}))
+    monkeypatch.setattr(_serve, "ready_app", FakeServe({"head": "app exited with 3 before answering"}))
     run = capture._served(Tree("head", "HEAD", tmp_path), make_spec(), 3400, tmp_path, 1)
     assert run == TreeRun(Tree("head", "HEAD", tmp_path), ["HEAD: app exited with 3 before answering", "  one", "  two"], {})
 

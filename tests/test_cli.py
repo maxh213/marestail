@@ -16,6 +16,7 @@ from marestail import cli, depth, graph, install, route, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
+from marestail.config import Config
 from marestail.context import Context
 from marestail.gates import Gate, visual
 from marestail.perf import db, samples
@@ -948,7 +949,12 @@ def test_scope_line_adds_the_proof_line_under_test_cmd(repo: Path) -> None:
 
 def test_visual_capture_takes_the_task_or_the_env(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     seen: list[tuple[Path, str]] = []
-    monkeypatch.setattr(visual, "capture_command", lambda config, task: seen.append((config.root, task)) or 0)
+
+    def capture_command(config: Config, task: str) -> int:
+        seen.append((config.root, task))
+        return 0
+
+    monkeypatch.setattr(visual, "capture_command", capture_command)
     monkeypatch.delenv("MARESTAIL_TASK", raising=False)
     assert cli.main(["visual", "capture"]) == 2
     assert capsys.readouterr().err == "no task; pass one or set MARESTAIL_TASK\n"

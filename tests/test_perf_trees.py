@@ -40,7 +40,7 @@ def test_work_files_live_under_marestail_perf(tmp_path: Path) -> None:
     assert trees.trees_file(config) == tmp_path / ".marestail" / "perf" / "trees.json"
     assert trees.samples_file(config) == tmp_path / ".marestail" / "perf" / "samples.jsonl"
     assert (tmp_path / ".marestail" / "perf").is_dir()
-    assert trees.start_file(config, "t1") == tmp_path / ".marestail" / "runs" / "t1" / "start-commit"
+    assert worktree.start_file(config, "t1") == tmp_path / ".marestail" / "runs" / "t1" / "start-commit"
 
 
 def test_recorded_and_active(tmp_path: Path) -> None:
@@ -85,25 +85,25 @@ def test_record_start_keeps_the_first_commit(git_repo: Path) -> None:
     config = config_at(git_repo)
     first = commit_file(git_repo, "a")
     trees.record_start(config, "t1")
-    trees.start_file(config, "t1").unlink()
+    worktree.start_file(config, "t1").unlink()
     trees.record_start(config, "t1")
     commit_file(git_repo, "b")
     trees.record_start(config, "t1")
-    assert trees.start_file(config, "t1").read_text() == first + "\n"
-    assert trees.start_commit(config, "t1") == (first, "")
+    assert worktree.start_file(config, "t1").read_text() == first + "\n"
+    assert worktree.start_commit(config, "t1") == (first, "")
 
 
 def test_start_commit_falls_back_to_merge_base(git_repo: Path) -> None:
     first = commit_file(git_repo, "a")
     git(git_repo, "checkout", "-q", "-b", "topic")
     commit_file(git_repo, "b")
-    assert trees.start_commit(config_at(git_repo), "t1") == (first, "no recorded start commit for t1; using git merge-base main HEAD")
+    assert worktree.start_commit(config_at(git_repo), "t1") == (first, "no recorded start commit for t1; using git merge-base main HEAD")
 
 
 def test_start_commit_falls_back_to_head(git_repo: Path) -> None:
     head = commit_file(git_repo, "a")
     config = Config(root=git_repo, raw={})
-    assert trees.start_commit(config, "t1") == (
+    assert worktree.start_commit(config, "t1") == (
         head,
         "no recorded start commit for t1 and no merge-base with origin/master; using HEAD",
     )
@@ -112,7 +112,7 @@ def test_start_commit_falls_back_to_head(git_repo: Path) -> None:
 def test_archive_start(tmp_path: Path) -> None:
     config = config_at(tmp_path)
     trees.archive_start(config, "t1", None)
-    path = trees.start_file(config, "t1")
+    path = worktree.start_file(config, "t1")
     path.parent.mkdir(parents=True)
     path.write_text("abc\n")
     trees.archive_start(config, "t1", None)
@@ -206,8 +206,8 @@ def test_measuring_with_a_passing_setup(git_repo: Path, fake_run: Callable[..., 
 def test_measuring_cleans_up_after_a_failed_worktree(git_repo: Path) -> None:
     commit_file(git_repo, "a")
     config = config_at(git_repo)
-    trees.start_file(config, "t1").parent.mkdir(parents=True)
-    trees.start_file(config, "t1").write_text("0000000000000000000000000000000000000000\n")
+    worktree.start_file(config, "t1").parent.mkdir(parents=True)
+    worktree.start_file(config, "t1").write_text("0000000000000000000000000000000000000000\n")
     with (
         pytest.raises(RuntimeError, match=r"^git worktree add for the baseline tree at 0{40} failed: \S") as raised,
         trees.measuring(config, "t1"),

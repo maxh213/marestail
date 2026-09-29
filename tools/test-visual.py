@@ -473,7 +473,11 @@ def case_blocked(folder: Path) -> None:
 
 def bindable(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        return sock.connect_ex(("127.0.0.1", port)) != 0 and sock.bind(("127.0.0.1", port)) is None
+        if sock.connect_ex(("127.0.0.1", port)) == 0:
+            return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", port))
+        return True
 
 
 def wait_until_free(*ports: int) -> None:

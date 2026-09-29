@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 
+from marestail import worktree
 from marestail.config import Config
 from marestail.gates import visual
 from marestail.gates.visual._model import Shot, Tree, TreeRun
@@ -38,7 +39,7 @@ def fake_capture(monkeypatch: pytest.MonkeyPatch, head: dict[str, Any], problems
     monkeypatch.setattr(visual.capture, "capture_trees", trees)
     monkeypatch.setattr(visual.capture, "tool_problems", list)
     monkeypatch.setattr(
-        visual.worktree, "start_commit", lambda config, task: ("abc", "no recorded start commit for t; using git merge-base main HEAD")
+        worktree, "start_commit", lambda config, task: ("abc", "no recorded start commit for t; using git merge-base main HEAD")
     )
     return seen
 
@@ -129,7 +130,7 @@ def test_capture_command_without_note_and_with_problems(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake_capture(monkeypatch, GEOMETRY, ["base: app exited with 3 before answering"])
-    monkeypatch.setattr(visual.worktree, "start_commit", lambda config, task: ("abc", ""))
+    monkeypatch.setattr(worktree, "start_commit", lambda config, task: ("abc", ""))
     assert visual.capture_command(Config(repo(tmp_path), {"visual": VISUAL}), "t") == 1
     assert capsys.readouterr().out.splitlines()[0] == "base: app exited with 3 before answering"
 
