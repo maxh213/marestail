@@ -13,7 +13,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
       `qa/<task>.md visual block: missing <key>` / `qa/<task>.md visual block: unknown key <key>`
       `qa/<task>.md visual block: unknown measure <m> in unchanged`
       `[visual] viewports: bad viewport <name> = "<value>"; expected WxH[@scale][ touch]`
-    `marestail visual capture` prints the same lines and exits 2.
+    Order: missing keys (`route` then `selector`), unknown keys (block order), unknown measures (block
+    order), bad viewports (config order). `marestail visual capture` prints the same lines and exits 2.
   - Tools: missing `node` on PATH fails with the one finding `node not found on PATH; run marestail install`;
     missing Playwright Chromium with `Playwright Chromium missing; run marestail install`. Capture exits 2.
   - Base commit: exactly `perf.trees.start_commit` (recorded `.marestail/runs/<task>/start-commit`,
@@ -31,8 +32,12 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     (default `[qa] ready_timeout`, else 180) seconds.
   - Waits: the selector, `wait` and two agreeing box reads (200 ms apart) each get `capture_timeout`
     (default 30) seconds. A selector not there by then is "not found".
-    A selector not found in a tree ends that capture: no wait, settle or comparison finding follows
-    for that viewport. An `inside` or `must_not_change` selector not found skips only its own rule.
+    A selector not found, a `wait` that never matched or a box that did not settle in a tree ends that
+    capture and that viewport's judging: its one finding (first of these to happen) stands alone for the
+    tree, the capture is not repeated, and no unstable, scroll, inside, overlap, `unchanged` or
+    `must_not_change` finding is made for that viewport. The capture still writes `viewport.png` and
+    `geometry.json` (`box` = the last box read, null when not found); `element.png` only when a box was read.
+    An `inside` or `must_not_change` selector not found skips only its own rule.
   - Files, per tree (`base`, `head`) and viewport name, under `.marestail/runs/<task>/visual/<tree>/<viewport>/`:
     `element.png`, `viewport.png`, `geometry.json`. Per tree: `.marestail/runs/<task>/visual/<tree>/app.log`;
     base also `setup.log`. Kept whatever the result.
@@ -211,7 +216,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Then the findings are exactly `desktop: wait #never never matched at base within 2s` and `desktop: wait #never never matched at HEAD within 2s`
     Given `wait: #widget` again and the HEAD commit adds `<script>setInterval(()=>{const w=document.getElementById("widget");w.style.marginLeft=(parseInt(w.style.marginLeft||0)+10)%100+"px"},50)</script>`
     When the gate runs
-    Then the only finding is `desktop: #widget box did not settle at HEAD within 2s`
+    Then the only finding is `desktop: #widget box did not settle at HEAD within 2s`, with no detail line
+    And `head/desktop/` holds `element.png`, `viewport.png` and `geometry.json`, whose `box` is not null
 
   Scenario Outline: malformed input fails before anything starts
     Given <change>
@@ -286,7 +292,9 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given `[visual] env = { CMS_URL = "https://cms.example.test/graphql" }` and `start = "echo $CMS_URL; python3 -m http.server $PORT --bind 127.0.0.1"`
     When the gate runs
     Then `base/app.log` and `head/app.log` both contain `https://cms.example.test/graphql`
-    And `git status --porcelain` is empty and no tracked file contains `cms.example.test`, `.png` or `localhost:34`
+    And `git status --porcelain` prints exactly ` M marestail.toml` and `git rev-parse HEAD` is what it was before the gate
+    And no file outside `.marestail/` other than `marestail.toml` contains `cms.example.test` or `localhost:34`,
+      and no file outside `.marestail/` ends in `.png`
 
   Scenario: start falls back to [qa] start
     Given `[visual]` has no `start` and `[qa] start = "python3 -m http.server $PORT --bind 127.0.0.1"`

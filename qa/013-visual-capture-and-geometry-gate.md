@@ -49,11 +49,14 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
 12b. Revert. Add `<p id="aside" style="position:absolute;top:150px;left:500px;margin:0">aside</p>` as the first child of `main`, commit, rerun.
     Expected: only finding `desktop: #widget overlaps p#aside at HEAD (base: no overlap)`.
 12c. Revert. In the block, change `selector: #widget` to `colour: red`, rerun.
-    Expected: `qa/t.md visual block: missing selector` and `qa/t.md visual block: unknown key colour`; `git worktree list` one line throughout. Restore the block.
-13. Revert and remove `hide`. Add `<script src="/tracker.js"></script>`, commit, set `block = ["*tracker*"]`, rerun.
+    Expected: `2 visual findings`: `qa/t.md visual block: missing selector` then `qa/t.md visual block: unknown key colour`; `git worktree list` one line throughout. Restore the block.
+13. Add `<script src="/tracker.js"></script>`, commit, set `block = ["*tracker*"]`, rerun.
     Expected: passes; `grep tracker .marestail/runs/t/visual/head/app.log` prints nothing.
 14. Set `env = { CMS_URL = "https://cms.example.test/graphql" }` and `start = "echo $CMS_URL; python3 -m http.server $PORT --bind 127.0.0.1"`, rerun.
-    Expected: both `base/app.log` and `head/app.log` contain the URL; `git status --porcelain` shows only `marestail.toml`; `git grep -l cms.example.test` finds only `marestail.toml` if you commit it (nothing marestail wrote).
+    Expected: both `base/app.log` and `head/app.log` contain the URL; `git status --porcelain` prints exactly ` M marestail.toml`;
+    `git rev-parse HEAD` is what it was before the rerun; `grep -rl --exclude-dir=.marestail --exclude-dir=.git -e cms.example.test -e localhost:34 .`
+    prints only `./marestail.toml`; `find . -name '*.png' -not -path './.marestail/*'` prints nothing.
+    Remove `env` and restore `start`.
 15. Set `setup = "echo installing; exit 1"`, rerun.
     Expected: `1 visual findings`: `base: setup failed (exit 1)` then the indented line `installing`; `base/setup.log` contains `installing`; `head/desktop/geometry.json` exists. Remove `setup`.
 16. Set `start = "sleep 60"`, `ready_timeout = 2`, rerun.
@@ -66,9 +69,13 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
     Expected: first line `no recorded start commit for t; using git merge-base main HEAD`, then `base desktop: .marestail/runs/t/visual/base/desktop` and `head desktop: .marestail/runs/t/visual/head/desktop`; exit 0; no PASS/FAIL line.
 19. Remove the block from `qa/t.md`. Run `marestail visual capture t`.
     Expected: exactly `visual: no block in qa/t.md; skipped`, exit 0. The gate shows `visual: no block in qa/t.md; skipped`.
-20. Run `env PATH=/usr/bin:/bin $M/.venv/bin/marestail gate --tier qa --only visual` with `MARESTAIL_TASK=t` and no node in `/usr/bin`, or `PLAYWRIGHT_BROWSERS_PATH=$(mktemp -d)`.
-    Expected: `node not found on PATH; run marestail install`, or `Playwright Chromium missing; run marestail install`.
-    Run the gate without `MARESTAIL_TASK`. Expected: `skipped: no task; set MARESTAIL_TASK`. Set `enabled = false`, rerun with it. Expected: `skipped: [visual] enabled = false`.
+20. Put the block back in `qa/t.md`. Build a PATH without node:
+    `rm -rf /tmp/nonode && mkdir /tmp/nonode && ln -s "$(command -v git)" "$(command -v bash)" "$(command -v sh)" /tmp/nonode/`,
+    then `MARESTAIL_TASK=t env PATH=$M/.venv/bin:/tmp/nonode $M/.venv/bin/marestail gate --tier qa --only visual`.
+    Expected: exit 1, `[FAIL] visual` whose only finding is exactly `node not found on PATH; run marestail install`.
+20a. `MARESTAIL_TASK=t PLAYWRIGHT_BROWSERS_PATH=$(mktemp -d) marestail gate --tier qa --only visual`.
+    Expected: exit 1, `[FAIL] visual` whose only finding is exactly `Playwright Chromium missing; run marestail install`.
+20b. Run the gate without `MARESTAIL_TASK`. Expected: `skipped: no task; set MARESTAIL_TASK`. Set `enabled = false`, rerun with it. Expected: `skipped: [visual] enabled = false`.
 21. Delete the `[visual]` section; run `marestail gate --tier qa`. Expected: no line names `visual`.
 22. From `$M`: `python3 tools/test-visual.py`. Expected: exit 0, last line `visual ok`.
     `python3 tools/test-perf.py`. Expected: exit 1, last line `verdict-commit-files: '' != 'perf/bench_x.py'`.
