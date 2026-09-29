@@ -53,9 +53,19 @@ Start in the marestail-green root with `.venv` active and `bin/` on PATH; `expor
    Expected: `[FAIL] ts.tests       test_cmd exited 1`, a finding containing `AssertionError`; `exit=1`.
 10. `sed -i '/^\[hyper\]/,$d' marestail.toml && marestail gate --tier full --scope hyper --only ts.tests; echo "exit=$?"`
     Expected: `[FAIL] ts.tests       hyper: set [hyper] test_cmd to the command that runs this repository's tests`; no `proof:` line; `exit=1`.
-11. `printf '[hyper]\ntest_cmd = "for f in client/embed/*.test.js; do node \\"$f\\" || exit 1; done"\n' >> marestail.toml && sed -i '7s/"shown"/"opening"/' client/embed/popUp.js && mv .marestail/tooling/node_modules /tmp/mt-nm && marestail gate --tier full --scope hyper --only ts.mutation; mv /tmp/mt-nm .marestail/tooling/node_modules`
+11. Put a vitest runner only in the tooling folder, as `marestail install --scope hyper` does, and keep `[hyper]` removed:
+    ```sh
+    npm install --prefix .marestail/tooling vitest @stryker-mutator/vitest-runner >/dev/null
+    printf 'import { defineConfig } from "vitest/config";\nexport default defineConfig({ root: process.cwd(), test: { include: ["client/**/*.spec.js"] } });\n' > .marestail/tooling/vitest.config.ts
+    printf '{ "testRunner": "vitest", "plugins": ["@stryker-mutator/vitest-runner"], "ignorePatterns": [".marestail"] }\n' > .marestail/tooling/stryker.config.json
+    ls package.json; marestail gate --tier full --scope hyper --only ts.tests; echo "exit=$?"
+    marestail gate --tier full --scope diff --only ts.tests | grep -c 'hyper: set'
+    ```
+    Expected: `package.json` missing; `[FAIL] ts.tests       hyper: set [hyper] test_cmd to the command that runs this repository's tests`, no vitest output, no `proof:` line, `exit=1`; under `--scope diff` the grep prints `0` (ts.tests drives the tooling vitest as today).
+12. `printf '[hyper]\ntest_cmd = "for f in client/embed/*.test.js; do node \\"$f\\" || exit 1; done"\n' >> marestail.toml && sed -i '7s/"shown"/"opening"/' client/embed/popUp.js && mv .marestail/tooling/node_modules /tmp/mt-nm && marestail gate --tier full --scope hyper --only ts.mutation; mv /tmp/mt-nm .marestail/tooling/node_modules`
     Expected: `[FAIL] ts.mutation    stryker produced no report (exit 127)`.
-12. `cd $M && python3 tools/test-hyper-test-cmd.py; echo "exit=$?"; python3 tools/test-perf.py | tail -1`
+13. `cd $M && python3 tools/test-hyper-test-cmd.py; echo "exit=$?"; python3 tools/test-perf.py | tail -1`
     Expected: last line `hyper test_cmd ok`, `exit=0`; test-perf still ends `verdict-commit-files: '' != 'perf/bench_x.py'`.
-13. `grep -n 'test_cmd' README.md; grep -n 'mutation stands in for coverage' README.md; grep -n 'pass process into the sandbox' README.md`
-    Expected: the hyper section states the tests rule and shows the `[hyper] test_cmd` example; the other two greps each find a line.
+14. `grep -n 'test_cmd' README.md; grep -n 'mutation stands in for coverage' README.md; grep -n 'pass process into the sandbox' README.md`
+    `grep -n 'a runner installed only in the tooling folder does not count' README.md`
+    Expected: the hyper section states the tests rule and shows the `[hyper] test_cmd` example; the other three greps each find a line.

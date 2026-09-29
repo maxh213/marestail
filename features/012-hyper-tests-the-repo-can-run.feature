@@ -9,9 +9,9 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     Exit 0: `[ok  ] ts.tests       test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd`.
     Exit n != 0: `[FAIL] ts.tests       test_cmd exited <n>` with the command's last 30 non-blank output lines as findings.
     No coverage report is read and coverage never fails the gate.
-  - ts.mutation runs Stryker with cwd = the ts root (as today); only the binary comes from
-    `<tooling>/node_modules/.bin/stryker` (011). It passes one argument, a config the gate writes to
-    `<repo>/.marestail/stryker/command.config.json` holding `"testRunner": "command"`,
+  - ts.mutation runs exactly `<tooling>/node_modules/.bin/stryker run <repo>/.marestail/stryker/command.config.json`,
+    with no other flags, and cwd = the ts root (as today); only the binary comes from tooling (011). The gate writes
+    that config, holding `"testRunner": "command"`,
     `"commandRunner": {"command": "<test_cmd>"}`, `"coverageAnalysis": "off"`, `"reporters": ["json", "progress"]`,
     `"jsonReporter": {"fileName": "<repo>/.marestail/stryker/mutation.json"}`,
     `"tempDirName": ".marestail/stryker-tmp"`, `"cleanTempDir": "always"`, `"ignorePatterns": [".marestail"]` and
@@ -46,9 +46,13 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
   - The report prints `proof: mutation via [hyper] test_cmd; coverage not measured` on the line directly after
     `scope: <summary>` and before the blank line. `--json` output keeps today's keys and adds no proof key; the proof
     shows only in the gate summaries above.
-  - A known runner is `vitest` or `jest` in `dependencies` or `devDependencies` of `<R>/package.json`. Under hyper with
-    no `test_cmd` and no known runner, ts.tests fails with summary
-    `hyper: set [hyper] test_cmd to the command that runs this repository's tests`.
+  - A known runner is `vitest` or `jest` in `dependencies` or `devDependencies` of `<R>/package.json`, the target's own
+    file. A runner installed only in `[ts] tooling` (for example the vitest, `vitest.config.ts` and vitest-runner
+    `stryker.config.json` that `marestail install --scope hyper` puts there) does not count under hyper, because the
+    repository cannot run it. Under hyper with no `test_cmd` and no known runner, ts.tests fails with summary
+    `hyper: set [hyper] test_cmd to the command that runs this repository's tests`, before running anything.
+    ts.mutation and ts.crap are unchanged in that case: they run as today (the tooling `stryker.config.json`, today's
+    coverage file), with no `proof:` line.
   - Everything else, including every gate when `test_cmd` is unset but a known runner exists, and every scope other
     than hyper, behaves exactly as today. Other languages ignore `[hyper] test_cmd`.
 
@@ -163,6 +167,17 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     Then it contains `[FAIL] ts.tests       hyper: set [hyper] test_cmd to the command that runs this repository's tests`
     And it contains no `proof:` line, and the exit code is 1
 
+  Scenario: a runner installed only in the tooling folder does not count under hyper
+    Given the `[hyper]` section is removed from `marestail.toml`
+    And `.marestail/tooling` also holds `vitest` and `@stryker-mutator/vitest-runner` in `node_modules`, `vitest.config.ts`
+      and a vitest-runner `stryker.config.json`, as `marestail install --scope hyper` writes them
+    And the repo still has no `package.json`
+    When I run `marestail gate --tier fast --scope hyper --only ts.tests`
+    Then it contains `[FAIL] ts.tests       hyper: set [hyper] test_cmd to the command that runs this repository's tests`
+    And no vitest output appears, the output has no `proof:` line, and the exit code is 1
+    When I run `marestail gate --tier fast --scope diff --only ts.tests` on the same repo
+    Then ts.tests runs the tooling vitest as today, and its summary does not contain `hyper: set [hyper] test_cmd`
+
   Scenario: a missing Stryker still fails the mutation gate
     Given `.marestail/tooling/node_modules` is renamed away
     When I run `marestail gate --tier full --scope hyper --only ts.mutation`
@@ -191,4 +206,5 @@ Feature: under `--scope hyper` tests run with the repository's own command, and 
     Then it exits 0 and its last line is `hyper test_cmd ok`
     And every other `tools/test-*.py` keeps its current result (`tools/test-perf.py` still exits 1 as in 000)
     And README's `--scope hyper` text states the rule about tests, documents `[hyper] test_cmd` with the example above,
-      contains `mutation stands in for coverage`, and says a vm-loaded test must `pass process into the sandbox`
+      contains `mutation stands in for coverage`, says a vm-loaded test must `pass process into the sandbox`,
+      and says that under hyper `a runner installed only in the tooling folder does not count`
