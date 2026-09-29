@@ -224,6 +224,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
 
   Scenario: on a tall page the scroll position changes no number
     Given the `main` commit also has `<div style="height:2000px"></div>` as the first child of `main`, so both trees have it
+    And the `main` commit also has `<div style="height:100px"></div>` as the last child of `main`, after `.col`, so the
+      24px margin below the widget is never clamped by the end of the document
     And the block says `unchanged: x-centre, y-centre` and keeps `scroll: true` and `must_not_change: header`
     And the HEAD commit sets `#widget` to `width:440px;height:200px;margin-top:300px`
     When the gate runs

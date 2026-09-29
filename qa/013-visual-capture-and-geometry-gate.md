@@ -52,8 +52,9 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
     Expected: only finding `desktop: #widget overlaps p#aside at HEAD (base: no overlap)`.
 12c. Revert. In the block, change `selector: #widget` to `colour: red`, rerun.
     Expected: `2 visual findings`: `qa/t.md visual block: missing selector` then `qa/t.md visual block: unknown key colour`; `git worktree list` one line throughout. Restore the block.
-12d. Put a 2000px spacer under both trees: `git checkout -q main`, add `<div style="height:2000px"></div>` as
-    the first child of `main` in `donate.html`, commit, `git checkout -q -b tall`. In the block set
+12d. Put a 2000px spacer above and a 100px spacer below the column in both trees: `git checkout -q main`, add `<div style="height:2000px"></div>` as
+    the first child of `main` and `<div style="height:100px"></div>` as the last child of `main` (after `.col`) in
+    `donate.html`, commit, `git checkout -q -b tall`. In the block set
     `unchanged: x-centre, y-centre`. Set `#widget` style to `width:440px;height:200px;margin-top:300px`, commit, rerun.
     Expected: only finding `desktop: #widget y-centre moved 300px (base: 2200px, HEAD: 2500px)`, nothing about `header`.
     `base/desktop/geometry.json` has box `y` 2100 and `head/desktop/geometry.json` box `y` 2400, both have header
