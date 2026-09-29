@@ -7,8 +7,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     No `qa/<task>.md` at all: `visual: no qa/<task>.md; skipped`, like a missing block.
   - Block keys. Required: `route`, `selector`. Optional, with defaults: `scroll` false, `wait` none
     (only `selector` is waited for), `styles` none, `inside` none (check off), `unchanged` none,
-    `must_not_change` none, `symptom` none. `symptom` is free text for the human: never a finding, printed
-    as the last detail line `symptom: <text>` when the gate fails.
+    `must_not_change` none, `symptom` none. `symptom` is free text for the human: never a finding; when the gate
+    fails it is the last entry of `Result.findings`, as the detail line `  symptom: <text>`.
   - Malformed input fails before any app or worktree starts, one finding each:
       `qa/<task>.md visual block: missing <key>` / `qa/<task>.md visual block: unknown key <key>`
       `qa/<task>.md visual block: unknown measure <m> in unchanged`
@@ -31,6 +31,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     (default `[qa] ready_timeout`, else 180) seconds.
   - Waits: the selector, `wait` and two agreeing box reads (200 ms apart) each get `capture_timeout`
     (default 30) seconds. A selector not there by then is "not found".
+    A selector not found in a tree ends that capture: no wait, settle or comparison finding follows
+    for that viewport. An `inside` or `must_not_change` selector not found skips only its own rule.
   - Files, per tree (`base`, `head`) and viewport name, under `.marestail/runs/<task>/visual/<tree>/<viewport>/`:
     `element.png`, `viewport.png`, `geometry.json`. Per tree: `.marestail/runs/<task>/visual/<tree>/app.log`;
     base also `setup.log`. Kept whatever the result.
@@ -51,9 +53,17 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   - The gate captures each tree twice per viewport, each in a fresh browser context, and compares `box`,
     `scrollWidth`, `clientWidth`, `inside.box` and `must_not_change` (numbers within `tolerance_px`) and
     `overlaps` (exactly). `styles`, `errors` and `viewport` are not compared. The kept files are from the
-    first capture. `marestail visual capture` captures once and judges nothing.
+    first capture. When a tree is unstable in a viewport, that viewport gets the `unstable` finding alone:
+    no scroll, inside, overlap, `unchanged` or `must_not_change` finding is made for it. `marestail visual capture` captures once and judges nothing.
   - Gate name `visual`, tier `qa`, listed only when `[visual]` exists. Pass summary:
     `<n> viewport(s), geometry holds` (`1 viewport, geometry holds`, `2 viewports, geometry holds`).
+    Findings and detail lines: `Result.findings` stays a flat `list[str]`, one entry per printed line.
+    An entry starting with two spaces is a detail line and belongs to the finding before it (the symptom
+    line belongs to the result). Every other entry is a finding. `<n>` counts findings only, and so do
+    "the only finding", "the findings are exactly" and "<n> findings" below; detail lines are named
+    separately. Order: setup and app findings (base, then HEAD); then per viewport in config order:
+    not-found (selector, inside, must_not_change; base before HEAD), wait, settle, unstable, scroll, inside,
+    overlaps, `unchanged` (block order), `must_not_change` (block order); then the symptom line.
     Fail summary: `<n> visual findings`. `<tree>` in texts is `base` or `HEAD`. Finding texts (tolerance default 2):
       `<vp>: <sel> not found at <tree>`
       `<vp>: inside <sel> not found at <tree>` / `<vp>: must_not_change <sel> not found at <tree>`
@@ -65,12 +75,12 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
       `<vp>: <sel> overlaps <sibling> at HEAD (base: no overlap)`
       `<vp>: <sel> <measure> moved <d>px (base: <b>px, HEAD: <h>px)`
       `<vp>: must_not_change <sel> changed (base: <x>,<y> <w>x<h>; HEAD: <x>,<y> <w>x<h>)`
-      `<vp>: unstable at <tree>: two captures gave different geometry`, followed by the two
-      records as `first: <json>` and `second: <json>`
+      `<vp>: unstable at <tree>: two captures gave different geometry`, with detail lines
+      `  first: <json>` and `  second: <json>` (each `geometry.json` record on one line)
       `<tree>: app did not answer on http://localhost:<p><ready> within <n>s`
       `<tree>: app exited with <n> before answering`
-      `base: setup failed (exit <n>)` / `base: setup did not finish within <n>s`, followed by the last
-      10 lines of `setup.log`; app findings are followed by the last 10 lines of `app.log`
+      `base: setup failed (exit <n>)` / `base: setup did not finish within <n>s`, with detail lines
+      `  <line>` for the last 10 lines of `setup.log`; app findings likewise for the last 10 lines of `app.log`
     `unchanged` measures: `x-centre`, `y-centre`, `left`, `right`, `top`, `bottom`, `width`, `height`.
 
   Background:
@@ -126,8 +136,10 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   Scenario: the element grows wider than its column
     Given the HEAD commit sets `#widget` to `width:1408px`
     When the gate runs as above
-    Then it fails with a finding exactly `desktop: #widget is 1408px wide, .col is 572px (base: 440px)`
-    And a finding exactly `desktop: page scrolls sideways at HEAD, scrollWidth 1842px > clientWidth 1440px (base: scrollWidth 1440px)`
+    Then it fails with summary `3 visual findings` and the entries are exactly, in order:
+      `desktop: page scrolls sideways at HEAD, scrollWidth 1842px > clientWidth 1440px (base: scrollWidth 1440px)`,
+      `desktop: #widget is 1408px wide, .col is 572px (base: 440px)` and
+      `desktop: #widget x-centre moved 484px (base: 654px, HEAD: 1138px)`
     And both `base/desktop/element.png` and `head/desktop/element.png` still exist
 
   Scenario: something else makes the page scroll sideways
@@ -171,8 +183,9 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   Scenario: a page whose layout differs between loads is unstable
     Given the HEAD commit adds `<script>document.getElementById("widget").style.width=(400+Math.floor(Math.random()*1000))+"px"</script>` after `#widget`
     When the gate runs
-    Then it fails with a finding `desktop: unstable at HEAD: two captures gave different geometry`
-    And the next two findings start `first: {` and `second: {` and their `box.width` values differ
+    Then the only finding is `desktop: unstable at HEAD: two captures gave different geometry`
+    And it is followed by exactly two detail lines, starting `  first: {` and `  second: {`, whose `box.width` values differ
+    And no scroll, inside or x-centre finding is made, whatever widths the two loads drew
 
   Scenario: the element sticks out of its column without being wider
     Given the HEAD commit sets `#widget` to `width:440px;height:200px;margin-left:200px`
@@ -216,7 +229,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   Scenario: symptom is shown to the human but judges nothing
     Given the block adds `symptom: the widget runs over the page text` and the HEAD commit sets `#widget` to `width:1408px`
     When the gate runs
-    Then the result has 2 findings and its last detail line is `symptom: the widget runs over the page text`
+    Then the summary is `3 visual findings`, the three findings are those of "the element grows wider than its column"
+    And the last entry is the detail line `  symptom: the widget runs over the page text`
 
   Scenario: node or Chromium missing
     Given `node` is not on PATH
@@ -252,12 +266,12 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given `[visual] start = "echo dying; exit 3"`
     When the gate runs
     Then the findings are exactly `base: app exited with 3 before answering` and
-      `HEAD: app exited with 3 before answering`, each followed by `dying`
+      `HEAD: app exited with 3 before answering`, each followed by the detail line `  dying`
 
   Scenario: setup runs in the baseline worktree and its failure is reported
     Given `[visual] setup = "echo installing; exit 1"` and the "stays put" change
     When the gate runs
-    Then the only finding is `base: setup failed (exit 1)`, followed by `installing`
+    Then the only finding is `base: setup failed (exit 1)`, followed by the detail line `  installing`
     And `.marestail/runs/t/visual/base/setup.log` contains `installing`
     And `head/desktop/geometry.json` exists and `base/desktop/` does not
     When `setup = "sleep 60"` and `setup_timeout = 1`

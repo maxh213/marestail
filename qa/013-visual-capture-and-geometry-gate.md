@@ -21,9 +21,12 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
    Expected: `2 viewports, geometry holds`; `head/phone/geometry.json` has `"scale": 2` and `"touch": true`.
    Remove `phone` again.
 5. Set `#widget` to `width:1408px`, commit, rerun the gate.
-   Expected: exit 1, `[FAIL] visual`, findings include
-   `desktop: #widget is 1408px wide, .col is 572px (base: 440px)` and
-   `desktop: page scrolls sideways at HEAD, scrollWidth 1842px > clientWidth 1440px (base: scrollWidth 1440px)`.
+   Expected: exit 1, `[FAIL] visual` with `3 visual findings`, exactly these lines in order:
+   `desktop: page scrolls sideways at HEAD, scrollWidth 1842px > clientWidth 1440px (base: scrollWidth 1440px)`,
+   `desktop: #widget is 1408px wide, .col is 572px (base: 440px)`,
+   `desktop: #widget x-centre moved 484px (base: 654px, HEAD: 1138px)`.
+   Add `symptom: the widget runs over the page text` to the block, rerun. Expected: the same three, then the
+   indented line `symptom: the widget runs over the page text` last; the summary still says `3 visual findings`. Remove `symptom`.
    Both `element.png` files still exist; `head/desktop/viewport.png` shows the widget running past the column.
 6. `git revert --no-edit HEAD`. Add `<div style="width:1600px">wide</div>` after `.col` in `main`, commit, rerun.
    Expected: the only finding is `desktop: page scrolls sideways at HEAD, scrollWidth 1600px > clientWidth 1440px (base: scrollWidth 1440px)`.
@@ -36,7 +39,8 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
 10. Revert. Rename `id="widget"` to `id="widget2"`, commit, rerun.
     Expected: only finding `desktop: #widget not found at HEAD`; no `head/desktop/element.png`.
 11. Revert. Add the random-width `<script>` from the feature after `#widget`, commit, rerun.
-    Expected: finding `desktop: unstable at HEAD: two captures gave different geometry`, then `first: {…}` and `second: {…}` with different `box.width`.
+    Expected: `1 visual findings`, the line `desktop: unstable at HEAD: two captures gave different geometry`, then the indented
+    lines `first: {…}` and `second: {…}` with different `box.width`; nothing about scrolling, `.col` or x-centre.
 12. Revert. Add `<div id="banner" style="position:absolute;top:0;left:0;width:100%;height:1000px">b</div>` inside `.col`, commit, rerun.
     Expected: finding `desktop: #widget overlaps div#banner at HEAD (base: no overlap)`. Add `hide = ["#banner"]` to `[visual]`, rerun. Expected: passes.
 12a. Revert, remove `hide`. Set `#widget` style to `width:440px;height:200px;margin-left:200px`, commit, rerun.
@@ -51,11 +55,11 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
 14. Set `env = { CMS_URL = "https://cms.example.test/graphql" }` and `start = "echo $CMS_URL; python3 -m http.server $PORT --bind 127.0.0.1"`, rerun.
     Expected: both `base/app.log` and `head/app.log` contain the URL; `git status --porcelain` shows only `marestail.toml`; `git grep -l cms.example.test` finds only `marestail.toml` if you commit it (nothing marestail wrote).
 15. Set `setup = "echo installing; exit 1"`, rerun.
-    Expected: only finding `base: setup failed (exit 1)` then `installing`; `base/setup.log` contains `installing`; `head/desktop/geometry.json` exists. Remove `setup`.
+    Expected: `1 visual findings`: `base: setup failed (exit 1)` then the indented line `installing`; `base/setup.log` contains `installing`; `head/desktop/geometry.json` exists. Remove `setup`.
 16. Set `start = "sleep 60"`, `ready_timeout = 2`, rerun.
     Expected: exactly `base: app did not answer on http://localhost:3401/ within 2s` then `HEAD: app did not answer on http://localhost:3400/ within 2s`;
     `git worktree list` one line; `ss -ltn | grep -E ':340[01]'` prints nothing.
-    Set `start = "echo dying; exit 3"`, rerun. Expected: `base: app exited with 3 before answering` and `HEAD: app exited with 3 before answering`, each followed by `dying`.
+    Set `start = "echo dying; exit 3"`, rerun. Expected: `base: app exited with 3 before answering` and `HEAD: app exited with 3 before answering`, each followed by the indented line `dying`.
 17. Restore `start`, set `ready_timeout = 60`, run the gate in the background and send `kill -INT <pid>` once `.marestail/runs/t/visual/head/app.log` exists.
     Expected: gate exits; `git worktree list` one line; nothing listening on 3400 or the base port.
 18. `marestail visual capture t`.
