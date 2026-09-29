@@ -23,7 +23,7 @@ ENV = "MARESTAIL_REMOTE"
 GATES = "MARESTAIL_REMOTE_GATES"
 BUSY = "/var/lib/marestail/busy.d"
 JOB_LOCK = "/var/lib/marestail/job.lock"
-EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump")
+EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump", "target/")
 PREPARE = (
     'if [ -f package-lock.json ]; then '
     'lock=$(sha256sum package-lock.json | cut -c1-16); '

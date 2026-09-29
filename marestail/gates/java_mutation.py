@@ -3,7 +3,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from marestail import java
+from marestail import java, remote
 from marestail.context import Context
 from marestail.report import Result
 from marestail.shell import tail
@@ -30,7 +30,12 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("java.mutation", "no changed Java sources" if wanted is not None else "no Java sources")
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
-    code, output = java.mvn(ctx, command(ctx, targets, out), timeout=int(ctx.java("mutation_timeout", 7200)))
+    maven = [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out)]
+    outcome = remote.run_mutation(
+        ctx, "java.mutation", maven, ctx.java_root(),
+        timeout=int(ctx.java("mutation_timeout", 7200)), pull=(str(out.relative_to(ctx.root)),),
+    )
+    code, output = outcome.code, outcome.output
     report = out / "mutations.xml"
     if not report.exists():
         return Result("java.mutation", False, java.maven_hint(code, output) or missing(output, code), tail(output), time.time() - started)
@@ -40,6 +45,7 @@ def run_gate(ctx: Context) -> Result:
     findings = [describe(ctx, mutant) for mutant in mutants if mutant.get("status") not in KILLED]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
     summary += f" {scope.note}" if scope.note else ""
+    summary += outcome.where
     return Result("java.mutation", not findings, summary, findings, time.time() - started)
 
 
@@ -49,7 +55,7 @@ def command(ctx: Context, targets: list[Path], out: Path) -> list[str]:
     args = [
         "test-compile", f"{PITEST}:mutationCoverage",
         f"-DtargetClasses={','.join(classes)}", "-DoutputFormats=XML", "-DtimestampedReports=false",
-        f"-DreportsDirectory={out}", f"-Dthreads={ctx.java('mutation_threads', 2)}",
+        f"-DreportsDirectory={out}", f"-Dthreads={remote.workers(ctx, 'java.mutation', ctx.java('mutation_threads', 2))}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
 

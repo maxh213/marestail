@@ -427,7 +427,7 @@ def classify_gate(tokens: list[str]) -> str | None:
 
 
 REMOTE_MARK = "☁"
-REMOTE_TOOLS = ("muex", "stryker", "mutmut")
+REMOTE_TOOLS = ("muex", "stryker", "mutmut", "pitest")
 
 
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
