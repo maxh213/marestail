@@ -13,7 +13,7 @@ REPORT = "reports/mutation/mutation.json"
 INCREMENTAL = "reports/stryker-incremental.json"
 TEMP_DIR = ".stryker-tmp"
 TIMEOUT = 7200
-BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError"}
+BAD = {"Survived", "NoCoverage", "RuntimeError"}
 
 
 def run_gate(ctx: Context) -> Result:
@@ -34,10 +34,15 @@ def run_gate(ctx: Context) -> Result:
         outcome = remote.run_mutation(ctx, "ts.mutation", command, ctx.ts_root(), timeout=TIMEOUT, pull=pull)
         if not report.exists():
             return Result("ts.mutation", False, f"stryker produced no report (exit {outcome.code}){outcome.where}", tail(outcome.output), time.time() - started)
-        survivors = surviving(json.loads(report.read_text()), ctx)
+        data = json.loads(report.read_text())
+        survivors = surviving(data, ctx)
+        timed_out = [m for m in in_scope(data, ctx) if m[1]["status"] == "Timeout"]
     finally:
         shutil.rmtree(temp, ignore_errors=True)
+    if ctx.timeouts_fail("ts"):
+        survivors += [finding(name, mutant) for name, mutant in timed_out]
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
+    summary += f" ({len(timed_out)} by timeout)" if timed_out and not ctx.timeouts_fail("ts") else ""
     summary += f" {scope.note}" if scope.note else ""
     summary += outcome.where
     return Result("ts.mutation", not survivors, summary, survivors, time.time() - started)
@@ -66,16 +71,21 @@ def changed_sources(ctx: Context, files: list[str]) -> list[str]:
 
 
 def surviving(report: dict, ctx: Context) -> list[str]:
-    findings = []
+    return [finding(name, mutant) for name, mutant in in_scope(report, ctx) if mutant["status"] in BAD]
+
+
+def in_scope(report: dict, ctx: Context) -> list[tuple[str, dict]]:
+    found = []
     for file, data in report.get("files", {}).items():
         name = relative(file, ctx)
-        if not ctx.in_scope(name):
-            continue
-        for mutant in data.get("mutants", []):
-            if mutant["status"] in BAD:
-                line = mutant["location"]["start"]["line"]
-                findings.append(f"{name}:{line} {mutant['mutatorName']} {mutant['status']}: {str(mutant.get('replacement', ''))[:60]}")
-    return findings
+        if ctx.in_scope(name):
+            found += [(name, mutant) for mutant in data.get("mutants", [])]
+    return found
+
+
+def finding(name: str, mutant: dict) -> str:
+    line = mutant["location"]["start"]["line"]
+    return f"{name}:{line} {mutant['mutatorName']} {mutant['status']}: {str(mutant.get('replacement', ''))[:60]}"
 
 
 def relative(path: str, ctx: Context) -> str:

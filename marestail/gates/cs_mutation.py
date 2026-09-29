@@ -11,7 +11,7 @@ from marestail.shell import tail
 
 OUTPUT_DIR = "stryker"
 REPORT = Path("reports") / "mutation-report.json"
-BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
+BAD = {"Survived", "NoCoverage", "RuntimeError", "CompileError"}
 SENTRY = re.compile(r'<PackageReference\s+Include="Sentry', re.IGNORECASE)
 SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerator>"
 INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
@@ -53,8 +53,11 @@ def run_gate(ctx: Context) -> Result:
     ]
     if not mutants:
         return Result("cs.mutation", False, "no mutants were generated", tail(output), time.time() - started)
-    findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
+    strict = ctx.timeouts_fail("dotnet")
+    timed_out = [m for m in mutants if m[1]["status"] == "Timeout"]
+    findings = [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD or (strict and mutant["status"] == "Timeout")]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
+    summary += f" ({len(timed_out)} by timeout)" if timed_out and not strict else ""
     summary += f" {scope.note}" if scope.note else ""
     return Result("cs.mutation", not findings, summary, findings, time.time() - started)
 

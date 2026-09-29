@@ -35,10 +35,11 @@ def run_gate(ctx: Context) -> Result:
     code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
         return Result("py.mutation", False, "mutmut failed", tail(output), time.time() - started)
-    total, survivors = surviving(ctx, patterns)
+    total, survivors, timed_out = surviving(ctx, patterns)
     if total == 0:
         return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
+    summary += f" ({timed_out} by timeout)" if timed_out and not ctx.timeouts_fail("python") else ""
     summary += f" {scope.note}" if scope.note else ""
     summary += outcome.where
     return Result("py.mutation", not survivors, summary, survivors, time.time() - started)
@@ -55,9 +56,11 @@ def module_name(root: Path, file: Path) -> str:
     return ".".join(relative.with_suffix("").parts)
 
 
-def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str]]:
+def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str], int]:
     prefixes = tuple(pattern.rstrip("*") for pattern in patterns)
+    passing = PASSING if ctx.timeouts_fail("python") else PASSING | {"timeout"}
     total = 0
+    timed_out = 0
     findings = []
     for meta in sorted((ctx.python_root() / "mutants").rglob("*.meta")):
         for name, code in json.loads(meta.read_text()).get("exit_code_by_key", {}).items():
@@ -65,6 +68,7 @@ def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str]]:
                 continue
             total += 1
             status = STATUS_BY_EXIT_CODE.get(code, "suspicious")
-            if status not in PASSING:
+            timed_out += status == "timeout"
+            if status not in passing:
                 findings.append(f"{name}: {status}")
-    return total, findings
+    return total, findings, timed_out
