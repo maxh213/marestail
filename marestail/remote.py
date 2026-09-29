@@ -20,8 +20,9 @@ CONFIG = Path.home() / ".config" / "marestail" / "remote.toml"
 USAGE = Path.home() / ".config" / "marestail" / "remote-usage.jsonl"
 LOCK = Path.home() / ".config" / "marestail" / "remote.lock"
 ENV = "MARESTAIL_REMOTE"
+GATES = "MARESTAIL_REMOTE_GATES"
 BUSY = "/var/lib/marestail/busy.d"
-EXCLUDES = (".git/", ".marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/")
+EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump")
 PREPARE = (
     'if [ -f package-lock.json ]; then '
     'lock=$(sha256sum package-lock.json | cut -c1-16); '
@@ -40,6 +41,7 @@ class Settings:
     container: str
     gates: tuple[str, ...]
     workers: dict[str, int]
+    env: dict[str, str]
     usd_per_hour: float
     user: str
     key: Path
@@ -71,8 +73,9 @@ def load() -> Settings | None:
         project=raw["project"],
         zone=raw["zone"],
         container=raw.get("container", "mt"),
-        gates=tuple(raw.get("gates", [])),
+        gates=tuple(os.environ[GATES].split(",")) if os.environ.get(GATES) else tuple(raw.get("gates", [])),
         workers={str(k): int(v) for k, v in raw.get("workers", {}).items()},
+        env={str(k): str(v) for k, v in raw.get("env", {}).items()},
         usd_per_hour=float(raw.get("usd_per_hour", 0)),
         user=raw.get("user", os.environ.get("USER", "max")),
         key=Path(raw.get("key", "~/.ssh/google_compute_engine")).expanduser(),
@@ -243,7 +246,7 @@ def fetch(found: Settings, ip: str, root: Path, path: str) -> None:
 
 
 def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
-    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", **(env or {})}
+    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", **found.env, **(env or {})}
     flags = " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
     inner = shlex.join(command)
     if timeout:
