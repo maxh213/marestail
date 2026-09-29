@@ -79,12 +79,14 @@ def worker_prompt(
     gate_flags: str = EMPTY,
     hard_focus: set[str] | None = None,
     hyper: bool = False,
+    bug: dict[str, str] | None = None,
 ) -> str:
     return PARAGRAPH.join(
         [
             role_text(worker.name),
             *qa_app_note(config, worker),
             section(TASK, task.read_text()),
+            *bug_sections(bug),
             *scope_section(worker.name, hard_focus, WORKER_SCOPE, hyper),
             section("Specification files", spec_listing(config, task_name)),
             section(HANDOFFS, handoffs(config, task_name)),
@@ -112,11 +114,13 @@ def judge_prompt(
     hard_focus: set[str] | None = None,
     hyper: bool = False,
     review: dict[str, str] | None = None,
+    bug: dict[str, str] | None = None,
 ) -> str:
     return PARAGRAPH.join(
         [
             role_text(judge.name),
             section(TASK, task.read_text()),
+            *bug_sections(bug),
             *scope_section(judge.name, hard_focus, JUDGE_SCOPE, hyper),
             section(SPECIFICATION, judge_specification(config, judge, task_name)),
             *review_sections(review or {}),
@@ -128,6 +132,10 @@ def judge_prompt(
             *optional_section("Why your verdict was rejected", feedback),
         ]
     )
+
+
+def bug_sections(bug: dict[str, str] | None) -> list[str]:
+    return [section(title, body) for title, body in (bug or {}).items() if body]
 
 
 def review_sections(review: dict[str, str]) -> list[str]:

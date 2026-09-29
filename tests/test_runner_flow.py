@@ -599,6 +599,7 @@ def test_run_worker_succeeds_after_feedback(
         " --scope hard --focus a.py",
         {"a.py"},
         False,
+        {},
     )
     assert worker_env["invoke"].calls == [(state, "01-coder", "PROMPT"), (state, "01-coder", "PROMPT")]
     assert verify.calls[1] == (state, CODER, reports[1], "before")
@@ -795,7 +796,7 @@ def test_judge_attempt_records_bounce(tmp_path: Path, judge_env: dict[str, Any],
     state, report, outcome = attempt_judge(tmp_path, judge)
     assert outcome == (("BOUNCE", "coder", "VERDICT: bounce coder\n1. fix"), "")
     assert judge_env["prompt"].calls == [
-        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}, False, None),
+        (state.config, judge, state.task, "task", report, "", "", "old feedback", {"a.py"}, False, None, {}),
     ]
     assert judge_env["discard"].calls == [(state.config, ("keep", report), ("writes", ("docs/**",)))]
     assert judge_env["stage"].calls == [(state.config, ("docs/**",))]
@@ -1063,7 +1064,8 @@ def test_judge_session_without_trees_uses_empty_section(tmp_path: Path, monkeypa
     runner.judge_session(state, CRITIC, report, "gate", None, "fb")
     assert section.calls == []
     assert prompt.calls[0][6] == ""
-    assert prompt.calls[0][-1] is None
+    assert prompt.calls[0][-2] is None
+    assert prompt.calls[0][-1] == {}
 
 
 def test_judge_session_gives_blast_the_review_since_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1076,7 +1078,7 @@ def test_judge_session_gives_blast_the_review_since_start(tmp_path: Path, monkey
     patch(monkeypatch, runner, "discard_edits")
     runner.judge_session(state, Judge("blast", None, bounce_to="coder"), report, "", None, "")
     assert review.calls == [(state.config, "s0", state.handoffs)]
-    assert prompt.calls[0][-1] == {"Diff stat": "DS", "Diff": "D", "Hunks": "H"}
+    assert prompt.calls[0][-2] == {"Diff stat": "DS", "Diff": "D", "Hunks": "H"}
 
 
 def test_parse_verdict_without_extra_reads_the_report(tmp_path: Path) -> None:
@@ -1352,7 +1354,7 @@ def test_judge_attempt_under_hyper_refuses_a_bounce_to_cleaner(tmp_path: Path, j
     verdict, _ = runner.judge_attempt(state, cast(Judge, find("hardener", "hyper")), report, ("", True, []), None, "")
     assert verdict is not None
     assert verdict[:2] == ("BOUNCE", None)
-    assert judge_env["prompt"].calls[0][-2] is True
+    assert judge_env["prompt"].calls[0][-3] is True
 
 
 def test_ending_for_a_pass_nobody_saw(tmp_path: Path, capsys: Any) -> None:

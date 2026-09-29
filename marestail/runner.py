@@ -53,6 +53,15 @@ PERF = "perf"
 BLAST = "blast"
 QA = "qa"
 VISUAL = "visual"
+SPECIFIER = "specifier"
+CRITIC = "critic"
+REPORTED = "Reported"
+OBSERVED = "Observed"
+OBSERVED_HEADING = "## Observed"
+ASK_OBSERVED = (
+    "Write ## Observed in your handoff: what the capture shows, then one line per cause the task states, marked holds or "
+    "does not hold, with the measurement that says so."
+)
 JUDGE_MODEL = "claude-fable-5-1"
 GEOMETRY_ONLY = " (geometry only, pictures not seen)"
 RUN_SETTINGS = ("agent", "model", "effort", "route", "account_env", "account")
@@ -150,6 +159,7 @@ class Run:
     judged_by: str = ""
     blind: bool = False
     unseen: bool = False
+    reproduction: visual_gate.Reproduction | None = None
 
     @property
     def task_name(self) -> str:
@@ -226,11 +236,55 @@ def run_pipeline(
     state = make_run(config, task, retries, agent, picked, scoped)
     state.start = head(config)
     perf_trees.record_start(config, state.task_name)
-    outcome = run_steps(state, window(start, stop, state.scope_name, config.section(VISUAL) is not None), auto)
+    steps = window(start, stop, state.scope_name, config.section(VISUAL) is not None)
+    outcome = run_steps(state, steps, auto) if reproduced(state, steps) else 1
     print(proposals_summary(state))
     if state.perf_changes:
         print(state.perf_changes)
     return outcome
+
+
+def reproduced(state: Run, steps: list[Step]) -> bool:
+    first = first_spec_step(steps)
+    report = visual_gate.bug_report(state.config, state.task) if first else None
+    if report is None:
+        return True
+    state.reproduction = visual_gate.reproduce(state.config, report)
+    if state.reproduction is None:
+        print(f"pipeline stopped before {first}: the bug could not be reproduced")
+    return state.reproduction is not None
+
+
+def first_spec_step(steps: list[Step]) -> str:
+    return next((step.name for step in steps if step.name in (SPECIFIER, CRITIC)), EMPTY)
+
+
+def bug_for(state: Run, role: str) -> dict[str, str]:
+    if state.reproduction is None or role not in (SPECIFIER, CRITIC):
+        return {}
+    body = visual_gate.reported_section(state.config, state.reproduction, blind_backend(state))
+    if role == CRITIC:
+        return {REPORTED: body, OBSERVED: latest_observed(state)}
+    return {REPORTED: f"{body}\n{ASK_OBSERVED}"}
+
+
+def latest_observed(state: Run) -> str:
+    handoffs = sorted(state.handoffs.glob(f"*-{SPECIFIER}.md"))
+    return observed_body(handoffs[LAST].read_text()) if handoffs else EMPTY
+
+
+def observed_body(text: str) -> str:
+    return until_heading(after_marker(text, OBSERVED_HEADING)) if has_observed(text) else EMPTY
+
+
+def has_observed(text: str) -> bool:
+    return OBSERVED_HEADING in (line.strip() for line in text.splitlines())
+
+
+def observed_problems(state: Run, worker: Worker, report: Path) -> list[str]:
+    if worker.name != SPECIFIER or state.reproduction is None or has_observed(read_or_empty(report)):
+        return []
+    return [f"missing {OBSERVED_HEADING} section in {report.relative_to(state.config.root)}"]
 
 
 def make_run(
@@ -514,6 +568,7 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
         state.gate_flags,
         state.hard_focus,
         state.hyper,
+        bug_for(state, worker.name),
     )
     invoke(state, report.stem, prompt)
     problems = verify_worker(state, worker, report, before)
@@ -683,6 +738,7 @@ def built_judge_prompt(state: Run, judge: Judge, report: Path, texts: tuple[str,
         state.hard_focus,
         state.hyper,
         review_for(state, judge),
+        bug_for(state, judge.name),
     )
 
 
@@ -969,6 +1025,7 @@ def known_target(raw: str | None, mode: str | None = None) -> str | None:
 
 def verify_worker(state: Run, worker: Worker, report: Path, before: str) -> str:
     problems = missing_handoff(state.config, report)
+    problems.extend(observed_problems(state, worker, report))
     dirty = changed_paths(state.config, STATUS_COMMAND)
     problems.extend(dirty_problems(dirty))
     problems.extend(frozen_problems(state, worker, report, before, dirty))

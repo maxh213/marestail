@@ -59,6 +59,23 @@ class Tree:
 class Shot:
     geometries: list[dict[str, Any]]
     failure: str | None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Report:
+    task: str
+    where: str
+    symptom: str
+    selector: str
+
+
+@dataclass(frozen=True)
+class Reproduction:
+    report: Report
+    sha: str
+    views: list[str]
+    frames: dict[str, dict[str, Any] | None]
 
 
 @dataclass

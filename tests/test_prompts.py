@@ -431,3 +431,20 @@ def test_judge_prompt_without_a_review_has_no_diff_section(repo: Path) -> None:
     add_role("hardener")
     text = prompts.judge_prompt(config(repo), cast(Judge, find("hardener")), repo / "tasks" / "t.md", "t", report(repo, "05"), "")
     assert "# Diff" not in text
+
+
+def test_prompts_put_the_bug_sections_right_after_the_task(repo: Path) -> None:
+    bug = {"Reported": "Symptom: square", "Observed": "- holds"}
+    worker = prompts.worker_prompt(
+        config(repo), cast(Worker, find("specifier")), repo / "tasks" / "t.md", "t", report(repo, "01-specifier"), "", bug={"Reported": "R"}
+    )
+    assert "# Task\nDo the thing.\n\n# Reported\nR\n\n# Specification files" in worker
+    judge = prompts.judge_prompt(
+        config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "", bug=bug
+    )
+    assert "# Task\nDo the thing.\n\n# Reported\nSymptom: square\n\n# Observed\n- holds\n\n# Specification" in judge
+
+
+def test_bug_sections_drop_empty_bodies() -> None:
+    assert prompts.bug_sections(None) == []
+    assert prompts.bug_sections({"Reported": "R", "Observed": ""}) == ["# Reported\nR"]

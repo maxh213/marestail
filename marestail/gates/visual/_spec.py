@@ -4,9 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from marestail.config import Config
-from marestail.gates.visual._model import Block, Settings, Spec, Viewport
+from marestail.gates.visual._model import Block, Report, Settings, Spec, Viewport
 
 SECTION = "visual"
+REPORTED = "reported"
+_TASK_KEYS = ("where", "symptom", "selector")
+_REPORTED_STYLES = ("border-radius", "overflow", "width", "height")
 _KEYS = ("route", "selector", "scroll", "wait", "styles", "inside", "unchanged", "must_not_change", "symptom")
 _REQUIRED = ("route", "selector")
 _MEASURES = ("x-centre", "y-centre", "left", "right", "top", "bottom", "width", "height")
@@ -25,6 +28,51 @@ _DEFAULT_SETUP_TIMEOUT = 900
 
 def visual_dir(config: Config, task: str) -> Path:
     return config.work / "runs" / task / "visual"
+
+
+def reported_dir(config: Config, task: str) -> Path:
+    return visual_dir(config, task) / REPORTED
+
+
+def bug_report(config: Config, task: Path) -> Report | None:
+    values = _task_values(task.read_text()) if _reproducing(config) else {}
+    if not (values.get("where") and values.get("symptom")):
+        return None
+    return Report(task.stem, values["where"], values["symptom"], values.get("selector", ""))
+
+
+def _reproducing(config: Config) -> bool:
+    return config.section(SECTION) is not None and bool(config.get(SECTION, "enabled", True))
+
+
+def _task_values(text: str) -> dict[str, str]:
+    lines = text.splitlines()
+    return {key: value for key in _TASK_KEYS for value in _values_after(lines, f"{key}: ")[:1]}
+
+
+def _values_after(lines: list[str], prefix: str) -> list[str]:
+    return [line[len(prefix) :].strip() for line in lines if line.startswith(prefix)]
+
+
+def reported_spec(config: Config, report: Report) -> tuple[Spec | None, list[str]]:
+    viewports, bad = _parse_viewports(config.get(SECTION, "viewports", {}))
+    if bad:
+        return None, bad
+    return Spec(report.task, _reported_block(report), _make_settings(config, viewports)), []
+
+
+def _reported_block(report: Report) -> Block:
+    return Block(
+        route=report.where,
+        selector=report.selector,
+        scroll=True,
+        wait="",
+        styles=list(_REPORTED_STYLES),
+        inside="",
+        unchanged=[],
+        must_not_change=[],
+        symptom=report.symptom,
+    )
 
 
 def _qa_file(config: Config, task: str) -> Path:

@@ -2,6 +2,8 @@ import json
 import re
 import shutil
 import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +11,7 @@ from marestail import worktree
 from marestail.config import Config
 from marestail.gates import _serve
 from marestail.gates.visual._model import Shot, Spec, Tree, TreeRun, Viewport
-from marestail.gates.visual._spec import visual_dir
+from marestail.gates.visual._spec import REPORTED, visual_dir
 from marestail.shell import run, tail
 
 _JS_DIR = Path(__file__).resolve().parent.parent.parent / "js"
@@ -22,6 +24,12 @@ _CHROMIUM_MISSING = "Playwright Chromium missing; run marestail install"
 _CHECK_TIMEOUT = 120
 _NODE_STARTUP_SECONDS = 60
 _WAITS_PER_LOAD = 4
+_TREES = ("base", "head")
+_FULL_URL = ("http://", "https://")
+_MARKUP_LIMIT = 200
+_INDENT = "  "
+_FRAME_KEYS = ("url", "width", "height", "status", "largest")
+_Shooter = Callable[[Spec, Viewport, str, Path, int], Shot]
 
 
 def tool_problems() -> list[str]:
@@ -33,25 +41,42 @@ def tool_problems() -> list[str]:
 
 def capture_trees(config: Config, spec: Spec, sha: str, captures: int) -> tuple[TreeRun, TreeRun]:
     folder = visual_dir(config, spec.task)
-    shutil.rmtree(folder, ignore_errors=True)
-    path = Path(tempfile.mkdtemp(prefix=_TEMP_PREFIX))
-    try:
+    for name in _TREES:
+        shutil.rmtree(folder / name, ignore_errors=True)
+    with _scratch(config.root) as path:
         base = _base_run(config.root, Tree("base", "base", path), sha, spec, folder, captures)
         head = _served(Tree("head", "HEAD", config.root), spec, spec.settings.port, folder, captures)
-    finally:
-        worktree.remove(config.root, path)
-        shutil.rmtree(path, ignore_errors=True)
     return base, head
 
 
-def _base_run(root: Path, tree: Tree, sha: str, spec: Spec, folder: Path, captures: int) -> TreeRun:
+def capture_reported(config: Config, spec: Spec, sha: str) -> TreeRun:
+    folder = visual_dir(config, spec.task)
+    shutil.rmtree(folder / REPORTED, ignore_errors=True)
+    if spec.block.route.startswith(_FULL_URL):
+        tree = Tree(REPORTED, "base", config.root)
+        return TreeRun(tree, [], _shots(spec, "", folder / REPORTED, 1, _reported_shot))
+    with _scratch(config.root) as path:
+        return _base_run(config.root, Tree(REPORTED, "base", path), sha, spec, folder, 1, _reported_shot)
+
+
+@contextmanager
+def _scratch(root: Path) -> Iterator[Path]:
+    path = Path(tempfile.mkdtemp(prefix=_TEMP_PREFIX))
+    try:
+        yield path
+    finally:
+        worktree.remove(root, path)
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _base_run(root: Path, tree: Tree, sha: str, spec: Spec, folder: Path, captures: int, shoot: _Shooter | None = None) -> TreeRun:
     code, output = worktree.add(root, tree.path, sha)
     if code != 0:
         return TreeRun(tree, [f"base: git worktree add failed (exit {code})", *_detail(tail(output, _LOG_TAIL))])
     problems = _setup_problems(tree, spec, folder / tree.folder / "setup.log")
     if problems:
         return TreeRun(tree, problems)
-    return _served(tree, spec, spec.settings.port + 1, folder, captures)
+    return _served(tree, spec, spec.settings.port + 1, folder, captures, shoot)
 
 
 def _setup_problems(tree: Tree, spec: Spec, log_path: Path) -> list[str]:
@@ -64,7 +89,7 @@ def _setup_problems(tree: Tree, spec: Spec, log_path: Path) -> list[str]:
     return [first, *_log_detail(log_path)]
 
 
-def _served(tree: Tree, spec: Spec, preferred: int, folder: Path, captures: int) -> TreeRun:
+def _served(tree: Tree, spec: Spec, preferred: int, folder: Path, captures: int, shoot: _Shooter | None = None) -> TreeRun:
     settings = spec.settings
     log_path = folder / tree.folder / "app.log"
     with _serve.ready_app(settings.start, tree.path, preferred, settings.ready, settings.ready_timeout, settings.env, log_path) as (
@@ -73,11 +98,11 @@ def _served(tree: Tree, spec: Spec, preferred: int, folder: Path, captures: int)
     ):
         if failure:
             return TreeRun(tree, [f"{tree.label}: {failure}", *_log_detail(log_path)])
-        shots = {
-            view.name: _shoot(spec, view, f"http://localhost:{port}", folder / tree.folder / view.name, captures)
-            for view in settings.viewports
-        }
-        return TreeRun(tree, [], shots)
+        return TreeRun(tree, [], _shots(spec, f"http://localhost:{port}", folder / tree.folder, captures, shoot or _shoot))
+
+
+def _shots(spec: Spec, origin: str, out: Path, captures: int, shoot: _Shooter) -> dict[str, Shot]:
+    return {view.name: shoot(spec, view, origin, out / view.name, captures) for view in spec.settings.viewports}
 
 
 def _log_detail(path: Path) -> list[str]:
@@ -97,6 +122,39 @@ def _shoot(spec: Spec, view: Viewport, origin: str, out: Path, captures: int) ->
     return Shot([item["geometry"] for item in captured], captured[-1]["failure"])
 
 
+def _reported_shot(spec: Spec, view: Viewport, origin: str, out: Path, captures: int) -> Shot:
+    payload = json.dumps(_script_input(spec, view, origin + spec.block.route, out, captures))
+    code, output = run(["node", str(_SCRIPT), REPORTED, payload], cwd=_JS_DIR, timeout=_node_timeout(spec, captures + 1))
+    if code != 0:
+        return Shot([], _node_error(output, code))
+    taken = json.loads(output.strip().splitlines()[-1])
+    _write_markup(out, taken.get("markup"))
+    _write_frame(out, taken.get("frame"))
+    return Shot([taken["geometry"]] if "geometry" in taken else [], taken["failure"], taken)
+
+
+def _write_markup(out: Path, markup: dict[str, Any] | None) -> None:
+    if markup:
+        (out / "markup.html").write_text("\n".join(_markup_lines(markup["ancestors"], markup["html"])) + "\n")
+
+
+def _markup_lines(ancestors: list[str], html: str) -> list[str]:
+    opening = [_INDENT * depth + tag for depth, tag in enumerate(ancestors)]
+    inner = _INDENT * len(ancestors)
+    return _trimmed([*opening, *(inner + line for line in html.split("\n"))])
+
+
+def _trimmed(lines: list[str]) -> list[str]:
+    if len(lines) <= _MARKUP_LIMIT:
+        return lines
+    return [*lines[:_MARKUP_LIMIT], f"… {len(lines) - _MARKUP_LIMIT} more lines trimmed"]
+
+
+def _write_frame(out: Path, frame: dict[str, Any] | None) -> None:
+    if frame and frame["url"]:
+        (out / "frame.json").write_text(json.dumps({key: frame[key] for key in _FRAME_KEYS}, indent=2) + "\n")
+
+
 def _node_error(output: str, code: int) -> str:
     return next((line for line in output.splitlines() if _ERROR_LINE.match(line)), f"node exited with {code}")
 
@@ -111,11 +169,11 @@ def _script_input(spec: Spec, view: Viewport, url: str, out: Path, captures: int
     return {
         "url": url,
         "viewport": {"width": view.width, "height": view.height, "scale": view.scale, "touch": view.touch},
-        "selector": block.selector,
+        "selector": block.selector or None,
         "scroll": block.scroll,
         "wait": block.wait,
         "query": {
-            "selector": block.selector,
+            "selector": block.selector or None,
             "styles": block.styles,
             "inside": block.inside or None,
             "mustNotChange": block.must_not_change,

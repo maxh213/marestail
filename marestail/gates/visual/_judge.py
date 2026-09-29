@@ -7,7 +7,8 @@ from marestail.gates.visual._model import Block, Shot, Spec, TreeRun
 _NOT_FOUND = "not_found"
 _WAIT = "wait"
 _SETTLE = "settle"
-_KNOWN = (_NOT_FOUND, _WAIT, _SETTLE)
+_NOT_VISIBLE = "not_visible"
+_KNOWN = (_NOT_FOUND, _WAIT, _SETTLE, _NOT_VISIBLE)
 _BOX_KEYS = ("x", "y", "width", "height")
 _Box = dict[str, int]
 _Geometry = dict[str, Any]
@@ -35,7 +36,7 @@ def _all_views(base: TreeRun, head: TreeRun, spec: Spec) -> list[str]:
 
 
 def _viewport_findings(name: str, trees: _Trees, spec: Spec) -> list[str]:
-    early = _stop_findings(name, trees, spec)
+    early = stop_findings(name, trees, spec)
     if _stopped(trees):
         return early
     return early + (_unstable_findings(name, trees, spec) or _compare(name, trees[0][1].geometries[0], trees[1][1].geometries[0], spec))
@@ -49,13 +50,17 @@ def _unstable_findings(name: str, trees: _Trees, spec: Spec) -> list[str]:
     return [line for label, shot in trees for line in _unstable_lines(name, label, shot.geometries, spec.settings.tolerance)]
 
 
-def _stop_findings(name: str, trees: _Trees, spec: Spec) -> list[str]:
-    rules = (_selector_missing, _inside_missing, _kept_missing, _wait_failed, _settle_failed, _crashed)
+def stop_findings(name: str, trees: _Trees, spec: Spec) -> list[str]:
+    rules = (_selector_missing, _selector_hidden, _inside_missing, _kept_missing, _wait_failed, _settle_failed, _crashed)
     return [f"{name}: {line}" for rule in rules for line in rule(trees, spec)]
 
 
 def _selector_missing(trees: _Trees, spec: Spec) -> list[str]:
     return [f"{spec.block.selector} not found at {label}" for label in _failed_as(trees, _NOT_FOUND)]
+
+
+def _selector_hidden(trees: _Trees, spec: Spec) -> list[str]:
+    return [f"{spec.block.selector} not visible at {label}" for label in _failed_as(trees, _NOT_VISIBLE)]
 
 
 def _inside_missing(trees: _Trees, spec: Spec) -> list[str]:
