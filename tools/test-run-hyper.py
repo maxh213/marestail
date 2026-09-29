@@ -29,7 +29,10 @@ SENTENCES = {
     "changed lines can reach.",
     "critic": "Bounce a scenario that would force a change outside the fix.",
     "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
-    "Write the tests the repository can already run, in the style it already uses. Write as many as you need.",
+    "Tests must run with a command the repository already supports, in the style its existing tests use; find that out first. "
+    "If the repository has a runner, use it. If it has tests but no runner, write the same kind of script. If it has no tests "
+    "at all, write dependency-free tests for the language's standard runtime and say so in your handoff. A test that loads "
+    "code with vm must pass process into the sandbox, so mutation testing can switch mutants. Write as many as you need.",
     "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
     "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
     "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "

@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from marestail import javascript
-from marestail.gates import _hyper_crap, ts_crap
+from marestail.gates import _hyper_crap, ts_crap, ts_mutation
+from marestail.report import Result
 from tests.conftest import checked, make_context, untimed
 
 TS = {"ts": {"root": "web"}}
@@ -170,3 +171,142 @@ def test_base_units_leave_the_file_to_the_caller(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(javascript, "scan", lambda ctx, mode, files: (0, json.dumps(found)))
     units = ts_crap.base_units(make_context(tmp_path, TS), tmp_path / "copy.ts")
     assert units == [{"file": "", "line": 1, "start": 1, "end": 30, "name": "loadPaymentPopup", "label": "loadPaymentPopup", "cc": 4}]
+
+
+POP_UP = """function popUpUrl(base, id) {
+  var url = base + "/embed/" + id;
+  return url;
+}
+
+function isOpen(state) {
+  return state === "open" || state === "shown";
+}
+
+module.exports = { popUpUrl: popUpUrl, isOpen: isOpen };
+"""
+SIZE = """function sizeOf(kind) {
+  if (kind === "wide") return 800;
+  if (kind === "tall") return 600;
+  var fallback = 400;
+  return fallback;
+}
+
+module.exports = { sizeOf: sizeOf };
+"""
+COMMAND = {"ts": {"root": "."}, "hyper": {"test_cmd": "node t.js"}}
+POP_UP_FUNCTIONS = [function("client/popUp.js", "popUpUrl", 1, 4, 1), function("client/popUp.js", "isOpen", 6, 8, 2)]
+
+
+def mutant(status: str, line: int) -> dict[str, Any]:
+    return {"status": status, "mutatorName": "StringLiteral", "location": {"start": {"line": line}}}
+
+
+def command_ctx(root: Path, lines: dict[str, set[int]]) -> Any:
+    (root / "client").mkdir(exist_ok=True)
+    (root / "client" / "popUp.js").write_text(POP_UP)
+    (root / "client" / "size.js").write_text(SIZE)
+    return make_context(root, COMMAND, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+
+
+def proven(monkeypatch: pytest.MonkeyPatch, proof: ts_mutation.Proof, base: str | None = None) -> list[Any]:
+    seen: list[Any] = []
+
+    def fake_proof(ctx: Any, mutate: list[str]) -> ts_mutation.Proof:
+        seen.append(mutate)
+        return proof
+
+    monkeypatch.setattr(ts_mutation, "command_proof", fake_proof)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: base)
+    return seen
+
+
+def test_mutation_proof_scores_an_asserted_line_as_covered(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = proven(monkeypatch, ts_mutation.Proof(0, "", {"files": {"client/popUp.js": {"mutants": [mutant("Killed", 7)] * 3}}}))
+    fake = fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS))])
+    ctx = command_ctx(tmp_path, {"client/popUp.js": {7}, "client/popUp.test.js": {1, 2}})
+
+    result = checked(ts_crap.run_gate(ctx), ts_crap.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (
+        True,
+        "1 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base",
+        [],
+    )
+    assert seen == [["client/popUp.js:7-7"]]
+    assert fake.calls[0][-1] == "client/popUp.js"
+    assert not (tmp_path / ".marestail" / "ts-coverage").exists()
+
+
+def test_mutation_proof_fails_a_line_whose_mutants_survive(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    report = {"files": {"client/popUp.js": {"mutants": [mutant("Survived", 7), mutant("Survived", 2)]}}}
+    proven(monkeypatch, ts_mutation.Proof(0, "", report), base=POP_UP)
+    fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS)), (0, json.dumps(POP_UP_FUNCTIONS))])
+
+    result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
+
+    assert (result.ok, result.findings) == (False, ["client/popUp.js:6 isOpen crap=6.0 (cc=2, coverage=0%); changed lines not covered: 7"])
+
+
+def test_mutation_proof_reports_lines_with_no_mutants_as_not_provable(
+    tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proven(monkeypatch, ts_mutation.Proof(0, "", None))
+    size = [function("client/size.js", "sizeOf", 1, 6, 3)]
+    fake_run(javascript, [(0, json.dumps(POP_UP_FUNCTIONS + size))])
+
+    result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {3, 4, 9}, "client/size.js": {5}})), ts_crap.GATE)
+
+    assert (result.ok, result.summary) == (
+        True,
+        "0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base; 2 changed lines not provable by mutation",
+    )
+    assert result.findings == ["client/popUp.js:3 not provable by mutation", "client/size.js:5 not provable by mutation"]
+
+
+def test_mutation_proof_fails_when_stryker_left_no_report(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    proven(monkeypatch, ts_mutation.Proof(127, "stryker: not found", None))
+    fake = fake_run(javascript)
+
+    result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "stryker produced no report (exit 127)", ["stryker: not found"])
+    assert fake.calls == []
+
+
+def test_mutation_proof_skips_when_no_source_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = proven(monkeypatch, ts_mutation.Proof(0, "", None))
+
+    result = untimed(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.test.js": {1}})), ts_crap.GATE)
+
+    assert (result.ok, result.summary, seen) == (True, "skipped: no files in scope", [])
+
+
+def test_mutation_proof_shows_a_failing_complexity_script(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    proven(monkeypatch, ts_mutation.Proof(0, "", None))
+    fake_run(javascript, [(1, "\n".join(f"line {n}" for n in range(12)))])
+
+    result = checked(ts_crap.run_gate(command_ctx(tmp_path, {"client/popUp.js": {7}})), ts_crap.GATE)
+
+    assert (result.ok, result.summary, result.findings[0]) == (False, "complexity script failed", "line 2")
+
+
+@pytest.mark.parametrize(
+    ("covered", "missing", "lines", "expected"),
+    [
+        ({7}, set(), {7}, {"cov": 1.0, "missing": set(), "scored": True, "unprovable": set()}),
+        ({7}, {8}, {7, 8, 9}, {"cov": 0.5, "missing": {8}, "scored": True, "unprovable": {9}}),
+        (set(), set(), {3}, {"cov": 1.0, "missing": set(), "scored": False, "unprovable": {3}}),
+    ],
+)
+def test_line_proof(covered: set[int], missing: set[int], lines: set[int], expected: dict[str, Any]) -> None:
+    assert ts_crap.line_proof(covered, missing, lines) == expected
+
+
+@pytest.mark.parametrize(("text", "ignored"), [("", True), ("  };", True), ("  ([ , ])", True), ("  return x;", False), ("}}x", False)])
+def test_ignored_lines_hold_only_punctuation(text: str, ignored: bool) -> None:
+    assert bool(ts_crap.IGNORED_LINE.match(text)) is ignored
+
+
+def test_with_unprovable_leaves_a_result_without_findings_alone() -> None:
+    result = Result(ts_crap.GATE, True, "s", ["a"])
+    assert ts_crap.with_unprovable(result, []) == Result(ts_crap.GATE, True, "s", ["a"])

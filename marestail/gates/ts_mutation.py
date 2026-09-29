@@ -1,6 +1,8 @@
 import json
 import shutil
 import time
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,15 +17,32 @@ TEMP_DIR = ".stryker-tmp"
 BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
 GATE = "ts.mutation"
 TS_SUFFIXES = (".ts", ".tsx")
+COMMAND_SUFFIXES = (".js", ".mjs", ".cjs", *TS_SUFFIXES)
+COMMAND_CONFIG = "stryker/command.config.json"
+COMMAND_REPORT = "stryker/mutation.json"
+COMMAND_TEMP = ".marestail/stryker-tmp"
+PROOF = "(proof: mutation via [hyper] test_cmd)"
+KILLED = "Killed"
+HINT = (
+    "hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, "
+    "or no assertion depends on the changed lines"
+)
 EMPTY = ""
 EMPTY_LIST: list[Any] = []
 EMPTY_MAP: dict[str, Any] = {}
 Placed = tuple[str, dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class Proof:
+    code: int
+    output: str
+    report: dict[str, Any] | None
+
+
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    scope = ctx.mutation_files("ts", ctx.ts_root(), TS_SUFFIXES)
+    scope = ctx.mutation_files("ts", ctx.ts_root(), suffixes(ctx))
     if scope.mode == "error":
         return Result(GATE, False, scope.note, [], elapsed(started))
     return mutated(ctx, scope, started)
@@ -33,7 +52,95 @@ def mutated(ctx: Context, scope: MutationScope, started: float) -> Result:
     mutate = targets(ctx, changed_sources(ctx, scope.files or []))
     if scope.mode != "full" and not mutate:
         return Result.skipped(GATE, "no changed typescript sources")
+    return mutation_run(ctx, scope, mutate, started)
+
+
+def mutation_run(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
+    if ctx.test_cmd:
+        return proven(ctx, command_proof(ctx, mutate), started)
     return stryker_result(ctx, scope, mutation_command(ctx, mutate), started)
+
+
+def suffixes(ctx: Context) -> tuple[str, ...]:
+    return COMMAND_SUFFIXES if ctx.test_cmd else TS_SUFFIXES
+
+
+def command_targets(ctx: Context) -> list[str]:
+    return targets(ctx, changed_sources(ctx, ctx.changed_under(ctx.ts_root(), COMMAND_SUFFIXES)))
+
+
+def command_proof(ctx: Context, mutate: list[str]) -> Proof:
+    if GATE not in ctx.memo:
+        ctx.memo[GATE] = command_run(ctx, mutate)
+    found: Proof = ctx.memo[GATE]
+    return found
+
+
+def command_run(ctx: Context, mutate: list[str]) -> Proof:
+    temp = ctx.ts_root() / COMMAND_TEMP
+    report = ctx.work / COMMAND_REPORT
+    drop_tree(temp)
+    report.unlink(missing_ok=True)
+    config = command_config(ctx, mutate)
+    try:
+        code, output = run([*tool(ctx, "stryker"), "run", str(config)], cwd=ctx.ts_root(), timeout=7200)
+    finally:
+        drop_tree(temp)
+    return Proof(code, output, json.loads(report.read_text()) if report.exists() else None)
+
+
+def command_config(ctx: Context, mutate: list[str]) -> Path:
+    path = ctx.work / COMMAND_CONFIG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    settings = {
+        "testRunner": "command",
+        "commandRunner": {"command": ctx.test_cmd},
+        "coverageAnalysis": "off",
+        "reporters": ["json", "progress"],
+        "jsonReporter": {"fileName": str(ctx.work / COMMAND_REPORT)},
+        "tempDirName": COMMAND_TEMP,
+        "cleanTempDir": "always",
+        "ignorePatterns": [".marestail"],
+        "mutate": mutate,
+    }
+    path.write_text(json.dumps(settings, indent=2) + "\n")
+    return path
+
+
+def no_report(proof: Proof) -> str:
+    return f"stryker produced no report (exit {proof.code})"
+
+
+def proven(ctx: Context, proof: Proof, started: float) -> Result:
+    if proof.report is not None:
+        return proof_verdict(placed(proof.report, ctx), started)
+    if proof.code == 0:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    return Result(GATE, False, no_report(proof), tail(proof.output), elapsed(started))
+
+
+def proof_verdict(mutants: list[Placed], started: float) -> Result:
+    if not mutants:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    result = survivor_result(survivors_of(mutants), PROOF, started)
+    result.findings = hint(mutants, result.findings) + result.findings
+    return result
+
+
+def hint(mutants: list[Placed], survivors: list[str]) -> list[str]:
+    killed = any(mutant["status"] == KILLED for _, mutant in mutants)
+    return [HINT] if survivors and not killed else []
+
+
+def line_statuses(report: dict[str, Any], ctx: Context) -> dict[str, dict[int, set[str]]]:
+    found: dict[str, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
+    for name, mutant in all_mutants(report, ctx):
+        found[name][mutant["location"]["start"]["line"]].add(mutant["status"])
+    return found
+
+
+def all_mutants(report: dict[str, Any], ctx: Context) -> list[Placed]:
+    return [(name, mutant) for name, data in named_files(report, ctx) for mutant in json_list(data, "mutants")]
 
 
 def drop_tree(path: Path) -> None:
@@ -117,7 +224,7 @@ def mutable(file: str) -> bool:
 
 
 def placed(report: dict[str, Any], ctx: Context) -> list[Placed]:
-    found = [(name, mutant) for name, data in named_files(report, ctx) if ctx.in_scope(name) for mutant in json_list(data, "mutants")]
+    found = [(name, mutant) for name, mutant in all_mutants(report, ctx) if ctx.in_scope(name)]
     return ctx.on_changed_lines(found, where)
 
 

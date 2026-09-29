@@ -52,6 +52,7 @@ class Context:
     hard: bool = False
     hyper: bool = False
     file_level: int = 0
+    memo: dict[str, Any] = field(default_factory=dict)
 
     @property
     def root(self) -> Path:
@@ -60,6 +61,13 @@ class Context:
     @property
     def work(self) -> Path:
         return self.config.work
+
+    @property
+    def test_cmd(self) -> str | None:
+        if not self.hyper or self.config.section("ts") is None:
+            return None
+        found = self.config.get(HYPER, "test_cmd")
+        return None if found is None else str(found)
 
     @property
     def scoped(self) -> bool:

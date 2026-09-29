@@ -19,7 +19,7 @@ from marestail import gates as gates_module
 from marestail.context import Context
 from marestail.gates import Gate
 from marestail.perf import db, samples
-from marestail.report import Result
+from marestail.report import Result, to_json
 from marestail.sonar import setup
 from tests.conftest import make_context
 
@@ -936,3 +936,11 @@ def test_readme_scope_section_describes_hyper_next_to_changed_and_hard() -> None
     )
     assert readme.index("`--scope changed` gates") < readme.index("`--scope hard` gates") < readme.index("`--scope hyper` gates")
     assert difference in readme
+
+
+def test_scope_line_adds_the_proof_line_under_test_cmd(repo: Path) -> None:
+    raw = {"ts": {}, "hyper": {"test_cmd": "node t.js"}}
+    ctx = make_context(repo, raw, scope_changed=True, hyper=True)
+    assert cli.scope_line(ctx) == "hyper: 0 changed lines in 0 files\nproof: mutation via [hyper] test_cmd; coverage not measured"
+    assert cli.scope_line(make_context(repo, {"ts": {}}, scope_changed=True, hyper=True)) == "hyper: 0 changed lines in 0 files"
+    assert "proof:" not in to_json([], ctx.scope_name, ctx.focus)

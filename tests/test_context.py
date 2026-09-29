@@ -395,3 +395,24 @@ def test_location_reads_the_first_path_and_line(finding: str, place: tuple[str, 
 def test_path_and_digits_pairs_a_path_with_the_digits_after_it() -> None:
     assert _location.path_and_digits("a.py", "12:3") == ("a.py", "12")
     assert _location.path_and_digits("a.py", "x1") == ("a.py", "")
+
+
+@pytest.mark.parametrize(
+    ("raw", "hyper", "expected"),
+    [
+        ({"ts": {}, "hyper": {"test_cmd": "node t.js"}}, True, "node t.js"),
+        ({"ts": {}, "hyper": {"test_cmd": "node t.js"}}, False, None),
+        ({"hyper": {"test_cmd": "node t.js"}}, True, None),
+        ({"ts": {}}, True, None),
+    ],
+)
+def test_test_cmd_applies_only_under_hyper_with_a_ts_section(
+    tmp_path: Path, raw: dict[str, Any], hyper: bool, expected: str | None
+) -> None:
+    assert make_context(tmp_path, raw, hyper=hyper).test_cmd == expected
+
+
+def test_memo_starts_empty_per_context(tmp_path: Path) -> None:
+    first = make_context(tmp_path)
+    first.memo["x"] = 1
+    assert make_context(tmp_path).memo == {}

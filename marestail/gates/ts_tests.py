@@ -20,6 +20,10 @@ VITEST = "vitest"
 JEST = "jest"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
+KNOWN_RUNNERS = (VITEST, JEST)
+DEPENDENCY_KEYS = ("dependencies", "devDependencies")
+NO_RUNNER = "hyper: set [hyper] test_cmd to the command that runs this repository's tests"
+ADVISORY = "; coverage advisory: not measured with [hyper] test_cmd"
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -28,6 +32,33 @@ def chosen_runner(ctx: Context) -> str:
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
+    if ctx.test_cmd:
+        return command_tests(ctx, ctx.test_cmd, started)
+    if ctx.hyper and not known_runner(ctx):
+        return Result(GATE, False, NO_RUNNER, [], elapsed(started))
+    return runner_tests(ctx, started)
+
+
+def command_tests(ctx: Context, command: str, started: float) -> Result:
+    code, output = run(["bash", "-lc", command], cwd=ctx.root, timeout=1800)
+    summary = f"test_cmd exited {code}"
+    if code != 0:
+        return Result(GATE, False, summary, tail(output), elapsed(started))
+    return Result(GATE, True, summary + ADVISORY, [], elapsed(started))
+
+
+def known_runner(ctx: Context) -> bool:
+    manifest = ctx.ts_root() / "package.json"
+    if not manifest.exists():
+        return False
+    return bool(listed_packages(json.loads(manifest.read_text())) & set(KNOWN_RUNNERS))
+
+
+def listed_packages(manifest: dict[str, Any]) -> set[str]:
+    return {name for key in DEPENDENCY_KEYS for name in manifest.get(key) or {}}
+
+
+def runner_tests(ctx: Context, started: float) -> Result:
     runner = chosen_runner(ctx)
     command = jest_command(ctx) if runner == JEST else vitest_command(ctx)
     code, output = run(command, cwd=ctx.ts_root(), timeout=1800)

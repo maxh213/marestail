@@ -27,6 +27,7 @@ HOOK_BLOCK_LIMIT = 5
 LOOP_START = 0
 COUNTER_TTL = 86400
 EMPTY = ""
+PROOF_LINE = "proof: mutation via [hyper] test_cmd; coverage not measured"
 FOCUS_ENV = "MARESTAIL_FOCUS"
 SCOPE_ENV = "MARESTAIL_SCOPE"
 HARD_SCOPE = "hard"
@@ -244,7 +245,11 @@ def hook_scope(config: config_module.Config) -> tuple[set[str], bool, bool]:
 
 
 def scope_line(ctx: context_module.Context) -> str | None:
-    return ctx.scope_summary() if ctx.scoped else None
+    return ctx.scope_summary() + proof_note(ctx) if ctx.scoped else None
+
+
+def proof_note(ctx: context_module.Context) -> str:
+    return f"\n{PROOF_LINE}" if ctx.test_cmd else EMPTY
 
 
 def parse_only(value: str | None) -> set[str] | None:

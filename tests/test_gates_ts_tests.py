@@ -305,3 +305,93 @@ def test_coverage_findings_skips_out_of_scope_files(tmp_path: Path) -> None:
     coverage = {"a.ts": coverage_entry({"1": 0}, {}), "b.ts": coverage_entry({"1": 0}, {})}
     ctx = make_context(tmp_path, TS, scope_changed=True, changed={"web/b.ts"})
     assert ts_tests.coverage_findings(coverage, ctx) == ["web/b.ts:10 not covered"]
+
+
+COMMAND = {"ts": {"root": "web"}, "hyper": {"test_cmd": "node t.js"}}
+
+
+def test_hyper_test_cmd_passes_on_exit_zero_and_reads_no_coverage(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_tests, [(0, "ok - a\n")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, COMMAND, hyper=True)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (
+        True,
+        "test_cmd exited 0; coverage advisory: not measured with [hyper] test_cmd",
+        [],
+    )
+    assert fake.calls == [["bash", "-lc", "node t.js"]]
+    assert fake.options[0]["cwd"] == tmp_path
+
+
+def test_hyper_test_cmd_failure_shows_the_last_lines(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_tests, [(1, "\n".join(f"line {n}" for n in range(40)) + "\nAssertionError: boom\n")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, COMMAND, hyper=True)), ts_tests.GATE)
+
+    assert (result.ok, result.summary) == (False, "test_cmd exited 1")
+    assert len(result.findings) == 30
+    assert result.findings[-1] == "AssertionError: boom"
+
+
+def test_hyper_without_test_cmd_or_known_runner_fails_before_running(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_tests)
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS, hyper=True)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, ts_tests.NO_RUNNER, [])
+    assert ts_tests.NO_RUNNER == "hyper: set [hyper] test_cmd to the command that runs this repository's tests"
+    assert fake.calls == []
+
+
+def test_test_cmd_outside_hyper_is_ignored(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_tests, [(1, "raw")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, COMMAND)), ts_tests.GATE)
+
+    assert (result.ok, result.summary) == (False, "tests failed")
+    assert fake.calls[0][:2] == ["npx", "vitest"]
+
+
+@pytest.mark.parametrize(
+    ("manifest", "expected"),
+    [
+        (None, False),
+        ({}, False),
+        ({"dependencies": {"left-pad": "1"}, "devDependencies": None}, False),
+        ({"devDependencies": {"vitest": "3"}}, True),
+        ({"dependencies": {"jest": "29"}}, True),
+    ],
+)
+def test_known_runner_reads_the_targets_own_package_json(tmp_path: Path, manifest: dict[str, Any] | None, expected: bool) -> None:
+    (tmp_path / "web").mkdir()
+    if manifest is not None:
+        (tmp_path / "web" / "package.json").write_text(json.dumps(manifest))
+    assert ts_tests.known_runner(make_context(tmp_path, TS)) is expected
+
+
+def test_hyper_with_a_known_runner_runs_it_as_today(tmp_path: Path, fake_run: Any) -> None:
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "package.json").write_text(json.dumps({"devDependencies": {"vitest": "3"}}))
+    fake = fake_run(ts_tests, [(1, "raw")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS, hyper=True)), ts_tests.GATE)
+
+    assert result.summary == "tests failed"
+    assert fake.calls[0][:3] == ["npx", "vitest", "run"]
+
+
+def test_hyper_does_not_count_a_runner_installed_only_in_tooling(tmp_path: Path, fake_run: Any) -> None:
+    tooling = tmp_path / ".marestail" / "tooling"
+    (tooling / "node_modules" / ".bin").mkdir(parents=True)
+    (tooling / "node_modules" / ".bin" / "vitest").write_text("")
+    (tooling / "vitest.config.ts").write_text("")
+    raw = {"ts": {"root": ".", "tooling": ".marestail/tooling"}}
+    fake = fake_run(ts_tests, [(1, "raw")])
+
+    hyper = checked(ts_tests.run_gate(make_context(tmp_path, raw, hyper=True)), ts_tests.GATE)
+    diff = checked(ts_tests.run_gate(make_context(tmp_path, raw, scope_changed=True)), ts_tests.GATE)
+
+    assert (hyper.ok, hyper.summary) == (False, ts_tests.NO_RUNNER)
+    assert diff.summary == "tests failed"
+    assert fake.calls[0][0] == str(tooling / "node_modules" / ".bin" / "vitest")

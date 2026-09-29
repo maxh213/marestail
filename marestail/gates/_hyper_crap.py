@@ -51,7 +51,7 @@ def member_units(scanned: tuple[Any, str | None]) -> list[Fn] | None:
 
 
 def judged(ctx: Context, hyper: Hyper, functions: list[Fn], started: float) -> Result:
-    gated = innermost(functions, ctx)
+    gated = _scored(innermost(functions, ctx))
     by_file = _by_file(functions)
     bases, unread = _base_complexities(ctx, hyper, sorted({fn["file"] for fn in gated}))
     above = _offenders([_judge(ctx, fn, by_file[fn["file"]], bases) for fn in gated], hyper.limit)
@@ -59,6 +59,10 @@ def judged(ctx: Context, hyper: Hyper, functions: list[Fn], started: float) -> R
     kept = len(above) - len(failing)
     summary = f"{len(gated)} innermost changed functions, {len(above)} above CRAP {hyper.limit:g}, {kept} of them no worse than base"
     return Result(hyper.gate, not failing, summary + _notes(unread), failing, elapsed(started))
+
+
+def _scored(functions: list[Fn]) -> list[Fn]:
+    return [fn for fn in functions if fn.get("scored", True)]
 
 
 def _offenders(entries: list[Fn], limit: float) -> list[Fn]:

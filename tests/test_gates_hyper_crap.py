@@ -188,3 +188,14 @@ def test_covered_member_without_line_data_misses_nothing() -> None:
     expected = {"file": "A.cs", "line": 3, "start": 3, "end": 5, "name": "M", "label": "M", "cc": 2, "cov": 0.0, "missing": set()}
     assert _hyper_crap.covered_member(member, {"files": {}}, 0.0) == expected
     assert _hyper_crap.covered_member(member, {"files": {"A.cs": {}}}, 0.0) == expected
+
+
+def test_judged_leaves_out_an_innermost_function_marked_unscored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bases(monkeypatch, {})
+    functions = [unit("outer", (1, 9), 9), unit("inner", (2, 4), 9, scored=False)]
+    result = _hyper_crap.judged(hyper_ctx(tmp_path, {"a.py": {3}}), Hyper("ts.crap", 4.0, scanner({})), functions, 0.0)
+    assert (result.ok, result.summary, result.findings) == (
+        True,
+        "0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base",
+        [],
+    )

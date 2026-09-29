@@ -226,3 +226,123 @@ def test_spans_group_consecutive_lines() -> None:
 def test_hyper_targets_skip_a_source_with_no_changed_lines(tmp_path: Path) -> None:
     ctx = hyper(tmp_path, {"web/src/a.ts": {3}})
     assert ts_mutation.targets(ctx, ["src/a.ts", "src/b.ts"]) == ["src/a.ts:3-3"]
+
+
+TOOLING = ".marestail/tooling"
+COMMAND = {"ts": {"root": "web", "tooling": TOOLING}, "hyper": {"test_cmd": "node t.js"}}
+
+
+def command_context(root: Path, lines: dict[str, set[int]]) -> Any:
+    (root / "web").mkdir(exist_ok=True)
+    return make_context(root, COMMAND, scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
+
+
+def command_stryker(root: Path, report: dict[str, Any] | None, code: int = 0) -> Any:
+    def reply(command: list[str]) -> tuple[int, str]:
+        (root / "web" / ts_mutation.COMMAND_TEMP).mkdir(parents=True)
+        if report is not None:
+            (root / ".marestail" / ts_mutation.COMMAND_REPORT).write_text(json.dumps(report))
+        return code, "stryker log"
+
+    return reply
+
+
+def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_path: Path, fake_run: Any) -> None:
+    report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 2)]}}}
+    fake = fake_run(ts_mutation, command_stryker(tmp_path, report))
+    ctx = command_context(tmp_path, {"web/src/a.js": {7}, "web/src/a.test.js": {1}, "web/src/b.py": {1}})
+
+    result = checked(ts_mutation.run_gate(ctx), ts_mutation.GATE)
+
+    config = tmp_path / ".marestail" / "stryker" / "command.config.json"
+    assert (result.ok, result.summary, result.findings) == (True, "all mutants killed (proof: mutation via [hyper] test_cmd)", [])
+    assert fake.calls == [[str(tmp_path / TOOLING / "node_modules" / ".bin" / "stryker"), "run", str(config)]]
+    assert fake.options[0]["cwd"] == tmp_path / "web"
+    assert json.loads(config.read_text()) == {
+        "testRunner": "command",
+        "commandRunner": {"command": "node t.js"},
+        "coverageAnalysis": "off",
+        "reporters": ["json", "progress"],
+        "jsonReporter": {"fileName": str(tmp_path / ".marestail" / "stryker" / "mutation.json")},
+        "tempDirName": ".marestail/stryker-tmp",
+        "cleanTempDir": "always",
+        "ignorePatterns": [".marestail"],
+        "mutate": ["src/a.js:7-7"],
+    }
+    assert not (tmp_path / "web" / ts_mutation.COMMAND_TEMP).exists()
+
+
+def test_command_proof_hints_when_nothing_is_killed(tmp_path: Path, fake_run: Any) -> None:
+    report = {"files": {"src/a.js": {"mutants": [mutant("Survived", 7), mutant("Survived", 7, "y"), mutant("Survived", 3)]}}}
+    fake_run(ts_mutation, command_stryker(tmp_path, report))
+
+    result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
+
+    assert (result.ok, result.summary) == (False, "2 surviving mutants (proof: mutation via [hyper] test_cmd)")
+    assert result.findings == [
+        "hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, "
+        "or no assertion depends on the changed lines",
+        "web/src/a.js:7 BooleanLiteral Survived: x",
+        "web/src/a.js:7 BooleanLiteral Survived: y",
+    ]
+
+
+def test_command_proof_gives_no_hint_when_a_mutant_is_killed(tmp_path: Path, fake_run: Any) -> None:
+    report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 7)]}}}
+    fake_run(ts_mutation, command_stryker(tmp_path, report))
+
+    result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
+
+    assert result.findings == ["web/src/a.js:7 BooleanLiteral Survived: x"]
+
+
+@pytest.mark.parametrize("report", [None, {"files": {"src/a.js": {"mutants": [mutant("Survived", 2)]}}}])
+def test_command_proof_with_no_mutants_on_changed_lines_passes(tmp_path: Path, fake_run: Any, report: dict[str, Any] | None) -> None:
+    fake_run(ts_mutation, command_stryker(tmp_path, report))
+
+    result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (True, "no mutants on changed lines", [])
+
+
+def test_command_proof_without_a_report_after_a_failure_fails(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(ts_mutation, [(127, "stryker: not found")])
+
+    result = checked(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.js": {7}})), ts_mutation.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "stryker produced no report (exit 127)", ["stryker: not found"])
+
+
+def test_command_proof_skips_when_only_tests_changed(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_mutation)
+
+    result = untimed(ts_mutation.run_gate(command_context(tmp_path, {"web/src/a.test.js": {1}})), ts_mutation.GATE)
+
+    assert result.summary == "skipped: no changed typescript sources"
+    assert fake.calls == []
+
+
+def test_command_proof_runs_once_per_context(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_mutation, command_stryker(tmp_path, None))
+    ctx = command_context(tmp_path, {"web/src/a.js": {7}})
+
+    first = ts_mutation.command_proof(ctx, ["src/a.js:7-7"])
+
+    assert ts_mutation.command_proof(ctx, ["src/a.js:7-7"]) is first
+    assert (first.code, first.report, len(fake.calls)) == (0, None, 1)
+
+
+def test_command_targets_include_javascript_but_not_tests(tmp_path: Path) -> None:
+    ctx = command_context(tmp_path, {"web/src/a.js": {1, 2}, "web/src/b.cjs": {4}, "web/src/a.test.js": {1}, "web/x.md": {1}})
+    assert ts_mutation.command_targets(ctx) == ["src/a.js:1-2", "src/b.cjs:4-4"]
+
+
+def test_suffixes_widen_only_under_test_cmd(tmp_path: Path) -> None:
+    assert ts_mutation.suffixes(command_context(tmp_path, {})) == (".js", ".mjs", ".cjs", ".ts", ".tsx")
+    assert ts_mutation.suffixes(hyper(tmp_path, {})) == (".ts", ".tsx")
+
+
+def test_line_statuses_group_every_mutant_by_start_line(tmp_path: Path) -> None:
+    report = {"files": {"src/a.js": {"mutants": [mutant("Killed", 7), mutant("Survived", 7), mutant("Killed", 3)]}, "src/b.js": {}}}
+    statuses = ts_mutation.line_statuses(report, command_context(tmp_path, {}))
+    assert {name: dict(lines) for name, lines in statuses.items()} == {"web/src/a.js": {7: {"Killed", "Survived"}, 3: {"Killed"}}}
