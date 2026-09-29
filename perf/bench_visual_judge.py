@@ -32,6 +32,8 @@ VISUAL_TARGETS = (
     "runner.judging_with",
     "runner.ending_for unseen",
     "ran_against.finish unseen",
+    "runner.ask_visual stub claude",
+    "runner.ask_visual fallback",
 )
 BLOCK = (
     "# QA\n\n```visual\n"
@@ -49,6 +51,11 @@ SECTION = {
 }
 VERDICT = "VERDICT: BOUNCE specifier\n1. the corner is still square\n"
 STUB = "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"ok\"}'\n"
+LIMITED_STUB = (
+    "#!/bin/sh\ncat >/dev/null\n"
+    "case \"$*\" in *claude-fable-5-1*) printf '%s\\n' '{\"is_error\":true,\"result\":\"rate limit exceeded\"}';; "
+    "*) printf '%s\\n' '{\"type\":\"result\",\"result\":\"ok\"}';; esac\n"
+)
 
 
 def geometry(width: int, scroll_width: int) -> dict:
@@ -146,6 +153,13 @@ try:
         harness.emit("runner.judging_with", harness.measure(swap))
         harness.emit("runner.ending_for unseen", harness.measure(lambda: runner.ending_for(blind, [pipeline.find("hardener")])))
         harness.emit("ran_against.finish unseen", harness.measure(lambda: ran_against.finish("app", False)))
+
+        def build() -> str:
+            return runner.built_judge_prompt(state, judge, report, texts)
+
+        harness.emit("runner.ask_visual stub claude", harness.measure(lambda: runner.ask_visual(state, "02-visual", build)))
+        stub.write_text(LIMITED_STUB)
+        harness.emit("runner.ask_visual fallback", harness.measure(lambda: runner.ask_visual(state, "02-visual", build)))
 finally:
     os.environ.pop("MARESTAIL_CLAUDE", None)
     shutil.rmtree(folder, ignore_errors=True)
