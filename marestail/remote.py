@@ -22,6 +22,7 @@ LOCK = Path.home() / ".config" / "marestail" / "remote.lock"
 ENV = "MARESTAIL_REMOTE"
 GATES = "MARESTAIL_REMOTE_GATES"
 BUSY = "/var/lib/marestail/busy.d"
+JOB_LOCK = "/var/lib/marestail/job.lock"
 EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump")
 PREPARE = (
     'if [ -f package-lock.json ]; then '
@@ -110,7 +111,7 @@ def run_mutation(
     if ip is None:
         return local(command, cwd, env, timeout, f" (remote unavailable: {problem}; ran locally)")
     started = time.time()
-    problem = push(found, ip, ctx.root)
+    problem = push(found, ip, ctx.root, gate)
     if problem:
         return local(command, cwd, env, timeout, f" (remote sync failed: {problem}; ran locally)")
     code, output = execute(found, ip, command, cwd, env, timeout)
@@ -216,21 +217,25 @@ def rsync(found: Settings, args: list[str]) -> tuple[int, str]:
     return completed.returncode, completed.stderr
 
 
-def push(found: Settings, ip: str, root: Path) -> str:
+def push(found: Settings, ip: str, root: Path, gate: str = "") -> str:
     ssh(found, ip, f"mkdir -p {shlex.quote(str(root))}", timeout=30)
-    excludes = [f"--exclude={pattern}" for pattern in EXCLUDES]
+    keep = {".venv/"} if gate.startswith("py.") else set()
+    excludes = [f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep]
     code, error = rsync(found, [*excludes, f"{root}/", f"{found.user}@{ip}:{root}/"])
     if code != 0:
         return error.strip().splitlines()[-1] if error.strip() else f"rsync exit {code}"
-    for toolchain in toolchains():
+    for toolchain in toolchains(root if keep else None):
         ssh(found, ip, f"mkdir -p {shlex.quote(str(toolchain))}", timeout=30)
         rsync(found, [f"{toolchain}/", f"{found.user}@{ip}:{toolchain}/"])
     return ""
 
 
-def toolchains() -> list[Path]:
+def toolchains(venv_root: Path | None = None) -> list[Path]:
     home = Path.home()
     found = []
+    store = home / ".local" / "share" / "uv" / "python"
+    if venv_root is not None and (venv_root / ".venv" / "bin" / "python").resolve().is_relative_to(store):
+        found.append(store)
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         path = Path(entry)
         if path.name == "bin" and path.parent.parent == home / ".nvm" / "versions" / "node" and path.is_dir():
@@ -254,8 +259,9 @@ def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[s
     inner = f"{PREPARE}; {inner}"
     docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} bash -c {shlex.quote(inner)}"
     marker = f"{BUSY}/{uuid.uuid4().hex}"
-    script = f"echo $$ > {marker}; sg docker -c {shlex.quote(docker)}; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
-    return ssh(found, ip, script, timeout=(timeout + 120) if timeout else None)
+    queued = f"flock {JOB_LOCK} sg docker -c {shlex.quote(docker)}"
+    script = f"echo $$ > {marker}; {queued}; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
+    return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None)
 
 
 def record(entry: dict) -> None:
