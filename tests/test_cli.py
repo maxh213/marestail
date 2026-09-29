@@ -327,6 +327,7 @@ def test_run_gates_with_context(registry: Recorder, repo: Path) -> None:
     results, ctx = gates_module.run_gates_with_context("full", True, {"lint"}, {"src"})
     assert (results, ctx.root, ctx.focus, ctx.hard) == ([PASS, FAIL], repo, {"src"}, False)
     assert ctx.scope_changed is True
+    assert ctx.hyper is False
     assert registry.calls == [("full", {"lint"})]
     assert os.environ["MARESTAIL_GATE_ACTIVE"] == "true"
 
