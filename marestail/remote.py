@@ -302,6 +302,9 @@ def status_command(_args) -> int:
     status, ip = describe(found)
     print(f"{found.instance} ({found.project}/{found.zone}): {status or 'unknown'} {ip}".rstrip())
     print(f"offloaded gates: {', '.join(found.gates) or 'none'}")
+    if status == "RUNNING" and ip:
+        for line in running_jobs(found, ip):
+            print(f"  running: {line}")
     now = datetime.now(timezone.utc)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     entries = usage()
@@ -319,6 +322,32 @@ def status_command(_args) -> int:
         billed_text = f"{hours:.2f}h = ${dollars:.2f}" if known else "unknown"
         print(f"{label}: VM up {billed_text}; {len(jobs)} jobs, {busy / 3600:.2f}h busy")
     return 0
+
+
+JOBS = r"""
+for f in /var/lib/marestail/busy.d/*; do
+  [ -e "$f" ] || continue
+  p=$(cat "$f"); kill -0 "$p" 2>/dev/null || continue
+  args=$(tr '\0' ' ' < /proc/$p/cmdline)
+  repo=$(echo "$args" | grep -oE 'docker exec -w [^ ]+' | head -1 | awk '{print $4}')
+  tool=$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)
+  state=running; pgrep -P "$p" -x flock >/dev/null && ! pgrep -f "docker exec -w $repo" >/dev/null && state=queued
+  echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
+done
+"""
+
+
+def running_jobs(found: Settings, ip: str) -> list[str]:
+    code, output = ssh(found, ip, JOBS, timeout=30)
+    if code != 0:
+        return []
+    jobs = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) == 4:
+            repo, tool, age, state = parts
+            jobs.append(f"{tool} for {Path(repo).name}, {age}" + (" (queued)" if state == "queued" else ""))
+    return jobs
 
 
 def instances(found: Settings, entries: list[dict]) -> dict[str, float]:
