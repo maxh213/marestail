@@ -31,6 +31,17 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     `port + 1`; either falls back to a random free port, exactly as `[qa]` does today (`_serve` and `[qa]`
     port handling do not change). `ready` (default `/`) must answer below 500 within `ready_timeout`
     (default `[qa] ready_timeout`, else 180) seconds.
+  - Loads: per tree and viewport, first one warm-up load of the route whose result is thrown away, then the
+    captures (two under the gate, one by hand). Every load, warm-up included, is a fresh browser context, so with
+    the static app each tree's `app.log` has 3 lines containing `GET <route>` per viewport under the gate and 2 by
+    hand. `app.log` and `setup.log` are rewritten on every run.
+  - One capture: open the route, wait for the selector; if `scroll` is true call
+    `scrollIntoView({block: "center", inline: "nearest"})` on it, else the page stays at scroll 0,0; wait for
+    `wait`; wait for two agreeing box reads; then read the geometry and take the pictures.
+  - Coordinates: every box (`box`, `inside.box`, `must_not_change`, and the boxes used for overlaps) is in
+    document coordinates, `getBoundingClientRect()` plus `scrollX`/`scrollY`, so the scroll position never
+    changes a number. `viewport.png` is the viewport as scrolled. `element.png` is a full-page screenshot
+    clipped to the box plus 24px each side (clamped to the document), so it shows the element even below the fold.
   - Waits: the selector, `wait` and two agreeing box reads (200 ms apart) each get `capture_timeout`
     (default 30) seconds. A selector not there by then is "not found".
     A selector not found, a `wait` that never matched or a box that did not settle in a tree ends that
@@ -44,7 +55,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     base also `setup.log`. Kept whatever the result.
   - `geometry.json` keys: `viewport` {width, height, scale, touch}, `selector`, `box` {x, y, width, height}
     or null, `styles` {name: computed value}, `scrollWidth`, `clientWidth`, `inside` {selector, box},
-    `must_not_change` {selector: box or null}, `overlaps` [names], `errors` [page error messages].
+    `must_not_change` {selector: box or null}, `overlaps` [names], `errors` [page error messages],
+    `scrollY` (the page's scroll position when the geometry was read).
     Numbers are CSS px rounded with JavaScript `Math.round`.
   - Overlap candidates: the children of each ancestor of the element up to `body` (its siblings and its
     ancestors' siblings), minus the element's own ancestors. Left out: `display: none`, `visibility: hidden`
@@ -139,7 +151,9 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     And `head/desktop/geometry.json` has `box` {x: 434, y: 100, width: 440, height: 200},
       `styles` {border-radius: "0px", overflow: "visible", width: "440px"}, `scrollWidth` 1440,
       `clientWidth` 1440, `inside` {selector: ".col", box: {x: 434, y: 60, width: 572, height: <n>}},
-      `overlaps` [] and `viewport` {width: 1440, height: 900, scale: 1, touch: false}
+      `overlaps` [], `scrollY` 0 and `viewport` {width: 1440, height: 900, scale: 1, touch: false}
+    And `base/app.log` and `head/app.log` each have exactly 6 lines containing `GET /donate.html`
+      (per viewport: 1 warm-up and 2 captures)
     And `head/phone/geometry.json` has `viewport` {width: 390, height: 844, scale: 2, touch: true}
 
   Scenario: the element grows wider than its column
@@ -207,6 +221,19 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given the HEAD commit adds `<p id="aside" style="position:absolute;top:150px;left:500px;margin:0">aside</p>` as the first child of `main`
     When the gate runs
     Then the only finding is `desktop: #widget overlaps p#aside at HEAD (base: no overlap)`
+
+  Scenario: on a tall page the scroll position changes no number
+    Given the `main` commit also has `<div style="height:2000px"></div>` as the first child of `main`, so both trees have it
+    And the block says `unchanged: x-centre, y-centre` and keeps `scroll: true` and `must_not_change: header`
+    And the HEAD commit sets `#widget` to `width:440px;height:200px;margin-top:300px`
+    When the gate runs
+    Then the only finding is `desktop: #widget y-centre moved 300px (base: 2200px, HEAD: 2500px)`
+    And `base/desktop/geometry.json` has `box` {x: 434, y: 2100, width: 440, height: 200}, `inside` box y 2060,
+      `must_not_change` {header: {x: 0, y: 0, width: 1440, height: 60}} and `scrollY` greater than 1000
+    And `head/desktop/geometry.json` has `box` y 2400, the same `header` box and `scrollY` greater than 1000
+    When the block says `scroll: false` and the gate runs again
+    Then the findings are the same, both `geometry.json` have `scrollY` 0 and the same boxes as before
+    And `head/desktop/element.png` is 488x248 pixels (the 440x200 box plus 24px each side)
 
   Scenario: a named selector the page does not have
     Given the HEAD commit only changes `Page text` to `Other text`
@@ -332,6 +359,7 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given the HEAD commit sets `#widget` to `width:1408px`
     When `marestail visual capture t` runs
     Then it prints `no recorded start commit for t; using git merge-base main HEAD`, exits 0
+    And `head/app.log` has exactly 2 lines containing `GET /donate.html` (1 warm-up, 1 capture)
     And prints one line per tree and viewport: `base desktop: .marestail/runs/t/visual/base/desktop` and `head desktop: .marestail/runs/t/visual/head/desktop`
     And the three files exist in both folders and afterwards `git worktree list` has exactly one line
 
