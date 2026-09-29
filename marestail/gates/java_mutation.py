@@ -30,18 +30,17 @@ def run_gate(ctx: Context) -> Result:
         return Result.skipped("java.mutation", "no changed Java sources" if wanted is not None else "no Java sources")
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
-    maven = [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out)]
     outcome = remote.run_mutation(
-        ctx, "java.mutation", maven, ctx.java_root(),
+        ctx, "java.mutation", lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)], ctx.java_root(),
         timeout=int(ctx.java("mutation_timeout", 7200)), pull=(str(out.relative_to(ctx.root)),),
     )
     code, output = outcome.code, outcome.output
     report = out / "mutations.xml"
     if not report.exists():
-        return Result("java.mutation", False, java.maven_hint(code, output) or missing(output, code), tail(output), time.time() - started)
+        return Result("java.mutation", False, (java.maven_hint(code, output) or missing(output, code)) + outcome.where, tail(output), time.time() - started)
     mutants = [m for m in ET.parse(report).getroot().findall("mutation") if m.get("status") not in IGNORED]
     if not mutants:
-        return Result("java.mutation", False, "no mutants were generated", tail(output), time.time() - started)
+        return Result("java.mutation", False, "no mutants were generated" + outcome.where, tail(output), time.time() - started)
     findings = [describe(ctx, mutant) for mutant in mutants if mutant.get("status") not in KILLED]
     summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
     summary += f" {scope.note}" if scope.note else ""
@@ -49,13 +48,13 @@ def run_gate(ctx: Context) -> Result:
     return Result("java.mutation", not findings, summary, findings, time.time() - started)
 
 
-def command(ctx: Context, targets: list[Path], out: Path) -> list[str]:
+def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool = False) -> list[str]:
     classes = [name for path in targets for name in class_globs(java.class_name(ctx, path))]
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [
         "test-compile", f"{PITEST}:mutationCoverage",
         f"-DtargetClasses={','.join(classes)}", "-DoutputFormats=XML", "-DtimestampedReports=false",
-        f"-DreportsDirectory={out}", f"-Dthreads={remote.workers(ctx, 'java.mutation', ctx.java('mutation_threads', 2))}",
+        f"-DreportsDirectory={out}", f"-Dthreads={remote.workers(ctx, 'java.mutation', ctx.java('mutation_threads', 2), on_remote)}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
 

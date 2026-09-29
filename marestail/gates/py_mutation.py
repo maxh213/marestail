@@ -26,18 +26,19 @@ def run_gate(ctx: Context) -> Result:
     if scope.mode != "full" and not patterns:
         return Result.skipped("py.mutation", "no changed python sources")
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
-    workers = str(remote.workers(ctx, "py.mutation", ctx.python("mutation_workers", 4)))
+    local_workers = ctx.python("mutation_workers", 4)
     mutants = str((ctx.python_root() / "mutants").relative_to(ctx.root))
     outcome = remote.run_mutation(
-        ctx, "py.mutation", [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", workers],
+        ctx, "py.mutation",
+        lambda on_remote: [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", str(remote.workers(ctx, "py.mutation", local_workers, on_remote))],
         ctx.python_root(), timeout=7200, pull=(mutants,),
     )
     code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
-        return Result("py.mutation", False, "mutmut failed", tail(output), time.time() - started)
+        return Result("py.mutation", False, "mutmut failed" + outcome.where, tail(output), time.time() - started)
     total, survivors, timed_out = surviving(ctx, patterns)
     if total == 0:
-        return Result("py.mutation", False, "no mutants were generated", tail(output), time.time() - started)
+        return Result("py.mutation", False, "no mutants were generated" + outcome.where, tail(output), time.time() - started)
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
     summary += f" ({timed_out} killed by timeout)" if timed_out and not ctx.timeouts_fail("python") else ""
     summary += f" {scope.note}" if scope.note else ""

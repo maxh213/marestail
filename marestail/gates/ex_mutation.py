@@ -56,18 +56,18 @@ def run_gate(ctx: Context) -> Result:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
         return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    outcome = remote.run_mutation(ctx, "ex.mutation", guarded(ctx, command(ctx, files)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    outcome = remote.run_mutation(ctx, "ex.mutation", lambda on_remote: guarded(ctx, command(ctx, files, on_remote)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     output = outcome.output
     start = output.find("{")
     if start < 0:
-        return Result("ex.mutation", False, "muex produced no report", tail(output), time.time() - started)
+        return Result("ex.mutation", False, "muex produced no report" + outcome.where, tail(output), time.time() - started)
     try:
         report, _ = json.JSONDecoder().raw_decode(output[start:])
     except json.JSONDecodeError:
-        return Result("ex.mutation", False, "muex report unreadable", tail(output), time.time() - started)
+        return Result("ex.mutation", False, "muex report unreadable" + outcome.where, tail(output), time.time() - started)
     mutations = report.get("mutations", [])
     if not mutations:
-        return Result("ex.mutation", False, "no mutants were generated", tail(output), time.time() - started)
+        return Result("ex.mutation", False, "no mutants were generated" + outcome.where, tail(output), time.time() - started)
     passing = PASSING if ctx.timeouts_fail("elixir") else PASSING | {"timeout"}
     timed_out = sum(1 for m in mutations if m.get("status", "").lower() == "timeout")
     findings = [describe(ctx, m) for m in mutations if m.get("status", "").lower() not in passing]
@@ -91,7 +91,7 @@ def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
     return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
 
 
-def command(ctx: Context, files: list[str]) -> list[str]:
+def command(ctx: Context, files: list[str], on_remote: bool = False) -> list[str]:
     parts = ["mix", "muex", "--format", "json", "--fail-at", "0"]
     if not ctx.elixir("muex_filter", False):
         parts.append("--no-filter")
@@ -100,7 +100,7 @@ def command(ctx: Context, files: list[str]) -> list[str]:
     preset = ctx.elixir("muex_preset")
     if preset:
         parts += ["--preset", str(preset)]
-    concurrency = remote.workers(ctx, "ex.mutation", ctx.elixir("muex_concurrency", 4))
+    concurrency = remote.workers(ctx, "ex.mutation", ctx.elixir("muex_concurrency", 4), on_remote)
     if concurrency:
         parts += ["--concurrency", str(concurrency)]
     max_mutations = ctx.elixir("muex_max_mutations")

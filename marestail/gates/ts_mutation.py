@@ -24,14 +24,14 @@ def run_gate(ctx: Context) -> Result:
     mutate = changed_sources(ctx, scope.files or [])
     if scope.mode != "full" and not mutate:
         return Result.skipped("ts.mutation", "no changed typescript sources")
-    command = mutation_command(mutate, concurrency(ctx), bool(ctx.ts("mutation_incremental", False)))
+    incremental = bool(ctx.ts("mutation_incremental", False))
     temp = ctx.ts_root() / TEMP_DIR
     report = ctx.ts_root() / REPORT
     shutil.rmtree(temp, ignore_errors=True)
     report.unlink(missing_ok=True)
     try:
         pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
-        outcome = remote.run_mutation(ctx, "ts.mutation", command, ctx.ts_root(), timeout=TIMEOUT, pull=pull)
+        outcome = remote.run_mutation(ctx, "ts.mutation", lambda on_remote: mutation_command(mutate, concurrency(ctx, on_remote), incremental), ctx.ts_root(), timeout=TIMEOUT, pull=pull)
         if not report.exists():
             return Result("ts.mutation", False, f"stryker produced no report (exit {outcome.code}){outcome.where}", tail(outcome.output), time.time() - started)
         data = json.loads(report.read_text())
@@ -48,9 +48,9 @@ def run_gate(ctx: Context) -> Result:
     return Result("ts.mutation", not survivors, summary, survivors, time.time() - started)
 
 
-def concurrency(ctx: Context) -> int | None:
+def concurrency(ctx: Context, on_remote: bool) -> int | None:
     configured = ctx.ts("mutation_concurrency")
-    return remote.workers(ctx, "ts.mutation", int(configured) if configured else 0) or None
+    return remote.workers(ctx, "ts.mutation", int(configured) if configured else 0, on_remote) or None
 
 
 def mutation_command(mutate: list[str], concurrency: int | None = None, incremental: bool = False) -> list[str]:

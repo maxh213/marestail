@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,9 +84,9 @@ def load() -> Settings | None:
     )
 
 
-def workers(ctx: Context, gate: str, local: int) -> int:
+def workers(ctx: Context, gate: str, local: int, on_remote: bool) -> int:
     found = settings(ctx)
-    if found is None or gate not in found.gates:
+    if not on_remote or found is None or gate not in found.gates:
         return local
     return found.workers.get(gate, local)
 
@@ -98,7 +99,7 @@ def offloads(ctx: Context, gate: str) -> bool:
 def run_mutation(
     ctx: Context,
     gate: str,
-    command: list[str],
+    build: Callable[[bool], list[str]],
     cwd: Path,
     env: dict[str, str] | None = None,
     timeout: int | None = 7200,
@@ -106,22 +107,31 @@ def run_mutation(
 ) -> Outcome:
     found = settings(ctx)
     if found is None or gate not in found.gates:
-        return local(command, cwd, env, timeout, "")
+        return local(build(False), cwd, env, timeout, "")
     ip, problem = ensure_up(found)
     if ip is None:
-        return local(command, cwd, env, timeout, f" (remote unavailable: {problem}; ran locally)")
+        return local(build(False), cwd, env, timeout, f" (remote unavailable: {problem}; ran locally)")
     started = time.time()
     problem = push(found, ip, ctx.root, gate)
     if problem:
-        return local(command, cwd, env, timeout, f" (remote sync failed: {problem}; ran locally)")
-    code, output = execute(found, ip, command, cwd, env, timeout)
-    if code == 255 and not output.strip():
-        return local(command, cwd, env, timeout, " (remote ssh dropped; ran locally)")
+        return local(build(False), cwd, env, timeout, f" (remote sync failed: {problem}; ran locally)")
+    code, output = execute(found, ip, build(True), cwd, env, timeout)
+    if dropped(code, output):
+        ip, problem = ensure_up(found)
+        if ip is None:
+            return Outcome(code, output, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
+        code, output = execute(found, ip, build(True), cwd, env, timeout)
+        if dropped(code, output):
+            return Outcome(code, output, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
     for path in pull:
         fetch(found, ip, ctx.root, path)
     seconds = time.time() - started
     record({"event": "job", "gate": gate, "repo": str(ctx.root), "seconds": round(seconds), "usd": round(seconds / 3600 * found.usd_per_hour, 3)})
     return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
+
+
+def dropped(code: int, output: str) -> bool:
+    return code == 255 and not output.strip()
 
 
 def local(command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None, where: str) -> Outcome:
@@ -185,15 +195,11 @@ def gcloud(found: Settings, args: list[str]) -> tuple[int, str]:
 
 
 def ssh_options(found: Settings) -> list[str]:
-    control = Path.home() / ".ssh" / f"cm-{found.instance}"
     return [
         "-i", str(found.key),
         "-o", f"HostKeyAlias={found.instance}",
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", f"UserKnownHostsFile={Path.home() / '.ssh' / 'marestail_known_hosts'}",
-        "-o", "ControlMaster=auto",
-        "-o", f"ControlPath={control}-%C",
-        "-o", "ControlPersist=600",
         "-o", "ServerAliveInterval=30",
         "-o", "ConnectTimeout=15",
         "-o", "BatchMode=yes",
