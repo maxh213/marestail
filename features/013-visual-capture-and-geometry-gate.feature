@@ -4,39 +4,73 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   - Task: `marestail visual capture <task>` takes the task stem; the `visual` gate reads it from
     `MARESTAIL_TASK` (the runner sets it, task 006). The block is the first fenced block whose info
     string is `visual` in `qa/<task>.md`, one `key: value` per line; lists are comma-separated.
+    No `qa/<task>.md` at all: `visual: no qa/<task>.md; skipped`, like a missing block.
+  - Block keys. Required: `route`, `selector`. Optional, with defaults: `scroll` false, `wait` none
+    (only `selector` is waited for), `styles` none, `inside` none (check off), `unchanged` none,
+    `must_not_change` none, `symptom` none. `symptom` is free text for the human: never a finding, printed
+    as the last detail line `symptom: <text>` when the gate fails.
+  - Malformed input fails before any app or worktree starts, one finding each:
+      `qa/<task>.md visual block: missing <key>` / `qa/<task>.md visual block: unknown key <key>`
+      `qa/<task>.md visual block: unknown measure <m> in unchanged`
+      `[visual] viewports: bad viewport <name> = "<value>"; expected WxH[@scale][ touch]`
+    `marestail visual capture` prints the same lines and exits 2.
+  - Tools: missing `node` on PATH fails with the one finding `node not found on PATH; run marestail install`;
+    missing Playwright Chromium with `Playwright Chromium missing; run marestail install`. Capture exits 2.
   - Base commit: exactly `perf.trees.start_commit` (recorded `.marestail/runs/<task>/start-commit`,
     else `git merge-base <[git] base> HEAD`), printing its note when it falls back. The baseline is a
     detached worktree added and removed through the same code the perf judge uses: `marestail/` holds
     exactly one `git worktree add` call site. HEAD is the working tree itself.
-  - Apps: `start` (default `[qa] start`) runs through `bash -lc` with `PORT` and `[visual] env`, in the
-    tree's root, as `[qa] start` does today. HEAD uses `port` (default 3400), or the next free port;
-    base uses the first free port above HEAD's. `ready` (default `/`) must answer below 500 within
-    `ready_timeout` (default 180) seconds. `setup` runs in the baseline worktree only, before its app.
+  - Order: base first, then HEAD; never both apps at once. Base: `setup` (worktree only, `setup_timeout`
+    default 900 s), start app, capture, stop app. Then HEAD: start app, capture, stop app. A base failure
+    (setup, app) does not skip HEAD: HEAD is still captured and its files kept, but no comparison findings
+    are made; the findings are the failure(s) alone. The worktree is removed after both.
+  - Apps: through `_serve.ready_app`, unchanged. `start` (default `[qa] start`) runs through `bash -lc`
+    with `PORT` and `[visual] env`, in the tree's root. HEAD prefers `port` (default 3400), base prefers
+    `port + 1`; either falls back to a random free port, exactly as `[qa]` does today (`_serve` and `[qa]`
+    port handling do not change). `ready` (default `/`) must answer below 500 within `ready_timeout`
+    (default `[qa] ready_timeout`, else 180) seconds.
+  - Waits: the selector, `wait` and two agreeing box reads (200 ms apart) each get `capture_timeout`
+    (default 30) seconds. A selector not there by then is "not found".
   - Files, per tree (`base`, `head`) and viewport name, under `.marestail/runs/<task>/visual/<tree>/<viewport>/`:
     `element.png`, `viewport.png`, `geometry.json`. Per tree: `.marestail/runs/<task>/visual/<tree>/app.log`;
     base also `setup.log`. Kept whatever the result.
   - `geometry.json` keys: `viewport` {width, height, scale, touch}, `selector`, `box` {x, y, width, height}
     or null, `styles` {name: computed value}, `scrollWidth`, `clientWidth`, `inside` {selector, box},
-    `must_not_change` {selector: box or null}, `overlaps` [sibling names], `errors` [page error messages].
-    A sibling is named `<tag>#<id>`, else `<tag>.<first class>`, else `<tag>`. Numbers are whole px.
+    `must_not_change` {selector: box or null}, `overlaps` [names], `errors` [page error messages].
+    Numbers are CSS px rounded with JavaScript `Math.round`.
+  - Overlap candidates: the children of each ancestor of the element up to `body` (its siblings and its
+    ancestors' siblings), minus the element's own ancestors. Left out: `display: none`, `visibility: hidden`
+    (so every `hide`d element), and zero width or height. Overlap means an intersection of positive area.
+    Named `<tag>#<id>`, else `<tag>.<first class>`, else `<tag>`.
+  - Inside rule, at HEAD alone: if the element is wider than `inside` by more than `tolerance_px`, one
+    width finding; otherwise one finding per side (left, right) where its edge is outside the `inside` box
+    by more than `tolerance_px`. Top and bottom are not checked: containers grow with their content.
   - `desktop = "1440x900"` is 1440x900, scale 1, no touch; `phone = "390x844@2 touch"` is 390x844, scale 2, touch.
   - `hide` selectors get `visibility: hidden !important`; `block` globs abort matching requests;
     animations and transitions are off. Page errors are recorded, never a finding.
-  - The gate captures each tree twice per viewport and compares the two records; the kept files are
-    from the first. `marestail visual capture` captures once.
+  - The gate captures each tree twice per viewport, each in a fresh browser context, and compares `box`,
+    `scrollWidth`, `clientWidth`, `inside.box` and `must_not_change` (numbers within `tolerance_px`) and
+    `overlaps` (exactly). `styles`, `errors` and `viewport` are not compared. The kept files are from the
+    first capture. `marestail visual capture` captures once and judges nothing.
   - Gate name `visual`, tier `qa`, listed only when `[visual]` exists. Pass summary:
     `<n> viewport(s), geometry holds` (`1 viewport, geometry holds`, `2 viewports, geometry holds`).
-    Fail summary: `<n> visual findings`. Finding texts (tolerance default 2):
-      `<vp>: <sel> not found at base` / `<vp>: <sel> not found at HEAD`
+    Fail summary: `<n> visual findings`. `<tree>` in texts is `base` or `HEAD`. Finding texts (tolerance default 2):
+      `<vp>: <sel> not found at <tree>`
+      `<vp>: inside <sel> not found at <tree>` / `<vp>: must_not_change <sel> not found at <tree>`
+      `<vp>: wait <wait> never matched at <tree> within <n>s`
+      `<vp>: <sel> box did not settle at <tree> within <n>s`
       `<vp>: page scrolls sideways at HEAD, scrollWidth <s>px > clientWidth <c>px (base: scrollWidth <b>px)`
       `<vp>: <sel> is <w>px wide, <inside> is <iw>px (base: <bw>px)`
+      `<vp>: <sel> <left|right> edge is <e>px, <inside> <left|right> edge is <ie>px (base: <be>px)`
       `<vp>: <sel> overlaps <sibling> at HEAD (base: no overlap)`
       `<vp>: <sel> <measure> moved <d>px (base: <b>px, HEAD: <h>px)`
       `<vp>: must_not_change <sel> changed (base: <x>,<y> <w>x<h>; HEAD: <x>,<y> <w>x<h>)`
-      `<vp>: unstable at <base|HEAD>: two captures gave different geometry`, followed by the two
+      `<vp>: unstable at <tree>: two captures gave different geometry`, followed by the two
       records as `first: <json>` and `second: <json>`
-      `<base|HEAD>: app did not answer on http://localhost:<p><ready> within <n>s`
-      `base: setup failed (exit <n>)`, followed by the last 10 lines of `setup.log`
+      `<tree>: app did not answer on http://localhost:<p><ready> within <n>s`
+      `<tree>: app exited with <n> before answering`
+      `base: setup failed (exit <n>)` / `base: setup did not finish within <n>s`, followed by the last
+      10 lines of `setup.log`; app findings are followed by the last 10 lines of `app.log`
     `unchanged` measures: `x-centre`, `y-centre`, `left`, `right`, `top`, `bottom`, `width`, `height`.
 
   Background:
@@ -140,6 +174,63 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Then it fails with a finding `desktop: unstable at HEAD: two captures gave different geometry`
     And the next two findings start `first: {` and `second: {` and their `box.width` values differ
 
+  Scenario: the element sticks out of its column without being wider
+    Given the HEAD commit sets `#widget` to `width:440px;height:200px;margin-left:200px`
+    When the gate runs
+    Then the findings are exactly `desktop: #widget right edge is 1074px, .col right edge is 1006px (base: 874px)`
+      and `desktop: #widget x-centre moved 200px (base: 654px, HEAD: 854px)`
+
+  Scenario: an overlapping element outside the element's parent counts
+    Given the HEAD commit adds `<p id="aside" style="position:absolute;top:150px;left:500px;margin:0">aside</p>` as the first child of `main`
+    When the gate runs
+    Then the only finding is `desktop: #widget overlaps p#aside at HEAD (base: no overlap)`
+
+  Scenario: a named selector the page does not have
+    Given the HEAD commit only changes `Page text` to `Other text`
+    And the block says `inside: .column` and `must_not_change: header, nav`
+    When the gate runs
+    Then the findings are exactly `desktop: inside .column not found at base`, `desktop: inside .column not found at HEAD`,
+      `desktop: must_not_change nav not found at base` and `desktop: must_not_change nav not found at HEAD`
+
+  Scenario: wait never matches, and a box that never settles
+    Given `[visual] capture_timeout = 2` and the block says `wait: #never`
+    When the gate runs on the "stays put" change
+    Then the findings are exactly `desktop: wait #never never matched at base within 2s` and `desktop: wait #never never matched at HEAD within 2s`
+    Given `wait: #widget` again and the HEAD commit adds `<script>setInterval(()=>{const w=document.getElementById("widget");w.style.marginLeft=(parseInt(w.style.marginLeft||0)+10)%100+"px"},50)</script>`
+    When the gate runs
+    Then the only finding is `desktop: #widget box did not settle at HEAD within 2s`
+
+  Scenario Outline: malformed input fails before anything starts
+    Given <change>
+    When the gate runs
+    Then the only finding is `<finding>` and no app, worktree or browser starts
+    And `marestail visual capture t` prints the same line and exits 2
+
+    Examples:
+      | change                                          | finding                                                                        |
+      | the block has no `selector` line                | qa/t.md visual block: missing selector                                         |
+      | the block has `colour: red`                     | qa/t.md visual block: unknown key colour                                       |
+      | the block says `unchanged: middle`              | qa/t.md visual block: unknown measure middle in unchanged                      |
+      | `viewports = { phone = "390by844" }`            | [visual] viewports: bad viewport phone = "390by844"; expected WxH[@scale][ touch] |
+
+  Scenario: symptom is shown to the human but judges nothing
+    Given the block adds `symptom: the widget runs over the page text` and the HEAD commit sets `#widget` to `width:1408px`
+    When the gate runs
+    Then the result has 2 findings and its last detail line is `symptom: the widget runs over the page text`
+
+  Scenario: node or Chromium missing
+    Given `node` is not on PATH
+    When the gate runs
+    Then the only finding is `node not found on PATH; run marestail install` and `marestail visual capture t` exits 2
+    Given `node` is on PATH and `PLAYWRIGHT_BROWSERS_PATH` points at an empty directory
+    When the gate runs
+    Then the only finding is `Playwright Chromium missing; run marestail install`
+
+  Scenario: a missing QA file is skipped like a missing block
+    Given `qa/t.md` does not exist
+    When `MARESTAIL_TASK=t marestail gate --tier qa --only visual` runs
+    Then `visual` is ok with summary exactly `visual: no qa/t.md; skipped`
+
   Scenario: a page error is recorded but is not a finding
     Given the HEAD commit adds `<script>throw new Error("boom")</script>` at the end of `body`
     When the gate runs
@@ -150,17 +241,27 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     When the gate runs
     Then `.marestail/runs/t/visual/head/app.log` has no line containing `/tracker.js`
 
-  Scenario: an app that never answers fails and leaves nothing behind
-    Given `[visual] start = "sleep 60"` and `ready_timeout = 2`
+  Scenario: an app that never answers fails for both trees and leaves nothing behind
+    Given `[visual] start = "sleep 60"` and `ready_timeout = 2`, and ports 3400 and 3401 are free
     When the gate runs
-    Then it fails with a finding `base: app did not answer on http://localhost:<p>/ within 2s` or the HEAD equivalent
-    And afterwards `git worktree list` has exactly one line and no process listens on 3400 or the base port
+    Then the findings are exactly `base: app did not answer on http://localhost:3401/ within 2s`
+      and `HEAD: app did not answer on http://localhost:3400/ within 2s`, in that order
+    And afterwards `git worktree list` has exactly one line and nothing listens on 3400 or 3401
+
+  Scenario: an app that exits before answering
+    Given `[visual] start = "echo dying; exit 3"`
+    When the gate runs
+    Then the findings are exactly `base: app exited with 3 before answering` and
+      `HEAD: app exited with 3 before answering`, each followed by `dying`
 
   Scenario: setup runs in the baseline worktree and its failure is reported
-    Given `[visual] setup = "echo installing; exit 1"`
+    Given `[visual] setup = "echo installing; exit 1"` and the "stays put" change
     When the gate runs
-    Then it fails with a finding `base: setup failed (exit 1)` followed by `installing`
+    Then the only finding is `base: setup failed (exit 1)`, followed by `installing`
     And `.marestail/runs/t/visual/base/setup.log` contains `installing`
+    And `head/desktop/geometry.json` exists and `base/desktop/` does not
+    When `setup = "sleep 60"` and `setup_timeout = 1`
+    Then the only finding is `base: setup did not finish within 1s`
 
   Scenario: cleanup after pass, failure and Ctrl-C
     When the gate passes, when it fails, and when `SIGINT` is sent to it after `head/app.log` exists
@@ -205,14 +306,18 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given `marestail.toml` has no `[visual]` section
     When `marestail gate --tier qa` runs
     Then no result line names `visual` and the gate lines are exactly those printed before this task
-    And `marestail install <target>` into a target without `[visual]` never runs `npm`
+    And `marestail install <target>` into a target without `[visual]` never runs `npm` or `npx` in `marestail/js`
 
-  Scenario: install fetches Playwright only when [visual] is enabled
-    Given a target whose `marestail.toml` has `[visual] enabled = true` and a fake `npm` first on PATH that records its argv and cwd
+  Scenario: install fetches Playwright and Chromium only when [visual] is enabled
+    Given a target whose `marestail.toml` has `[visual] enabled = true`
+    And fake `npm` and `npx` first on PATH that each append `<name> <argv> @ <cwd>` to a log and exit 0
     When `marestail install <target>` runs
-    Then `npm install` ran with cwd `<marestail checkout>/marestail/js`
+    Then the log is exactly two lines: `npm install @ <marestail checkout>/marestail/js`
+      then `npx playwright install chromium @ <marestail checkout>/marestail/js`
     And `marestail/js/package.json` lists `playwright` under `dependencies` and nothing else
-    And with `enabled = false` the fake `npm` is never called
+    And with `enabled = false`, or no `[visual]`, the log stays empty
+    Given the fake `npx` exits 1
+    Then install prints `npx playwright install chromium failed (exit 1); everything else is installed` and exits 1
 
   Scenario: the perf judge and its worktrees are unchanged
     When `python3 tools/test-perf.py` runs
@@ -220,10 +325,12 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     And `grep -rn '"worktree", "add"' marestail/` finds exactly one line
 
   Scenario: QA stays a worker and a visual failure stops the run
-    Given the "wider than its column" change and a stub QA agent that writes its handoff with `ran-against: app`
-    When `marestail run tasks/t.md --from qa --to qa --auto` runs
-    Then the qa verification gate shows `[FAIL] visual` and stdout does not contain `pipeline complete`
-    And the run stops through QA's existing retry and repeat limit, with no new role
+    Given the "wider than its column" change and a stub QA agent that writes its handoff with `ran-against: app` and changes nothing else
+    When `marestail run tasks/t.md --from qa --to qa --auto` runs (default `--retries 0`)
+    Then stdout has `== qa (` ... `) attempt 1`, `attempt 2` and `attempt 3`, and no `attempt 4`
+    And each attempt's verification gate shows `[FAIL] visual`
+    And stdout has `qa got the same problems back 3 times in a row; the worker is not making progress, stopping for a human`
+      then `pipeline stopped at qa`, does not contain `pipeline complete`, and the exit code is 1
 
   Scenario: roles and README
     Then `roles/specifier.md` contains `When the task changes what a user sees, add a fenced visual block to qa/<task>.md.`

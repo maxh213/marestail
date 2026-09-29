@@ -11,7 +11,8 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
    fence with info string `visual`. Commit, then `git checkout -q -b work`.
    Expected: `git worktree list` prints one line.
 2. `marestail install $T`.
-   Expected: exit 0; `$M/marestail/js/node_modules/playwright` exists.
+   Expected: exit 0; `$M/marestail/js/node_modules/playwright` exists;
+   `ls ~/.cache/ms-playwright` lists a `chromium-*` folder; `cd $M/marestail/js && npx playwright --version` prints a version.
 3. Change `Page text` to `Other text` in `donate.html`, commit. Run `MARESTAIL_TASK=t marestail gate --tier qa --only visual`.
    Expected: `[ok  ] visual` with `1 viewport, geometry holds`, then `GATE PASSED`. `ls .marestail/runs/t/visual/base/desktop .marestail/runs/t/visual/head/desktop`
    shows `element.png geometry.json viewport.png` in each. Open both `element.png`: the same 440px widget with a 24px margin.
@@ -38,21 +39,32 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
     Expected: finding `desktop: unstable at HEAD: two captures gave different geometry`, then `first: {…}` and `second: {…}` with different `box.width`.
 12. Revert. Add `<div id="banner" style="position:absolute;top:0;left:0;width:100%;height:1000px">b</div>` inside `.col`, commit, rerun.
     Expected: finding `desktop: #widget overlaps div#banner at HEAD (base: no overlap)`. Add `hide = ["#banner"]` to `[visual]`, rerun. Expected: passes.
+12a. Revert, remove `hide`. Set `#widget` style to `width:440px;height:200px;margin-left:200px`, commit, rerun.
+    Expected: exactly `desktop: #widget right edge is 1074px, .col right edge is 1006px (base: 874px)` and
+    `desktop: #widget x-centre moved 200px (base: 654px, HEAD: 854px)`.
+12b. Revert. Add `<p id="aside" style="position:absolute;top:150px;left:500px;margin:0">aside</p>` as the first child of `main`, commit, rerun.
+    Expected: only finding `desktop: #widget overlaps p#aside at HEAD (base: no overlap)`.
+12c. Revert. In the block, change `selector: #widget` to `colour: red`, rerun.
+    Expected: `qa/t.md visual block: missing selector` and `qa/t.md visual block: unknown key colour`; `git worktree list` one line throughout. Restore the block.
 13. Revert and remove `hide`. Add `<script src="/tracker.js"></script>`, commit, set `block = ["*tracker*"]`, rerun.
     Expected: passes; `grep tracker .marestail/runs/t/visual/head/app.log` prints nothing.
 14. Set `env = { CMS_URL = "https://cms.example.test/graphql" }` and `start = "echo $CMS_URL; python3 -m http.server $PORT --bind 127.0.0.1"`, rerun.
     Expected: both `base/app.log` and `head/app.log` contain the URL; `git status --porcelain` shows only `marestail.toml`; `git grep -l cms.example.test` finds only `marestail.toml` if you commit it (nothing marestail wrote).
 15. Set `setup = "echo installing; exit 1"`, rerun.
-    Expected: finding `base: setup failed (exit 1)` then `installing`; `base/setup.log` contains `installing`. Remove `setup`.
+    Expected: only finding `base: setup failed (exit 1)` then `installing`; `base/setup.log` contains `installing`; `head/desktop/geometry.json` exists. Remove `setup`.
 16. Set `start = "sleep 60"`, `ready_timeout = 2`, rerun.
-    Expected: a finding `… app did not answer on http://localhost:<p>/ within 2s`; `git worktree list` one line; `ss -ltn | grep -E ':340[0-9]'` prints nothing.
+    Expected: exactly `base: app did not answer on http://localhost:3401/ within 2s` then `HEAD: app did not answer on http://localhost:3400/ within 2s`;
+    `git worktree list` one line; `ss -ltn | grep -E ':340[01]'` prints nothing.
+    Set `start = "echo dying; exit 3"`, rerun. Expected: `base: app exited with 3 before answering` and `HEAD: app exited with 3 before answering`, each followed by `dying`.
 17. Restore `start`, set `ready_timeout = 60`, run the gate in the background and send `kill -INT <pid>` once `.marestail/runs/t/visual/head/app.log` exists.
     Expected: gate exits; `git worktree list` one line; nothing listening on 3400 or the base port.
 18. `marestail visual capture t`.
     Expected: first line `no recorded start commit for t; using git merge-base main HEAD`, then `base desktop: .marestail/runs/t/visual/base/desktop` and `head desktop: .marestail/runs/t/visual/head/desktop`; exit 0; no PASS/FAIL line.
 19. Remove the block from `qa/t.md`. Run `marestail visual capture t`.
     Expected: exactly `visual: no block in qa/t.md; skipped`, exit 0. The gate shows `visual: no block in qa/t.md; skipped`.
-20. Run the gate without `MARESTAIL_TASK`. Expected: `skipped: no task; set MARESTAIL_TASK`. Set `enabled = false`, rerun with it. Expected: `skipped: [visual] enabled = false`.
+20. Run `env PATH=/usr/bin:/bin $M/.venv/bin/marestail gate --tier qa --only visual` with `MARESTAIL_TASK=t` and no node in `/usr/bin`, or `PLAYWRIGHT_BROWSERS_PATH=$(mktemp -d)`.
+    Expected: `node not found on PATH; run marestail install`, or `Playwright Chromium missing; run marestail install`.
+    Run the gate without `MARESTAIL_TASK`. Expected: `skipped: no task; set MARESTAIL_TASK`. Set `enabled = false`, rerun with it. Expected: `skipped: [visual] enabled = false`.
 21. Delete the `[visual]` section; run `marestail gate --tier qa`. Expected: no line names `visual`.
 22. From `$M`: `python3 tools/test-visual.py`. Expected: exit 0, last line `visual ok`.
     `python3 tools/test-perf.py`. Expected: exit 1, last line `verdict-commit-files: '' != 'perf/bench_x.py'`.
