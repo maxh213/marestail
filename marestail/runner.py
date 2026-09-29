@@ -320,9 +320,7 @@ def includes_qa(steps: list[Step]) -> bool:
 
 
 def say_complete(by_eye: bool = True) -> int:
-    line, code = ran_against.finish("app", by_eye)
-    print(line)
-    return code
+    return qa_ending("app", by_eye)
 
 
 def ending_for(state: Run, steps: list[Step]) -> int:

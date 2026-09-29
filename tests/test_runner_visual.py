@@ -137,7 +137,8 @@ def test_the_judge_model_looks_first_and_the_run_keeps_its_backend(tmp_path: Pat
     assert sessions.calls == [("claude", "claude-fable-5-1", None, None, "prompt for claude")]
     assert (state.agent, state.model, state.effort, state.account_env, state.account) == ("cursor", "gpt-9", "high", {"K": "v"}, "acct")
     assert (state.judged_by, state.blind, state.unseen) == ("claude-fable-5-1", False, False)
-    assert state.attempt_agent is not None and state.attempt_agent["model"] == "claude-fable-5-1"
+    assert state.attempt_agent is not None
+    assert state.attempt_agent["model"] == "claude-fable-5-1"
     assert (state.folder / "02-visual.prompt.md").read_text() == "prompt for claude"
     assert "out of usage" not in capsys.readouterr().out
 
