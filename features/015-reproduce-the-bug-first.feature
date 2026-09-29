@@ -151,8 +151,9 @@ Feature: for a bug task, marestail captures the symptom on the real app before t
     And `$PROMPTS/01.txt` contains `none: the task has no selector: line` and no `## Frame`
 
   Scenario: the largest visible match is captured, not the first
-    Given `donate.html` has `<iframe id="pixel" src="/embed.html" style="width:1px;height:1px;border:0"></iframe>` and
-      `<iframe id="ghost" src="/embed.html" style="display:none"></iframe>` right after `<main>`
+    Given `donate.html` has, inserted directly after `<main>` with no whitespace before, between or after them,
+      `<iframe id="pixel" src="/embed.html" style="position:absolute;top:0;left:0;width:1px;height:1px;border:0"></iframe>`
+      then `<iframe id="ghost" src="/embed.html" style="display:none"></iframe>` (both out of flow, so `#widget` stays put)
     And `tasks/t.md` says `selector: iframe` and the plan is `specify observed`, `judge PASS`
     When I run `marestail run tasks/t.md --to critic --auto`
     Then `reported/desktop/geometry.json` has `box` `{"x": 434, "y": 100, "width": 440, "height": 200}`

@@ -45,8 +45,9 @@ first on PATH. Work in `$T=/tmp/mt-repro`, wrappers in `$W=/tmp/mt-repro-bin`. R
 14. Remove the `where:` line from `tasks/t.md`; plan `specify`, `judge PASS`; run step 3's command.
     Expected: `== specifier (` then `== critic (` print and no line starts `== reported` or `reported`;
     `echo $?` prints 0; `.marestail/runs/t/visual/reported` does not exist. Restore the `where:` line.
-15. Change `selector:` to `iframe` and add `<iframe id="pixel" src="/embed.html" style="width:1px;height:1px;border:0"></iframe>`
-    right after `<main>` in `donate.html` (commit it). Plan as step 3; run step 3's command.
+15. Change `selector:` to `iframe` and insert
+    `<iframe id="pixel" src="/embed.html" style="position:absolute;top:0;left:0;width:1px;height:1px;border:0"></iframe>`
+    in `donate.html` directly after `<main>`, with no whitespace before or after it (commit it). Plan as step 3; run step 3's command.
     Expected: exit 0; `reported/desktop/geometry.json` has box `434,100 440x200`; `markup.html` has no `pixel`.
     Undo both changes (commit).
 16. Set the iframe's `src` to `/missing.html` (commit). Plan as step 3; run step 3's command.
