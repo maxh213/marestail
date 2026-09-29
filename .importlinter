@@ -10,7 +10,7 @@ layers =
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail._hyper
     marestail._install | marestail._tooling
-    marestail.prompts : marestail.audit : marestail.practices : marestail.hunks
+    marestail.prompts : marestail.audit : marestail.practices : marestail.hunks : marestail.reported
     marestail.gates
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
@@ -25,6 +25,7 @@ source_modules =
     marestail.gates
 forbidden_modules =
     marestail.hunks
+    marestail.reported
     marestail.runner
     marestail.cli
     marestail.prompts
@@ -229,7 +230,7 @@ allowed_importers =
     marestail.gates.visual
 
 [importlinter:contract:visual-has-one-entry-point]
-name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge, judge prompt and records are private
+name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge, judge prompt, reported capture and records are private
 type = protected
 protected_modules =
     marestail.gates.visual._model
@@ -237,6 +238,7 @@ protected_modules =
     marestail.gates.visual._capture
     marestail.gates.visual._judge
     marestail.gates.visual._pictures
+    marestail.gates.visual._reported
 allowed_importers =
     marestail.gates.visual
 
@@ -482,3 +484,37 @@ forbidden_modules =
     marestail.timeline
     marestail.ran_against
     marestail.context
+
+[importlinter:contract:visual-gate-parts-never-see-the-reported-bug]
+name = The visual gate's spec, capture, judge and judge prompt know nothing of the reported bug; the reported capture sits on top of them
+type = forbidden
+source_modules =
+    marestail.gates.visual._model
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates.visual._pictures
+forbidden_modules =
+    marestail.gates.visual._reported
+
+[importlinter:contract:reported-bug-has-one-caller]
+name = Reproducing a bug first is the runner's step; nothing else reaches the reported-bug module
+type = protected
+protected_modules =
+    marestail.reported
+allowed_importers =
+    marestail.runner
+
+[importlinter:contract:reported-bug-does-no-io-of-its-own]
+name = The reported-bug module decides when to reproduce and what the spec roles are told; capturing lives in the visual gate and agents in the backends
+type = forbidden
+source_modules =
+    marestail.reported
+forbidden_modules =
+    marestail.shell
+    marestail.worktree
+    marestail.backends
+    marestail.prompts
+    marestail.pipeline
+    marestail.gates._serve
+allow_indirect_imports = True

@@ -5,12 +5,12 @@ from typing import Any
 
 import pytest
 
-from marestail import prompts, runner
+from marestail import prompts, reported, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.gates import visual as visual_gate
-from marestail.gates.visual._model import Report, Reproduction
-from marestail.pipeline import Judge, Worker, window
+from marestail.gates.visual import Report, Reproduction
+from marestail.pipeline import Judge, Worker
 from marestail.route import Choice
 from marestail.runner import Run
 
@@ -231,102 +231,21 @@ def test_reset_attempt_forgets_who_judged(tmp_path: Path) -> None:
     assert (state.judged_by, state.blind, state.unseen) == ("", False, True)
 
 
-SPECIFIER = Worker("specifier", None)
 REPORT = Report("t", "/donate.html", "square", "#widget")
-OBSERVED = "spec written\n## Observed\nthe frame is 440px\n- radius does not clip: does not hold\n## Left\nnothing\n"
 
 
-def reproducing(root: Path, **fields: Any) -> Run:
-    return make_state(root, reproduction=Reproduction(REPORT, "abc", ["desktop"], {}), **fields)
+def test_bug_for_hands_the_run_to_the_reported_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sections = patch(monkeypatch, reported, "prompt_sections", {"Reported": "BODY"})
+    state = make_state(tmp_path, agent="kilo", reproduction=Reproduction(REPORT, "abc", ["desktop"], {}))
+    assert runner.bug_for(state, "critic") == {"Reported": "BODY"}
+    assert sections.calls == [(state.config, state.reproduction, "critic", state.handoffs, "kilo")]
 
 
-def handoff(state: Run, name: str, text: str) -> Path:
-    path = state.handoffs / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-    return path
-
-
-def test_first_spec_step_finds_the_specifier_or_the_critic() -> None:
-    assert runner.first_spec_step(window(None, None)) == "specifier"
-    assert runner.first_spec_step(window("critic", None)) == "critic"
-    assert runner.first_spec_step(window("coder", "coder")) == ""
-
-
-def test_reproduced_skips_windows_without_a_spec_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    report = patch(monkeypatch, visual_gate, "bug_report", REPORT)
-    reproduce = patch(monkeypatch, visual_gate, "reproduce", None)
+def test_verify_worker_asks_the_reported_module_about_the_handoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    problems = patch(monkeypatch, reported, "handoff_problems", ["missing ## Observed section in h.md"])
+    for name in ("missing_handoff", "changed_paths", "frozen_problems", "hunk_problems", "audit_problems", "gate_problems"):
+        patch(monkeypatch, runner, name, [])
     state = make_state(tmp_path)
-    assert runner.reproduced(state, window("coder", "coder")) is True
-    assert (report.calls, reproduce.calls) == ([], [])
-
-
-def test_reproduced_skips_tasks_without_a_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    report = patch(monkeypatch, visual_gate, "bug_report", None)
-    reproduce = patch(monkeypatch, visual_gate, "reproduce", None)
-    state = make_state(tmp_path)
-    assert runner.reproduced(state, window(None, "critic")) is True
-    assert report.calls == [(state.config, state.task)]
-    assert reproduce.calls == []
-
-
-def test_reproduced_keeps_the_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = Reproduction(REPORT, "abc", ["desktop"], {})
-    patch(monkeypatch, visual_gate, "bug_report", REPORT)
-    reproduce = patch(monkeypatch, visual_gate, "reproduce", captured)
-    state = make_state(tmp_path)
-    assert runner.reproduced(state, window(None, "critic")) is True
-    assert state.reproduction == captured
-    assert reproduce.calls == [(state.config, REPORT)]
-
-
-def test_reproduced_stops_before_the_first_spec_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
-    patch(monkeypatch, visual_gate, "bug_report", REPORT)
-    patch(monkeypatch, visual_gate, "reproduce", None)
-    assert runner.reproduced(make_state(tmp_path), window("critic", "critic")) is False
-    assert capsys.readouterr().out == "pipeline stopped before critic: the bug could not be reproduced\n"
-
-
-def test_bug_for_only_with_a_capture_and_only_for_spec_roles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    section = patch(monkeypatch, visual_gate, "reported_section", "BODY")
-    assert runner.bug_for(make_state(tmp_path), "specifier") == {}
-    assert runner.bug_for(reproducing(tmp_path), "coder") == {}
-    assert section.calls == []
-
-
-def test_bug_for_asks_the_specifier_for_observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    section = patch(monkeypatch, visual_gate, "reported_section", "BODY")
-    state = reproducing(tmp_path, agent="kilo")
-    assert runner.bug_for(state, "specifier") == {"Reported": f"BODY\n{runner.ASK_OBSERVED}"}
-    assert section.calls == [(state.config, state.reproduction, "kilo")]
-
-
-def test_bug_for_gives_the_critic_the_newest_observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    patch(monkeypatch, visual_gate, "reported_section", "BODY")
-    state = reproducing(tmp_path)
-    assert runner.bug_for(state, "critic") == {"Reported": "BODY", "Observed": ""}
-    handoff(state, "01-specifier.md", "old\n## Observed\nfirst\n")
-    handoff(state, "02-critic.md", "## Observed\nnot mine\n")
-    handoff(state, "03-specifier.md", OBSERVED)
-    assert runner.bug_for(state, "critic") == {
-        "Reported": "BODY",
-        "Observed": "the frame is 440px\n- radius does not clip: does not hold",
-    }
-
-
-def test_observed_body_and_heading() -> None:
-    assert runner.observed_body("## Observed\nall of it") == "all of it"
-    assert runner.observed_body("no section\n### Observed\nx") == ""
-    assert runner.has_observed("x\n## Observed  \n") is True
-    assert runner.has_observed("x ## Observed") is False
-
-
-def test_observed_problems_only_for_a_reproduced_specifier(tmp_path: Path) -> None:
-    plain = make_state(tmp_path)
-    state = reproducing(tmp_path)
-    report = handoff(state, "01-specifier.md", "spec written\n")
-    assert runner.observed_problems(plain, SPECIFIER, report) == []
-    assert runner.observed_problems(state, Worker("coder", None), report) == []
-    assert runner.observed_problems(state, SPECIFIER, report) == ["missing ## Observed section in .marestail/handoffs/t/01-specifier.md"]
-    report.write_text(OBSERVED)
-    assert runner.observed_problems(state, SPECIFIER, report) == []
+    report = tmp_path / "01-specifier.md"
+    assert runner.verify_worker(state, Worker("specifier", None), report, "before") == "missing ## Observed section in h.md"
+    assert problems.calls == [(state.config, None, "specifier", report)]

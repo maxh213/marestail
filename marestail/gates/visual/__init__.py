@@ -1,7 +1,6 @@
 import os
 import time
 from pathlib import Path
-from typing import Any
 
 from marestail import worktree
 from marestail.config import Config
@@ -9,20 +8,28 @@ from marestail.context import Context
 from marestail.gates.visual import _capture as capture
 from marestail.gates.visual import _judge as judge
 from marestail.gates.visual import _spec as spec_module
-from marestail.gates.visual._model import Report, Reproduction, Shot, Spec, TreeRun
+from marestail.gates.visual._model import Report, Reproduction, Spec, TreeRun
 from marestail.gates.visual._pictures import judge_section, judge_skip
-from marestail.gates.visual._reported import reported_section
+from marestail.gates.visual._reported import reported_section, reproduce
 from marestail.gates.visual._spec import bug_report
 from marestail.report import Result, elapsed
 
-__all__ = ["Reproduction", "bug_report", "capture_command", "judge_section", "judge_skip", "reported_section", "reproduce", "run_gate"]
+__all__ = [
+    "Report",
+    "Reproduction",
+    "bug_report",
+    "capture_command",
+    "judge_section",
+    "judge_skip",
+    "reported_section",
+    "reproduce",
+    "run_gate",
+]
 
 _GATE = "visual"
 _TASK_ENV = "MARESTAIL_TASK"
 _GATE_CAPTURES = 2
 _HAND_CAPTURES = 1
-_STATUS = "status"
-_BASE = "base"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -114,42 +121,3 @@ def _folder_lines(config: Config, spec: Spec, runs: list[TreeRun]) -> list[str]:
 
 def _shown_path(config: Config, path: Path) -> str:
     return str(path.relative_to(config.root))
-
-
-def reproduce(config: Config, report: Report) -> Reproduction | None:
-    print(f"== reported ({report.where} at the start commit)")
-    sha, _ = worktree.start_commit(config, report.task)
-    run, reasons = _reported_run(config, report, sha)
-    if run is None or reasons:
-        print("\n".join(f"reported: {line}" for line in reasons))
-        return None
-    print("\n".join(_reported_folders(config, report, run)))
-    return Reproduction(report, sha, list(run.shots), _frames(run))
-
-
-def _reported_folders(config: Config, report: Report, run: TreeRun) -> list[str]:
-    folder = spec_module.reported_dir(config, report.task)
-    return [f"reported {name}: {_shown_path(config, folder / name)}" for name in run.shots]
-
-
-def _frames(run: TreeRun) -> dict[str, dict[str, Any] | None]:
-    return {name: shot.details.get("frame") for name, shot in run.shots.items()}
-
-
-def _reported_run(config: Config, report: Report, sha: str) -> tuple[TreeRun | None, list[str]]:
-    spec, problems = _checked(spec_module.reported_spec(config, report))
-    if spec is None:
-        return None, problems
-    run = capture.capture_reported(config, spec, sha)
-    return run, run.problems or _shot_reasons(run, spec)
-
-
-def _shot_reasons(run: TreeRun, spec: Spec) -> list[str]:
-    lines = [line for name, shot in run.shots.items() for line in _view_reasons(name, shot, spec)]
-    return list(dict.fromkeys(lines))
-
-
-def _view_reasons(name: str, shot: Shot, spec: Spec) -> list[str]:
-    if shot.failure == _STATUS:
-        return [f"{spec.block.route} answered {shot.details[_STATUS]}"]
-    return judge.stop_findings(name, [(_BASE, shot)], spec)

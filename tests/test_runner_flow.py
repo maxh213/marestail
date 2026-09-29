@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import hunks, pipeline, prompts, ran_against, runner
+from marestail import hunks, pipeline, prompts, ran_against, reported, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -1367,3 +1367,14 @@ def test_ending_for_a_pass_nobody_saw(tmp_path: Path, capsys: Any) -> None:
     state.ran_against = "harness"
     assert runner.ending_for(state, [find("qa")]) == 3
     assert capsys.readouterr().out == ran_against.finish("harness", True)[0] + "\n"
+
+
+def test_run_pipeline_keeps_the_reproduction_and_stops_when_it_fails(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    first = patch(monkeypatch, reported, "reproduce_first", ("CAPTURE", True), (None, False))
+    assert runner.run_pipeline(Path("t.md"), "specifier", "critic", True, None, 0) == 7
+    state = pipeline_env["state"]
+    assert state.reproduction == "CAPTURE"
+    assert first.calls == [(state.config, state.task, ["specifier", "critic"])]
+    pipeline_env.pop("state")
+    assert runner.run_pipeline(Path("t.md"), "specifier", "critic", True, None, 0) == 1
+    assert "state" not in pipeline_env
