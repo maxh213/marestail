@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 VALUES = 200
-WARMUP = 5
+WARMUP = 10
 TOML = "marestail.toml"
 FALLBACK = {
     "git": {"base": "origin/main"},
