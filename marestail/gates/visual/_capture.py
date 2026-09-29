@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from marestail import worktree
 from marestail.config import Config
@@ -25,7 +26,7 @@ _CHECK_TIMEOUT = 120
 _NODE_STARTUP_SECONDS = 60
 _WAITS_PER_LOAD = 4
 _TREES = ("base", "head")
-_FULL_URL = ("http://", "https://")
+_WEB_SCHEMES = ("http", "https")
 _MARKUP_LIMIT = 200
 _INDENT = "  "
 _FRAME_KEYS = ("url", "width", "height", "status", "largest")
@@ -52,7 +53,7 @@ def capture_trees(config: Config, spec: Spec, sha: str, captures: int) -> tuple[
 def capture_reported(config: Config, spec: Spec, sha: str) -> TreeRun:
     folder = visual_dir(config, spec.task)
     shutil.rmtree(folder / REPORTED, ignore_errors=True)
-    if spec.block.route.startswith(_FULL_URL):
+    if urlsplit(spec.block.route).scheme in _WEB_SCHEMES:
         tree = Tree(REPORTED, "base", config.root)
         return TreeRun(tree, [], _shots(spec, "", folder / REPORTED, 1, _reported_shot))
     with _scratch(config.root) as path:
