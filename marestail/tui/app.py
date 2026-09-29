@@ -3,7 +3,7 @@ import locale
 import time
 from pathlib import Path
 
-from .collect import collect_fleet
+from .collect import REMOTE_MARK, collect_fleet
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
 from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
 
@@ -128,7 +128,9 @@ def draw_header(win: curses.window, width: int, state: WatchState) -> None:
 def status_text(state: WatchState) -> str:
     fleet = state.fleet
     beds = len(fleet.repos) if fleet is not None else 0
-    return f"{beds} beds · {len(worker_rows(fleet))} workers · {time.strftime('%H:%M:%S')} "
+    remote = sum(1 for repo in fleet.repos if (repo.gate_activity or "").startswith(REMOTE_MARK)) if fleet is not None else 0
+    on_vm = f"{REMOTE_MARK} {remote} on vm · " if remote else ""
+    return f"{on_vm}{beds} beds · {len(worker_rows(fleet))} workers · {time.strftime('%H:%M:%S')} "
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:

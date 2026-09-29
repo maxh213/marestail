@@ -426,7 +426,14 @@ def classify_gate(tokens: list[str]) -> str | None:
     return gate_label(tokens, names)
 
 
+REMOTE_MARK = "☁"
+REMOTE_TOOLS = ("muex", "stryker", "mutmut")
+
+
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
+    remote = remote_label(tokens, names)
+    if remote is not None:
+        return remote
     if "muex" in names:
         return "muex"
     mix = after(tokens, "mix")
@@ -453,6 +460,22 @@ def gate_label(tokens: list[str], names: list[str]) -> str | None:
             return tool
     if "erlc" in names or any("eunit" in token for token in tokens):
         return "eunit"
+    return None
+
+
+def remote_label(tokens: list[str], names: list[str]) -> str | None:
+    alias = re.search(r"HostKeyAlias=(\S+)", " ".join(tokens))
+    host = alias.group(1) if alias else None
+    if names and names[0] == "gcloud" and "instances" in tokens and "start" in tokens:
+        return f"{REMOTE_MARK} starting {after(tokens, 'start') or 'vm'}"
+    if host is None:
+        return None
+    if names[0] == "rsync":
+        return f"{REMOTE_MARK} syncing to {host}"
+    command = " ".join(tokens)
+    if names[0] == "ssh" and "busy.d" in command:
+        tool = next((tool for tool in REMOTE_TOOLS if tool in command), "gate")
+        return f"{REMOTE_MARK} {tool} on {host}"
     return None
 
 
