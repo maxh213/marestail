@@ -139,7 +139,7 @@ def add_visual(parser: argparse.ArgumentParser) -> None:
 
 
 def visual_capture_command(args: argparse.Namespace) -> int:
-    from marestail.gates.qa import visual
+    from marestail.gates import visual
 
     task = args.task or os.environ.get("MARESTAIL_TASK")
     if not task:

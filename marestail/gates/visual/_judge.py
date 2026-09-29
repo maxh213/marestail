@@ -2,8 +2,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from marestail.gates.qa._visual_capture import Shot, TreeRun
-from marestail.gates.qa._visual_spec import Block, Spec
+from marestail.gates.visual._model import Block, Shot, Spec, TreeRun
 
 _NOT_FOUND = "not_found"
 _WAIT = "wait"
@@ -160,9 +159,7 @@ def _inside_lines(name: str, block: Block, base: _Geometry, head: _Geometry, tol
         return []
     box = head["box"]
     if box["width"] > outer["width"] + tolerance:
-        return [
-            f"{name}: {block.selector} is {box['width']}px wide, {block.inside} is {outer['width']}px (base: {base['box']['width']}px)"
-        ]
+        return [f"{name}: {block.selector} is {box['width']}px wide, {block.inside} is {outer['width']}px (base: {base['box']['width']}px)"]
     return _edge_lines(name, block, base["box"], box, outer, tolerance)
 
 

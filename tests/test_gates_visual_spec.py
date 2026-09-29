@@ -5,8 +5,8 @@ from typing import Any
 import pytest
 
 from marestail.config import Config
-from marestail.gates.qa import _visual_spec as spec_module
-from marestail.gates.qa._visual_spec import Block, Viewport
+from marestail.gates.visual import _spec as spec_module
+from marestail.gates.visual._model import Block, Viewport
 
 BLOCK = """# QA
 

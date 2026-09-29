@@ -1,9 +1,9 @@
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from marestail.config import Config
+from marestail.gates.visual._model import Block, Settings, Spec, Viewport
 
 SECTION = "visual"
 _KEYS = ("route", "selector", "scroll", "wait", "styles", "inside", "unchanged", "must_not_change", "symptom")
@@ -18,51 +18,6 @@ _DEFAULT_READY_TIMEOUT = 180
 _DEFAULT_TOLERANCE = 2
 _DEFAULT_CAPTURE_TIMEOUT = 30
 _DEFAULT_SETUP_TIMEOUT = 900
-
-
-@dataclass(frozen=True)
-class Viewport:
-    name: str
-    width: int
-    height: int
-    scale: float
-    touch: bool
-
-
-@dataclass(frozen=True)
-class Block:
-    route: str
-    selector: str
-    scroll: bool
-    wait: str
-    styles: list[str]
-    inside: str
-    unchanged: list[str]
-    must_not_change: list[str]
-    symptom: str
-
-
-@dataclass(frozen=True)
-class Settings:
-    start: str
-    setup: str
-    ready: str
-    port: int
-    env: dict[str, str]
-    viewports: list[Viewport]
-    hide: list[str]
-    block: list[str]
-    tolerance: int
-    capture_timeout: int
-    setup_timeout: int
-    ready_timeout: int
-
-
-@dataclass(frozen=True)
-class Spec:
-    task: str
-    block: Block
-    settings: Settings
 
 
 def _qa_file(config: Config, task: str) -> Path:

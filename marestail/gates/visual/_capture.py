@@ -1,18 +1,15 @@
 import json
-import os
 import re
 import shutil
-import subprocess
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from marestail import worktree
 from marestail.config import Config
 from marestail.gates import _serve
-from marestail.gates.qa._visual_spec import Spec, Viewport
-from marestail.shell import ensure_dir, run, tail
+from marestail.gates.visual._model import Shot, Spec, Tree, TreeRun, Viewport
+from marestail.shell import run, tail
 
 _JS_DIR = Path(__file__).resolve().parent.parent.parent / "js"
 _SCRIPT = _JS_DIR / "visual.mjs"
@@ -24,26 +21,6 @@ _CHROMIUM_MISSING = "Playwright Chromium missing; run marestail install"
 _CHECK_TIMEOUT = 120
 _NODE_STARTUP_SECONDS = 60
 _WAITS_PER_LOAD = 4
-
-
-@dataclass(frozen=True)
-class Tree:
-    folder: str
-    label: str
-    path: Path
-
-
-@dataclass
-class Shot:
-    geometries: list[dict[str, Any]]
-    failure: str | None
-
-
-@dataclass
-class TreeRun:
-    tree: Tree
-    problems: list[str] = field(default_factory=list)
-    shots: dict[str, Shot] = field(default_factory=dict)
 
 
 def visual_dir(config: Config, task: str) -> Path:
@@ -83,30 +60,11 @@ def _base_run(root: Path, tree: Tree, sha: str, spec: Spec, folder: Path, captur
 def _setup_problems(tree: Tree, spec: Spec, log_path: Path) -> list[str]:
     if not spec.settings.setup:
         return []
-    code = _run_setup(tree.path, spec, log_path)
+    code = _serve.run_logged(spec.settings.setup, tree.path, spec.settings.env, log_path, spec.settings.setup_timeout)
     if code == 0:
         return []
     first = f"base: setup failed (exit {code})" if code is not None else f"base: setup did not finish within {spec.settings.setup_timeout}s"
     return [first, *_log_detail(log_path)]
-
-
-def _run_setup(cwd: Path, spec: Spec, log_path: Path) -> int | None:
-    ensure_dir(log_path.parent)
-    with log_path.open("w") as handle:
-        process = subprocess.Popen(
-            ["bash", "-lc", spec.settings.setup],
-            cwd=cwd,
-            env={**os.environ, **spec.settings.env},
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        try:
-            return process.wait(timeout=spec.settings.setup_timeout)
-        except subprocess.TimeoutExpired:
-            return None
-        finally:
-            _serve.stop(process)
 
 
 def _served(tree: Tree, spec: Spec, preferred: int, folder: Path, captures: int) -> TreeRun:

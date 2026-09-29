@@ -17,8 +17,7 @@ from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
 from marestail.context import Context
-from marestail.gates import Gate
-from marestail.gates.qa import visual
+from marestail.gates import Gate, visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup

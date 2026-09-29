@@ -14,7 +14,7 @@ layers =
     marestail.gates
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
-    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree
     marestail.report : marestail.config : marestail.changes : marestail._location
     marestail.shell
 
@@ -57,6 +57,7 @@ source_modules =
     marestail.sonar.client
     marestail.timeline
     marestail.ran_against
+    marestail.worktree
 forbidden_modules =
     marestail.hunks
     marestail.gates
@@ -216,14 +217,83 @@ modules =
     marestail.gates.ts_lint
     marestail.gates.ts_mutation
     marestail.gates.ts_tests
+    marestail.gates.visual
 
 [importlinter:contract:serve-belongs-to-qa]
-name = The app lifecycle is private to the qa gate
+name = The app lifecycle is private to the two gates that start the target's app: qa and visual
 type = protected
 protected_modules =
     marestail.gates._serve
 allowed_importers =
     marestail.gates.qa
+    marestail.gates.visual
+
+[importlinter:contract:visual-has-one-entry-point]
+name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge and records are private
+type = protected
+protected_modules =
+    marestail.gates.visual._model
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+allowed_importers =
+    marestail.gates.visual
+
+[importlinter:contract:visual-records-are-plain-data]
+name = The visual records import nothing from marestail
+type = forbidden
+source_modules =
+    marestail.gates.visual._model
+forbidden_modules =
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+    marestail.config
+
+[importlinter:contract:visual-judge-is-pure]
+name = Judging geometry reads records only, never the config, git, the app or the browser
+type = forbidden
+source_modules =
+    marestail.gates.visual._judge
+forbidden_modules =
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+    marestail.config
+
+[importlinter:contract:visual-spec-starts-nothing]
+name = Reading the visual block and section starts no process and never judges
+type = forbidden
+source_modules =
+    marestail.gates.visual._spec
+forbidden_modules =
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+
+[importlinter:contract:visual-capture-never-judges]
+name = Capturing writes pictures and geometry and never decides what a finding is
+type = forbidden
+source_modules =
+    marestail.gates.visual._capture
+forbidden_modules =
+    marestail.gates.visual._judge
+
+[importlinter:contract:worktree-belongs-to-baselines]
+name = Detached baseline worktrees and the task's start commit are used only by the perf trees and the visual gate
+type = protected
+protected_modules =
+    marestail.worktree
+allowed_importers =
+    marestail.perf.trees
+    marestail.gates.visual
 
 [importlinter:contract:protect-location-internals]
 name = Reading a path:line out of finding text is private to the context's changed-line filter

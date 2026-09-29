@@ -38,6 +38,25 @@ def ready_app(
         _end_app(process, handle)
 
 
+def run_logged(command: str, cwd: Path, env: dict[str, str], log_path: Path, seconds: int) -> int | None:
+    ensure_dir(log_path.parent)
+    with log_path.open("w") as handle:
+        process = subprocess.Popen(
+            ["bash", "-lc", command],
+            cwd=cwd,
+            env={**os.environ, **env},
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            return process.wait(timeout=seconds)
+        except subprocess.TimeoutExpired:
+            return None
+        finally:
+            _stop(process)
+
+
 def _chosen_port(preferred: int) -> int:
     return preferred if _can_bind(preferred) else _free_port()
 
@@ -77,7 +96,7 @@ def _wait_ready(url: str, process: subprocess.Popen[Any], seconds: int) -> str |
         if _answers(url):
             return None
         time.sleep(0.2)
-    stop(process)
+    _stop(process)
     return f"app did not answer on {url} within {seconds}s"
 
 
@@ -98,11 +117,11 @@ def _answers(url: str) -> bool:
 
 def _end_app(process: subprocess.Popen[Any] | None, handle: TextIO) -> None:
     if process is not None:
-        stop(process)
+        _stop(process)
     handle.close()
 
 
-def stop(process: subprocess.Popen[Any]) -> None:
+def _stop(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
     try:

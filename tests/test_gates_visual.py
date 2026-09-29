@@ -4,8 +4,8 @@ from typing import Any
 import pytest
 
 from marestail.config import Config
-from marestail.gates.qa import visual
-from marestail.gates.qa._visual_capture import Shot, Tree, TreeRun
+from marestail.gates import visual
+from marestail.gates.visual._model import Shot, Tree, TreeRun
 from tests.conftest import gate_shape, make_context
 
 BLOCK = "```visual\nroute: /donate.html\nselector: #widget\nsymptom: runs over the text\n```\n"

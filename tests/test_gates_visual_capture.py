@@ -8,9 +8,8 @@ from typing import Any
 import pytest
 
 from marestail.config import Config
-from marestail.gates.qa import _visual_capture as capture
-from marestail.gates.qa._visual_capture import Shot, Tree, TreeRun
-from marestail.gates.qa._visual_spec import Block, Settings, Spec, Viewport
+from marestail.gates.visual import _capture as capture
+from marestail.gates.visual._model import Block, Settings, Shot, Spec, Tree, TreeRun, Viewport
 from tests.conftest import FakeRun
 
 DESKTOP = Viewport("desktop", 1440, 900, 1, False)

@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from marestail.gates.qa import _visual_judge as judge
-from marestail.gates.qa._visual_capture import Shot, Tree, TreeRun
-from marestail.gates.qa._visual_spec import Block, Settings, Spec, Viewport
+from marestail.gates.visual import _judge as judge
+from marestail.gates.visual._model import Block, Settings, Shot, Spec, Tree, TreeRun, Viewport
 
 DESKTOP = Viewport("desktop", 1440, 900, 1, False)
 PHONE = Viewport("phone", 390, 844, 2, True)

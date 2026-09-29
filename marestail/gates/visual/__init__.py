@@ -5,10 +5,10 @@ from pathlib import Path
 from marestail import worktree
 from marestail.config import Config
 from marestail.context import Context
-from marestail.gates.qa import _visual_capture as capture
-from marestail.gates.qa import _visual_judge as judge
-from marestail.gates.qa import _visual_spec as spec_module
-from marestail.gates.qa._visual_spec import Spec
+from marestail.gates.visual import _capture as capture
+from marestail.gates.visual import _judge as judge
+from marestail.gates.visual import _spec as spec_module
+from marestail.gates.visual._model import Spec, TreeRun
 from marestail.report import Result, elapsed
 
 _GATE = "visual"
@@ -87,13 +87,13 @@ def _hand_capture(config: Config, task: str) -> int:
     return _report_capture(config, spec, [base, head])
 
 
-def _report_capture(config: Config, spec: Spec, runs: list[capture.TreeRun]) -> int:
+def _report_capture(config: Config, spec: Spec, runs: list[TreeRun]) -> int:
     problems = [line for run in runs for line in run.problems]
     print("\n".join(problems + _folder_lines(config, spec, runs)))
     return 1 if problems else 0
 
 
-def _folder_lines(config: Config, spec: Spec, runs: list[capture.TreeRun]) -> list[str]:
+def _folder_lines(config: Config, spec: Spec, runs: list[TreeRun]) -> list[str]:
     root = capture.visual_dir(config, spec.task)
     folders = [(run.tree.folder, name) for run in runs for name in run.shots]
     return [f"{folder} {name}: {_shown_path(config, root / folder / name)}" for folder, name in folders]
