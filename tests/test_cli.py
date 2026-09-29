@@ -835,11 +835,12 @@ def test_run_parser_defaults_and_help() -> None:
         helped["--effort"]
         == "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok and hermes: reasoning effort; kilo: variant; junie: low|medium|high); stamped on every commit"
     )
-    assert helped["--agent"] == "agent backend (claude, agy, kimi, grok, cursor, junie, or hermes)"
+    assert helped["--agent"] == "agent backend (claude, agy, kimi, grok, cursor, junie, hermes, or kilo)"
     retries = next(action for action in parser._actions if "--retries" in action.option_strings)
     assert (retries.metavar, retries.type) == ("N", int)
     agent = next(action for action in parser._actions if "--agent" in action.option_strings)
     assert list(agent.choices or []) == list(cli.AGENT_CHOICES)
+    assert "kilo" in cli.AGENT_CHOICES
     assert positional_help(parser)["task"] == cli.HELP_TASK
     scope = next(action for action in parser._actions if "--scope" in action.option_strings)
     assert list(scope.choices or []) == list(cli.SCOPE_CHOICES)

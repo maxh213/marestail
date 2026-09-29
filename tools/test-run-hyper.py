@@ -455,7 +455,7 @@ def readme_documents() -> None:
     table = text[text.index("## Pipeline") : text.index("The Gate column")]
     rows = [line.split(" | ") for line in table.splitlines() if line.startswith("| ") and "---" not in line]
     expect("readme-header", rows[0][:4], ["| Step", "Kind", "Gate", "hyper"])
-    expect("readme-hyper", [row[3] for row in rows[1:]], ["none", "none", "full", "—", "full", "—", "—", "none", "full", "qa"])
+    expect("readme-hyper", [row[3] for row in rows[1:]], ["none", "none", "full", "—", "full", "—", "—", "none", "full", "visual", "qa"])
     expect("readme-blast", [row[0] for row in rows[7:10]], ["| perf", "| blast", "| hardener"])
     expect("readme-blast-row", rows[8][:4], ["| blast", "judge", "—", "none"])
     paragraph = text[text.index("The Gate column is") :].split("\n\n", 1)[0]

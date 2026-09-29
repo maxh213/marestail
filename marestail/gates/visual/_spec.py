@@ -36,10 +36,15 @@ def skip_reason(config: Config, task: str) -> str | None:
 
 
 def _missing_block(config: Config, task: str) -> str | None:
+    problem = block_problem(config, task)
+    return f"visual: {problem}; skipped" if problem else None
+
+
+def block_problem(config: Config, task: str) -> str:
     path = _qa_file(config, task)
     if not path.exists():
-        return f"visual: no qa/{task}.md; skipped"
-    return None if _block_lines(path.read_text()) is not None else f"visual: no block in qa/{task}.md; skipped"
+        return f"no qa/{task}.md"
+    return "" if _block_lines(path.read_text()) is not None else f"no block in qa/{task}.md"
 
 
 def _block_lines(text: str) -> list[str] | None:

@@ -72,6 +72,11 @@ def test_mono_and_glyphs() -> None:
     assert len(theme.full_vine(5)) == 5
 
 
+def test_visual_is_coloured_as_a_judge() -> None:
+    mono = theme.mono_theme()
+    assert theme.role_attr(mono, "visual") == theme.role_attr(mono, "hardener") == mono.judge
+
+
 def test_color_theme(monkeypatch: Any) -> None:
     monkeypatch.setattr(theme, "curses", FakeCurses)
     monkeypatch.setattr(FakeCurses, "colors_on", True)

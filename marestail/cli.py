@@ -9,6 +9,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from marestail import backends
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -40,7 +41,7 @@ TREE = "--tree"
 TUI_APP = "marestail.tui.app"
 SCOPE_CHOICES = ("all", "changed", "hard", "hyper")
 TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
-AGENT_CHOICES = tuple(dict.fromkeys(route_module.BACKENDS.values()))
+AGENT_CHOICES = tuple(dict.fromkeys([*route_module.BACKENDS.values(), backends.KILO]))
 HELP_TASK = "path to the task file"
 HELP_GATE_SCOPE = (
     "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths; "

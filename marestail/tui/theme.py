@@ -10,7 +10,7 @@ GLYPH_PASSED = "✔"
 GLYPH_IDLE = "○"
 GLYPH_SECTION = "◆"
 
-JUDGE_ROLES = frozenset({"critic", "practices", "perf", "hardener"})
+JUDGE_ROLES = frozenset({"critic", "practices", "perf", "hardener", "visual"})
 STATUS_RUNNING = "running"
 VERDICT_BOUNCE = "BOUNCE"
 VERDICT_PASS = "PASS"

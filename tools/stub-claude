@@ -83,6 +83,9 @@ elif words[0] == "architect":
     listed = {"no-hunks": [], "util": ["- util.py:3-3 — the fix needs it"], "extract": ["- src.py:1-6 — boy scout: named the increment in add_one"]}
     h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True)
     h.write_text(f"architect done\n{hunks_section(listed.get(tag, ['- src.py:1-2 — the fix needs it']))}")
+elif words[0] == "limit":
+    print(json.dumps({"is_error": True, "result": "rate limit exceeded"}))
+    sys.exit(1)
 elif words[0] == "worker":
     role = words[1]
     Path("note.txt").write_text(action + "\n"); commit(role, "note.txt")

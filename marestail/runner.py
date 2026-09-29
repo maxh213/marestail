@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import os
 import re
 import shutil
@@ -34,6 +35,7 @@ from marestail.backends import (
 from marestail.config import Config
 from marestail.context import focus_clash, hook_focus, resolve_focus
 from marestail.gates import run_gates
+from marestail.gates.visual import pictures
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene as perf_hygiene
 from marestail.perf import review as perf_review
@@ -50,6 +52,10 @@ AUTHOR = "AUTHOR"
 PERF = "perf"
 BLAST = "blast"
 QA = "qa"
+VISUAL = "visual"
+JUDGE_MODEL = "claude-fable-5-1"
+GEOMETRY_ONLY = " (geometry only, pictures not seen)"
+RUN_SETTINGS = ("agent", "model", "effort", "route", "account_env", "account")
 CONFIG_CHANGE = "## Config change"
 MISSING_RAN_AGAINST = ran_against.MISSING
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
@@ -141,6 +147,9 @@ class Run:
     attempt_agent: dict[str, Any] | None = None
     ran_against: str | None = None
     start: str = ""
+    judged_by: str = ""
+    blind: bool = False
+    unseen: bool = False
 
     @property
     def task_name(self) -> str:
@@ -161,7 +170,8 @@ class Run:
         return self.focus if self.hard else None
 
     def gates(self, tier: str) -> list[Result]:
-        return run_gates(tier, self.scope_changed, None, self.focus, self.hard, self.hyper)
+        wanted, only = gate_tier(tier)
+        return run_gates(wanted, self.scope_changed, only, self.focus, self.hard, self.hyper)
 
     @property
     def folder(self) -> Path:
@@ -175,6 +185,12 @@ class Run:
         ensure_dir(self.handoffs)
         existing = list(self.handoffs.glob("*.md"))
         return self.handoffs / f"{len(existing) + 1:02d}-{role}.md"
+
+
+def gate_tier(tier: str) -> tuple[str, set[str] | None]:
+    if tier == VISUAL:
+        return QA, {VISUAL}
+    return tier, None
 
 
 @dataclass
@@ -210,7 +226,7 @@ def run_pipeline(
     state = make_run(config, task, retries, agent, picked, scoped)
     state.start = head(config)
     perf_trees.record_start(config, state.task_name)
-    outcome = run_steps(state, window(start, stop, state.scope_name), auto)
+    outcome = run_steps(state, window(start, stop, state.scope_name, config.section(VISUAL) is not None), auto)
     print(proposals_summary(state))
     if state.perf_changes:
         print(state.perf_changes)
@@ -303,20 +319,20 @@ def includes_qa(steps: list[Step]) -> bool:
     return any(step.name == QA for step in steps)
 
 
-def say_complete() -> int:
-    line, code = ran_against.finish("app")
+def say_complete(by_eye: bool = True) -> int:
+    line, code = ran_against.finish("app", by_eye)
     print(line)
     return code
 
 
 def ending_for(state: Run, steps: list[Step]) -> int:
     if not includes_qa(steps):
-        return say_complete()
-    return qa_ending(state.ran_against or "nothing")
+        return say_complete(not state.unseen)
+    return qa_ending(state.ran_against or "nothing", not state.unseen)
 
 
-def qa_ending(against: str) -> int:
-    line, code = ran_against.finish(against)
+def qa_ending(against: str, by_eye: bool = True) -> int:
+    line, code = ran_against.finish(against, by_eye)
     print(line)
     return code
 
@@ -391,7 +407,11 @@ def skip_reason(state: Run, judge: Judge) -> str:
         return f"{judge.name} disabled in marestail.toml; skipping"
     if without_guidance(state, judge):
         return "practices: no guidance files; skipping"
-    return ""
+    return visual_skip(state, judge)
+
+
+def visual_skip(state: Run, judge: Judge) -> str:
+    return pictures.skip_reason(state.config, state.task_name) if judge.name == VISUAL else ""
 
 
 def disabled(state: Run, judge: Judge) -> bool:
@@ -510,6 +530,8 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
 def reset_attempt(state: Run) -> None:
     state.attempt_waits = []
     state.attempt_agent = None
+    state.judged_by = ""
+    state.blind = False
 
 
 def record_attempt(
@@ -583,17 +605,21 @@ def judged(state: Run, judge: Judge, gate: tuple[str, bool, list[Result]], progr
     with measuring(state, judge) as session:
         prepare_perf(state, judge, gate[1], session, progress)
         outcome, progress.feedback = judge_attempt(state, judge, report, gate, session, progress.feedback)
-    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(outcome))
+    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(state, outcome))
     if outcome is not None and outcome[0] == AUTHOR:
         progress.author_requested()
         return None
     return outcome
 
 
-def outcome_verdict(outcome: Verdict | None) -> str | None:
+def outcome_verdict(state: Run, outcome: Verdict | None) -> str | None:
     if outcome is None:
         return None
-    return timeline.verdict_text(outcome[0], outcome[1])
+    return timeline.verdict_text(shown_verdict(state, outcome[0]), outcome[1])
+
+
+def shown_verdict(state: Run, verdict: str) -> str:
+    return verdict + GEOMETRY_ONLY if state.blind and verdict == PASS else verdict
 
 
 def has_author_round(left: int) -> bool:
@@ -638,7 +664,16 @@ def judge_attempt(
 
 def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, session: perf_trees.Session | None, feedback: str) -> str:
     trees = perf_trees.prompt_section(state.config, session) if session else EMPTY
-    prompt = prompts.judge_prompt(
+    build = functools.partial(built_judge_prompt, state, judge, report, (gate_report, trees, feedback))
+    before = head(state.config)
+    ask(state, judge, report.stem, build)
+    discard_edits(state.config, keep=report, writes=judge_writes(judge))
+    return before
+
+
+def built_judge_prompt(state: Run, judge: Judge, report: Path, texts: tuple[str, str, str]) -> str:
+    gate_report, trees, feedback = texts
+    return prompts.judge_prompt(
         state.config,
         judge,
         state.task,
@@ -649,16 +684,68 @@ def judge_session(state: Run, judge: Judge, report: Path, gate_report: str, sess
         feedback,
         state.hard_focus,
         state.hyper,
-        blast_review(state, judge),
+        review_for(state, judge),
     )
-    before = head(state.config)
-    invoke(state, report.stem, prompt)
-    discard_edits(state.config, keep=report, writes=judge_writes(judge))
-    return before
+
+
+def review_for(state: Run, judge: Judge) -> dict[str, str] | None:
+    if judge.name == VISUAL:
+        return {"Visual": pictures.section(state.config, state.task_name, blind_backend(state))}
+    return blast_review(state, judge)
 
 
 def blast_review(state: Run, judge: Judge) -> dict[str, str] | None:
     return hunks.review(state.config, state.start, state.handoffs) if judge.name == BLAST else None
+
+
+def blind_backend(state: Run) -> str:
+    backend = resolve_agent(state)
+    return backend if backend in backends.IMAGE_BLIND else EMPTY
+
+
+def ask(state: Run, judge: Judge, label: str, build: Callable[[], str]) -> None:
+    if judge.name == VISUAL:
+        ask_visual(state, label, build)
+        return
+    invoke(state, label, build())
+
+
+def ask_visual(state: Run, label: str, build: Callable[[], str]) -> None:
+    judge_model = str(state.config.get(VISUAL, "judge_model", JUDGE_MODEL))
+    with judging_with(state, judge_model):
+        answered = look(state, label, build)
+    if not answered:
+        fall_back(state, label, build, judge_model)
+    state.unseen = state.blind
+
+
+@contextlib.contextmanager
+def judging_with(state: Run, model: str) -> Iterator[None]:
+    saved = {name: getattr(state, name) for name in RUN_SETTINGS}
+    vars(state).update(agent=CLAUDE, model=model, effort=None, route=None, account_env={}, account="")
+    try:
+        yield
+    finally:
+        vars(state).update(saved)
+
+
+def look(state: Run, label: str, build: Callable[[], str]) -> bool:
+    state.judged_by = agent_label(state)
+    prompt = build()
+    return not limited_session(state, label, prompt, saved_prompt(state, label, prompt))
+
+
+def fall_back(state: Run, label: str, build: Callable[[], str], judge_model: str) -> None:
+    print(f"visual: {judge_model} is out of usage; judging with {fallback_name(state)}")
+    invoke(state, label, build(), build)
+    state.judged_by = agent_label(state)
+    state.blind = bool(blind_backend(state))
+
+
+def fallback_name(state: Run) -> str:
+    if state.route:
+        return state.route
+    return SPACE.join(part for part in (resolve_agent(state), state.model) if part)
 
 
 def judge_writes(judge: Judge) -> tuple[str, ...]:
@@ -694,7 +781,17 @@ def gated_verdict(judge: Judge, report: Path, gate: tuple[str, bool, list[Result
     text = report.read_text()
     if not gate[1]:
         return BOUNCE, None, gate[0] + "\n\n" + text
-    return verdict, None if judge.pinned_bounce else target, text
+    return verdict, bounce_target(judge, target), text
+
+
+def bounce_target(judge: Judge, target: str | None) -> str | None:
+    if judge.pinned_bounce:
+        return None
+    return kept_target(judge.targets, target)
+
+
+def kept_target(allowed: tuple[str, ...], target: str | None) -> str | None:
+    return target if not allowed or target in allowed else None
 
 
 def settle_verdict(
@@ -725,11 +822,16 @@ def drop_scratch(state: Run) -> None:
 
 def commit_verdict(state: Run, judge: Judge, before: str, outcome: Verdict) -> None:
     verdict, target, text = outcome
+    shown = shown_verdict(state, verdict) + with_target(" to ", target)
     stage_writes(state.config, judge_writes(judge))
     saved = drop_ignored_since(state.config, before)
-    record_commit(state.config, f"{judge.name} verdict: {verdict}" + with_target(" to ", target), text, judge.name, agent_label(state))
+    record_commit(state.config, f"{judge.name} verdict: {shown}", text, judge.name, judge_label(state))
     restore_files(state.config, saved)
-    print(f"   verdict {verdict}" + with_target(" to ", target))
+    print(f"   verdict {shown}")
+
+
+def judge_label(state: Run) -> str:
+    return state.judged_by or agent_label(state)
 
 
 def no_verdict_feedback(report: Path) -> str:
@@ -1179,24 +1281,30 @@ def head(config: Config) -> str:
     return output.strip()
 
 
-def invoke(state: Run, label: str, prompt: str) -> None:
-    ensure_dir(state.folder)
-    prompt_file = state.folder / f"{label}.prompt.md"
-    prompt_file.write_text(prompt)
+def invoke(state: Run, label: str, prompt: str, rebuild: Callable[[], str] | None = None) -> None:
+    prompt_file = saved_prompt(state, label, prompt)
     for _ in range(LIMIT_WAITS):
-        prompt, finished = invoke_once(state, label, prompt, prompt_file)
+        prompt, finished = invoke_once(state, label, prompt, prompt_file, rebuild)
         if finished:
             return
     print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
 
 
-def invoke_once(state: Run, label: str, prompt: str, prompt_file: Path) -> tuple[str, bool]:
+def saved_prompt(state: Run, label: str, prompt: str) -> Path:
+    ensure_dir(state.folder)
+    prompt_file = state.folder / f"{label}.prompt.md"
+    prompt_file.write_text(prompt)
+    return prompt_file
+
+
+def invoke_once(state: Run, label: str, prompt: str, prompt_file: Path, rebuild: Callable[[], str] | None = None) -> tuple[str, bool]:
     if state.route:
         prompt, unrouted = routed(state, prompt)
         if unrouted:
             note_wait(state, "dandelion-unrouted")
             wait(f"   {state.route}: {unrouted}; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
             return prompt, False
+        prompt = rebuild() if rebuild else prompt
         prompt_file.write_text(prompt)
     return prompt, run_session(state, label, prompt, prompt_file)
 
@@ -1211,6 +1319,14 @@ def wait(message: str) -> None:
 
 
 def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
+    if not limited_session(state, label, prompt, prompt_file):
+        return True
+    note_wait(state, "rate-limit")
+    wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+    return False
+
+
+def limited_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     backend = resolve_agent(state)
     started = time.time()
     code, output = run_backend(state, backend, prompt, prompt_file)
@@ -1218,15 +1334,13 @@ def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     if backend == GROK and grok_always_approve_locked(code, output):
         print(f"   {label}: grok always-approve is locked; cannot run unattended")
         remember_agent(state, backend, started, "")
-        return True
+        return False
     limited, describe = outcome_readers(backend)
-    if not limited(code, output):
-        summary = describe(output)
-        print(f"   {label} finished in {(elapsed(started)) / MINUTES:.1f} min: {summary}")
-        remember_agent(state, backend, started, summary)
+    if limited(code, output):
         return True
-    note_wait(state, "rate-limit")
-    wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+    summary = describe(output)
+    print(f"   {label} finished in {(elapsed(started)) / MINUTES:.1f} min: {summary}")
+    remember_agent(state, backend, started, summary)
     return False
 
 

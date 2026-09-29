@@ -8,6 +8,7 @@ _LINES = {
 _PHRASE = {"harness": "a harness", "nothing": "nothing"}
 _COMPLETE = "pipeline complete"
 _TEMPLATE = "pipeline complete, NOT verified against the running app (qa ran against {what})"
+_UNSEEN = "pipeline complete, NOT verified by eye"
 _OK = 0
 _NOT_VERIFIED = 3
 
@@ -19,7 +20,7 @@ def parse(text: str) -> str | None:
     return next((_LINES[line] for line in text.splitlines() if line in _LINES), None)
 
 
-def finish(against: str) -> tuple[str, int]:
-    if against == "app":
-        return _COMPLETE, _OK
-    return _TEMPLATE.format(what=_PHRASE[against]), _NOT_VERIFIED
+def finish(against: str, by_eye: bool = True) -> tuple[str, int]:
+    if against != "app":
+        return _TEMPLATE.format(what=_PHRASE[against]), _NOT_VERIFIED
+    return (_COMPLETE, _OK) if by_eye else (_UNSEEN, _NOT_VERIFIED)

@@ -218,12 +218,16 @@ def test_write_files_indent(tmp_path: Path) -> None:
     assert raw.startswith('{\n  "task": "t",\n  "steps": [\n    {\n      "id": "01-coder",\n      "attempt": 1\n    }\n  ]\n}\n')
 
 
-def test_outcome_verdict() -> None:
-    assert runner.outcome_verdict(None) is None
-    assert runner.outcome_verdict(("PASS", None, "")) == "PASS"
-    assert runner.outcome_verdict(("BOUNCE", "coder", "")) == "BOUNCE coder"
-    assert runner.outcome_verdict(("AUTHOR", None, "")) == "AUTHOR"
-    assert runner.outcome_verdict(("BOUNCE", None, "")) == "BOUNCE"
+def test_outcome_verdict(tmp_path: Path) -> None:
+    state = runner.Run(config=Config(root=tmp_path, raw={}), task=tmp_path / "t.md", model=None, retries=1)
+    assert runner.outcome_verdict(state, None) is None
+    assert runner.outcome_verdict(state, ("PASS", None, "")) == "PASS"
+    assert runner.outcome_verdict(state, ("BOUNCE", "coder", "")) == "BOUNCE coder"
+    assert runner.outcome_verdict(state, ("AUTHOR", None, "")) == "AUTHOR"
+    assert runner.outcome_verdict(state, ("BOUNCE", None, "")) == "BOUNCE"
+    state.blind = True
+    assert runner.outcome_verdict(state, ("PASS", None, "")) == "PASS (geometry only, pictures not seen)"
+    assert runner.outcome_verdict(state, ("BOUNCE", "coder", "")) == "BOUNCE coder"
 
 
 def test_commit_entry() -> None:

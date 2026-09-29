@@ -1344,3 +1344,15 @@ def test_judge_attempt_under_hyper_refuses_a_bounce_to_cleaner(tmp_path: Path, j
     assert verdict is not None
     assert verdict[:2] == ("BOUNCE", None)
     assert judge_env["prompt"].calls[0][-2] is True
+
+
+def test_ending_for_a_pass_nobody_saw(tmp_path: Path, capsys: Any) -> None:
+    state = make_state(tmp_path, unseen=True)
+    assert runner.ending_for(state, [find("coder")]) == 3
+    assert capsys.readouterr().out == "pipeline complete, NOT verified by eye\n"
+    state.ran_against = "app"
+    assert runner.ending_for(state, [find("qa")]) == 3
+    assert capsys.readouterr().out == "pipeline complete, NOT verified by eye\n"
+    state.ran_against = "harness"
+    assert runner.ending_for(state, [find("qa")]) == 3
+    assert capsys.readouterr().out == ran_against.finish("harness")[0] + "\n"

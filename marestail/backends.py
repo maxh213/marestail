@@ -26,6 +26,7 @@ KIMI = "kimi"
 JUNIE = "junie"
 HERMES = "hermes"
 BACKENDS = frozenset({CLAUDE, AGY, CURSOR, GROK, KILO, KIMI, JUNIE, HERMES})
+IMAGE_BLIND = frozenset({KILO})
 
 LIMIT_PATTERN = re.compile(
     r"rate.?limit|usage limit|session limit|resets \d|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE

@@ -121,3 +121,36 @@ def test_check_role() -> None:
     pipeline._check_role("qa", "hyper")
     with pytest.raises(SystemExit):
         pipeline._check_role("perf", "hyper")
+
+
+def test_visual_follows_the_hardener_only_when_asked() -> None:
+    assert "visual" not in pipeline.names()
+    assert pipeline.names(None, True) == [
+        "specifier",
+        "critic",
+        "coder",
+        "cleaner",
+        "architect",
+        "practices",
+        "perf",
+        "hardener",
+        "visual",
+        "qa",
+    ]
+    assert pipeline.names("hyper", True) == [*HYPER_ROLES[:-1], "visual", "qa"]
+
+
+def test_visual_judge_bounces_to_the_coder_or_the_specifier() -> None:
+    judge = pipeline.find("visual", None, True)
+    assert judge == Judge("visual", "visual", bounce_to="coder", optional=True, targets=("coder", "specifier"))
+
+
+def test_window_with_visual_names_it_among_the_roles() -> None:
+    assert [step.name for step in pipeline.window("visual", "visual", None, True)] == ["visual"]
+    with pytest.raises(SystemExit) as raised:
+        pipeline.window("bogus", None, "changed", True)
+    assert str(raised.value) == (
+        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, visual, qa"
+    )
+    with pytest.raises(SystemExit, match=r"choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa$"):
+        pipeline.window("visual", None)
