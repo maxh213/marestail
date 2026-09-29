@@ -46,7 +46,9 @@ Feature: a visual judge looks at the before and after pictures and says whether 
     Given the fixture of `tools/test-visual.py` (013 Background) with `viewports = { desktop = "1440x900", phone = "390x844@2 touch" }`
     And `marestail.toml` also has `[qa] cmd = "true"`, `[practices] enabled = false`, `[perf] enabled = false`
     And the `visual` block in `qa/t.md` also has `symptom: the widget is 440px wide`
-    And `tasks/t.md` is `# Change the page text` and `features/t.feature` is the one `tools/stub-claude specify` writes
+    And `tasks/t.md` is `# Change the page text`
+    And `features/t.feature` is written directly (not by running `tools/stub-claude specify`, which would overwrite `qa/t.md`)
+      as the five lines `Feature: t`, `  Scenario: Adds one`, `    Given x`, `  Scenario Outline: Rejects bad input`, `    Given y`
     And on branch `work` `Page text` became `Other text`, committed
     And `MARESTAIL_CLAUDE`, `MARESTAIL_CURSOR` and `MARESTAIL_KILO` point at symlinks named `claude`, `cursor-agent`
       and `kilo` to one capture wrapper that saves `<basename of $0> <args>` to `$ARGS/NN.txt` and its stdin to
@@ -60,7 +62,7 @@ Feature: a visual judge looks at the before and after pictures and says whether 
     When I run `marestail run tasks/t.md --from hardener --to qa --auto --retries 2`
     Then the `== <role> (` lines name, in order, hardener, visual, qa
     And `$ARGS/02.txt` contains `--model claude-fable-5-1` and not `--effort`
-    And `$PROMPTS/02.txt` contains `Symptom: the widget is 440px wide`
+    And `$PROMPTS/02.txt` contains the line `# Visual`, and the line `Symptom: the widget is 440px wide` comes after it
     And it contains the 8 lines, in order, `- .marestail/runs/t/visual/base/desktop/element.png`, `…/base/desktop/viewport.png`,
       `…/head/desktop/element.png`, `…/head/desktop/viewport.png`, then the same four for `phone`, each file existing
     And it contains `| desktop | x | 434 | 434 |`, `| desktop | width | 440 | 440 |`, `| desktop | scrollWidth | 1440 | 1440 |`,
@@ -102,13 +104,14 @@ Feature: a visual judge looks at the before and after pictures and says whether 
 
   Scenario: a failing visual gate forces a bounce to the coder over a PASS
     Given on `work` the widget is `width:1408px`, committed
-    And STUB_PLAN is `judge PASS`, `code`, `judge PASS`
+    And `.marestail/runs/t/start-commit` holds the output of `git rev-parse main`, so the gate's base is `main`
+    And STUB_PLAN is `judge PASS`, `code`, `judge PASS`, `worker coder`
     When I run `marestail run tasks/t.md --from visual --to visual --auto --retries 1`
-    Then stdout contains `   verdict BOUNCE` after `== visual (`
-    And the invocations are visual, coder, visual, and the coder's prompt contains `[FAIL] visual` and
-      `desktop: #widget is 1408px wide, .col is 572px (base: 440px)`
-    And stdout contains `visual repeated the same findings twice; the worker is not making progress, stopping for a human`
-    And the exit code is 1
+    Then stdout contains `   verdict BOUNCE` after the first `== visual (`, though the stub wrote PASS
+    And the invocations are, in order, visual, coder, visual, coder
+    And `$PROMPTS/02.txt` (the first coder) contains `[FAIL] visual` and `desktop: #widget is 1408px wide, .col is 572px (base: 440px)`
+    And the second coder attempt is rejected (its handoff has no `## Audit`), so the run ends there
+    And stdout contains no `repeated the same findings`, the last line is `pipeline stopped at visual` and the exit code is 1
 
   Scenario: another backend runs every other role; the visual judge still uses claude-fable-5-1
     Given STUB_PLAN is `judge PASS`, `judge PASS`, `worker qa`
@@ -142,11 +145,16 @@ Feature: a visual judge looks at the before and after pictures and says whether 
     And the last line is `pipeline complete, NOT verified by eye` and the exit code is 3
 
   Scenario: with dandelion/route the judge model is still asked first
-    Given a stub dandelion whose plan line is `0 claude-opus-5 high claude` and STUB_PLAN is `limit`, `judge PASS`
-    When I run `marestail run tasks/t.md --from visual --to visual --model dandelion/route --auto`
-    Then `$ARGS/01.txt` contains `--model claude-fable-5-1`
-    And stdout contains `visual: claude-fable-5-1 is out of usage; judging with dandelion/route` before the `dandelion/route:` line
-    And `$ARGS/02.txt` contains `--model claude-opus-5`
+    Given `MARESTAIL_DANDELION` points at the stub `dandelion` of `tools/test-timeline.py` (`stub_dandelion`): an executable
+      file, so `route.require()` finds it; invoked as `<bin> route <args>`, it appends its args to `$CALLS`, takes the
+      first line of `$PLAN` (`<exit> <plan line>`), prints the plan line on stdout and exits with `<exit>`
+    And `$PLAN` is `0 gpt-9 cursor`, `0 gpt-9 cursor` and STUB_PLAN is `limit`, `judge PASS`, `worker qa`
+    When I run `marestail run tasks/t.md --from visual --to qa --model dandelion/route --auto --retries 2`
+    Then `$ARGS/01.txt` starts with `claude` and contains `--model claude-fable-5-1`
+    And stdout contains `visual: claude-fable-5-1 is out of usage; judging with dandelion/route` before `   dandelion/route: gpt-9 cursor`
+    And `$ARGS/02.txt` starts with `cursor-agent`, contains `--model gpt-9` and does not contain `claude-fable-5-1`
+    And `$ARGS/03.txt` (qa) starts with `cursor-agent` and does not contain `claude-fable-5-1`
+    And `$CALLS` has 2 lines, the visual verdict commit is `[gpt-9] visual verdict: PASS` and the exit code is 0
 
   Scenario: the other judges and roles keep their waits
     Given STUB_PLAN is `limit`, `judge PASS`
@@ -154,7 +162,9 @@ Feature: a visual judge looks at the before and after pictures and says whether 
     Then stdout contains `rate limited; waiting 0 min before retrying` and no `out of usage`
 
   Scenario: watch shows the visual step as a judge
-    Then `marestail.tui.theme` colours role `visual` with the judge colour
+    Given the run of the first scenario has finished
+    When I open that run in `marestail watch`
+    Then its steps list `visual` between `hardener` and `qa`, in the same colour as `hardener`
 
   Scenario: diagnostics and README
     When I run `python3 tools/test-visual-judge.py`
