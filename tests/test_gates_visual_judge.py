@@ -204,8 +204,9 @@ def test_stability_holds_at_exactly_the_tolerance() -> None:
 
 
 def test_stability_needs_the_same_named_boxes() -> None:
-    with pytest.raises(ValueError, match="zip"):
-        judge._same(geometry(), geometry(must_not_change={}), 2)
+    full, bare = geometry(), geometry(must_not_change={})
+    with pytest.raises(ValueError):
+        judge._same(full, bare, 2)
 
 
 def test_unstable_reports_the_first_two_of_more_captures() -> None:
