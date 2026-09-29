@@ -1,0 +1,57 @@
+# QA procedure: the visual judge looks at the pictures
+
+Needs Chromium via Playwright (013 QA step 2). `$M` is the marestail-green checkout with `.venv` active and
+`$M/bin` first on PATH. Work in `$T=/tmp/mt-vjudge`; `$W=/tmp/mt-vjudge-bin`. Run every `marestail` command in `$T`.
+
+1. Build the fixture as in 013 QA step 1, with `viewports = { desktop = "1440x900", phone = "390x844@2 touch" }`,
+   `[practices] enabled = false`, `[perf] enabled = false`, the block plus `symptom: the widget is 440px wide`,
+   `tasks/t.md` (`# Change the page text`) and `features/t.feature` as `tools/stub-claude specify` writes it.
+   Commit on `main`, `git checkout -q -b work`, change `Page text` to `Other text`, commit.
+   Expected: `git log --oneline | wc -l` prints 2.
+2. Make the wrapper: `$W/wrap` saves `$(basename $0) $*` to `$ARGS/NN.txt` and stdin to `$PROMPTS/NN.txt`
+   (next free NN), then pipes stdin to `$M/tools/stub-claude`. Symlink it as `$W/claude`, `$W/cursor-agent`, `$W/kilo`.
+   Export `MARESTAIL_CLAUDE=$W/claude MARESTAIL_CURSOR=$W/cursor-agent MARESTAIL_KILO=$W/kilo
+   MARESTAIL_LIMIT_WAIT_SECONDS=0 STUB_PLAN=$W/plan ARGS=$W/args PROMPTS=$W/prompts`.
+   Before each step below: empty `$ARGS` and `$PROMPTS`, write the step's plan to `$W/plan`, one action per line.
+   Expected: `ls -l $W` shows the three symlinks.
+3. Plan `judge PASS`, `judge PASS`, `worker qa`. Run `marestail run tasks/t.md --from hardener --to qa --auto --retries 2`.
+   Expected: `== hardener (`, `== visual (`, `== qa (` in that order; exit 0; last line `pipeline complete`.
+   `$ARGS/02.txt` contains `--model claude-fable-5-1`, no `--effort`. `$PROMPTS/02.txt` starts `You are the visual judge.`,
+   has `Symptom: the widget is 440px wide`, eight `.png` lines (desktop then phone; base element, base viewport,
+   head element, head viewport), and the rows `| desktop | width | 440 | 440 |` and `| phone | scrollWidth | 572 | 572 |`.
+   Open `.marestail/runs/t/visual/head/desktop/element.png`: the 440px widget.
+   `git log --format=%s | grep 'visual verdict'` prints `[claude-fable-5-1] visual verdict: PASS`.
+4. Same plan and command, with `--agent cursor --model gpt-9` added.
+   Expected: `$ARGS/01.txt` and `03.txt` start with `cursor-agent` and have `--model gpt-9`; `02.txt` starts with `claude` and has
+   `--model claude-fable-5-1`. The newest visual verdict subject starts `[claude-fable-5-1]`, the hardener's `[gpt-9]`.
+5. Plan `limit`, `judge PASS`. Run `marestail run tasks/t.md --from visual --to visual --agent cursor --model gpt-9 --auto`.
+   Expected: stdout has `visual: claude-fable-5-1 is out of usage; judging with cursor gpt-9` and no `rate limited; waiting`;
+   `$ARGS/02.txt` starts with `cursor-agent`; the visual step in `.marestail/runs/t/timeline.json` has `"waits": []`;
+   the verdict subject is `[gpt-9] visual verdict: PASS`; exit 0.
+6. Plan `limit`, `judge PASS`, `worker qa`. Run `marestail run tasks/t.md --from visual --to qa --agent kilo --model kilo/x --auto --retries 2`.
+   Expected: `judging with kilo kilo/x`; `$PROMPTS/02.txt` has `The pictures could not be shown: kilo cannot read images.
+   Judge from the geometry table alone.` and `grep -c png $PROMPTS/02.txt` prints 0; stdout has
+   `   verdict PASS (geometry only, pictures not seen)`; last line `pipeline complete, NOT verified by eye`; `echo $?` prints 3.
+7. Plan `judge PASS`, `judge BOUNCE coder`, `code`, `judge PASS`, `worker qa`; run step 3's command.
+   Expected: roles in order hardener, visual, coder, visual, qa; exit 0.
+8. Plan `judge PASS`, `judge BOUNCE specifier`, `worker specifier`, `judge PASS`, `worker qa`; run step 3's command.
+   Expected: hardener, visual, specifier, visual, qa; exit 0.
+9. Set `#widget` to `width:1408px`, commit. Plan `judge PASS`, `code`, `judge PASS`.
+   Run `marestail run tasks/t.md --from visual --to visual --auto --retries 1`.
+   Expected: `   verdict BOUNCE` though the stub wrote PASS; `$PROMPTS/02.txt` (coder) has `[FAIL] visual` and
+   `desktop: #widget is 1408px wide, .col is 572px (base: 440px)`; the run stops with
+   `visual repeated the same findings twice; the worker is not making progress, stopping for a human`, exit 1.
+   `git revert --no-edit HEAD`.
+10. Add `judge_model = "claude-opus-5-5"` under `[visual]`. Plan `judge PASS`; run `marestail run tasks/t.md --from visual --to visual --auto`.
+    Expected: `$ARGS/01.txt` has `--model claude-opus-5-5`. Remove the line.
+11. Plan `judge PASS`, `worker qa`; run step 3's command three times: with the block removed from `qa/t.md`, then with
+    `enabled = false`, then with the `[visual]` section removed (restore between runs).
+    Expected, in order: `visual: no block in qa/t.md; skipping`; `visual disabled in marestail.toml; skipping`; no line
+    containing `visual` at all. Each time 2 prompts, exit 0.
+12. With `[visual]` still removed, run `marestail run tasks/t.md --from visual --auto`.
+    Expected: exit 1, stderr `unknown role visual; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa`.
+13. Restore `[visual]`. Plan `limit`, `judge PASS`; run `marestail run tasks/t.md --from hardener --to hardener --auto`.
+    Expected: `rate limited; waiting 0 min before retrying`, no `out of usage`.
+14. In `$M`: `python3 tools/test-visual-judge.py`. Expected: exit 0, last line `visual judge ok`.
+    `cat roles/visual.md` starts `You are the visual judge.`; README's pipeline table has a `visual` row between
+    `hardener` and `qa`, and a paragraph on `judge_model` and the fallback.
