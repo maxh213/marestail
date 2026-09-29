@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import importlib
 import inspect
 import tempfile
 from pathlib import Path
@@ -96,9 +97,19 @@ def mutant_lines() -> None:
 changed_ts = {f"src/file{index}.ts": set(range(1, 600, 2)) | set(range(600, 700)) for index in range(20)}
 
 
+def stryker_module() -> object:
+    try:
+        return importlib.import_module("marestail.gates._stryker")
+    except ImportError:
+        return ts_mutation
+
+
+line_ranges = getattr(ts_mutation, "line_ranges", None) or getattr(stryker_module(), "line_ranges", None)
+
+
 def ts_ranges() -> None:
     for source, lines in changed_ts.items():
-        ts_mutation.line_ranges(source, lines)
+        line_ranges(source, lines)
 
 
 def build_accepts_hyper() -> bool:
@@ -126,7 +137,7 @@ if hasattr(py_mutation, "MutantLines"):
 else:
     harness.absent("py_mutation.MutantLines.where")
 
-if hasattr(ts_mutation, "line_ranges"):
+if line_ranges is not None:
     harness.emit("ts_mutation.line_ranges", harness.measure(ts_ranges))
 else:
     harness.absent("ts_mutation.line_ranges")
