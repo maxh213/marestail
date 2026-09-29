@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -119,15 +119,25 @@ def run_mutation(
     if dropped(code, output):
         ip, problem = ensure_up(found)
         if ip is None:
+            record_job(found, gate, ctx, started, "dropped")
             return Outcome(code, output, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
         code, output = execute(found, ip, build(True), cwd, env, timeout)
         if dropped(code, output):
+            record_job(found, gate, ctx, started, "dropped")
             return Outcome(code, output, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
     for path in pull:
         fetch(found, ip, ctx.root, path)
-    seconds = time.time() - started
-    record({"event": "job", "gate": gate, "repo": str(ctx.root), "seconds": round(seconds), "usd": round(seconds / 3600 * found.usd_per_hour, 3)})
+    seconds = record_job(found, gate, ctx, started, "ok" if code == 0 else f"exit {code}")
     return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
+
+
+def record_job(found: Settings, gate: str, ctx: Context, started: float, result: str) -> float:
+    seconds = time.time() - started
+    record({
+        "event": "job", "instance": found.instance, "gate": gate, "repo": str(ctx.root), "result": result,
+        "seconds": round(seconds), "usd_per_hour": found.usd_per_hour, "usd": round(seconds / 3600 * found.usd_per_hour, 3),
+    })
+    return seconds
 
 
 def dropped(code: int, output: str) -> bool:
@@ -156,7 +166,7 @@ def ensure_up(found: Settings) -> tuple[str | None, str]:
             code, output = gcloud(found, ["compute", "instances", verb, found.instance])
             if code != 0:
                 return None, output.strip().splitlines()[-1] if output.strip() else f"{verb} failed"
-            record({"event": "vm-start", "usd_per_hour": found.usd_per_hour})
+            record({"event": "vm-start", "instance": found.instance, "usd_per_hour": found.usd_per_hour})
             status, ip = describe(found)
         if status != "RUNNING" or not ip:
             return None, f"instance is {status or 'unknown'}"
@@ -294,13 +304,32 @@ def status_command(_args) -> int:
     print(f"offloaded gates: {', '.join(found.gates) or 'none'}")
     now = datetime.now(timezone.utc)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    entries = usage()
     for label, since in (("today", midnight), ("this month", midnight.replace(day=1))):
-        billed = uptime_seconds(found, since, now)
-        jobs = [entry for entry in usage() if entry.get("event") == "job" and entry["ts"] >= since.isoformat(timespec="seconds")]
+        hours, dollars, known = 0.0, 0.0, True
+        for instance, rate in instances(found, entries).items():
+            seconds = uptime_seconds(replace(found, instance=instance), since, now)
+            if seconds is None:
+                known = False
+                continue
+            hours += seconds / 3600
+            dollars += seconds / 3600 * rate
+        jobs = [entry for entry in entries if entry.get("event") == "job" and when(entry) >= since]
         busy = sum(entry.get("seconds", 0) for entry in jobs)
-        billed_text = "unknown" if billed is None else f"{billed / 3600:.2f}h = ${billed / 3600 * found.usd_per_hour:.2f}"
+        billed_text = f"{hours:.2f}h = ${dollars:.2f}" if known else "unknown"
         print(f"{label}: VM up {billed_text}; {len(jobs)} jobs, {busy / 3600:.2f}h busy")
     return 0
+
+
+def instances(found: Settings, entries: list[dict]) -> dict[str, float]:
+    rates = {entry["instance"]: float(entry.get("usd_per_hour", found.usd_per_hour)) for entry in entries if entry.get("instance")}
+    rates[found.instance] = found.usd_per_hour
+    return rates
+
+
+def when(entry: dict) -> datetime:
+    stamp = datetime.fromisoformat(entry["ts"])
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
 
 
 def usage() -> list[dict]:
