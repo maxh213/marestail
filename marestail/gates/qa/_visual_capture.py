@@ -1,6 +1,6 @@
 import json
-import re
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +21,9 @@ _LOG_TAIL = 10
 _NODE_MISSING = "node not found on PATH; run marestail install"
 _ERROR_LINE = re.compile(r"^[A-Za-z][\w.]*: \S")
 _CHROMIUM_MISSING = "Playwright Chromium missing; run marestail install"
+_CHECK_TIMEOUT = 120
+_NODE_STARTUP_SECONDS = 60
+_WAITS_PER_LOAD = 4
 
 
 @dataclass(frozen=True)
@@ -50,7 +53,7 @@ def visual_dir(config: Config, task: str) -> Path:
 def tool_problems() -> list[str]:
     if shutil.which("node") is None:
         return [_NODE_MISSING]
-    code, _ = run(["node", str(_SCRIPT), "--check"], cwd=_JS_DIR, timeout=120)
+    code, _ = run(["node", str(_SCRIPT), "--check"], cwd=_JS_DIR, timeout=_CHECK_TIMEOUT)
     return [] if code == 0 else [_CHROMIUM_MISSING]
 
 
@@ -103,7 +106,7 @@ def _run_setup(cwd: Path, spec: Spec, log_path: Path) -> int | None:
         except subprocess.TimeoutExpired:
             return None
         finally:
-            _serve._stop(process)
+            _serve.stop(process)
 
 
 def _served(tree: Tree, spec: Spec, preferred: int, folder: Path, captures: int) -> TreeRun:
@@ -144,7 +147,8 @@ def _node_error(output: str, code: int) -> str:
 
 
 def _node_timeout(spec: Spec, captures: int) -> int:
-    return 60 + spec.settings.capture_timeout * 4 * (captures + 1)
+    loads = captures + 1
+    return _NODE_STARTUP_SECONDS + spec.settings.capture_timeout * _WAITS_PER_LOAD * loads
 
 
 def _script_input(spec: Spec, view: Viewport, url: str, out: Path, captures: int) -> dict[str, Any]:

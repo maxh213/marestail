@@ -139,11 +139,7 @@ def _compare(name: str, base: _Geometry, head: _Geometry, spec: Spec) -> list[st
     return [
         *_scroll_lines(name, base, head),
         *_inside_lines(name, block, base, head, tolerance),
-        *[
-            f"{name}: {block.selector} overlaps {other} at HEAD (base: no overlap)"
-            for other in head["overlaps"]
-            if other not in base["overlaps"]
-        ],
+        *_overlap_lines(name, block, base, head),
         *_unchanged_lines(name, block, base["box"], head["box"], tolerance),
         *_kept_lines(name, block, base, head, tolerance),
     ]
@@ -177,6 +173,11 @@ def _edge_lines(name: str, block: Block, base: _Box, box: _Box, outer: _Box, tol
         for side, edge, sign in sides
         if (edge(box) - edge(outer)) * sign > tolerance
     ]
+
+
+def _overlap_lines(name: str, block: Block, base: _Geometry, head: _Geometry) -> list[str]:
+    fresh = [other for other in head["overlaps"] if other not in base["overlaps"]]
+    return [f"{name}: {block.selector} overlaps {other} at HEAD (base: no overlap)" for other in fresh]
 
 
 def _unchanged_lines(name: str, block: Block, base: _Box, head: _Box, tolerance: int) -> list[str]:

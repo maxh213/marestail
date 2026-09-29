@@ -77,7 +77,7 @@ def _wait_ready(url: str, process: subprocess.Popen[Any], seconds: int) -> str |
         if _answers(url):
             return None
         time.sleep(0.2)
-    _stop(process)
+    stop(process)
     return f"app did not answer on {url} within {seconds}s"
 
 
@@ -98,11 +98,11 @@ def _answers(url: str) -> bool:
 
 def _end_app(process: subprocess.Popen[Any] | None, handle: TextIO) -> None:
     if process is not None:
-        _stop(process)
+        stop(process)
     handle.close()
 
 
-def _stop(process: subprocess.Popen[Any]) -> None:
+def stop(process: subprocess.Popen[Any]) -> None:
     if process.poll() is not None:
         return
     try:

@@ -40,13 +40,10 @@ const found = (page, selector, timeout) =>
     () => false,
   );
 
-const boxKey = (page, selector) =>
-  page.evaluate((wanted) => {
-    const element = document.querySelector(wanted);
-    if (!element) return null;
-    const rect = element.getBoundingClientRect();
-    return [rect.x + scrollX, rect.y + scrollY, rect.width, rect.height].map(Math.round).join(",");
-  }, selector);
+const boxKey = async (page, selector) => {
+  const { box } = await page.evaluate(read, { selector, styles: [], inside: null, mustNotChange: [] });
+  return JSON.stringify(box);
+};
 
 const settled = async (page, spec) => {
   const deadline = Date.now() + spec.timeout;

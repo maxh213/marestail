@@ -115,8 +115,10 @@ def test_capture_trees_removes_the_worktree_on_interrupt(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(capture._serve, "ready_app", interrupted)
+    config = Config(tmp_path, {})
+    spec = make_spec()
     with pytest.raises(KeyboardInterrupt):
-        capture.capture_trees(Config(tmp_path, {}), make_spec(), "abc", 1)
+        capture.capture_trees(config, spec, "abc", 1)
     assert [kind for kind, _ in worktrees] == ["add", "remove"]
     assert not worktrees[1][1].exists()
 

@@ -185,7 +185,7 @@ def test_wait_ready_success(monkeypatch: pytest.MonkeyPatch) -> None:
     answers = MagicMock(return_value=True)
     stopped: list[Any] = []
     monkeypatch.setattr(_serve, "_answers", answers)
-    monkeypatch.setattr(_serve, "_stop", stopped.append)
+    monkeypatch.setattr(_serve, "stop", stopped.append)
     assert _serve._wait_ready("http://x/", process, 1) is None
     answers.assert_called_once_with("http://x/")
     assert stopped == []
@@ -200,7 +200,7 @@ def test_wait_ready_polls_until_deadline(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(_serve, "_answers", answers)
     monkeypatch.setattr(time, "time", MagicMock(side_effect=[100, 100, 100.5, 101]))
     monkeypatch.setattr(time, "sleep", naps.append)
-    monkeypatch.setattr(_serve, "_stop", stopped.append)
+    monkeypatch.setattr(_serve, "stop", stopped.append)
     assert _serve._wait_ready("http://x/", process, 1) == "app did not answer on http://x/ within 1s"
     assert answers.call_args_list == [call("http://x/"), call("http://x/")]
     assert naps == [0.2, 0.2]
@@ -216,7 +216,7 @@ def test_wait_ready_exited(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stop_already_dead() -> None:
     dead = MagicMock()
     dead.poll.return_value = 0
-    _serve._stop(dead)
+    _serve.stop(dead)
     dead.wait.assert_not_called()
 
 
@@ -225,7 +225,7 @@ def test_stop_group_already_gone(monkeypatch: pytest.MonkeyPatch) -> None:
     live.poll.return_value = None
     live.pid = 123
     monkeypatch.setattr(os, "killpg", MagicMock(side_effect=ProcessLookupError))
-    _serve._stop(live)
+    _serve.stop(live)
     live.wait.assert_not_called()
 
 
@@ -240,7 +240,7 @@ def test_stop_terminates_and_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     live = MagicMock()
     live.poll.return_value = None
     live.pid = 7
-    _serve._stop(live)
+    _serve.stop(live)
     assert kills == [(7, signal.SIGTERM)]
     live.wait.assert_called_once_with(timeout=15)
 
@@ -251,7 +251,7 @@ def test_stop_kills_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None
     stuck.poll.return_value = None
     stuck.pid = 7
     stuck.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=15)
-    _serve._stop(stuck)
+    _serve.stop(stuck)
     assert kills == [(7, signal.SIGTERM), (7, signal.SIGKILL)]
 
 
@@ -279,7 +279,7 @@ def test_stop_never_signals_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
     kills = recorded_kills(monkeypatch)
     unnumbered = MagicMock()
     unnumbered.poll.return_value = None
-    _serve._stop(unnumbered)
+    _serve.stop(unnumbered)
     assert kills == []
 
 
@@ -310,7 +310,7 @@ def test_end_app_closes(monkeypatch: pytest.MonkeyPatch) -> None:
     handle = MagicMock()
     process = MagicMock()
     stopped: list[Any] = []
-    monkeypatch.setattr(_serve, "_stop", stopped.append)
+    monkeypatch.setattr(_serve, "stop", stopped.append)
     _serve._end_app(process, handle)
     assert stopped == [process]
     handle.close.assert_called_once()
@@ -323,7 +323,7 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     process.pid = 4242
     process.poll.return_value = None
     monkeypatch.setattr(_serve, "_chosen_port", lambda preferred: 3456)
-    monkeypatch.setattr(_serve, "_stop", lambda proc: None)
+    monkeypatch.setattr(_serve, "stop", lambda proc: None)
 
     def write_log(start: str, cwd: Path, port: int, extra: dict[str, str], handle: Any) -> MagicMock:
         handle.write("one\ntwo\n")
