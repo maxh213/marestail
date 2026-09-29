@@ -40,11 +40,18 @@ first on PATH. Work in `$T=/tmp/mt-repro`, wrappers in `$W=/tmp/mt-repro-bin`. R
 12. Plan as step 3; run with `--agent kilo --model x`.
     Expected: `$PROMPTS/01.txt` has `The pictures could not be shown: kilo cannot read images. Judge from the geometry and markup alone.`
     and `form#form at 0,0 425x180`; `grep -c png $PROMPTS/01.txt` prints 0.
-13. After step 3, run `MARESTAIL_TASK=t marestail gate --tier qa --only visual`.
+13. Rerun step 3 (plan `specify observed`, `judge PASS`), then run `MARESTAIL_TASK=t marestail gate --tier qa --only visual`.
     Expected: `.marestail/runs/t/visual/reported/desktop/viewport.png` still exists.
 14. Remove the `where:` line from `tasks/t.md`; plan `specify`, `judge PASS`; run step 3's command.
-    Expected: no line starts `== reported`; `.marestail/runs/t/visual/reported` does not exist; exit 0.
-15. `grep -n 'reproduced first' $M/README.md; grep -n 'where:' $M/tasks/README.md $M/templates/tasks-README.md`.
+    Expected: `== specifier (` then `== critic (` print and no line starts `== reported` or `reported`;
+    `echo $?` prints 0; `.marestail/runs/t/visual/reported` does not exist. Restore the `where:` line.
+15. Change `selector:` to `iframe` and add `<iframe id="pixel" src="/embed.html" style="width:1px;height:1px;border:0"></iframe>`
+    right after `<main>` in `donate.html` (commit it). Plan as step 3; run step 3's command.
+    Expected: exit 0; `reported/desktop/geometry.json` has box `434,100 440x200`; `markup.html` has no `pixel`.
+    Undo both changes (commit).
+16. Set the iframe's `src` to `/missing.html` (commit). Plan as step 3; run step 3's command.
+    Expected: exit 0; `$PROMPTS/01.txt` has `Loaded alone: http://localhost:3401/missing.html answered 404`. Undo (commit).
+17. `grep -n 'reproduced first' $M/README.md; grep -n 'where:' $M/tasks/README.md $M/templates/tasks-README.md`.
     Expected: one hit in the Pipeline section; `where: /donate.html` in both task READMEs.
-16. `cd $M && python3 tools/test-reproduce-first.py`.
+18. `cd $M && python3 tools/test-reproduce-first.py`.
     Expected: exit 0, last line `reproduce first ok`.
