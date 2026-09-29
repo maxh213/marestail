@@ -52,6 +52,8 @@ Needs Chromium via Playwright (`marestail install` into a target with `[visual] 
     Expected: `2 visual findings`: `qa/t.md visual block: missing selector` then `qa/t.md visual block: unknown key colour`; `git worktree list` one line throughout. Restore the block.
 13. Add `<script src="/tracker.js"></script>`, commit, set `block = ["*tracker*"]`, rerun.
     Expected: passes; `grep tracker .marestail/runs/t/visual/head/app.log` prints nothing.
+13a. Set `block = ["*nomatch*"]`, rerun.
+    Expected: `grep 'GET /tracker.js' .marestail/runs/t/visual/head/app.log` prints at least one line.
 14. Set `env = { CMS_URL = "https://cms.example.test/graphql" }` and `start = "echo $CMS_URL; python3 -m http.server $PORT --bind 127.0.0.1"`, rerun.
     Expected: both `base/app.log` and `head/app.log` contain the URL; `git status --porcelain` prints exactly ` M marestail.toml`;
     `git rev-parse HEAD` is what it was before the rerun; `grep -rl --exclude-dir=.marestail --exclude-dir=.git -e cms.example.test -e localhost:34 .`

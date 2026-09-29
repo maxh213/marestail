@@ -18,7 +18,8 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
   - Tools: missing `node` on PATH fails with the one finding `node not found on PATH; run marestail install`;
     missing Playwright Chromium with `Playwright Chromium missing; run marestail install`. Capture exits 2.
   - Base commit: exactly `perf.trees.start_commit` (recorded `.marestail/runs/<task>/start-commit`,
-    else `git merge-base <[git] base> HEAD`), printing its note when it falls back. The baseline is a
+    else `git merge-base <[git] base> HEAD`). Only `marestail visual capture` prints its fallback note (first
+    line); the gate neither prints it nor puts it in `Result.findings`. The baseline is a
     detached worktree added and removed through the same code the perf judge uses: `marestail/` holds
     exactly one `git worktree add` call site. HEAD is the working tree itself.
   - Order: base first, then HEAD; never both apps at once. Base: `setup` (worktree only, `setup_timeout`
@@ -53,8 +54,11 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     width finding; otherwise one finding per side (left, right) where its edge is outside the `inside` box
     by more than `tolerance_px`. Top and bottom are not checked: containers grow with their content.
   - `desktop = "1440x900"` is 1440x900, scale 1, no touch; `phone = "390x844@2 touch"` is 390x844, scale 2, touch.
-  - `hide` selectors get `visibility: hidden !important`; `block` globs abort matching requests;
-    animations and transitions are off. Page errors are recorded, never a finding.
+  - `hide` selectors get `visibility: hidden !important`. Each `block` pattern is matched against the full
+    request URL with Python `fnmatch.fnmatchcase` semantics (`*` and `?` match any characters, `/` included),
+    so `*tracker*` matches `http://localhost:3400/tracker.js`; any match aborts the request. An aborted
+    request is neither a page error nor a finding. Animations and transitions are off. Page errors are
+    recorded, never a finding.
   - The gate captures each tree twice per viewport, each in a fresh browser context, and compares `box`,
     `scrollWidth`, `clientWidth`, `inside.box` and `must_not_change` (numbers within `tolerance_px`) and
     `overlaps` (exactly). `styles`, `errors` and `viewport` are not compared. The kept files are from the
@@ -191,6 +195,7 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Then the only finding is `desktop: unstable at HEAD: two captures gave different geometry`
     And it is followed by exactly two detail lines, starting `  first: {` and `  second: {`, whose `box.width` values differ
     And no scroll, inside or x-centre finding is made, whatever widths the two loads drew
+    And test-visual may rerun this case once when the two loads drew widths within `tolerance_px` of each other
 
   Scenario: the element sticks out of its column without being wider
     Given the HEAD commit sets `#widget` to `width:440px;height:200px;margin-left:200px`
@@ -260,6 +265,12 @@ Feature: marestail captures the real page at base and HEAD and fails when the la
     Given the HEAD commit adds `<script src="/tracker.js"></script>` and `[visual] block = ["*tracker*"]`
     When the gate runs
     Then `.marestail/runs/t/visual/head/app.log` has no line containing `/tracker.js`
+    And `visual` passes and `head/desktop/geometry.json` `errors` is empty
+
+  Scenario: a block pattern that matches nothing blocks nothing
+    Given the HEAD commit adds `<script src="/tracker.js"></script>` and `[visual] block = ["*nomatch*"]`
+    When the gate runs
+    Then `.marestail/runs/t/visual/head/app.log` has a line containing `GET /tracker.js`
 
   Scenario: an app that never answers fails for both trees and leaves nothing behind
     Given `[visual] start = "sleep 60"` and `ready_timeout = 2`, and ports 3400 and 3401 are free
