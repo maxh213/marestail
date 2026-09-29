@@ -108,6 +108,7 @@ def test_review_for_visual_shows_pictures_to_a_backend_that_can_read_them(tmp_pa
     assert runner.review_for(make_state(tmp_path), VISUAL) == {"Visual": "SECTION"}
     assert runner.review_for(make_state(tmp_path, agent="kilo"), VISUAL) == {"Visual": "SECTION"}
     assert [call[1:] for call in section.calls] == [("t", ""), ("t", "kilo")]
+    assert all(isinstance(call[0], Config) for call in section.calls)
     assert runner.review_for(make_state(tmp_path), CRITIC) is None
 
 
@@ -140,7 +141,10 @@ def test_the_judge_model_looks_first_and_the_run_keeps_its_backend(tmp_path: Pat
     assert state.attempt_agent is not None
     assert state.attempt_agent["model"] == "claude-fable-5-1"
     assert (state.folder / "02-visual.prompt.md").read_text() == "prompt for claude"
-    assert "out of usage" not in capsys.readouterr().out
+    assert (state.folder / "02-visual.json").read_text() == DONE
+    out = capsys.readouterr().out
+    assert "   02-visual finished in " in out
+    assert "out of usage" not in out
 
 
 def test_a_configured_judge_model_is_used(tmp_path: Path, sessions: Recorder) -> None:

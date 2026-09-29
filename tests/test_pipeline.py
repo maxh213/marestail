@@ -117,10 +117,10 @@ def test_window_rejects_an_unknown_role(start: str | None, stop: str | None, mod
 
 
 def test_check_role() -> None:
-    pipeline._check_role(None, "hyper")
-    pipeline._check_role("qa", "hyper")
+    pipeline._check_role(None, "hyper", False)
+    pipeline._check_role("qa", "hyper", False)
     with pytest.raises(SystemExit):
-        pipeline._check_role("perf", "hyper")
+        pipeline._check_role("perf", "hyper", False)
 
 
 def test_visual_follows_the_hardener_only_when_asked() -> None:

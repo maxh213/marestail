@@ -20,7 +20,7 @@ def parse(text: str) -> str | None:
     return next((_LINES[line] for line in text.splitlines() if line in _LINES), None)
 
 
-def finish(against: str, by_eye: bool = True) -> tuple[str, int]:
+def finish(against: str, by_eye: bool) -> tuple[str, int]:
     if against != "app":
         return _TEMPLATE.format(what=_PHRASE[against]), _NOT_VERIFIED
     return (_COMPLETE, _OK) if by_eye else (_UNSEEN, _NOT_VERIFIED)

@@ -82,7 +82,7 @@ def find(name: str, mode: str | None = None, visual: bool = False) -> Step:
     raise SystemExit(f"unknown role {name}; choose from {', '.join(names(mode, visual))}")
 
 
-def _check_role(name: str | None, mode: str | None, visual: bool = False) -> None:
+def _check_role(name: str | None, mode: str | None, visual: bool) -> None:
     if name is not None:
         find(name, mode, visual)
 

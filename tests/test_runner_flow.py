@@ -28,7 +28,7 @@ from marestail.runner import JudgeProgress, Run
 
 CRITIC = Judge("critic", None, bounce_to="specifier")
 PERF = Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True)
-COMPLETE_LINE = ran_against.finish("app")[0]
+COMPLETE_LINE = ran_against.finish("app", True)[0]
 CODER = Worker("coder", None)
 QA = Worker("qa", "qa")
 
@@ -198,6 +198,14 @@ def test_run_pipeline_routes_and_scopes(pipeline_env: dict[str, Any], capsys: py
     assert capsys.readouterr().out == "\n"
 
 
+def test_run_pipeline_puts_the_visual_judge_after_the_hardener_only_with_a_visual_section(pipeline_env: dict[str, Any]) -> None:
+    runner.run_pipeline(Path("t.md"), "hardener", "qa", True, None, 0)
+    assert [step.name for step in pipeline_env["window"]] == ["hardener", "qa"]
+    pipeline_env["config"].raw["visual"] = {}
+    runner.run_pipeline(Path("t.md"), "hardener", "qa", True, None, 0)
+    assert [step.name for step in pipeline_env["window"]] == ["hardener", "visual", "qa"]
+
+
 def test_run_pipeline_keeps_the_agent(pipeline_env: dict[str, Any]) -> None:
     runner.run_pipeline(Path("t.md"), None, None, True, "opus", 3, agent="claude")
     assert pipeline_env["state"].agent == "claude"
@@ -319,8 +327,8 @@ def test_latest_qa_text_and_read(tmp_path: Path) -> None:
 
 
 def test_qa_ending_and_not_verified(capsys: Any) -> None:
-    harness_line, harness_code = ran_against.finish("harness")
-    nothing_line, nothing_code = ran_against.finish("nothing")
+    harness_line, harness_code = ran_against.finish("harness", True)
+    nothing_line, nothing_code = ran_against.finish("nothing", True)
     assert runner.qa_ending("app") == 0
     assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
     assert runner.qa_ending("harness") == harness_code
@@ -1355,4 +1363,4 @@ def test_ending_for_a_pass_nobody_saw(tmp_path: Path, capsys: Any) -> None:
     assert capsys.readouterr().out == "pipeline complete, NOT verified by eye\n"
     state.ran_against = "harness"
     assert runner.ending_for(state, [find("qa")]) == 3
-    assert capsys.readouterr().out == ran_against.finish("harness")[0] + "\n"
+    assert capsys.readouterr().out == ran_against.finish("harness", True)[0] + "\n"
