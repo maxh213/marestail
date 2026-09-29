@@ -46,6 +46,8 @@ A repo whose TypeScript suite is Playwright — including Next.js apps that alre
 
 Mutation testing always runs on the diff: even without `--scope changed`, each mutation gate defaults to the files changed against `[git] base` (an empty diff skips the gate), because a whole-repo mutation pass is too slow to run on every gate. Set `[<lang>] mutation_scope = "all"` (e.g. `[elixir] mutation_scope = "all"`) to opt back into whole-repo runs; any other value fails the gate. An explicit `--scope changed` / `--focus` still wins over the config, and a repo whose `[git] base` ref does not resolve falls back to a full run, noted in the gate summary.
 
+`ex.mutation` kills any single muex test run that goes past `[elixir] muex_run_limit` seconds (default 300). muex's own `--timeout` resets whenever the tests print output, so a mutant that stops the app from starting while it keeps logging would otherwise hang the whole run. muex scores the killed run and moves on.
+
 ## Use
 
 ```sh

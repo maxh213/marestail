@@ -8,6 +8,38 @@ from marestail.report import Result
 from marestail.shell import run, tail
 
 PASSING = {"killed", "invalid", "equivalent"}
+RUN_LIMIT = 300
+WATCHDOG = r"""
+limit=$1; poll=$2; shift 2
+pattern="mix test --max""-failures"
+"$@" &
+main=$!
+descends() {
+  local pid=$1
+  while [ "$pid" -gt 1 ] 2>/dev/null; do
+    [ "$pid" = "$main" ] && return 0
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$pid" ] || return 1
+  done
+  return 1
+}
+reap() {
+  local child
+  for child in $(pgrep -P "$1"); do reap "$child"; done
+  kill -9 "$1" 2>/dev/null
+}
+while kill -0 "$main" 2>/dev/null; do
+  sleep "$poll"
+  for run in $(pgrep -f -- "$pattern"); do
+    age=$(ps -o etimes= -p "$run" 2>/dev/null | tr -d ' ')
+    if [ -n "$age" ] && [ "$age" -gt "$limit" ] && descends "$run"; then
+      echo "marestail: killed a muex test run after ${age}s (limit ${limit}s)" >&2
+      reap "$run"
+    fi
+  done
+done
+wait "$main"
+"""
 
 
 def run_gate(ctx: Context) -> Result:
@@ -24,7 +56,7 @@ def run_gate(ctx: Context) -> Result:
         return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
     if code != 0:
         return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    outcome = remote.run_mutation(ctx, "ex.mutation", command(ctx, files), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    outcome = remote.run_mutation(ctx, "ex.mutation", guarded(ctx, command(ctx, files)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
     output = outcome.output
     start = output.find("{")
     if start < 0:
@@ -49,6 +81,11 @@ def mutation_timeout(ctx: Context) -> int | None:
     if not value or str(value).lower() in {"0", "none", "false", "off"}:
         return None
     return int(value)
+
+
+def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
+    limit = int(ctx.elixir("muex_run_limit", RUN_LIMIT))
+    return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
 
 
 def command(ctx: Context, files: list[str]) -> list[str]:
