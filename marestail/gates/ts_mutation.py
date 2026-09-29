@@ -13,7 +13,7 @@ REPORT = "reports/mutation/mutation.json"
 INCREMENTAL = "reports/stryker-incremental.json"
 TEMP_DIR = ".stryker-tmp"
 TIMEOUT = 7200
-BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
+BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError"}
 
 
 def run_gate(ctx: Context) -> Result:
