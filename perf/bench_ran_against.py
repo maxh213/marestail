@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import inspect
 import shutil
 import tempfile
 from pathlib import Path
@@ -66,8 +67,10 @@ else:
             runner_activity=NOTE_LINE,
         )
 
+        finish_args = ("harness", True) if "by_eye" in inspect.signature(ran_against.finish).parameters else ("harness",)
+
         harness.emit("ran_against.parse", harness.measure(lambda: ran_against.parse(HANDOFF)))
-        harness.emit("ran_against.finish", harness.measure(lambda: ran_against.finish("harness")))
+        harness.emit("ran_against.finish", harness.measure(lambda: ran_against.finish(*finish_args)))
         harness.emit("runner.includes_qa", harness.measure(lambda: runner.includes_qa(qa_steps)))
         harness.emit("runner.ending_for", harness.measure(lambda: runner.ending_for(state, qa_steps)))
         harness.emit(
