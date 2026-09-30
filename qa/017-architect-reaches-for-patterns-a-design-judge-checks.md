@@ -1,34 +1,85 @@
 # QA: 017 — architect patterns and design judge
 
-1. From the marestail-green root with the venv active, run `python3 tools/test-pattern-rulebooks.py`.
-   Expected: exit 0; last line contains `ok`.
+Run these from the marestail-green root with the venv active. Expected results are exact unless noted.
 
-2. Run `python3 -c "from marestail.pipeline import PIPELINE, window, steps, HYPER; names=[s.name for s in PIPELINE]; i=names.index('architect'); print(names[i:i+3]); print([s.name for s in window('architect','practices')]); print('design' in [s.name for s in steps(HYPER)])"`.
-   Expected: first line is `['architect', 'design', 'practices']`; second lists architect, design, practices; third is `False`.
+1. Run `python3 tools/test-pattern-rulebooks.py`.
+   Expected: exit 0, last line `patterns ok`. A dummy rule with an empty trigger, a `patterns/py.md`, a `method_missing` form, or a `WaitGroup.Go` mention without `1.25` and `go.mod` would fail this script.
 
-3. Grep `tools/dryrun-plan.txt` for the block around architect.
-   Expected: a line `judge design` appears immediately after `worker architect`.
+2. Run:
+   ```
+   python3 - <<'PY'
+   from marestail.pipeline import Judge, find, names, window
+   from marestail.tui import theme
+   design = find("design")
+   assert design == Judge("design", None, bounce_to="architect", optional=True)
+   assert (design.bounces, design.pause_after, design.writes, design.pinned_bounce, design.targets) == (0, False, (), False, ())
+   assert names() == ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"]
+   assert [s.name for s in window("design", "design")] == ["design"]
+   assert [s.name for s in window("architect", "practices")] == ["architect", "design", "practices"]
+   assert [s.name for s in window("coder", "architect")] == ["coder", "cleaner", "architect"]
+   assert names("hyper") == ["specifier", "critic", "coder", "architect", "blast", "hardener", "qa"]
+   assert "design" not in names("hyper", True)
+   assert names(None, True)[5] == "design"
+   mono = theme.mono_theme()
+   assert theme.role_attr(mono, "design") == mono.judge
+   try:
+       find("design", "hyper")
+   except SystemExit as error:
+       assert str(error) == "unknown role design; choose from specifier, critic, coder, architect, blast, hardener, qa"
+   else:
+       raise SystemExit("hyper accepted design")
+   print("pipeline ok")
+   PY
+   ```
+   Expected: exit 0, last line `pipeline ok`.
 
-4. In an empty temp git repo, run `marestail install /tmp/mt-017-bare` (create the dir first).
-   Expected: `guidance/ts.md` and `guidance/patterns/ts.md` exist; no `guidance/go.md`, `er.md`, `ex.md`, `rb.md`, or `cs.md`; no other `guidance/patterns/*` besides `ts.md`.
+3. In a temp dir, call `run_step` on `find("design")` three times: no `guidance/patterns/*.md`; the same plus config `[design] enabled = false`; then with `guidance/patterns/ts.md` present and design left enabled. Mirror `tests/test_runner_flow.py` `test_run_step_judge` (capture stdout, stub `run_judge_loop`).
+   Expected, in order: stdout `design: no pattern rulebooks; skipping` and success, loop not called; stdout `design disabled in marestail.toml; skipping` and not `no pattern rulebooks`; neither skip line, and the loop is called.
 
-5. In a fresh temp git repo at `/tmp/mt-017-langs` add a root `go.mod` (`module x` / `go 1.22`), a `Gemfile`, a `mix.exs`, an `a.erl`, and `src/App.csproj`, then run `marestail install /tmp/mt-017-langs`.
-   Expected: `guidance/{ts,cs,rb,ex,er,go}.md` and `guidance/patterns/{ts,cs,rb,ex,er,go}.md` all exist.
+4. Stub `run_judge` to return `("BOUNCE", None, "1. TS-P1 src/order.ts:4: applied with no trigger\n")` once, then the same text again, and call `run_judge_loop` on `find("design")`.
+   Expected: the first bounce calls `run_worker` with the architect step; the second prints `design repeated the same findings twice; the worker is not making progress, stopping for a human`, returns false, and does not call the architect again.
 
-6. Edit `/tmp/mt-017-langs/guidance/patterns/ts.md` to start with `# edited`, run `marestail install /tmp/mt-017-langs` again.
-   Expected: the file still starts with `# edited`.
+5. Grep `roles/design.md` for `src/order.ts:4`, `src/Walk.cs:10`, `src/pool.go:18`, `src/old.go:3`, `VERDICT: BOUNCE`, `VERDICT: PASS`, `## Patterns`, `## Pre-existing`, `guidance/patterns/`.
+   Expected: all present. The order.ts fixture is one `return new Order(id)` cited as applied Factory TS-P1, verdict bounce. The Walk.cs fixture is a hand-written `Current`/`MoveNext` cited as Iterator, verdict bounce. The pool.go fixture with `go 1.25` and no `## Patterns` line bounces; the same trigger with `- GO-P1 src/pool.go:18: not applied because go.mod says go 1.22, which is below 1.25` passes. A pass that only saw `src/old.go:3` includes `## Pre-existing` and `- GO-P1 src/old.go:3: Add(1) / go func / defer Done()`, and a pass with nothing pre-existing omits that heading.
 
-7. On the sample from step 5 (which has both `guidance/*.md` and `guidance/patterns/*.md`), run `python3 -c "from pathlib import Path; from marestail import practices; print(any('patterns' in p.parts for p in practices.files(Path('/tmp/mt-017-langs'))))"` (use that sample's path).
-   Expected: prints `False`.
+6. Grep `roles/architect.md` for `Prefer a few deep modules over many shallow ones`, `guidance/patterns/*.md`, `## Proposals`, `## Patterns`, and `A factory or wrapper that hides nothing is the shallow module the role already rejects.`
+   Expected: all present. The new text is one paragraph: apply a pattern only for a trigger in code this task touched, only in the rule's form, never add a dependency, and record applied and skipped triggers as `- <rule id> <file:line>: …`.
 
-8. Diff `templates/guidance/er.md` and `ex.md` against `git show dfdb550:templates/guidance/er.md` and `ex.md`; `rb.md` against `git show 4148a1e:templates/guidance/rb.md`; and confirm `ts.md` / `cs.md` match HEAD before this task (or `git show HEAD:templates/guidance/ts.md` if this task has not rewritten them).
-   Expected: no wording drift on the ported or pre-existing rulebooks.
+7. Run `bash tools/dryrun.sh`.
+   Expected: exit 0 and a final line `remaining plan lines: 0`. `tools/dryrun.sh` creates `guidance/patterns/*.md` as well as `guidance/ts.md`. `tools/dryrun-plan.txt` has `judge design` on the line after `worker architect` and `judge BOUNCE` on the line after that. The stub's verdict for `judge design` is `VERDICT: PASS`.
 
-9. Read `roles/architect.md` and `roles/design.md`.
-   Expected: architect tells the role to read `guidance/patterns/*.md`, apply only on trigger, never add a dependency (propose under `## Proposals`), and list applied / deliberately-skipped triggers under `## Patterns`. design tells the judge to bounce only for the three cases in the feature, each as `<rule id> <file:line>`, and to list pre-existing under `## Pre-existing` on a pass.
+8. Create a bare temp git repo at `/tmp/mt-017-bare` and run `marestail install /tmp/mt-017-bare`.
+   Expected: `guidance/ts.md` and `guidance/patterns/ts.md` exist; `guidance/{cs,rb,ex,er,go}.md` and the other `guidance/patterns/*.md` do not.
 
-10. Open README.md Pipeline table and Best practices.
-    Expected: a `design` row between architect and practices; one short Best-practices paragraph on `guidance/patterns/`, who reads them, and what design bounces for.
+9. Install a temp git repo that has `src/nested/a.erl` and nothing else from this task.
+   Expected: `guidance/er.md` and `guidance/patterns/er.md` exist; `rb.md`, `ex.md`, `go.md`, and `cs.md` do not.
 
-11. Run the other `tools/test-*.py` scripts that already exit 0 today (same set as 016).
-    Expected: each exits 0 with last line containing `ok`. `tools/test-perf.py` still exits 1 with last line `verdict-commit-files: '' != 'perf/bench_x.py'`.
+10. Install a temp git repo that has only `nested/Gemfile`, `nested/mix.exs`, and `nested/go.mod`.
+    Expected: no `guidance/rb.md`, `ex.md`, or `go.md`, and no `guidance/patterns/{rb,ex,go}.md`.
+
+11. Create a temp git repo at `/tmp/mt-017-langs` with root `Gemfile`, root `mix.exs`, root `go.mod` (`module x` / `go 1.22`), `src/nested/a.erl`, and `src/App.csproj`, then run `marestail install /tmp/mt-017-langs`.
+    Expected: `guidance/{ts,cs,rb,ex,er,go}.md` and `guidance/patterns/{ts,cs,rb,ex,er,go}.md` all exist.
+
+12. Prepend `# edited` to that tree's `guidance/patterns/ts.md` and `guidance/go.md`, then install again.
+    Expected: both files still start with `# edited`.
+
+13. On the repo from step 11, run `python3 -c "from pathlib import Path; from marestail import practices; root=Path('/tmp/mt-017-langs'); print(practices.files(root))"`.
+    Expected: the printed paths are top-level `guidance/*.md` only. None contain `patterns`.
+
+14. Run `python3 -c "from pathlib import Path; from marestail._hyper import hyper_files; print(sorted(hyper_files(Path('/tmp/mt-017-bare'))))"` on the bare repo, and the same on the step 11 repo.
+    Expected: bare keys are `PERFORMANCE.md`, `guidance/ts.md`, `marestail.toml`, `tasks/README.md`. The marked repo adds only `guidance/cs.md`. No `guidance/patterns/` key and no `er.md`, `ex.md`, `rb.md`, or `go.md`.
+
+15. Diff `templates/guidance/ts.md` and `cs.md` against `git show origin/main:templates/guidance/ts.md` and `cs.md`. Diff `er.md`, `ex.md`, and `rb.md` against `git show dfdb550:templates/guidance/<file>`.
+    Expected: empty diffs. `rb.md` contains `RB-48` and does not contain `RB-49`. Do not use commit `4148a1e`.
+
+16. Grep `templates/marestail.toml` for the commented `[design]` block.
+    Expected: it sits beside `[practices]` and says the judge runs between architect and practices unless false, and skips repos with no `guidance/patterns/*.md`. The `[practices]` comment is unchanged.
+
+17. In README.md, read the Pipeline row whose Step cell is `design`.
+    Expected: it is directly between architect and practices; Kind `judge`, Gate `none`, hyper `—`; Does names the three bounces, the citation `<rule id> <file:line>`, and `design: no pattern rulebooks; skipping`. The sentence `Other languages get no shipped rulebook` is absent. The next Best practices paragraph names `guidance/patterns/`, the architect, the design judge, not practices, and install of `er.md`, `ex.md`, `rb.md`, `go.md`, and `guidance/patterns/`.
+
+18. Run `pytest tests/test_pipeline.py tests/test_runner_flow.py tests/test_install.py tests/test_install_hyper.py tests/test_tui_theme.py -q`.
+    Expected: all pass. `tests/test_install_hyper.py` still expects the hyper key set from step 14.
+
+19. Run each `tools/test-*.py` that already exits 0 (the `PASSING_SCRIPTS` list in `tests/test_green_repo.py`, which now includes `test-pattern-rulebooks.py`, plus the other scripts that passed before this task). Run `python3 tools/test-perf.py` too.
+    Expected: each previously passing script still exits 0 with a last line containing `ok`. `tools/test-perf.py` exits 1 and its last line is `verdict-commit-files: '' != 'perf/bench_x.py'`. Its `pipeline_order` list includes `design`, so it does not fail earlier on the role list.
