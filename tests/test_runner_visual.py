@@ -232,6 +232,7 @@ def test_reset_attempt_forgets_who_judged(tmp_path: Path) -> None:
 
 
 REPORT = Report("t", "/donate.html", "square", "#widget")
+CAPTURE = Reproduction(REPORT, "abc", ["desktop"], {})
 
 
 def test_bug_for_hands_the_run_to_the_reported_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,7 +246,46 @@ def test_verify_worker_asks_the_reported_module_about_the_handoff(tmp_path: Path
     problems = patch(monkeypatch, reported, "handoff_problems", ["missing ## Observed section in h.md"])
     for name in ("missing_handoff", "changed_paths", "frozen_problems", "hunk_problems", "audit_problems", "gate_problems"):
         patch(monkeypatch, runner, name, [])
-    state = make_state(tmp_path)
+    state = make_state(tmp_path, reproduction=CAPTURE)
     report = tmp_path / "01-specifier.md"
     assert runner.verify_worker(state, Worker("specifier", None), report, "before") == "missing ## Observed section in h.md"
-    assert problems.calls == [(state.config, None, "specifier", report)]
+    assert problems.calls == [(state.config, CAPTURE, "specifier", report)]
+
+
+def test_verify_worker_rejects_a_reproduced_specifier_without_observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("changed_paths", "frozen_problems", "hunk_problems", "audit_problems", "gate_problems"):
+        patch(monkeypatch, runner, name, [])
+    state = make_state(tmp_path, reproduction=CAPTURE)
+    report = state.handoffs / "01-specifier.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("spec written\n")
+    problems = runner.verify_worker(state, Worker("specifier", None), report, "before")
+    assert problems == "missing ## Observed section in .marestail/handoffs/t/01-specifier.md"
+    assert runner.verify_worker(make_state(tmp_path), Worker("specifier", None), report, "before") == ""
+
+
+@pytest.mark.parametrize(
+    ("role", "sections"),
+    [("specifier", {"Reported": f"BODY\n{reported.ASK_OBSERVED}"}), ("coder", {})],
+)
+def test_worker_prompt_carries_the_reported_bug_for_the_specifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str, sections: dict[str, str]
+) -> None:
+    patch(monkeypatch, visual_gate, "reported_section", "BODY")
+    prompt = patch(monkeypatch, prompts, "worker_prompt", "PROMPT")
+    for name in ("head", "invoke", "record_attempt", "drop_ignored_since", "fold_handoff", "restore_files"):
+        patch(monkeypatch, runner, name)
+    patch(monkeypatch, runner, "verify_worker", "")
+    runner.worker_attempt(make_state(tmp_path, reproduction=CAPTURE), Worker(role, None), "", 1, "before")
+    assert prompt.calls[0][-1] == sections
+
+
+def test_critic_prompt_carries_the_reported_bug_and_the_observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    patch(monkeypatch, visual_gate, "reported_section", "BODY")
+    prompt = patch(monkeypatch, prompts, "judge_prompt", "PROMPT")
+    state = make_state(tmp_path, reproduction=CAPTURE)
+    state.handoffs.mkdir(parents=True)
+    (state.handoffs / "01-specifier.md").write_text("## Observed\nthe frame is 440px\n")
+    runner.built_judge_prompt(state, CRITIC, state.handoffs / "02-critic.md", ("", "", ""))
+    runner.built_judge_prompt(state, PERF, state.handoffs / "03-perf.md", ("", "", ""))
+    assert [call[-1] for call in prompt.calls] == [{"Reported": "BODY", "Observed": "the frame is 440px"}, {}]

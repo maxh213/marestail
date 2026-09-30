@@ -120,8 +120,8 @@ def _frame_lines(frame: _Frame) -> list[str]:
 def _load_problem(frame: _Frame) -> str:
     if "error" in frame:
         return f"Loaded alone: {frame['url']} could not be loaded: {frame['error']}"
-    status = frame["status"] or 0
-    return f"Loaded alone: {frame['url']} answered {status}" if status >= _ANSWERED_FROM else ""
+    status = frame["status"]
+    return f"Loaded alone: {frame['url']} answered {status}" if status is not None and status >= _ANSWERED_FROM else ""
 
 
 def _measured(frame: _Frame) -> str:

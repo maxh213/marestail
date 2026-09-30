@@ -308,3 +308,74 @@ def test_reproduce_stops_on_app_and_capture_failures(tmp_path: Path, reproducing
         "reported: desktop: #widget not visible at base",
         "reported: mobile: #widget not found at base",
     ]
+
+
+def recording(seen: list[tuple[Any, ...]], reply: Any) -> Callable[..., Any]:
+    def record(*args: Any) -> Any:
+        seen.append(args)
+        return reply(*args) if callable(reply) else reply
+
+    return record
+
+
+def test_reproduce_captures_the_task_at_its_start_commit(
+    tmp_path: Path, reproducing: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    seen: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(worktree, "start_commit", recording(seen, ("abc", "note")))
+    monkeypatch.setattr(visual.capture, "capture_reported", recording(seen, lambda *args: reproducing["run"]))
+    shots = {"desktop": Shot([{}], None), "mobile": Shot([{}], None)}
+    reproducing["run"] = TreeRun(Tree("reported", "base", tmp_path), [], shots)
+    config = config_with(tmp_path, {"viewports": {"desktop": "1440x900"}})
+    visual.reproduce(config, REPORT)
+    spec, _ = spec_module.reported_spec(config, REPORT)
+    assert seen == [(config, "t"), (config, spec, "abc")]
+    assert capsys.readouterr().out.splitlines()[1:] == [
+        "reported desktop: .marestail/runs/t/visual/reported/desktop",
+        "reported mobile: .marestail/runs/t/visual/reported/mobile",
+    ]
+
+
+def test_load_problem_from_status_400() -> None:
+    url = FRAME["url"]
+    assert reported._load_problem({**FRAME, "status": None}) == ""
+    assert reported._load_problem({**FRAME, "status": 399}) == ""
+    assert reported._load_problem({**FRAME, "status": 400}) == f"Loaded alone: {url} answered 400"
+
+
+def test_reported_spec_without_viewports(tmp_path: Path) -> None:
+    spec, problems = spec_module.reported_spec(config_with(tmp_path, {"start": "serve"}), REPORT)
+    assert problems == []
+    assert spec is not None
+    assert spec.settings.viewports == []
+
+
+def test_capture_reported_runs_one_capture_of_the_base_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, ...]] = []
+    config = Config(tmp_path, {})
+    monkeypatch.setattr(capture, "_base_run", recording(seen, lambda *args: TreeRun(args[1])))
+    monkeypatch.setattr(worktree, "remove", lambda *args: recording(seen, None)("remove", *args))
+    run = capture.capture_reported(config, make_spec(), "abc")
+    folder = spec_module.visual_dir(config, "t")
+    assert seen[0] == (tmp_path, Tree("reported", "base", run.tree.path), "abc", make_spec(), folder, 1, capture._reported_shot)
+    assert seen[1] == ("remove", tmp_path, run.tree.path)
+    assert run.tree.path.name.startswith("marestail-visual-")
+
+
+def test_capture_reported_takes_one_capture_of_a_full_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(capture, "_reported_shot", recording(seen, Shot([], None)))
+    spec = make_spec(route="https://example.org/donate")
+    run = capture.capture_reported(Config(tmp_path, {}), spec, "abc")
+    assert run.tree == Tree("reported", "base", tmp_path)
+    assert seen == [(spec, DESKTOP, "", spec_module.reported_dir(Config(tmp_path, {}), "t") / "desktop", 1)]
+
+
+def test_reported_shot_sends_its_folder_and_capture_count(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    frame = {**FRAME, "error": "x"}
+    fake = fake_run(capture, [(0, "one\ntwo\n" + json.dumps({"failure": None, "frame": frame}) + "\n")])
+    capture._reported_shot(make_spec(), DESKTOP, "", tmp_path, 3)
+    payload = json.loads(fake.calls[0][3])
+    assert (payload["out"], payload["captures"]) == (str(tmp_path), 3)
+    assert (tmp_path / "frame.json").read_text() == json.dumps(FRAME, indent=2) + "\n"
+    assert (tmp_path / "frame.json").read_text().startswith('{\n  "url": ')

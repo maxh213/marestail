@@ -128,3 +128,10 @@ def test_handoff_problems_for_a_handoff_never_written(tmp_path: Path) -> None:
     assert reported.handoff_problems(Config(tmp_path, {}), CAPTURE, "specifier", missing) == [
         "missing ## Observed section in 01-specifier.md"
     ]
+
+
+def test_observed_is_the_first_section_up_to_the_next_heading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    patch(monkeypatch, "reported_section", "BODY")
+    text = "## Observed\nfirst\n## Left\nx\n## Observed\nsecond\n## Config change\nnone\n"
+    handoff(tmp_path, "01-specifier.md", text)
+    assert reported.prompt_sections(Config(tmp_path, {}), CAPTURE, "critic", tmp_path, "")["Observed"] == "first"
