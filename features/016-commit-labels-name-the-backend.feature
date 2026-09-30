@@ -84,7 +84,12 @@ Feature: Commit labels name the backend: [cursor/auto high], not [auto high]
   Scenario: pytest covers every label branch
     Then the pytest suite carries one test per row of the eight-row table above
     And tests cover each branch: prefix added, slash present, backend contained, model unset with a route, model unset without a route, kilo default
-    And existing label expectations that asserted a bare model are updated to the prefixed form (`opus high` to `claude/opus high`, kilo `other` to `kilo/other`, hermes `mymodel` to `hermes/mymodel`, hermes `mymodel xhigh` to `hermes/mymodel xhigh`)
+    And in tests/test_runner_backends.py test_agent_label the bare-model rows become `claude/opus high`, kilo `kilo/other`, hermes `hermes/mymodel` and hermes `hermes/mymodel xhigh`
+    And in tests/test_runner_flow.py test_invoke_routes_each_session the routed prompt and the saved prompt file become `Commit as [claude/opus high] here` and state.labels becomes {"claude/opus high"}
+    And in tests/test_runner_flow.py the "m e" label argument becomes "claude/m e" in test_run_worker_succeeds_after_feedback (worker prompt and handoff fold), test_judge_attempt_records_bounce (verdict commit) and test_author_phase_stops_when_benches_settle (benches commit)
+    And in tests/test_runner_git.py the revert subjects in test_reject_config_change_without_reason_reverts and test_reject_config_change_records_proposal start with `[claude/m e] `
+    And in tests/test_timeline.py test_remember_agent records the model as `claude/m`
+    And in tests/test_runner_visual.py `gpt-9 high` becomes `cursor/gpt-9 high` in test_an_out_of_usage_judge_model_falls_back_at_once (judged_by) and test_commit_verdict_stamps_the_judge_and_marks_a_blind_pass (verdict commit label)
     And `python -m pytest tests -q` passes
 
   Scenario: README describes the stamp rule
@@ -93,3 +98,4 @@ Feature: Commit labels name the backend: [cursor/auto high], not [auto high]
 
   Scenario: other diagnostics keep their contracts
     Then every other tools/test-*.py script keeps its current pass/fail contract, including tools/test-perf.py exit 1 with last line `verdict-commit-files: '' != 'perf/bench_x.py'`
+    And tools/test-visual-judge.py still exits 0 with last line `visual judge ok`, with its prefix-affected pins updated: hardener-stamp `[cursor/gpt-9] hardener verdict: PASS`, the fallback-timeline model `cursor/gpt-9`, and fallback-stamp plus route-stamp `[cursor/gpt-9] visual verdict: PASS`; its `[claude-fable-5-1] ...` and `[kilo/x] ...` pins stay unchanged
