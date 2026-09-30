@@ -223,7 +223,7 @@ def case_other_backend(folder: Path) -> None:
         expect_true(f"cursor-{number}", bed.arg(number).startswith("cursor-agent") and "--model gpt-9" in bed.arg(number))
     expect_true("claude-judge", bed.arg(2).startswith("claude") and "--model claude-fable-5-1" in bed.arg(2))
     expect("visual-stamp", bed.subjects("visual verdict"), ["[claude-fable-5-1] visual verdict: PASS"])
-    expect("hardener-stamp", bed.subjects("hardener verdict"), ["[gpt-9] hardener verdict: PASS"])
+    expect("hardener-stamp", bed.subjects("hardener verdict"), ["[cursor/gpt-9] hardener verdict: PASS"])
 
 
 def case_configured_judge_model(folder: Path) -> None:
@@ -245,8 +245,8 @@ def case_out_of_usage(folder: Path) -> None:
     expect_true("fallback-backend", bed.arg(2).startswith("cursor-agent") and "--model gpt-9" in bed.arg(2))
     expect("fallback-pictures", [line for line in bed.prompt(2).splitlines() if line.startswith("- .marestail")], PICTURES)
     step = visual_step(bed)
-    expect("fallback-timeline", (step["waits"], step["agent"]["backend"], step["agent"]["model"]), ([], "cursor", "gpt-9"))
-    expect("fallback-stamp", (bed.subjects("visual verdict"), bed.code), (["[gpt-9] visual verdict: PASS"], 0))
+    expect("fallback-timeline", (step["waits"], step["agent"]["backend"], step["agent"]["model"]), ([], "cursor", "cursor/gpt-9"))
+    expect("fallback-stamp", (bed.subjects("visual verdict"), bed.code), (["[cursor/gpt-9] visual verdict: PASS"], 0))
 
 
 def case_blind_fallback(folder: Path) -> None:
@@ -299,7 +299,7 @@ def case_dandelion(folder: Path) -> None:
         expect_true(f"route-{number}", bed.arg(number).startswith("cursor-agent") and "claude-fable-5-1" not in bed.arg(number))
     expect_true("route-model", "--model gpt-9" in bed.arg(2))
     expect("route-calls", len(calls.read_text().splitlines()), 2)
-    expect("route-stamp", (bed.subjects("visual verdict"), bed.code), (["[gpt-9] visual verdict: PASS"], 0))
+    expect("route-stamp", (bed.subjects("visual verdict"), bed.code), (["[cursor/gpt-9] visual verdict: PASS"], 0))
 
 
 def case_other_waits(folder: Path) -> None:

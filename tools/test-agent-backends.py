@@ -346,38 +346,39 @@ def env_overrides() -> None:
 
 
 def labels() -> None:
-    expect("label-model-only", agent_label(state("claude")), "mymodel")
-    expect("label-with-effort", agent_label(state("claude", effort="high")), "mymodel high")
+    expect("label-model-only", agent_label(state("claude")), "claude/mymodel")
+    expect("label-with-effort", agent_label(state("claude", effort="high")), "claude/mymodel high")
     expect("label-no-model", agent_label(state("claude", model=None)), "claude")
     expect("label-kilo-default", agent_label(state("kilo", model=None)), f"{KILO_DEFAULT_MODEL} {KILO_DEFAULT_VARIANT}")
     expect("label-kilo-plain", agent_label(state("kilo", model="kilo/other")), "kilo/other")
+    expect("label-cursor-auto", agent_label(state("cursor", model="auto", effort="high")), "cursor/auto high")
     effortful = state("grok", effort="xhigh")
-    expect("label-grok", agent_label(effortful), "mymodel xhigh")
+    expect("label-grok", agent_label(effortful), "grok/mymodel xhigh")
     expect("grok-effort-flag", grok_command(effortful, PROMPT)[-2:], ["--reasoning-effort", "xhigh"])
     expect("claude-effort-flag", agent_command(state("claude", effort="xhigh"))[-2:], ["--effort", "xhigh"])
     expect("agy-effort-flag", agent_command(state("agy", effort="high"))[-2:], ["--effort", "high"])
     expect("cursor-effort-unflagged", agent_command(state("cursor", effort="high"))[-2:], ["--model", "mymodel"])
     expect("kilo-effort-flag", kilo_command(state("kilo", model="kilo/other", effort="low"))[-2:], ["--variant", "low"])
     expect("kilo-effort-off", kilo_command(state("kilo", model=None, effort=""))[-2:], ["--model", KILO_DEFAULT_MODEL])
-    expect("label-kimi", agent_label(state("kimi")), "mymodel")
+    expect("label-kimi", agent_label(state("kimi")), "kimi/mymodel")
     expect("label-kimi-no-model", agent_label(state("kimi", model=None)), "kimi")
-    expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "mymodel high")
+    expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "kimi/mymodel high")
     expect(
         "kimi-effort-unflagged",
         kimi_command(state("kimi", effort="high"), PROMPT),
         ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json", "-m", "mymodel"],
     )
-    expect("label-junie", agent_label(state("junie")), "mymodel")
+    expect("label-junie", agent_label(state("junie")), "junie/mymodel")
     expect("label-junie-no-model", agent_label(state("junie", model=None)), "junie")
-    expect("label-junie-effort", agent_label(state("junie", effort="high")), "mymodel high")
+    expect("label-junie-effort", agent_label(state("junie", effort="high")), "junie/mymodel high")
     expect(
         "junie-effort-unflagged",
         junie_command(state("junie", effort="xhigh")),
         ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
     )
-    expect("label-hermes", agent_label(state("hermes")), "mymodel")
+    expect("label-hermes", agent_label(state("hermes")), "hermes/mymodel")
     expect("label-hermes-no-model", agent_label(state("hermes", model=None)), "hermes")
-    expect("label-hermes-effort", agent_label(state("hermes", effort="xhigh")), "mymodel xhigh")
+    expect("label-hermes-effort", agent_label(state("hermes", effort="xhigh")), "hermes/mymodel xhigh")
     expect(
         "hermes-effort-flag",
         hermes_command(state("hermes", effort="xhigh"), PROMPT),

@@ -562,6 +562,15 @@ def test_readme_documents_hermes() -> None:
     assert "--format stream-json" in paragraph
 
 
+def test_readme_describes_the_commit_stamp() -> None:
+    text = (ROOT / "README.md").read_text()
+    paragraph = text.split("the stamp is deterministic", 1)[1].split("\n\n", 1)[0]
+    assert "`<backend>/<model>`" in paragraph
+    assert "`[cursor/auto high]`" in paragraph
+    assert "the backend name stands in for it" in paragraph
+    assert "the stamp is the model alone" in paragraph
+
+
 def test_templates_list_hermes() -> None:
     text = (ROOT / "templates" / "marestail.toml").read_text()
     assert '# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi | junie | hermes' in text

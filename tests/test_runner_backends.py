@@ -67,21 +67,38 @@ def test_resolve_agent(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], 
 @pytest.mark.parametrize(
     ("fields", "expected"),
     [
-        ({"model": "opus", "effort": "high"}, "opus high"),
+        ({"model": "opus", "effort": "high"}, "claude/opus high"),
         ({"route": "dandelion/route"}, "dandelion/route"),
         ({"route": "dandelion/route", "agent": "claude", "effort": "low"}, "dandelion/route low"),
         ({"agent": "kilo"}, f"{backends.KILO_DEFAULT_MODEL} high"),
-        ({"agent": "kilo", "model": "other"}, "other"),
+        ({"agent": "kilo", "model": "other"}, "kilo/other"),
         ({"agent": "grok", "effort": "max"}, "grok max"),
         ({"agent": "grok"}, "grok"),
         ({"agent": "hermes"}, "hermes"),
-        ({"agent": "hermes", "model": "mymodel"}, "mymodel"),
+        ({"agent": "hermes", "model": "mymodel"}, "hermes/mymodel"),
         ({"agent": "hermes", "effort": "xhigh"}, "hermes xhigh"),
-        ({"agent": "hermes", "model": "mymodel", "effort": "xhigh"}, "mymodel xhigh"),
+        ({"agent": "hermes", "model": "mymodel", "effort": "xhigh"}, "hermes/mymodel xhigh"),
         ({}, "claude"),
     ],
 )
 def test_agent_label(fields: dict[str, Any], expected: str) -> None:
+    assert runner.agent_label(make_state(**fields)) == expected
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"agent": "cursor", "model": "auto", "effort": "high"}, "cursor/auto high"),
+        ({"agent": "cursor", "model": "kimi-k3-max"}, "cursor/kimi-k3-max"),
+        ({"agent": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}, "agy/gemini-3.8-flash-high high"),
+        ({"agent": "junie", "model": "gemini-3.8-flash", "effort": "high"}, "junie/gemini-3.8-flash high"),
+        ({"agent": "claude", "model": "claude-opus-5", "effort": "high"}, "claude-opus-5 high"),
+        ({"agent": "grok", "model": "grok-4.6", "effort": "xhigh"}, "grok-4.6 xhigh"),
+        ({"agent": "kimi", "model": "kimi-code/kimi-for-coding-highspeed"}, "kimi-code/kimi-for-coding-highspeed"),
+        ({"agent": "hermes", "model": "x-ai/grok-4.6", "effort": "xhigh"}, "x-ai/grok-4.6 xhigh"),
+    ],
+)
+def test_agent_label_names_the_backend(fields: dict[str, Any], expected: str) -> None:
     assert runner.agent_label(make_state(**fields)) == expected
 
 

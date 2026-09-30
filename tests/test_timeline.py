@@ -255,7 +255,7 @@ def test_remember_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     runner.remember_agent(state, "claude", 30.0, "summary")
     assert state.attempt_agent == {
         "backend": "claude",
-        "model": "m",
+        "model": "claude/m",
         "effort": "high",
         "account": "claude",
         "minutes": 1.0,

@@ -595,7 +595,7 @@ def test_run_worker_succeeds_after_feedback(
         "task",
         reports[0],
         "first feedback",
-        "m e",
+        "claude/m e",
         " --scope hard --focus a.py",
         {"a.py"},
         False,
@@ -604,7 +604,7 @@ def test_run_worker_succeeds_after_feedback(
     assert worker_env["invoke"].calls == [(state, "01-coder", "PROMPT"), (state, "01-coder", "PROMPT")]
     assert verify.calls[1] == (state, CODER, reports[1], "before")
     assert worker_env["drop"].calls == [(state.config, "before")]
-    assert worker_env["fold"].calls == [(state.config, "coder", reports[1], "before", "m e", {"x"})]
+    assert worker_env["fold"].calls == [(state.config, "coder", reports[1], "before", "claude/m e", {"x"})]
     assert worker_env["restore"].calls == [(state.config, {"a.log": b"x"})]
     assert worker_env["head"].calls == [(state.config,), (state.config,), (state.config,)]
     assert capsys.readouterr().out == "== coder (01-coder) attempt 1\nmissing handoff\n== coder (01-coder) attempt 2\n"
@@ -801,7 +801,7 @@ def test_judge_attempt_records_bounce(tmp_path: Path, judge_env: dict[str, Any],
     assert judge_env["discard"].calls == [(state.config, ("keep", report), ("writes", ("docs/**",)))]
     assert judge_env["stage"].calls == [(state.config, ("docs/**",))]
     assert judge_env["commit"].calls == [
-        (state.config, "hardener verdict: BOUNCE to coder", "VERDICT: bounce coder\n1. fix", "hardener", "m e"),
+        (state.config, "hardener verdict: BOUNCE to coder", "VERDICT: bounce coder\n1. fix", "hardener", "claude/m e"),
     ]
     assert judge_env["restore"].calls == [(state.config, {"f": b"1"})]
     assert judge_env["drop"].calls == [(state.config, "before")]
@@ -915,7 +915,7 @@ def test_author_phase_stops_when_benches_settle(tmp_path: Path, author_env: dict
     assert author_env["invoke"].calls[0] == (state, "perf-author-1", "AUTHOR PROMPT")
     assert author_env["discard"].calls[0] == (state.config, ("keep", note), ("writes", ("perf/**",)))
     assert author_env["stage"].calls[0] == (state.config, ("perf/**",))
-    assert author_env["staged"].calls[0] == (state.config, "perf-author-1 benches", "perf", "m e")
+    assert author_env["staged"].calls[0] == (state.config, "perf-author-1 benches", "perf", "claude/m e")
     assert author_env["restore"].calls[0] == (state.config, {"k": b"v"})
     assert capsys.readouterr().out == (
         "   perf-author-1: benches changed; stale samples dropped, re-authoring\n   perf-author-2: benches unchanged\n"
@@ -1172,14 +1172,14 @@ def test_invoke_routes_each_session(tmp_path: Path, invoke_env: dict[str, Any], 
     runner.invoke(state, "x", "Commit as [dandelion/route] here")
     prompt_file = state.folder / "x.prompt.md"
     assert choose.calls == [("dandelion/route", tmp_path), ("dandelion/route", tmp_path)]
-    assert invoke_env["backend"].calls == [(state, "claude", "Commit as [opus high] here", prompt_file)]
-    assert prompt_file.read_text() == "Commit as [opus high] here"
+    assert invoke_env["backend"].calls == [(state, "claude", "Commit as [claude/opus high] here", prompt_file)]
+    assert prompt_file.read_text() == "Commit as [claude/opus high] here"
     assert (state.agent, state.model, state.effort, state.account_env, state.labels) == (
         "claude",
         "opus",
         "high",
         {"K": "v"},
-        {"opus high"},
+        {"claude/opus high"},
     )
     assert invoke_env["sleep"].calls == [(120,)]
     assert capsys.readouterr().out.splitlines()[:2] == [

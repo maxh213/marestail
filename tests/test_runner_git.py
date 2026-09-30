@@ -382,7 +382,7 @@ def test_reject_config_change_without_reason_reverts(repo: Path) -> None:
     problems = runner.reject_config_change(state, Worker("coder", None), report, before, ["marestail.toml"])
     assert problems == ["marestail.toml is frozen for coder; reverted. Work within the current configuration."]
     assert (repo / "marestail.toml").read_text() == "[a]\n"
-    assert last_message(repo) == "[m e] Revert change to frozen files by 01-coder\n\nBy runner."
+    assert last_message(repo) == "[claude/m e] Revert change to frozen files by 01-coder\n\nBy runner."
 
 
 def test_reject_config_change_records_proposal(repo: Path) -> None:
@@ -397,7 +397,7 @@ def test_reject_config_change_records_proposal(repo: Path) -> None:
         "for a human to consider after the run. Find a way within the current configuration."
     ]
     assert (state.handoffs / "02-proposal.md").read_text() == body
-    assert last_message(repo) == f"[m e] Revert change to frozen files by 01-coder, recorded as a proposal\n\n{body}\nBy runner."
+    assert last_message(repo) == f"[claude/m e] Revert change to frozen files by 01-coder, recorded as a proposal\n\n{body}\nBy runner."
     assert (repo / "marestail.toml").read_text() == "[a]\n"
 
 

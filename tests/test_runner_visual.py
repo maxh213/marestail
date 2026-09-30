@@ -162,7 +162,7 @@ def test_an_out_of_usage_judge_model_falls_back_at_once(tmp_path: Path, sessions
     assert [call[:2] for call in sessions.calls] == [("claude", "claude-fable-5-1"), ("cursor", "gpt-9")]
     assert sessions.calls[1][-1] == "prompt for cursor"
     assert capsys.readouterr().out.splitlines()[0] == "visual: claude-fable-5-1 is out of usage; judging with cursor gpt-9"
-    assert (state.attempt_waits, state.judged_by, state.blind, state.unseen) == ([], "gpt-9 high", False, False)
+    assert (state.attempt_waits, state.judged_by, state.blind, state.unseen) == ([], "cursor/gpt-9 high", False, False)
 
 
 def test_a_fallback_that_cannot_read_images_is_blind(tmp_path: Path, sessions: Recorder, capsys: Any) -> None:
@@ -222,7 +222,7 @@ def test_commit_verdict_stamps_the_judge_and_marks_a_blind_pass(tmp_path: Path, 
     assert commits.calls[0][1:] == ("visual verdict: PASS (geometry only, pictures not seen)", "ok", "visual", "kilo/x")
     assert capsys.readouterr().out == "   verdict PASS (geometry only, pictures not seen)\n"
     runner.commit_verdict(make_state(tmp_path), CRITIC, "abc", (runner.BOUNCE, "specifier", "no"))
-    assert commits.calls[1][1:] == ("critic verdict: BOUNCE to specifier", "no", "critic", "gpt-9 high")
+    assert commits.calls[1][1:] == ("critic verdict: BOUNCE to specifier", "no", "critic", "cursor/gpt-9 high")
 
 
 def test_reset_attempt_forgets_who_judged(tmp_path: Path) -> None:

@@ -1413,11 +1413,17 @@ def agent_label(state: Run) -> str:
 
 def model_name(state: Run) -> str:
     if state.model:
-        return state.model
+        return model_label(resolve_agent(state), state.model)
     if state.route:
         return state.route
     backend = resolve_agent(state)
     return KILO_DEFAULT_MODEL if backend == "kilo" else backend
+
+
+def model_label(backend: str, model: str) -> str:
+    if "/" in model or backend in model:
+        return model
+    return f"{backend}/{model}"
 
 
 def effort_name(state: Run) -> str:
