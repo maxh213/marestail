@@ -8,6 +8,15 @@ One task is one pipeline run: specifier, critic, coder, cleaner, architect, prac
 - **Give the values.** Amounts, currencies, error messages, locales. Concrete values become concrete scenarios.
 - **Put the rules in the gate, not the task.** Coverage, complexity, comments, and Sonar are already enforced. Mention a rule only when this task needs a different one.
 - **Refactors are the exception.** A task that changes no behaviour says so in the first line and freezes everything; the critic will not demand a user-visible outcome.
+- **Reproduce a bug first.** A bug task should carry two lines, and may add a third naming the element:
+
+  ```
+  where: /donate.html
+  symptom: the teal bar's top-left corner is round and its top-right corner is square
+  selector: #widget
+  ```
+
+  `where` is a route on the app that `[visual]` or `[qa] start` brings up, or a full URL; `symptom` is what a user sees. With both lines and `[visual]` enabled, the run captures `where` at the start commit before the specifier runs, and stops if it cannot. The specifier and the critic then check the task's stated cause against the capture, so describe what you see and treat the cause you suspect as a guess.
 - **Order slices in a file** when several belong together, and run them one after another; the architect reshapes modules between them.
 
 Name files `NNN-short-name.md`. The specifier writes `features/short-name.feature` and `qa/short-name.md` to match.
