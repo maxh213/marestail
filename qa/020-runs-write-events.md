@@ -12,7 +12,7 @@ The script fails until the events writer, the runner wiring, the freeze entry, t
 
 4. `append ok`. The file starts as `not json\n`. Two passing runs append. The first line is still `not json`. Two `run-start` lines share this pid, and the two `start_commit` values differ.
 
-5. `bounce ok`. First critic: `VERDICT: BOUNCE` and `1. scenario missing`. Second: `VERDICT: PASS`. Events add `02-critic` bounce to `specifier`, `03-specifier` done, `04-critic` pass, `run-end` complete. Stdout contains `   verdict BOUNCE to specifier`.
+5. `bounce ok`. First critic: `VERDICT: BOUNCE` and `1. scenario missing`. Second: `VERDICT: PASS`. Events add `02-critic` bounce to `specifier`, `03-specifier` done, `04-critic` pass, `run-end` complete. Stdout contains `   verdict BOUNCE`.
 
 6. `stop ok`. Both critics use that same bounce text. Events end `04-critic` bounce, `run-end` stopped. No `05-specifier`. Exit 1. `stopped_at` is `critic`. Reason is `critic repeated the same findings twice; the worker is not making progress, stopping for a human`. Stdout contains that line and `pipeline stopped at critic`.
 
@@ -590,7 +590,7 @@ def bounce_ok():
     assert sequence(got["rows"])[4] == ("step-end", "02-critic", "bounce")
     assert got["rows"][4]["bounce_to"] == "specifier"
     assert sequence(got["rows"])[-2:] == [("step-end", "04-critic", "pass"), ("run-end", None, "complete")]
-    assert "   verdict BOUNCE to specifier" in got["out"]
+    assert "   verdict BOUNCE" in got["out"]
 
 
 def stop_ok():

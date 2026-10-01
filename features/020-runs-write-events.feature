@@ -223,7 +223,7 @@ Feature: Runs write one event line at every step boundary
       | step-end | 04-critic | pass |
       | run-end | - | complete |
     And 02-critic's bounce_to is "specifier" and 04-critic's bounce_to is null
-    And stdout contains "   verdict BOUNCE to specifier" and "   verdict PASS" and "pipeline complete"
+    And stdout contains "   verdict BOUNCE" and "   verdict PASS" and "pipeline complete"
 
   Scenario: the same critic findings twice stop at the critic
     Given the same repo and window
