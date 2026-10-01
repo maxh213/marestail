@@ -160,7 +160,7 @@ Read by the architect and the `design` judge for `*.go` changes. Each pattern na
 
 - **GO-P27 — WaitGroup.**
   pattern: WaitGroup — wait for a set of goroutines to finish.
-  trigger: the `Add(1)` / `go func() { defer Done() }()` sequence, or several goroutines whose completion the caller must await.
+  trigger: the `Add(1)` / `go func` / `defer Done()` sequence, only when `go.mod`'s `go` line is at least 1.25.
   form: `sync.WaitGroup.Go` (Go 1.25, when `go.mod`'s `go` line is at least 1.25), which replaces the dance.
   not when: a channel already tells the caller when the work is done.
 

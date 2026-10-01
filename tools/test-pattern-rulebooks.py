@@ -290,9 +290,10 @@ RB_CITES = (
 )
 REQUIRED = (
     ("cs", 16, "trigger", ("hand-written",)),
-    ("cs", 16, "form", ("IEnumerable",)),
+    ("cs", 16, "form", ("IEnumerable", "yield return")),
     ("ts", 4, "trigger", ("hand-written",)),
     ("ts", 4, "form", ("Symbol.iterator",)),
+    ("ts", 9, "trigger", ("the same construction sequence at 3 or more call sites",)),
     ("ts", 9, "form", ("plain function", "TS-11", "TS-15")),
     ("ts", 11, "trigger", ("hand-written",)),
     ("ts", 11, "form", ("ES module",)),
@@ -313,7 +314,7 @@ REQUIRED = (
     ("go", 4, "form", ("sync.Once",)),
     ("go", 10, "form", ("sync.Pool",)),
     ("go", 15, "form", ("iter.Seq", "1.23", "go.mod")),
-    ("go", 27, "trigger", ("Add(1)", "go func", "Done")),
+    ("go", 27, "trigger", ("Add(1)", "go func", "Done", "1.25", "go.mod")),
     ("go", 27, "form", ("sync.WaitGroup.Go", "1.25", "go.mod")),
     ("go", 30, "trigger", ("channel",)),
     ("go", 30, "form", ("close", "ctx.Done()")),
@@ -321,6 +322,15 @@ REQUIRED = (
     ("go", 32, "form", ("Stop",)),
     ("go", 34, "trigger", ("r.Method",)),
     ("go", 34, "form", ("ServeMux", "1.22", "go.mod")),
+)
+EXACT = (
+    ("ts", 9, "trigger", "the same construction sequence at 3 or more call sites."),
+    (
+        "go",
+        27,
+        "trigger",
+        "the `Add(1)` / `go func` / `defer Done()` sequence, only when `go.mod`'s `go` line is at least 1.25.",
+    ),
 )
 ER_CITED = (1, 2, 4, 6, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 22, 28, 29, 30, 33)
 EX_CITED = (9, 10, 11, 12)
@@ -392,7 +402,7 @@ DESIGN = (
     "TS-15",
     "not applied because go.mod says go 1.22",
     "release condition is part of its trigger",
-    "Iterator rule's form is `IEnumerable<T>`",
+    "Iterator rule's form is `IEnumerable<T>` and `yield return`",
 )
 TOML = (
     "[design]",
@@ -583,6 +593,13 @@ def check_required(store: Books) -> None:
         value = rule_of(store, language, number).fields[name]
         for needle in needles:
             expect_true(f"{language}-P{number}-{name}-{needle}", needle in value)
+    check_exact(store)
+
+
+def check_exact(store: Books) -> None:
+    for language, number, name, wanted in EXACT:
+        got = rule_of(store, language, number).fields[name]
+        expect(f"{language}-P{number}-{name}", got, wanted)
 
 
 def check_citations(store: Books) -> None:

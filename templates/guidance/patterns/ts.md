@@ -52,7 +52,7 @@ Read by the architect and the `design` judge for `*.ts`/`*.tsx` changes. Each pa
 
 - **TS-P9 — Factory.**
   pattern: Factory — construction with logic, or hiding which concrete type the caller gets.
-  trigger: building an object needs validation or a choice between implementations.
+  trigger: the same construction sequence at 3 or more call sites.
   form: a plain function returning an object, preferred over classes and `new`; a named static factory (TS-15) only for a class that has earned its place (TS-11), and a plain function whenever there is no invariant to protect.
   not when: the caller knows the type and construction has no invariants.
 

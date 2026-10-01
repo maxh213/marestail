@@ -119,7 +119,13 @@ def guidance_files() -> None:
         (folder / "c.txt").write_text("c\n")
         (folder / "sub").mkdir()
         (folder / "sub" / "x.md").write_text("x\n")
-        expect("found-sorted", [path.name for path in practices.files(root)], ["a.md", "b.md"])
+        pattern = folder / "patterns" / "ts.md"
+        pattern.parent.mkdir()
+        pattern.write_text("p\n")
+        found = list(practices.files(root))
+        expect("pattern-present", pattern.is_file(), True)
+        expect("found-sorted", [path.name for path in found], ["a.md", "b.md"])
+        expect("no-pattern-rulebook", pattern in found, False)
 
 
 def no_guidance_skip() -> None:

@@ -284,9 +284,11 @@ def test_hyper_config_adds_tooling_under_the_first_ts_only(tmp_path: Path, monke
 
 
 def test_hyper_files_add_cs_guidance_only_for_csharp(tmp_path: Path) -> None:
-    assert sorted(_hyper.hyper_files(tmp_path)) == ["PERFORMANCE.md", "guidance/ts.md", "marestail.toml", "tasks/README.md"]
+    bare = ["PERFORMANCE.md", "guidance/ts.md", "marestail.toml", "tasks/README.md"]
+    assert sorted(_hyper.hyper_files(tmp_path)) == bare
     assert _hyper.hyper_files(tmp_path)["tasks/README.md"] == (TEMPLATES / "tasks-README.md").read_text()
     (tmp_path / "App.csproj").write_text("")
+    assert sorted(_hyper.hyper_files(tmp_path)) == sorted([*bare, "guidance/cs.md"])
     assert _hyper.hyper_files(tmp_path)["guidance/cs.md"] == (TEMPLATES / "guidance" / "cs.md").read_text()
 
 

@@ -17,4 +17,10 @@ def test_lists_markdown_guidance_sorted(tmp_path: Path) -> None:
     folder.mkdir()
     for name in ("ts.md", "cs.md", "notes.txt"):
         (folder / name).write_text("x")
-    assert practices.files(tmp_path) == [folder / "cs.md", folder / "ts.md"]
+    pattern = folder / "patterns" / "ts.md"
+    pattern.parent.mkdir()
+    pattern.write_text("pattern\n")
+    found = practices.files(tmp_path)
+    assert pattern.is_file()
+    assert pattern not in found
+    assert found == [folder / "cs.md", folder / "ts.md"]
