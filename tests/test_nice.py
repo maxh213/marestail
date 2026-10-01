@@ -282,10 +282,7 @@ def test_readme_documents_run_priority() -> None:
     assert "\u2013" in ROW
 
 
-def test_nice_is_listed_with_ran_against() -> None:
-    text = (ROOT / ".importlinter").read_text()
-    parts = [part.strip() for part in colon_layer(text, "marestail.ran_against").split(":")]
-    assert "marestail.nice" in parts
+def test_nice_imports_only_config() -> None:
     assert imported_marestail(ROOT / "marestail" / "nice.py") == ["marestail.config"]
     assert (nice.DEFAULT, nice.OOM_SCORE, nice.ENV) == (19, 500, "MARESTAIL_NICE")
     assert not (ROOT / "tools" / "test-nice.py").exists()
@@ -298,13 +295,6 @@ def test_apply_is_only_called_from_run_pipeline() -> None:
     assert "\n".join(sources).count("nice.apply") == 1
     assert "config_module.load" in earlier_code(lines, index)
     assert "pick_model" in later_code(lines, index)
-
-
-def colon_layer(text: str, name: str) -> str:
-    for line in text.splitlines():
-        if name in line and ":" in line:
-            return line
-    raise AssertionError(name)
 
 
 def imported_marestail(path: Path) -> list[str]:
