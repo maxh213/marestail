@@ -5,6 +5,9 @@ import sys
 import harness
 
 root = harness.use_tree()
+
+from marestail import cli as cli_module
+
 cli = root / "marestail" / "cli.py"
 
 
@@ -26,3 +29,4 @@ def gate_help() -> None:
 harness.emit_one("CLI startup", harness.measure_one(help_text))
 harness.emit("marestail --help", harness.measure(help_text))
 harness.emit("marestail gate --help", harness.measure(gate_help))
+harness.emit("cli.build_parser", harness.measure(cli_module.build_parser))
