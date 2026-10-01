@@ -71,7 +71,7 @@ REJECTED: list[tuple[object, str]] = [
 class Effects:
     def __init__(self) -> None:
         self.priorities: list[tuple[object, ...]] = []
-        self.commands: list[tuple[list[str], bool, bool]] = []
+        self.commands: list[tuple[list[str], object, object]] = []
         self.writes: list[tuple[str, str]] = []
 
     def priority(self, error: BaseException | None) -> Callable[..., None]:
@@ -83,9 +83,11 @@ class Effects:
         return setpriority
 
     def command(self, error: BaseException | None, code: int) -> Callable[..., subprocess.CompletedProcess[str]]:
-        def run(cmd: Sequence[str], check: bool = False, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+        def run(cmd: Sequence[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             listed = [str(part) for part in cmd]
-            self.commands.append((listed, check, capture_output))
+            check = kwargs.get("check")
+            capture = kwargs.get("capture_output")
+            self.commands.append((listed, check, capture))
             refuse_checked(error, check, code, listed)
             return subprocess.CompletedProcess(listed, code)
 
@@ -111,10 +113,10 @@ class Effects:
         return write_text
 
 
-def refuse_checked(error: BaseException | None, check: bool, code: int, cmd: list[str]) -> None:
+def refuse_checked(error: BaseException | None, check: object, code: int, cmd: list[str]) -> None:
     if error is not None:
         raise error
-    if check and code != 0:
+    if check is True and code != 0:
         raise subprocess.CalledProcessError(code, cmd)
 
 
