@@ -155,6 +155,42 @@ Feature: Task files say what they depend on
       """
     And stdout does not contain "stack is required"
 
+  Scenario: a block whose only key is stack reports the missing depends line
+    Given "tasks/019-only-true.md" whose bytes are:
+      """
+      +++
+      stack = true
+      +++
+      # x
+      """
+    When I run `marestail tasks check tasks/019-only-true.md`
+    Then the exit code is 1
+    And stdout is exactly:
+      """
+      tasks/019-only-true.md: front matter has no depends; write depends = [] for a task with no dependencies
+      """
+    And stdout does not contain "got 0"
+    And stdout does not contain "stack is required"
+    And stdout does not contain "stack is not allowed"
+    And stderr is empty
+    Given "tasks/019-only-false.md" whose bytes are:
+      """
+      +++
+      stack = false
+      +++
+      # x
+      """
+    When I run `marestail tasks check tasks/019-only-false.md`
+    Then the exit code is 1
+    And stdout is exactly:
+      """
+      tasks/019-only-false.md: front matter has no depends; write depends = [] for a task with no dependencies
+      """
+    And stdout does not contain "got 0"
+    And stdout does not contain "stack is required"
+    And stdout does not contain "stack is not allowed"
+    And stderr is empty
+
   Scenario: a backslash in an id is not a task id
     Given "tasks/019-slash.md" has five LF-terminated lines: "+++", a depends line, "stack = true", "+++", and "# x"
     And the depends line equals depends = ["018, two bytes of value 92, a"] with nothing between 018 and a except those two bytes
