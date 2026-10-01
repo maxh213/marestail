@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from marestail import _hyper, _install, install
+from marestail import _guidance, _hyper, _install, install
 
 TEMPLATES = _install.TEMPLATES
 GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
@@ -241,18 +241,18 @@ def test_install_keeps_edited_rulebooks_and_patterns(home: Path, target: Path) -
     assert (target / "guidance" / "go.md").read_text() == "# edited\n"
 
 
-@pytest.mark.parametrize(("name", "marker"), [("uses_elixir", "mix.exs"), ("uses_ruby", "Gemfile"), ("uses_go", "go.mod")])
+@pytest.mark.parametrize(("name", "marker"), [("_uses_elixir", "mix.exs"), ("_uses_ruby", "Gemfile"), ("_uses_go", "go.mod")])
 def test_root_marker_detectors(target: Path, name: str, marker: str) -> None:
-    assert getattr(_install, name)(target) is False
+    assert getattr(_guidance, name)(target) is False
     (target / marker).write_text("")
-    assert getattr(_install, name)(target) is True
+    assert getattr(_guidance, name)(target) is True
 
 
 def test_uses_erlang_finds_a_nested_erl(target: Path) -> None:
-    assert _install.uses_erlang(target) is False
+    assert _guidance._uses_erlang(target) is False
     (target / "src").mkdir()
     (target / "src" / "a.erl").write_text("-module(a).\n")
-    assert _install.uses_erlang(target) is True
+    assert _guidance._uses_erlang(target) is True
 
 
 @pytest.mark.parametrize(("text", "expected"), [(None, False), ("[python]\n", False), ("[dotnet]\n", True)])

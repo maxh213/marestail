@@ -2,7 +2,7 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), prompts and the hunk check, gates, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
@@ -10,6 +10,7 @@ layers =
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail._hyper
     marestail._install | marestail._tooling
+    marestail._guidance
     marestail.prompts : marestail.audit : marestail.practices : marestail.hunks : marestail.reported
     marestail.gates
     marestail.depth : marestail.graph
@@ -327,6 +328,33 @@ protected_modules =
 allowed_importers =
     marestail.install
     marestail._hyper
+
+[importlinter:contract:protect-guidance-copy]
+name = Choosing and copying a target's language rulebooks is private to the classic install; hyper may import it only to ask whether C# is present
+type = protected
+protected_modules =
+    marestail._guidance
+allowed_importers =
+    marestail._install
+    marestail._hyper
+
+[importlinter:contract:guidance-reads-the-tree-only]
+name = Language rulebook copying reads the target tree and the templates, never install, config, orchestration or the practices file list
+type = forbidden
+source_modules =
+    marestail._guidance
+forbidden_modules =
+    marestail._install
+    marestail._hyper
+    marestail.install
+    marestail.config
+    marestail.context
+    marestail.practices
+    marestail.pipeline
+    marestail.runner
+    marestail.gates
+    marestail.prompts
+    marestail._tooling
 
 [importlinter:contract:hyper-install-belongs-to-install]
 name = The hyper install flow is started only by install

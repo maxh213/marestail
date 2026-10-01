@@ -3,6 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from marestail._guidance import uses_csharp
 from marestail._install import (
     AGENTS_MD,
     CLAUDE_MD,
@@ -16,7 +17,6 @@ from marestail._install import (
     merge_grok_hook,
     merge_hook,
     trust_grok_folder,
-    uses_csharp,
 )
 from marestail._tooling import TOOLING, Tooling, write_tooling
 from marestail.shell import ensure_dir, run
