@@ -52,13 +52,14 @@ Feature: Architect applies pattern rules; a design judge checks them
     Then stdout contains neither skip line and `run_judge_loop` is called
 
   Scenario: a pattern applied with no trigger bounces to the architect
-    Given `guidance/patterns/ts.md` has rule TS-P9 Factory whose trigger is "the same construction sequence at 3 or more call sites" and whose form is "a plain function"
+    Given `guidance/patterns/ts.md` has rule TS-P9 Factory whose trigger is "the same construction sequence at 3 or more call sites" and whose form is "a plain function when there is no invariant to protect, and TS-15's named static factory when the object is a class that has earned its place (TS-11)"
     And the architect handoff contains the line `- TS-P9 src/order.ts:4: replaced new Order() with order()`
     And the task diff touches only `src/order.ts` line 4, `return new Order(id)`, one construction
     When the design judge runs
     Then the verdict file starts `VERDICT: BOUNCE` and a numbered finding contains `TS-P9 src/order.ts:4`
     And the runner re-enters the architect (`bounce_to`, no other target)
     And `roles/design.md` states this fixture and that verdict
+    And `roles/design.md` teaches TS-P9's conditional form: a plain function when there is no invariant, and TS-15's static factory only for a class that has earned its place under TS-11
 
   Scenario: a pattern in the wrong form bounces to the architect
     Given the Iterator rule's form is `IEnumerable<T>` and `yield return`, not a hand-written cursor
@@ -90,6 +91,13 @@ Feature: Architect applies pattern rules; a design judge checks them
     When the design judge runs
     Then the verdict file starts `VERDICT: PASS` and does not bounce for `src/pool.go:18`
     And `roles/design.md` states this fixture
+
+  Scenario: a trigger below its release condition is not a finding
+    Given the diff adds the same `Add(1)` / `go func` / `defer Done()` sequence at `src/pool.go:18` and `go.mod` contains `go 1.22`
+    And `## Patterns` says nothing about `src/pool.go:18`
+    When the design judge runs
+    Then the verdict file starts `VERDICT: PASS` and no finding cites `GO-P27` or `src/pool.go:18`
+    And `roles/design.md` states this fixture: the WaitGroup trigger needs `go 1.25`, so below it the sequence is not a trigger and the judge does not bounce on it, explained or not
 
   Scenario: a pass lists pre-existing triggers and omits an empty section
     Given the only `Add(1)` / `go func` / `defer Done()` sequence is `src/old.go:3`, a file the task diff does not touch
@@ -169,10 +177,11 @@ Feature: Architect applies pattern rules; a design judge checks them
     And there is no `patterns/py.md` and no `templates/guidance/py.md`
     And each pattern rule is `- **<LANG>-P<n> — <name>.**` plus non-empty `pattern:`, `trigger:`, `form:`, and `not when:` lines
     And the table order in each file is the rule id order sequential from 1, and the `pattern:` names are exactly the set below, once each
+    And the shipped ids are exactly TS-P9 Factory, CS-P16 Iterator, and GO-P27 WaitGroup
     And `templates/guidance/go.md` is `# Go best practices`, one line that the practices judge applies it to `*.go` changes, then exactly `GO-1` through `GO-10`, each non-empty, with no doc-comment requirement (`doc comment` and `godoc` appear in neither Go file)
-    And `GO-1` through `GO-10` cover, in order: return `error` last, handle it or return it, wrap with `%w`, match with `errors.Is` and `errors.As`; `panic` only for programmer errors and `recover` only at goroutine and handler boundaries; `context.Context` first, never stored in a struct, values for request metadata only; no goroutine without a known stop, tied to a context and waited for, tickers stopped; accept interfaces and return structs, interfaces declared by the consumer, kept small; a useful zero value; table-driven tests with `t.Run` and tests run with `-race`; `log/slog` passed explicitly; nothing in `init()`; generics only for containers and algorithms
+    And `GO-1` through `GO-10` cover, in order: return `error` last, handle it or return it, wrap with `%w`, match with `errors.Is` and `errors.As`; `panic` only for programmer errors and `recover` only at goroutine and handler boundaries; `context.Context` first, never stored in a struct, values for request metadata only; no goroutine without a known stop, tied to a context and waited for, and no ticker clause (the Ticker pattern, not GO-4, owns stopping tickers); accept interfaces and return structs, interfaces declared by the consumer, kept small; a useful zero value; table-driven tests with `t.Run` and tests run with `-race`; `log/slog` passed explicitly; nothing in `init()`; generics only for containers and algorithms
     And the `log/slog` rule names Go 1.21 and applies only when `go.mod`'s `go` line is at least 1.21
-    And any rule that names `errors.Join` or `WithCancelCause` also says 1.20 and `go.mod`; `errors.AsType` says 1.26; `sync.OnceValue`, `sync.OnceFunc`, `slices.Clone`, `maps.Clone`, or `context.AfterFunc` says 1.21; `iter.Seq` or the `unique` package says 1.23; `sync.WaitGroup.Go` or `testing/synctest` says 1.25
+    And any rule that names `errors.Join` or `WithCancelCause` also says 1.20 and `go.mod`; `ServeMux` method-and-pattern routing says 1.22 and `go.mod`; `errors.AsType` says 1.26; `sync.OnceValue`, `sync.OnceFunc`, `slices.Clone`, `maps.Clone`, or `context.AfterFunc` says 1.21; `iter.Seq` or the `unique` package says 1.23; `sync.WaitGroup.Go` or `testing/synctest` says 1.25
     And a library token `MediatR`, `Polly`, `XState`, `Oban`, `Broadway`, `Scrutor`, `Draper`, `Stateless`, `neverthrow`, `errgroup`, `singleflight`, `cobra`, `viper`, `envconfig`, `sqlc`, `pgx`, `participle`, `gproc`, `syn`, `PropEr`, `recon`, `wire`, or `fx` (whole word), or the path `golang.org/x/sync` or `golang.org/x/time/rate`, appears only inside a rule that also says `already a dependency`
     And these strings do not appear in any pattern file: `singleflight`, `graceful shutdown`, `golang.org/x/sync`, `state_functions`, `doc comment`
     And `patterns/er.md` contains `simple_one_for_one` only in a rule that also says `not allowed` and `ER-18`
@@ -185,16 +194,29 @@ Feature: Architect applies pattern rules; a design judge checks them
     And `patterns/er.md` gen_statem form contains `handle_event_function`, and `patterns/ex.md` gen_statem form contains `gen_statem`
     And `patterns/go.md` WaitGroup trigger contains `Add(1)`, `go func`, and `Done`, and its form contains `sync.WaitGroup.Go`, `1.25`, and `go.mod`
     And `patterns/go.md` Iterator form contains `iter.Seq`, `1.23`, and `go.mod`
+    And `patterns/go.md` Producer/consumer sits between Confinement and Timeouts, its trigger contains `channel`, and its form contains `close` and `ctx.Done()`
+    And `patterns/go.md` net/http handlers sits between Synctest and Handler struct, its trigger contains `r.Method`, and its form contains `ServeMux`, `1.22`, and `go.mod`
+    And `patterns/go.md` Flyweight's form contains `sync.Pool` (the Object reuse row), and Singleton's form contains `sync.Once` (the One-time init row)
+    And `patterns/go.md` Ticker's trigger contains `time.Ticker` and its form contains `Stop`, and the Ticker rule, not GO-4, owns stopping a ticker
+    And `patterns/ex.md` Notify many sits between Pool and Monitor, its trigger contains `pid`, its form contains `Registry.dispatch` or `Phoenix.PubSub`, and the rule cites `EX-12`
+    And `patterns/ts.md` Async coordination and Result sit directly after Function composition and `satisfies` sits after Const assertion
+    And `patterns/ts.md` Async coordination's form contains `Promise.all`, `allSettled`, `race`, and `AbortController`, and Result's form contains `{ ok: true, value }` and names `neverthrow` only with `already a dependency`
     And `patterns/er.md` Iolist trigger contains `<<Acc/binary, X/binary>>` and its form contains `iolist`
     And `patterns/er.md` Send after trigger contains `timer:send_interval` and its form contains `erlang:send_after`
     And `patterns/rb.md` contains `RB-4`, does not contain `method_missing` or `define_method`, has no pattern named Metaprogramming, cites `RB-12` for Adapter without restating its form, cites `RB-8` for Concern without restating its form, cites `RB-9` for Value object without restating its form, cites `RB-11` for Refinement without restating its form, and cites `RB-16` for Service object without restating its form with not when citing `RB-16`
-    And `patterns/ex.md` contains `EX-9`, `EX-10`, and `EX-11`, and does not contain `holds a list you could pass`, `LiveView already gives a process`, or `one named GenServer`
+    And `patterns/ex.md` contains `EX-9`, `EX-10`, `EX-11`, and `EX-12`, and does not contain `holds a list you could pass`, `LiveView already gives a process`, `one named GenServer`, or `subscriber pid lists`
     And `patterns/er.md` contains `ER-1`, `ER-2`, `ER-4`, `ER-6`, `ER-9`, `ER-10`, `ER-13`, `ER-14`, `ER-15`, `ER-16`, `ER-17`, `ER-18`, `ER-19`, `ER-20`, `ER-22`, `ER-28`, `ER-29`, `ER-30`, and `ER-33`
     And `patterns/er.md` does not contain `no swallowing a DB crash`, `error threading is a finding`, `no sys/debug`, `pg2 is gone`, or `gen_fsm`
     And `patterns/er.md` does not contain `a case on a shape this module owns` (ER-4), `#mod_state{}` (ER-6), `heavy startup` (ER-10), `tightly coupled` (ER-14), `pg:get_members` (ER-20), `OpenTelemetry context` (ER-22), `ensure_all_started` (ER-28), or `is_binary(Id)` (ER-33), unless the only mention is `see ER-n`
+    And each dropped sheet row is named nowhere in its language file: `patterns/cs.md` has no Mediator, CQRS or Specification rule (MediatR and Ardalis.Specification are libraries the target does not declare) and no Aggregates and domain events rule (no reader-pointable trigger)
+    And `patterns/ts.md` has no Event emitter/PubSub, Parse don't validate, Barrel files, Container/presentational, Server Components, Mediator, Bridge, Flyweight, Interpreter, Prototype or Typed builder rule (an undeclared library, a data-fetching behaviour change, or no reader-pointable trigger)
+    And `patterns/rb.md` has no Metaprogramming rule (RB-4 bans its forms), no Duck typing, Convention over configuration or Callbacks rule (RB-6, RB-1, RB-2 and RB-17 already cover them), no Job, Instrumentation or Operations/interactors rule (behaviour, or Trailblazer and dry-transaction), and its Rails Decorator row is the GoF Decorator rule with Draper only as `already a dependency`
+    And `patterns/ex.md` names no shard-or-ETS, cast-over-`call`, GenStage, circuit-breaker or cluster-registry rule (behaviour, storage, or a library the target must already declare), the other OTP-table rows are rules, and Changesets, LiveView and PubSub and Presence are not restated (EX-8 and EX-12 already cover them)
+    And `patterns/er.md` names no Release, distribution, hot-code-loading, ETS/DETS/Mnesia, share-nothing or typespecs rule (the task leaves storage and deployment out; ER-19, ER-20 and ER-32 already cover names, links, monitors and typespecs)
+    And `patterns/go.md` names no singleflight, rate-limit, graceful-shutdown, GOMAXPROCS, package-layout, configuration or clean-architecture rule (a banned library, a run-time behaviour change, or no reader-pointable trigger)
     And each React pattern's own rule contains `React code`: Custom hooks, Compound components, Provider, Controlled and uncontrolled, Reducer, Render props, Composition over configuration, Client data caching
     And each Rails pattern's own rule contains `Rails app`: Value object, Service object, Form object, Query object, Presenter, Policy, Concern
-    And `patterns/go.md` does not contain `%w`, `errors.Is`, `log/slog`, or `-race`, and `guidance/go.md` does not contain `WaitGroup.Go` or `iter.Seq`
+    And `patterns/go.md` does not contain `%w`, `errors.Is`, `log/slog`, or `-race`, and `guidance/go.md` does not contain `WaitGroup.Go`, `iter.Seq`, or `Ticker`
     And the last non-empty line of each pattern file is exactly:
       | file | line |
       | cs.md | Canonical: GoF (1994); Refactoring.Guru; Fowler's PoEAA. |
@@ -206,11 +228,11 @@ Feature: Architect applies pattern rules; a design judge checks them
     And the pattern names are exactly:
       | file | names |
       | cs.md | Factory Method, Abstract Factory, Builder, Prototype, Singleton, Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy, Chain of Responsibility, Command, Interpreter, Iterator, Memento, Observer, State, Strategy, Template Method, Visitor, Dependency injection, Options, Repository, Result, Middleware, Producer/consumer |
-      | ts.md | Strategy, Command, Observer, Iterator, Decorator, Adapter, Facade, Proxy, Factory, Builder, Singleton, Composite, State, Chain of Responsibility, Visitor, Memento, Template Method, Module, Function composition, Dependency injection, Immutability, Custom hooks, Compound components, Provider, Controlled and uncontrolled, Reducer, Render props, Composition over configuration, Client data caching, Discriminated union, Branded types, Const assertion, Template literal types, Overloads, Mapped types |
+      | ts.md | Strategy, Command, Observer, Iterator, Decorator, Adapter, Facade, Proxy, Factory, Builder, Singleton, Composite, State, Chain of Responsibility, Visitor, Memento, Template Method, Module, Function composition, Async coordination, Result, Dependency injection, Immutability, Custom hooks, Compound components, Provider, Controlled and uncontrolled, Reducer, Render props, Composition over configuration, Client data caching, Discriminated union, Branded types, Const assertion, satisfies, Template literal types, Overloads, Mapped types |
       | rb.md | Template Method, Strategy, Observer, Composite, Iterator, Command, Adapter, Proxy, Decorator, Singleton, Factory, Builder, Interpreter, Block, Mixin, Delegation, Null Object, Internal DSL, Guard clause, Refinement, Value object, Service object, Form object, Query object, Presenter, Policy, Concern |
-      | ex.md | Process or module, Async stream, Unlinked task, Linked task, GenServer, Agent, DynamicSupervisor, handle_continue, Rescheduled tick, gen_statem, Pool, Monitor, Supervisor strategy, Behaviour, Protocol, Functional core, Token, Stream, Macro, Runtime config, Context, Ecto.Multi, Query object, Plug, Telemetry, Memento |
+      | ex.md | Process or module, Async stream, Unlinked task, Linked task, GenServer, Agent, DynamicSupervisor, handle_continue, Rescheduled tick, gen_statem, Pool, Notify many, Monitor, Supervisor strategy, Behaviour, Protocol, Functional core, Token, Stream, Macro, Runtime config, Context, Ecto.Multi, Query object, Plug, Telemetry, Memento |
       | er.md | gen_statem, gen_event, Application, Error kernel, Monitor, Error class, Iolist, Send after |
-      | go.md | Factory, Functional options, Prototype, Singleton, Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy, Chain of Responsibility, Command, Interpreter, Iterator, Mediator, Memento, Observer, State, Strategy, Template Method, Visitor, Embedding, Constructor injection, Enum, Bounded parallel work, WaitGroup, Mutex, Confinement, Timeouts, Ticker, Synctest, Handler struct, HTTP status mapping, Repository |
+      | go.md | Factory, Functional options, Prototype, Singleton, Adapter, Bridge, Composite, Decorator, Facade, Flyweight, Proxy, Chain of Responsibility, Command, Interpreter, Iterator, Mediator, Memento, Observer, State, Strategy, Template Method, Visitor, Embedding, Constructor injection, Enum, Bounded parallel work, WaitGroup, Mutex, Confinement, Producer/consumer, Timeouts, Ticker, Synctest, net/http handlers, Handler struct, HTTP status mapping, Repository |
 
   Scenario: README documents the design row and the pattern paragraph
     Then the Pipeline table has this row directly between architect and practices:
@@ -218,8 +240,14 @@ Feature: Architect applies pattern rules; a design judge checks them
       | design | judge | none | — |
     And that row's Does names the three bounces (no trigger, wrong form, unexplained trigger under `## Patterns`), the citation `<rule id> <file:line>`, and the skip line `design: no pattern rulebooks; skipping`
     And the sentence `Other languages get no shipped rulebook; write your own `guidance/<lang>.md` with one numbered rule per line.` is gone
+    And the Best practices section still says `guidance/ts.md` is the curated TypeScript/React/Next.js rulebook with rules `TS-1`…, that a repo with a `.csproj` gets `guidance/cs.md` whose one rule so far (`CS-1`) requires Arrange, Act, Assert, and that guidance files are committed, never gitignored, and frozen (`guidance/**` in `freeze.SPEC`)
     And the Best practices section keeps the practices paragraph, then one new paragraph that says pattern rulebooks live in `guidance/patterns/`, the architect and the design judge read them, practices does not, install also ships `er.md` (any `*.erl`), `ex.md` (root `mix.exs`), `rb.md` (root `Gemfile`), `go.md` (root `go.mod`), and `guidance/patterns/<lang>.md` beside each installed language rulebook including `patterns/ts.md`, and design bounces only for those three cases
     And that paragraph states `[design]` key `enabled` defaults to true
+
+  Scenario: both task READMEs list the pipeline with design
+    Then `tasks/README.md` and `templates/tasks-README.md` are byte-identical
+    And both read `specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, QA`
+    And no other line of either file changed
 
   Scenario: other checks still pass
     Then `pytest tests/test_pipeline.py tests/test_runner_flow.py tests/test_install.py tests/test_install_hyper.py tests/test_tui_theme.py` passes and covers every new runner and install branch
