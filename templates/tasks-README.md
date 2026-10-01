@@ -20,3 +20,14 @@ One task is one pipeline run: specifier, critic, coder, cleaner, architect, desi
 - **Order slices in a file** when several belong together, and run them one after another; the architect reshapes modules between them.
 
 Name files `NNN-short-name.md`. The specifier writes `features/short-name.feature` and `qa/short-name.md` to match.
+
+## Dependencies
+
+A task that needs another task first says so in a block at the very top of the file, before the title:
+
+    +++
+    depends = ["018-runs-stay-nice"]
+    stack = true
+    +++
+
+`depends` lists task ids: file names in this folder without `.md`. Write `depends = []` for a task that needs nothing. `stack = true` runs the task on its one dependency's branch, after it; `stack = false` starts it on its own branch once every dependency is merged. Leave `stack` out when `depends` is empty. `marestail tasks check` reports every problem in this folder, one line each. `marestail run` works with or without the block.

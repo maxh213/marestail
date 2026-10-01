@@ -1,11 +1,38 @@
 from pathlib import Path
 
-from marestail import audit
+from marestail import audit, task_file
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 
 EMPTY = ""
 PARAGRAPH = "\n\n"
+_ONE = (
+    "This task depends on `{name}`, which runs before it, so its work is already in the tree. "
+    "Treat what it delivered as existing behaviour: build on it and keep it working."
+)
+_MANY = (
+    "This task depends on {names}, which run before it, so their work is already in the tree. "
+    "Treat what they delivered as existing behaviour: build on it and keep it working."
+)
+
+
+def _task_body(task: Path) -> str:
+    loaded = task_file.read(task)
+    if not loaded.depends:
+        return loaded.body
+    return f"{_dependency_note(loaded.depends)}\n\n{loaded.body}"
+
+
+def _dependency_note(depends: tuple[str, ...]) -> str:
+    if len(depends) == 1:
+        return _ONE.format(name=depends[0])
+    return _MANY.format(names=_listed(depends))
+
+
+def _listed(depends: tuple[str, ...]) -> str:
+    head = ", ".join(f"`{item}`" for item in depends[:-1])
+    return f"{head} and `{depends[-1]}`"
+
 
 ROLES_DIR = Path(__file__).resolve().parent.parent / "roles"
 WORKER_SCOPE = (
@@ -85,7 +112,7 @@ def worker_prompt(
         [
             role_text(worker.name),
             *qa_app_note(config, worker),
-            section(TASK, task.read_text()),
+            section(TASK, _task_body(task)),
             *bug_sections(bug),
             *scope_section(worker.name, hard_focus, WORKER_SCOPE, hyper),
             section("Specification files", spec_listing(config, task_name)),
@@ -119,7 +146,7 @@ def judge_prompt(
     return PARAGRAPH.join(
         [
             role_text(judge.name),
-            section(TASK, task.read_text()),
+            section(TASK, _task_body(task)),
             *bug_sections(bug),
             *scope_section(judge.name, hard_focus, JUDGE_SCOPE, hyper),
             section(SPECIFICATION, judge_specification(config, judge, task_name)),
@@ -271,7 +298,7 @@ def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, n
     return PARAGRAPH.join(
         [
             role_text("perf"),
-            section(TASK, task.read_text()),
+            section(TASK, _task_body(task)),
             section(SPECIFICATION, spec_listing(config, task_name)),
             section(HANDOFFS, handoffs(config, task_name)),
             *optional_section("Trees", trees),

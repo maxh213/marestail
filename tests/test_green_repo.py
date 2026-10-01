@@ -215,7 +215,7 @@ def test_help_lists_every_subcommand() -> None:
     text = cli.build_parser().format_help()
     listed = re.search(r"\{([a-z,]+)\}", text)
     assert listed is not None
-    assert listed.group(1).split(",") == ["gate", "run", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
+    assert listed.group(1).split(",") == ["gate", "run", "tasks", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
 
 
 def parse_help(parser: argparse.ArgumentParser, argv: list[str]) -> None:

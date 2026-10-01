@@ -43,6 +43,7 @@ SCOPE_CHOICES = ("all", "changed", "hard", "hyper")
 TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
 AGENT_CHOICES = tuple(dict.fromkeys([*route_module.BACKENDS.values(), backends.KILO]))
 HELP_TASK = "path to the task file"
+HELP_TASKS = "a folder of task files or a .md file (default: tasks/)"
 HELP_GATE_SCOPE = (
     "all (default); changed: the diff against [git] base plus the focus paths; hard: only the focus paths; "
     "hyper: only the changed lines of the diff"
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     add_gate(commands.add_parser("gate", help="run the gates against the current repo"))
     add_run(commands.add_parser("run", help="run the role pipeline on a task"))
+    add_tasks(commands.add_parser("tasks", help="check task files"))
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
@@ -183,6 +185,30 @@ def add_focus(parser: argparse.ArgumentParser) -> None:
         metavar="PATH",
         help=HELP_FOCUS,
     )
+
+
+def add_tasks(parser: argparse.ArgumentParser) -> None:
+    actions = parser.add_subparsers(dest="tasks_command", required=True)
+    check = actions.add_parser("check", help="check the front matter and dependencies of task files")
+    check.add_argument("paths", nargs="*", metavar="PATH", help=HELP_TASKS)
+    check.set_defaults(handler=tasks_check_command)
+
+
+def tasks_check_command(args: argparse.Namespace) -> int:
+    from marestail.task_file import check
+
+    return _report_tasks(check(_task_paths(args.paths)))
+
+
+def _task_paths(given: list[str] | None) -> list[Path]:
+    return [Path(path) for path in given or ["tasks"]]
+
+
+def _report_tasks(problems: list[str]) -> int:
+    if not problems:
+        return 0
+    print("\n".join(problems))
+    return 1
 
 
 def add_run(parser: argparse.ArgumentParser) -> None:

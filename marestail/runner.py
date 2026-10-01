@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from marestail import audit, backends, freeze, hunks, nice, practices, prompts, ran_against, reported, timeline
+from marestail import audit, backends, freeze, hunks, nice, practices, prompts, ran_against, reported, task_file, timeline
 from marestail import config as config_module
 from marestail import route as dandelion
 from marestail.backends import (
@@ -207,6 +207,13 @@ class JudgeProgress:
             self.feedback = AUTHOR_DONE
 
 
+def _accept_task(task: Path) -> None:
+    try:
+        task_file.read(task)
+    except task_file.TaskFileError as error:
+        raise SystemExit("\n".join(f"{task}: {problem}" for problem in error.problems)) from error
+
+
 def run_pipeline(
     task: Path,
     start: str | None,
@@ -221,6 +228,7 @@ def run_pipeline(
 ) -> int:
     config = config_module.load(Path.cwd())
     nice.apply(config)
+    _accept_task(task)
     picked = pick_model(config, model, agent, effort)
     scoped = pick_scope(config, scope, focus)
     share_scope(*scoped)

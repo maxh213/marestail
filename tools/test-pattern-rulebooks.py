@@ -825,7 +825,9 @@ def lines_of(path: Path) -> list[str]:
 
 def without_design(lines: list[str], shipped: str) -> list[str]:
     frozen = shipped.replace("architect, design, practices", "architect, practices")
-    return [frozen if line == shipped else line for line in lines]
+    index = lines.index("## Dependencies")
+    end = index - 1 if lines[index - 1] == "" else index
+    return [frozen if line == shipped else line for line in lines[:end]]
 
 
 def check_script_pins() -> None:

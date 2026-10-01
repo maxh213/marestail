@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -443,6 +444,113 @@ def test_prompts_put_the_bug_sections_right_after_the_task(repo: Path) -> None:
         config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02-critic"), "", bug=bug
     )
     assert "# Task\nDo the thing.\n\n# Reported\nSymptom: square\n\n# Observed\n- holds\n\n# Specification" in judge
+
+
+MARKERS = ("\n\n# Specification", "\n\n# Handoffs", "\n\n# Finishing", "\n\n# Authoring", "\n\n# Verdict")
+ONE = (
+    "This task depends on `018-runs-stay-nice`, which runs before it, so its work is already in the tree. "
+    "Treat what it delivered as existing behaviour: build on it and keep it working.\n\n# Title\n\nBody."
+)
+TWO = (
+    "This task depends on `017-a` and `018-b`, which run before it, so their work is already in the tree. "
+    "Treat what they delivered as existing behaviour: build on it and keep it working.\n\n# Title\n\nBody."
+)
+THREE = (
+    "This task depends on `017-a`, `018-b` and `019-c`, which run before it, so their work is already in the tree. "
+    "Treat what they delivered as existing behaviour: build on it and keep it working.\n\n# Title\n\nBody."
+)
+FOUR = (
+    "This task depends on `017-a`, `018-b`, `019-c` and `020-d`, which run before it, so their work is already in the tree. "
+    "Treat what they delivered as existing behaviour: build on it and keep it working.\n\n# Title\n\nBody."
+)
+TASKS = [
+    ("# Add one\n", "# Add one", False),
+    ("+++ \ndepends = []\n+++\n# Later\n", "+++ \ndepends = []\n+++\n# Later", False),
+    ("+++\ndepends = []\n+++\n# Title\n\nBody.\n", "# Title\n\nBody.", True),
+    ('+++\ndepends = ["018-runs-stay-nice"]\nstack = true\n+++\n# Title\n\nBody.\n', ONE, True),
+    ('+++\ndepends = ["018-runs-stay-nice"]\nstack = false\n+++\n# Title\n\nBody.\n', ONE, True),
+    ('+++\ndepends = ["017-a", "018-b"]\nstack = false\n+++\n# Title\n\nBody.\n', TWO, True),
+    ('+++\ndepends = ["017-a", "018-b", "019-c"]\nstack = false\n+++\n# Title\n\nBody.\n', THREE, True),
+    ('+++\ndepends = ["017-a", "018-b", "019-c", "020-d"]\nstack = false\n+++\n# Title\n\nBody.\n', FOUR, True),
+]
+
+
+def task_text(prompt: str) -> str:
+    start = prompt.index("# Task\n") + len("# Task\n")
+    ends = [prompt.index(marker, start) for marker in MARKERS if marker in prompt[start:]]
+    return prompt[start : min(ends)]
+
+
+def built(repo: Path, task: Path) -> list[str]:
+    loaded = config(repo)
+    coder = cast(Worker, find("coder"))
+    critic = cast(Judge, find("critic"))
+    return [
+        prompts.worker_prompt(loaded, coder, task, "t", report(repo, "03-coder"), ""),
+        prompts.judge_prompt(loaded, critic, task, "t", report(repo, "02-critic"), ""),
+        prompts.perf_author_prompt(loaded, task, "t", "trees", repo / "n.md"),
+    ]
+
+
+def hidden(items: list[str]) -> None:
+    for item in items:
+        assert "+++" not in item
+        assert "depends =" not in item
+        assert "stack" not in item
+
+
+def hide_block(items: list[str], hide: bool) -> None:
+    if hide:
+        hidden(items)
+
+
+@pytest.mark.parametrize(("text", "expected", "hide"), TASKS)
+def test_prompts_share_the_task_text(repo: Path, text: str, expected: str, hide: bool) -> None:
+    found = built(repo, write(repo / "tasks" / "extra.md", text))
+    assert [task_text(item) for item in found] == [expected, expected, expected]
+    hide_block(found, hide)
+
+
+def test_blockless_task_text_stays_stripped(repo: Path) -> None:
+    assert [task_text(item) for item in built(repo, repo / "tasks" / "t.md")] == ["Do the thing."] * 3
+
+
+def test_prompt_signatures_stay() -> None:
+    assert list(inspect.signature(prompts.worker_prompt).parameters) == [
+        "config",
+        "worker",
+        "task",
+        "task_name",
+        "report",
+        "feedback",
+        "label",
+        "gate_flags",
+        "hard_focus",
+        "hyper",
+        "bug",
+    ]
+    assert list(inspect.signature(prompts.judge_prompt).parameters) == [
+        "config",
+        "judge",
+        "task",
+        "task_name",
+        "report",
+        "gate_report",
+        "trees",
+        "feedback",
+        "hard_focus",
+        "hyper",
+        "review",
+        "bug",
+    ]
+    assert list(inspect.signature(prompts.perf_author_prompt).parameters) == [
+        "config",
+        "task",
+        "task_name",
+        "trees",
+        "note",
+        "feedback",
+    ]
 
 
 def test_bug_sections_drop_empty_bodies() -> None:

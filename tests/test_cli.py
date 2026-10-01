@@ -103,8 +103,100 @@ def test_main_requires_a_command(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_help_lists_commands_in_order() -> None:
     text = cli.build_parser().format_help()
-    assert "{gate,run,install,sonar,watch,perf,visual,route,graph,depth}" in text
+    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,graph,depth}" in text
+    assert "check task files" in text
     assert "print the subscription to use now: runs dandelion" in " ".join(text.split())
+
+
+def test_tasks_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,graph,depth}" in cli.build_parser().format_help()
+    assert_tasks_help(capsys)
+    assert_unchanged_command_help(monkeypatch, capsys)
+    assert_tasks_requires_a_subcommand(capsys)
+    assert cli.main(["tasks", "check"]) == 1
+    assert capsys.readouterr() == ("tasks: no such file or folder\n", "")
+    tasks = tmp_path / "tasks"
+    write_task(tasks / "018-a.md", "+++\ndepends = []\n+++\n# a\n")
+    write_task(tasks / "019-b.md", '+++\ndepends = ["018-a"]\nstack = true\n+++\n# b\n')
+    assert cli.main(["tasks", "check"]) == 0
+    assert capsys.readouterr() == ("", "")
+    write_task(tasks / "020-run-events.md", '+++\ndepends = ["018-runs-stay-nice", "019-tasks"]\nstack = true\n+++\n# 020\n')
+    write_task(tasks / "021-status.md", "+++\ndepend = []\n+++\n# 021\n")
+    assert cli.main(["tasks", "check"]) == 1
+    assert capsys.readouterr() == (PUBLISHED, "")
+    write_task(tmp_path / "alpha" / "019-a.md", "# a\n")
+    write_task(tmp_path / "beta" / "019-b.md", "# b\n")
+    assert cli.main(["tasks", "check", "beta", "alpha"]) == 1
+    assert capsys.readouterr() == (
+        "alpha/019-a.md: no front matter: line 1 must be +++\nbeta/019-b.md: no front matter: line 1 must be +++\n",
+        "",
+    )
+
+
+PUBLISHED = (
+    "tasks/020-run-events.md: stack = true needs exactly one dependency, got 2\n"
+    "tasks/021-status.md: unknown front matter key 'depend'; allowed keys are depends and stack\n"
+    "tasks/021-status.md: front matter has no depends; write depends = [] for a task with no dependencies\n"
+)
+
+
+def write_task(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def assert_tasks_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as tasks_help:
+        cli.main(["tasks", "--help"])
+    assert tasks_help.value.code == 0
+    out = capsys.readouterr().out
+    assert "{check}" in out
+    assert "check the front matter and dependencies of task files" in out
+    with pytest.raises(SystemExit) as check_help:
+        cli.main(["tasks", "check", "--help"])
+    assert check_help.value.code == 0
+    check_out = capsys.readouterr().out
+    assert "usage: marestail tasks check [-h] [PATH ...]" in check_out
+    assert "a folder of task files or a .md file (default: tasks/)" in check_out
+    with pytest.raises(SystemExit) as run_help:
+        cli.main(["run", "--help"])
+    assert run_help.value.code == 0
+    run_out = capsys.readouterr().out
+    assert "--from" in run_out
+    assert "--model" in run_out
+    assert "front matter" not in run_out
+
+
+def assert_unchanged_command_help(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    assert "--tier" in help_text(capsys, "gate")
+    for name in ("watch", "perf", "visual", "install", "sonar", "graph", "depth"):
+        help_text(capsys, name)
+    assert_route_needs_dandelion(monkeypatch, capsys)
+
+
+def help_text(capsys: pytest.CaptureFixture[str], name: str) -> str:
+    with pytest.raises(SystemExit) as raised:
+        cli.main([name, "--help"])
+    assert raised.value.code == 0
+    return capsys.readouterr().out
+
+
+def assert_route_needs_dandelion(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.delenv("MARESTAIL_DANDELION", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert cli.main(["route", "--help"]) == 127
+    assert "dandelion is not installed" in capsys.readouterr().err
+
+
+def assert_tasks_requires_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["tasks"])
+    assert raised.value.code == 2
+    assert capsys.readouterr() == (
+        "",
+        "usage: marestail tasks [-h] {check} ...\nmarestail tasks: error: the following arguments are required: tasks_command\n",
+    )
 
 
 def test_graph_command(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -796,10 +888,11 @@ def test_root_parser_help_and_subcommands() -> None:
     action = subparsers_action(parser)
     assert action.dest == "command"
     assert action.required is True
-    assert list(action.choices) == ["gate", "run", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
+    assert list(action.choices) == ["gate", "run", "tasks", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
     help_by_name = choice_help(parser)
     assert help_by_name["gate"] == "run the gates against the current repo"
     assert help_by_name["run"] == "run the role pipeline on a task"
+    assert help_by_name["tasks"] == "check task files"
     assert help_by_name["install"] == "install thin config into a target repo"
     assert help_by_name["sonar"] == "manage the local SonarQube"
     assert help_by_name["watch"] == "live TUI of every marestail pipeline on this machine"

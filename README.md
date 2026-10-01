@@ -91,6 +91,7 @@ marestail run tasks/001.md --scope changed --focus write-to-api/Services   # sof
 marestail run tasks/001.md --scope hard --focus src/render/terminal.ts   # hard scope: gates cover only that file, and roles leave the rest alone
 marestail run tasks/001.md --model dandelion/route        # ask dandelion route before every session
 marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route --high before every session
+marestail tasks check          # front matter and dependencies of every task in tasks/; or pass folders and .md files
 ```
 
 `marestail run` starts at nice 19 with idle I/O and a raised OOM score, so a fleet of pipelines yields the CPU and disk to you and is first in line if the kernel needs memory. Children inherit. `[run] nice = 0` or `MARESTAIL_NICE=0` turns it off; any other integer 1–19 is the level (`MARESTAIL_NICE` wins over the file). `marestail watch` and `marestail gate` stay at the shell's priority.
@@ -192,6 +193,8 @@ A bench that touches a database runs with `--db`. With `[perf.db] migrate` set, 
 ## Writing tasks
 
 One task is one vertical slice: a user-visible outcome, thin, through every layer it needs. `marestail install` drops `tasks/README.md` into the repo with the guidance; the critic bounces a spec that delivers a layer instead of a slice unless the task declares itself a refactor.
+
+A task file may open with a `+++` TOML block holding `depends` and `stack`. `depends` lists task ids, the file names in that folder without the `.md` suffix, and `depends = []` means the task needs nothing. `stack = true` runs the task on its one dependency's branch, after it; `stack = false` starts the task on its own branch once every dependency is merged. Leave `stack` out when `depends` is empty. `marestail tasks check` checks a folder of task files. `marestail run` never requires the block. Roles see one sentence naming the dependencies, not the block.
 
 ## Environment variables
 
