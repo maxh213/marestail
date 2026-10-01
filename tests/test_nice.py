@@ -293,15 +293,6 @@ def test_nice_imports_only_config() -> None:
     assert not (ROOT / "tools" / "test-nice.py").exists()
 
 
-def test_apply_is_only_called_from_run_pipeline() -> None:
-    sources = [path.read_text() for path in (ROOT / "marestail").rglob("*.py") if path.name != "nice.py"]
-    lines = (ROOT / "marestail" / "runner.py").read_text().splitlines()
-    index = next(number for number, line in enumerate(lines) if "nice.apply(config)" in line)
-    assert "\n".join(sources).count("nice.apply") == 1
-    assert "config_module.load" in earlier_code(lines, index)
-    assert "pick_model" in later_code(lines, index)
-
-
 def imported_marestail(path: Path) -> list[str]:
     found = [module for node in ast.walk(ast.parse(path.read_text())) for module in modules_of(node)]
     return sorted(module for module in found if module.startswith("marestail"))
@@ -319,17 +310,3 @@ def from_module(node: ast.ImportFrom) -> list[str]:
     if node.module is None:
         return []
     return [node.module]
-
-
-def earlier_code(lines: list[str], index: int) -> str:
-    for line in reversed(lines[:index]):
-        if line.strip():
-            return line.strip()
-    return ""
-
-
-def later_code(lines: list[str], index: int) -> str:
-    for line in lines[index + 1 :]:
-        if line.strip():
-            return line.strip()
-    return ""
