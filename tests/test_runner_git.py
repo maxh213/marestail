@@ -551,6 +551,18 @@ def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatc
     assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "h"
 
 
+def test_archive_handoffs_keeps_a_repeated_stamp_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(perf_trees, "archive_start", lambda *args: None)
+    monkeypatch.setattr(time, "strftime", lambda fmt: "now")
+    state = make_state(tmp_path)
+    state.next_report("coder").write_text("one")
+    runner.archive_handoffs(state)
+    state.next_report("coder").write_text("two")
+    runner.archive_handoffs(state)
+    assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "one"
+    assert (state.folder / "handoffs-now-1" / "01-coder.md").read_text() == "two"
+
+
 def test_frozen_changes_under_hyper_freeze_files_that_are_neither_source_nor_test(repo: Path) -> None:
     config = Config(root=repo, raw={})
     before = runner.head(config)

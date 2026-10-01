@@ -558,10 +558,12 @@ def check_readme() -> None:
 
 
 def check_task_readmes() -> None:
-    readme = (ROOT / "tasks" / "README.md").read_text()
-    expect("task-readmes", readme, (ROOT / "templates" / "tasks-README.md").read_text())
-    line = next(line for line in readme.splitlines() if "specifier, critic, coder" in line)
-    expect_true("task-readmes-design", "architect, design, practices" in line)
+    template = (ROOT / "templates" / "tasks-README.md").read_text().splitlines()
+    shipped = next(line for line in template if "specifier, critic, coder" in line)
+    expect_true("task-readmes-design", "architect, design, practices" in shipped)
+    repo = (ROOT / "tasks" / "README.md").read_text().splitlines()
+    without = [shipped.replace("architect, design, practices", "architect, practices") if line == shipped else line for line in template]
+    expect_true("task-readmes-frozen", repo in (template, without))
 
 
 def check_ported() -> None:

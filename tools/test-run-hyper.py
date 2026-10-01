@@ -145,7 +145,7 @@ def environment(folder: Path) -> dict[str, str]:
     capture.chmod(0o755)
     env = {**os.environ, "MARESTAIL_CLAUDE": str(capture), "STUB_PLAN": str(folder / "plan.txt"), "PROMPTS": str(folder / "prompts")}
     env["PATH"] = f"{ROOT / 'bin'}{os.pathsep}{env['PATH']}"
-    for key in ("MARESTAIL_AGENT", "MARESTAIL_DANDELION", "MARESTAIL_SCOPE", "MARESTAIL_FOCUS"):
+    for key in ("MARESTAIL_AGENT", "MARESTAIL_DANDELION", "MARESTAIL_SCOPE", "MARESTAIL_FOCUS", "MODEL", "EFFORT"):
         env.pop(key, None)
     return env
 

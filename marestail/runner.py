@@ -1283,8 +1283,18 @@ def restamp(config: Config, sha: str, parent: str, label: str, used: set[str] | 
     return created.split()[0]
 
 
+def free_handoffs_folder(folder: Path) -> Path:
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    destination = folder / f"handoffs-{stamp}"
+    number = 1
+    while destination.exists():
+        destination = folder / f"handoffs-{stamp}-{number}"
+        number += 1
+    return destination
+
+
 def archive_handoffs(state: Run) -> None:
-    destination = state.folder / f"handoffs-{time.strftime('%Y%m%dT%H%M%S')}"
+    destination = free_handoffs_folder(state.folder)
     if state.handoffs.exists():
         ensure_dir(state.folder)
         shutil.move(str(state.handoffs), str(destination))
