@@ -84,5 +84,5 @@ Run these from the marestail-green root with the venv active. Expected results a
 19. Run each `tools/test-*.py` that already exits 0 (the `PASSING_SCRIPTS` list in `tests/test_green_repo.py`, which now includes `test-pattern-rulebooks.py`, plus the other scripts that passed before this task). Run `python3 tools/test-perf.py` too.
     Expected: each previously passing script still exits 0 with a last line containing `ok`. `tools/test-perf.py` exits 1 and its last line is `verdict-commit-files: '' != 'perf/bench_x.py'`. Its `pipeline_order` list includes `design`, so it does not fail earlier on the role list. `tools/test-run-hyper.py` passes because `[design] enabled = false` is in `TOML`, `HARD_PLAN` is unchanged, and `readme_documents` checks the updated blast row indices.
 
-20. Diff `tasks/README.md` and `templates/tasks-README.md`, then diff each against its committed previous version.
-    Expected: the two files are byte-identical; each differs only on its pipeline line, which now reads `specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, QA`; no other line changed.
+20. Diff `tasks/README.md` against `templates/tasks-README.md`.
+    Expected: `templates/tasks-README.md` reads `specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, QA`. `tasks/README.md` is that file with `design` removed from that one pipeline line, so it reads `specifier, critic, coder, cleaner, architect, practices, perf, hardener, QA`. No other line differs. `tasks/README.md` is not in `freeze.allow`.

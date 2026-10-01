@@ -244,10 +244,11 @@ Feature: Architect applies pattern rules; a design judge checks them
     And the Best practices section keeps the practices paragraph, then one new paragraph that says pattern rulebooks live in `guidance/patterns/`, the architect and the design judge read them, practices does not, install also ships `er.md` (any `*.erl`), `ex.md` (root `mix.exs`), `rb.md` (root `Gemfile`), `go.md` (root `go.mod`), and `guidance/patterns/<lang>.md` beside each installed language rulebook including `patterns/ts.md`, and design bounces only for those three cases
     And that paragraph states `[design]` key `enabled` defaults to true
 
-  Scenario: both task READMEs list the pipeline with design
-    Then `tasks/README.md` and `templates/tasks-README.md` are byte-identical
-    And both read `specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, QA`
-    And no other line of either file changed
+  Scenario: the shipped task README lists design and the frozen copy drops it
+    Then `templates/tasks-README.md` reads `specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, QA`
+    And `tasks/README.md` is that file with `design` removed from that one pipeline line, so it reads `specifier, critic, coder, cleaner, architect, practices, perf, hardener, QA`
+    And no other line differs
+    And `tasks/README.md` is not added to `freeze.allow`
 
   Scenario: other checks still pass
     Then `pytest tests/test_pipeline.py tests/test_runner_flow.py tests/test_install.py tests/test_install_hyper.py tests/test_tui_theme.py` passes and covers every new runner and install branch
