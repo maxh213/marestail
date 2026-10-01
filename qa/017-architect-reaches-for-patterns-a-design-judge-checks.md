@@ -3,7 +3,7 @@
 Run these from the marestail-green root with the venv active. Expected results are exact unless noted.
 
 1. Run `python3 tools/test-pattern-rulebooks.py`.
-   Expected: exit 0, last line `patterns ok`. A dummy rule with an empty trigger, a `patterns/py.md`, a `method_missing` form, or a `WaitGroup.Go` mention without `1.25` and `go.mod` would fail this script.
+   Expected: exit 0, last line `patterns ok`. A dummy rule with an empty trigger, a `patterns/py.md`, a `method_missing` form, an unquoted distinctive ER-n phrase, or a `WaitGroup.Go` mention without `1.25` and `go.mod` would fail this script.
 
 2. Run:
    ```
@@ -36,11 +36,11 @@ Run these from the marestail-green root with the venv active. Expected results a
 3. In a temp dir, call `run_step` on `find("design")` three times: no `guidance/patterns/*.md`; the same plus config `[design] enabled = false`; then with `guidance/patterns/ts.md` present and design left enabled. Mirror `tests/test_runner_flow.py` `test_run_step_judge` (capture stdout, stub `run_judge_loop`).
    Expected, in order: stdout `design: no pattern rulebooks; skipping` and success, loop not called; stdout `design disabled in marestail.toml; skipping` and not `no pattern rulebooks`; neither skip line, and the loop is called.
 
-4. Stub `run_judge` to return `("BOUNCE", None, "1. TS-P1 src/order.ts:4: applied with no trigger\n")` once, then the same text again, and call `run_judge_loop` on `find("design")`.
+4. Stub `run_judge` to return `("BOUNCE", None, "1. TS-P9 src/order.ts:4: applied with no trigger\n")` once, then the same text again, and call `run_judge_loop` on `find("design")`.
    Expected: the first bounce calls `run_worker` with the architect step; the second prints `design repeated the same findings twice; the worker is not making progress, stopping for a human`, returns false, and does not call the architect again.
 
 5. Grep `roles/design.md` for `src/order.ts:4`, `src/Walk.cs:10`, `src/pool.go:18`, `src/old.go:3`, `VERDICT: BOUNCE`, `VERDICT: PASS`, `## Patterns`, `## Pre-existing`, `guidance/patterns/`.
-   Expected: all present. The order.ts fixture is one `return new Order(id)` cited as applied Factory TS-P1, verdict bounce. The Walk.cs fixture is a hand-written `Current`/`MoveNext` cited as Iterator, verdict bounce. The pool.go fixture with `go 1.25` and no `## Patterns` line bounces; the same trigger with `- GO-P1 src/pool.go:18: not applied because go.mod says go 1.22, which is below 1.25` passes. A pass that only saw `src/old.go:3` includes `## Pre-existing` and `- GO-P1 src/old.go:3: Add(1) / go func / defer Done()`, and a pass with nothing pre-existing omits that heading.
+   Expected: all present. The order.ts fixture is one `return new Order(id)` cited as applied Factory TS-P9, verdict bounce. The Walk.cs fixture is a hand-written `Current`/`MoveNext` cited as Iterator CS-P16, verdict bounce. The pool.go fixture with `go 1.25` and no `## Patterns` line bounces citing `GO-P27 src/pool.go:18`; the same trigger with `- GO-P27 src/pool.go:18: not applied because go.mod says go 1.22, which is below 1.25` passes. A pass that only saw `src/old.go:3` includes `## Pre-existing` and `- GO-P27 src/old.go:3: Add(1) / go func / defer Done()`, and a pass with nothing pre-existing omits that heading.
 
 6. Grep `roles/architect.md` for `Prefer a few deep modules over many shallow ones`, `guidance/patterns/*.md`, `## Proposals`, `## Patterns`, and `A factory or wrapper that hides nothing is the shallow module the role already rejects.`
    Expected: all present. The new text is one paragraph: apply a pattern only for a trigger in code this task touched, only in the rule's form, never add a dependency, and record applied and skipped triggers as `- <rule id> <file:line>: …`.
@@ -82,4 +82,4 @@ Run these from the marestail-green root with the venv active. Expected results a
     Expected: all pass. `tests/test_install_hyper.py` still expects the hyper key set from step 14.
 
 19. Run each `tools/test-*.py` that already exits 0 (the `PASSING_SCRIPTS` list in `tests/test_green_repo.py`, which now includes `test-pattern-rulebooks.py`, plus the other scripts that passed before this task). Run `python3 tools/test-perf.py` too.
-    Expected: each previously passing script still exits 0 with a last line containing `ok`. `tools/test-perf.py` exits 1 and its last line is `verdict-commit-files: '' != 'perf/bench_x.py'`. Its `pipeline_order` list includes `design`, so it does not fail earlier on the role list.
+    Expected: each previously passing script still exits 0 with a last line containing `ok`. `tools/test-perf.py` exits 1 and its last line is `verdict-commit-files: '' != 'perf/bench_x.py'`. Its `pipeline_order` list includes `design`, so it does not fail earlier on the role list. `tools/test-run-hyper.py` passes because `[design] enabled = false` is in `TOML`, `HARD_PLAN` is unchanged, and `readme_documents` checks the updated blast row indices.
