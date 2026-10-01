@@ -334,6 +334,20 @@ def test_docs_and_import_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert_install_copies_the_readme(tmp_path, monkeypatch, capsys)
 
 
+def test_task_file_is_listed_with_the_foundations() -> None:
+    contracts = (ROOT / ".importlinter").read_text()
+    layer = next(line for line in contracts.splitlines() if line.strip().startswith("marestail.report :"))
+    assert [part.strip() for part in layer.split(":")] == [
+        "marestail.report",
+        "marestail.config",
+        "marestail.changes",
+        "marestail._location",
+        "marestail.task_file",
+    ]
+    foundations = contracts.split("[importlinter:contract:foundations-import-nothing-above]", 1)[1]
+    assert "marestail.task_file" in foundations.split("forbidden_modules", 1)[0].split()
+
+
 def assert_documented() -> None:
     template = (ROOT / "templates" / "tasks-README.md").read_text()
     readme = (ROOT / "README.md").read_text()
