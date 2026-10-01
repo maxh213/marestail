@@ -268,7 +268,8 @@ def transcript_conversation(root: Path, max_lines: int = 200, window: int = CONV
 
 def claude_homes() -> list[Path]:
     work = os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR") or "~/.claude-work"
-    homes = [Path.home() / ".claude", Path(work).expanduser()]
+    deepseek = os.environ.get("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR") or "~/.claude-deepseek"
+    homes = [Path.home() / ".claude", Path(work).expanduser(), Path(deepseek).expanduser()]
     configured = os.environ.get("CLAUDE_CONFIG_DIR")
     if configured:
         homes.append(Path(configured).expanduser())

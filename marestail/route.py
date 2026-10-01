@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO = "https://github.com/maxh213/dandelion"
 MODES = {"dandelion/route": (), "dandelion/route-best": ("--high",)}
-BACKENDS = {"claude": "claude", "claude-work": "claude", "agy": "agy", "kimi": "kimi", "grok": "grok", "cursor": "cursor"}
+BACKENDS = {"claude": "claude", "claude-work": "claude", "claude-deepseek": "claude", "agy": "agy", "kimi": "kimi", "grok": "grok", "cursor": "cursor"}
 NO_ROUTE = "none"
 TIMEOUT_SECONDS = 300
 
@@ -82,8 +82,15 @@ def parse(line: str) -> Choice:
     return Choice(line, BACKENDS[provider], words[0], effort, account_env(provider))
 
 
+CONFIG_DIRS = {
+    "claude-work": ("DANDELION_CLAUDE_WORK_CONFIG_DIR", "~/.claude-work"),
+    "claude-deepseek": ("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/.claude-deepseek"),
+}
+
+
 def account_env(provider: str) -> dict[str, str]:
-    if provider != "claude-work":
+    configured = CONFIG_DIRS.get(provider)
+    if configured is None:
         return {}
-    configured = os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR") or "~/.claude-work"
-    return {"CLAUDE_CONFIG_DIR": str(Path(configured).expanduser())}
+    name, fallback = configured
+    return {"CLAUDE_CONFIG_DIR": str(Path(os.environ.get(name) or fallback).expanduser())}

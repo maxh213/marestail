@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import re
 import subprocess
@@ -14,7 +15,7 @@ from marestail.runner import Run, agent_env, agent_label, invoke, stamped
 
 CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
 DANDELION_ROUTES = Path(os.environ.get("MARESTAIL_DANDELION_SRC", Path.home() / "workspace" / "dandelion" / "src" / "domain" / "route.ts"))
-ENV_KEYS = ["MARESTAIL_DANDELION", "DANDELION_CLAUDE_WORK_CONFIG_DIR", "MARESTAIL_CLAUDE", "MARESTAIL_GROK", "MARESTAIL_CURSOR", "PLAN", "CALLS", "SEEN"]
+ENV_KEYS = ["MARESTAIL_DANDELION", "DANDELION_CLAUDE_WORK_CONFIG_DIR", "DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "MARESTAIL_CLAUDE", "MARESTAIL_GROK", "MARESTAIL_CURSOR", "PLAN", "CALLS", "SEEN"]
 
 
 def expect(name, got, wanted):
@@ -45,10 +46,13 @@ def parsed(line):
 
 def parses_every_line():
     work = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-work").expanduser())}
+    deepseek = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-deepseek").expanduser())}
+    flash = "deepseek/deepseek-v4.1-flash max claude-deepseek"
     cases = {
         "claude-opus-5 high claude": ("claude", "claude-opus-5", "high", {}),
         "claude-opus-5 max claude-work": ("claude", "claude-opus-5", "max", work),
         "claude-fable-5-1 max claude-work": ("claude", "claude-fable-5-1", "max", work),
+        flash: ("claude", "deepseek/deepseek-v4.1-flash", "max", deepseek),
         "gemini-3.1-pro-high medium agy": ("agy", "gemini-3.1-pro-high", "medium", {}),
         "gemini-3.8-flash-high high agy": ("agy", "gemini-3.8-flash-high", "high", {}),
         "kimi-code/kimi-for-coding-highspeed kimi": ("kimi", "kimi-code/kimi-for-coding-highspeed", None, {}),
@@ -61,6 +65,11 @@ def parses_every_line():
     os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"] = "/srv/work-claude"
     expect("work-dir-env", parsed("claude-opus-5 high claude-work")[3], {"CLAUDE_CONFIG_DIR": "/srv/work-claude"})
     del os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"]
+    os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = "/srv/deepseek-claude"
+    expect("deepseek-dir-env", parsed(flash)[3], {"CLAUDE_CONFIG_DIR": "/srv/deepseek-claude"})
+    os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = ""
+    expect("deepseek-dir-empty", parsed(flash)[3], deepseek)
+    del os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"]
     expect_exit("one-word", lambda: route.parse("claude"), "expected")
     expect_exit("four-words", lambda: route.parse("a b c claude"), "expected")
     expect_exit("unknown-account", lambda: route.parse("gpt-6 high codex"), "no backend for")
@@ -69,14 +78,13 @@ def parses_every_line():
 
 def dandelion_source_lines() -> list[str]:
     source = DANDELION_ROUTES.read_text()
-    claude = re.search(r"CLAUDE_LINES = \{ standard: '([^']+)', max: '([^']+)' \}", source)
-    lines = []
-    for entry in re.finditer(r"\{ id: '([\w-]+)'(.*?)\}", source):
-        account, rest = entry.group(1), entry.group(2)
-        pair = claude.groups() if "...CLAUDE_LINES" in rest else re.search(r"standard: '([^']+)', max: '([^']+)'", rest).groups()
-        lines.extend(f"{line} {account}" for line in pair)
-    for entry in re.finditer(r"providers: \[([^\]]*)\].*?line: '([^']+)'", source):
-        lines.extend(f"{entry.group(2)} {account}" for account in re.findall(r"'([\w-]+)'", entry.group(1)))
+    routes = json.loads((DANDELION_ROUTES.parents[2] / "routes.json").read_text())
+    lines = [f"{pair[key]} {account}" for account, pair in routes["route"].items() if account in route.BACKENDS for key in ("standard", "max")]
+    providers = {
+        match.group(1): re.findall(r"'([\w-]+)'", match.group(2))
+        for match in re.finditer(r"name: '([\w-]+)', providers: \[([^\]]*)\]", source)
+    }
+    lines.extend(f"{line} {account}" for name, line in routes["high"].items() for account in providers[name])
     return lines
 
 
@@ -166,6 +174,29 @@ def reroutes(folder: Path):
     expect("stamp-unknown-bracket", stamped("[WIP] coder work", "claude-opus-5 high", {"grok-4.6 xhigh"}), "[claude-opus-5 high] [WIP] coder work")
 
 
+def routes_deepseek(folder: Path):
+    stub_dandelion(folder)
+    os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = "/srv/deepseek-claude"
+    os.environ["SEEN"] = str(folder / "seen")
+    (folder / "plan").write_text("0 deepseek/deepseek-v4.1-flash max claude-deepseek\n")
+    os.environ["MARESTAIL_CLAUDE"] = str(script(folder / "claude", (
+        'cat > "$SEEN"\n'
+        'printf \'{"total_cost_usd": 0, "num_turns": 1, "result": "config=%s args=%s"}\' "$CLAUDE_CONFIG_DIR" "$*"\n'
+    )))
+    previous_wait = runner.LIMIT_WAIT_SECONDS
+    runner.LIMIT_WAIT_SECONDS = 0
+    try:
+        state = Run(config=Config(root=folder, raw={"agent": {"backend": "kilo", "effort": "low"}}), task=folder / "t.md", model=None, retries=0, route="dandelion/route")
+        invoke(state, "01-coder", "deepseek prompt")
+        expect("deepseek-state", (state.agent, state.model, state.effort), ("claude", "deepseek/deepseek-v4.1-flash", "max"))
+        output = (state.folder / "01-coder.json").read_text()
+        expect("deepseek-config", "config=/srv/deepseek-claude " in output, True)
+        expect("deepseek-args", "--model deepseek/deepseek-v4.1-flash --effort max" in output, True)
+        expect("deepseek-env", agent_env(state)["CLAUDE_CONFIG_DIR"], "/srv/deepseek-claude")
+    finally:
+        runner.LIMIT_WAIT_SECONDS = previous_wait
+
+
 def rejects_flags(folder: Path):
     repo = folder / "repo"
     repo.mkdir()
@@ -190,7 +221,7 @@ if __name__ == "__main__":
     try:
         parses_every_line()
         matches_dandelion_source()
-        for check in (chooses, proxies, reroutes, rejects_flags):
+        for check in (chooses, proxies, reroutes, routes_deepseek, rejects_flags):
             with tempfile.TemporaryDirectory(prefix="marestail-route-test-") as temp:
                 check(Path(temp))
     finally:
