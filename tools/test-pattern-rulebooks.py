@@ -338,7 +338,7 @@ REACT = (24, 25, 26, 27, 28, 29, 30, 31)
 RAILS = (21, 22, 23, 24, 25, 26, 27)
 GO_NEEDLES = (
     (1, ("`error` last", "handle it or return it", "%w", "errors.Is", "errors.As")),
-    (2, ("`panic`", "programmer errors", "`recover`", "boundaries")),
+    (2, ("`panic`", "programmer errors", "`recover`", "goroutine", "handler", "boundaries")),
     (3, ("context.Context", "first parameter", "never stored in a struct", "request metadata only")),
     (4, ("goroutine", "known stop", "context", "wait for it")),
     (5, ("accept interfaces", "return structs", "consumer", "small")),
@@ -438,7 +438,26 @@ PARAGRAPH = (
     "`go.md` (root `go.mod`)",
     "patterns/ts.md",
     "`[design]` key `enabled` defaults to true",
+    "a pattern applied with no trigger",
+    "a form other than the rule's",
+    "neither applied nor explained under `## Patterns`",
 )
+SIMPLE = "simple_one_for_one"
+HYPER_ASSIGNMENTS = (
+    ("ALL_ROLES", '["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"]'),
+    ("HARD_PLAN", '["specify", "judge PASS", "code", "worker cleaner", "worker architect", "judge PASS", "worker qa"]'),
+    (
+        "TOML",
+        "'[git]\\nbase = \"main\"\\n\\n[design]\\nenabled = false\\n\\n[practices]\\nenabled = false\\n\\n[perf]\\nenabled = false\\n'",
+    ),
+)
+HYPER_README = (
+    '["none", "none", "full", "—", "full", "—", "—", "—", "none", "full", "visual", "qa"]',
+    "rows[8:11]",
+    '["| perf", "| blast", "| hardener"]',
+    'rows[9][:4], ["| blast", "judge", "—", "none"]',
+)
+VISUAL_UNKNOWN = "unknown role visual; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa"
 
 
 class Rule(NamedTuple):
@@ -640,9 +659,24 @@ def check_shipped(store: Books) -> None:
 
 
 def check_er_simple(store: Books) -> None:
-    for rule in store["er"].rules:
-        if "simple_one_for_one" in rule.text:
-            expect_true(f"er-P{rule.number}-simple", refuses_simple(rule.text))
+    book = store["er"]
+    hits = simple_rules(book.rules)
+    expect_true("er-simple-present", bool(hits))
+    expect_true("er-simple-only-rules", not simple_outside(book))
+    expect_simple_refusals(hits)
+
+
+def simple_rules(rules: list[Rule]) -> list[Rule]:
+    return [rule for rule in rules if SIMPLE in rule.text]
+
+
+def simple_outside(book: Book) -> bool:
+    return book.text.count(SIMPLE) != sum(rule.text.count(SIMPLE) for rule in book.rules)
+
+
+def expect_simple_refusals(rules: list[Rule]) -> None:
+    for rule in rules:
+        expect_true(f"er-P{rule.number}-simple", refuses_simple(rule.text))
 
 
 def refuses_simple(text: str) -> bool:
@@ -794,6 +828,27 @@ def without_design(lines: list[str], shipped: str) -> list[str]:
     return [frozen if line == shipped else line for line in lines]
 
 
+def check_script_pins() -> None:
+    hyper = script_text("test-run-hyper.py")
+    expect_assignments(hyper, HYPER_ASSIGNMENTS)
+    expect_needles("hyper-readme", hyper, HYPER_README)
+    expect_true("visual-unknown-role", VISUAL_UNKNOWN in script_text("test-visual-judge.py"))
+
+
+def script_text(name: str) -> str:
+    return (ROOT / "tools" / name).read_text()
+
+
+def expect_assignments(text: str, pairs: tuple[tuple[str, str], ...]) -> None:
+    for name, wanted in pairs:
+        expect(f"pin-{name}", assigned(text, name), wanted)
+
+
+def assigned(text: str, name: str) -> str:
+    line = next(line for line in text.splitlines() if line.startswith(f"{name} = "))
+    return line.split("=", 1)[1].strip()
+
+
 def check_ported() -> None:
     for rev, name in PORTED:
         expect_blob(rev, name)
@@ -848,6 +903,7 @@ def main() -> None:
     check_readme()
     check_task_readmes()
     check_ported()
+    check_script_pins()
     print("patterns ok")
 
 

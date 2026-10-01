@@ -17,7 +17,7 @@ Read by the architect and the `design` judge for `*.erl`/`*.hrl` changes. Each p
 - **ER-P3 — Application.**
   pattern: `application` — package a supervision tree with its config and dependencies.
   trigger: a new supervised tree must start with the node, before any request arrives.
-  form: `-behaviour(application)` with `start/2` returning the top supervisor quickly, heavy work in `handle_continue` (see ER-10); the strategy matches the failure domain (see ER-14), child specs are maps (see ER-17), restart intensity is chosen (see ER-15), and dynamic children come from `supervisor:start_child/2` (see ER-18).
+  form: `-behaviour(application)` with `start/2` returning the top supervisor quickly, heavy work in `handle_continue` (see ER-10); the strategy matches the failure domain (see ER-14), child specs are maps (see ER-17), restart intensity is chosen (see ER-15), and dynamic children come from `supervisor:start_child/2` (see ER-18). `simple_one_for_one` is not allowed (see ER-18).
   not when: the code is a library with no processes of its own; tests start what they need rather than the whole application (see ER-28).
 
 - **ER-P4 — Error kernel.**
