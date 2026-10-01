@@ -57,6 +57,8 @@ def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.Cap
         assert (target / name).read_text() == (TEMPLATES / name).read_text()
     assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
     assert not (target / "guidance" / "cs.md").exists()
+    guidance = sorted(str(path.relative_to(target / "guidance")) for path in (target / "guidance").rglob("*.md"))
+    assert guidance == ["patterns/ts.md", "ts.md"]
     assert (target / "CLAUDE.md").read_text() == (TEMPLATES / "CLAUDE.md").read_text()
     assert (target / "AGENTS.md").read_text() == (TEMPLATES / "CLAUDE.md").read_text()
     assert read_json(target / ".claude" / "settings.json") == {"hooks": {"Stop": [read_json(TEMPLATES / "stop-hook.json")]}}
@@ -191,6 +193,64 @@ def test_install_for_dotnet_and_csharp(home: Path, target: Path) -> None:
     assert (target / "guidance" / "cs.md").read_text() == (TEMPLATES / "guidance" / "cs.md").read_text()
     lines = (target / ".gitignore").read_text().splitlines()
     assert lines[-len(_install.GITIGNORE_GENERATED_LINES) :] == _install.GITIGNORE_GENERATED_LINES
+
+
+def test_install_copies_every_marker_rulebook_with_its_patterns(home: Path, target: Path) -> None:
+    for name, text in (("Gemfile", ""), ("mix.exs", ""), ("go.mod", "module x\n")):
+        (target / name).write_text(text)
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    (target / "src" / "App.csproj").write_text("<Project />")
+    install.install(target)
+    for name in ("ts", "cs", "rb", "ex", "er", "go"):
+        assert (target / "guidance" / f"{name}.md").read_text() == (TEMPLATES / "guidance" / f"{name}.md").read_text()
+        assert (target / "guidance" / "patterns" / f"{name}.md").read_text() == (
+            TEMPLATES / "guidance" / "patterns" / f"{name}.md"
+        ).read_text()
+
+
+def test_install_takes_erlang_anywhere_but_the_other_markers_at_the_root_only(home: Path, target: Path) -> None:
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    install.install(target)
+    assert (target / "guidance" / "er.md").exists()
+    assert (target / "guidance" / "patterns" / "er.md").exists()
+    for name in ("rb", "ex", "go", "cs"):
+        assert not (target / "guidance" / f"{name}.md").exists()
+
+
+def test_install_ignores_language_markers_below_the_root(home: Path, target: Path) -> None:
+    (target / "nested").mkdir()
+    for name in ("Gemfile", "mix.exs", "go.mod"):
+        (target / "nested" / name).write_text("")
+    install.install(target)
+    for name in ("rb", "ex", "go"):
+        assert not (target / "guidance" / f"{name}.md").exists()
+        assert not (target / "guidance" / "patterns" / f"{name}.md").exists()
+
+
+def test_install_keeps_edited_rulebooks_and_patterns(home: Path, target: Path) -> None:
+    (target / "go.mod").write_text("module x\n")
+    install.install(target)
+    (target / "guidance" / "patterns" / "ts.md").write_text("# edited\n")
+    (target / "guidance" / "go.md").write_text("# edited\n")
+    install.install(target)
+    assert (target / "guidance" / "patterns" / "ts.md").read_text() == "# edited\n"
+    assert (target / "guidance" / "go.md").read_text() == "# edited\n"
+
+
+@pytest.mark.parametrize(("name", "marker"), [("uses_elixir", "mix.exs"), ("uses_ruby", "Gemfile"), ("uses_go", "go.mod")])
+def test_root_marker_detectors(target: Path, name: str, marker: str) -> None:
+    assert getattr(_install, name)(target) is False
+    (target / marker).write_text("")
+    assert getattr(_install, name)(target) is True
+
+
+def test_uses_erlang_finds_a_nested_erl(target: Path) -> None:
+    assert _install.uses_erlang(target) is False
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    assert _install.uses_erlang(target) is True
 
 
 @pytest.mark.parametrize(("text", "expected"), [(None, False), ("[python]\n", False), ("[dotnet]\n", True)])

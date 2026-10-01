@@ -417,6 +417,10 @@ def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
         (CRITIC, {"critic": {"enabled": False}}, False, ""),
         (find("practices"), {}, False, "practices: no guidance files; skipping\n"),
         (find("practices"), {}, True, ""),
+        (find("design"), {}, False, "design: no pattern rulebooks; skipping\n"),
+        (find("design"), {"design": {"enabled": False}}, False, "design disabled in marestail.toml; skipping\n"),
+        (find("design"), {"design": {"enabled": False}}, True, "design disabled in marestail.toml; skipping\n"),
+        (find("design"), {"design": {"enabled": True}}, True, ""),
     ],
 )
 def test_run_step_judge(
@@ -425,11 +429,30 @@ def test_run_step_judge(
     loop = patch(monkeypatch, runner, "run_judge_loop", "looped")
     (tmp_path / "guidance").mkdir()
     (tmp_path / "guidance" / ("g.md" if guidance else "g.txt")).write_text("g")
+    (tmp_path / "guidance" / "patterns").mkdir()
+    (tmp_path / "guidance" / "patterns" / ("g.md" if guidance else "g.txt")).write_text("g")
     state = make_state(tmp_path, raw=raw)
     outcome = runner.run_step(state, judge)
     assert capsys.readouterr().out == expected
     assert outcome == (True if expected else "looped")
     assert loop.calls == ([] if expected else [(state, judge)])
+
+
+def test_design_bounces_to_the_architect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("PASS", None, "ok"))
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(tmp_path)
+    assert runner.run_judge_loop(state, cast(Judge, find("design"))) is True
+    assert worker.calls == [(state, find("architect"), "1. a")]
+
+
+def test_design_loop_stops_on_repeated_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1.  same\nnote a"), ("BOUNCE", None, " 1. same \nnote b"))
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(tmp_path)
+    assert runner.run_judge_loop(state, cast(Judge, find("design"))) is False
+    assert worker.calls == [(state, find("architect"), "1.  same\nnote a")]
+    assert capsys.readouterr().out == "design repeated the same findings twice; the worker is not making progress, stopping for a human\n"
 
 
 def test_judge_loop_passes_after_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1313,7 +1336,7 @@ def test_run_pipeline_rejects_an_unknown_role(pipeline_env: dict[str, Any], star
     with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(Path("t.md"), start, stop, True, "x", 1)
     assert str(raised.value) == (
-        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"
+        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa"
     )
     assert "window" not in pipeline_env
 

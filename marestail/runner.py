@@ -403,12 +403,23 @@ def run_qa(state: Run, worker: Worker) -> bool:
     return settle_ran_against(state, worker, read_qa_ran_against(state))
 
 
+RULEBOOK_SKIPS: dict[str, tuple[str, Callable[[Path], list[Path]]]] = {
+    "practices": ("practices: no guidance files; skipping", practices.files),
+    "design": ("design: no pattern rulebooks; skipping", practices.pattern_files),
+}
+
+
 def skip_reason(state: Run, judge: Judge) -> str:
     if disabled(state, judge):
         return f"{judge.name} disabled in marestail.toml; skipping"
-    if without_guidance(state, judge):
-        return "practices: no guidance files; skipping"
-    return visual_skip(state, judge)
+    return missing_rulebooks(state.config.root, judge) or visual_skip(state, judge)
+
+
+def missing_rulebooks(root: Path, judge: Judge) -> str:
+    skip = RULEBOOK_SKIPS.get(judge.name)
+    if skip is not None and not skip[1](root):
+        return skip[0]
+    return ""
 
 
 def visual_skip(state: Run, judge: Judge) -> str:
@@ -417,10 +428,6 @@ def visual_skip(state: Run, judge: Judge) -> str:
 
 def disabled(state: Run, judge: Judge) -> bool:
     return judge.optional and state.config.get(judge.name, ENABLED, True) is False
-
-
-def without_guidance(state: Run, judge: Judge) -> bool:
-    return judge.name == "practices" and not practices.files(state.config.root)
 
 
 MAX_JUDGE_ROUNDS = 1000

@@ -9,6 +9,9 @@ base = "origin/master"
 # [practices]
 # enabled = true  # the practices judge runs between architect and perf unless false; skips repos with no guidance/*.md
 
+# [design]
+# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md
+
 # [perf]
 # enabled = true  # the perf judge runs between architect and hardener unless false
 # threshold_percent = 10  # a change smaller than this is unchanged

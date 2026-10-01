@@ -13,10 +13,10 @@ ROOT = HERE.parent
 CLI = ROOT / "marestail" / "cli.py"
 STUB = HERE / "stub-claude"
 HYPER_ROLES = ["specifier", "critic", "coder", "architect", "blast", "hardener", "qa"]
-ALL_ROLES = ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"]
+ALL_ROLES = ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"]
 HYPER_PLAN = ["specify", "judge PASS", "code", "architect", "judge PASS", "judge PASS", "worker qa"]
 HARD_PLAN = ["specify", "judge PASS", "code", "worker cleaner", "worker architect", "judge PASS", "worker qa"]
-TOML = '[git]\nbase = "main"\n\n[practices]\nenabled = false\n\n[perf]\nenabled = false\n'
+TOML = '[git]\nbase = "main"\n\n[design]\nenabled = false\n\n[practices]\nenabled = false\n\n[perf]\nenabled = false\n'
 CAPTURE = '#!/bin/sh\nn=$(printf \'%02d\' $(( $(ls "$PROMPTS" | wc -l) + 1 )))\ntee "$PROMPTS/$n.txt" | "{stub}"\n'
 HARD_TEXT = "This run has a hard scope"
 HYPER_ALL = (
@@ -455,9 +455,11 @@ def readme_documents() -> None:
     table = text[text.index("## Pipeline") : text.index("The Gate column")]
     rows = [line.split(" | ") for line in table.splitlines() if line.startswith("| ") and "---" not in line]
     expect("readme-header", rows[0][:4], ["| Step", "Kind", "Gate", "hyper"])
-    expect("readme-hyper", [row[3] for row in rows[1:]], ["none", "none", "full", "—", "full", "—", "—", "none", "full", "visual", "qa"])
-    expect("readme-blast", [row[0] for row in rows[7:10]], ["| perf", "| blast", "| hardener"])
-    expect("readme-blast-row", rows[8][:4], ["| blast", "judge", "—", "none"])
+    expect(
+        "readme-hyper", [row[3] for row in rows[1:]], ["none", "none", "full", "—", "full", "—", "—", "—", "none", "full", "visual", "qa"]
+    )
+    expect("readme-blast", [row[0] for row in rows[8:11]], ["| perf", "| blast", "| hardener"])
+    expect("readme-blast-row", rows[9][:4], ["| blast", "judge", "—", "none"])
     paragraph = text[text.index("The Gate column is") :].split("\n\n", 1)[0]
     for phrase in (
         "that pipeline is specifier, critic, coder, architect, blast, hardener, qa",

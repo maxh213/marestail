@@ -30,6 +30,7 @@ _PIPELINE: list[Step] = [
     Worker("coder", "fast", audit=True),
     Worker("cleaner", "sonar"),
     Worker("architect", "sonar"),
+    Judge("design", None, bounce_to="architect", optional=True),
     Judge("practices", None, bounce_to="coder", pinned_bounce=True, optional=True),
     Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True),
     Judge("hardener", "full", bounce_to="coder"),
@@ -38,7 +39,7 @@ _PIPELINE: list[Step] = [
 
 
 HYPER = "hyper"
-_HYPER_DROPPED = ("cleaner", "practices", "perf")
+_HYPER_DROPPED = ("cleaner", "design", "practices", "perf")
 _HYPER_FULL_TIER = ("coder", "architect")
 _BLAST = Judge("blast", None, bounce_to="coder")
 _BLAST_BEFORE = "hardener"

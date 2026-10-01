@@ -39,6 +39,7 @@ PASSING_SCRIPTS = [
     "test-scope-hard.py",
     "test-sonar-worktree.py",
     "test-practices.py",
+    "test-pattern-rulebooks.py",
 ]
 PACKAGE = "marestail"
 PERF_FAIL_LINE = "verdict-commit-files: '' != 'perf/bench_x.py'"

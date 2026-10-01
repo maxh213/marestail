@@ -5,11 +5,12 @@ from marestail.pipeline import Judge, Worker
 
 
 def test_names_follow_the_pipeline_order() -> None:
-    assert pipeline.names() == ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"]
+    assert pipeline.names() == ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"]
 
 
 def test_find_returns_the_named_step() -> None:
     assert pipeline.find("coder") == Worker("coder", "fast", audit=True)
+    assert pipeline.find("design") == Judge("design", None, bounce_to="architect", optional=True)
     assert pipeline.find("perf") == Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True)
 
 
@@ -22,7 +23,7 @@ def test_find_rejects_an_unknown_role() -> None:
     ("start", "stop", "expected"),
     [
         (None, None, pipeline.names()),
-        ("coder", None, ["coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"]),
+        ("coder", None, ["coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"]),
         (None, "critic", ["specifier", "critic"]),
         ("cleaner", "architect", ["cleaner", "architect"]),
         ("qa", "qa", ["qa"]),
@@ -86,6 +87,8 @@ def test_hyper_step_only_changes_coder_and_architect() -> None:
 def test_find_under_hyper_rejects_a_dropped_role() -> None:
     with pytest.raises(SystemExit, match=r"^unknown role cleaner; choose from specifier, critic, coder, architect, blast, hardener, qa$"):
         pipeline.find("cleaner", "hyper")
+    with pytest.raises(SystemExit, match=r"^unknown role design; choose from specifier, critic, coder, architect, blast, hardener, qa$"):
+        pipeline.find("design", "hyper")
 
 
 @pytest.mark.parametrize(
@@ -106,8 +109,8 @@ def test_window_under_hyper(start: str | None, stop: str | None, expected: list[
     [
         ("cleaner", None, "hyper", "cleaner", ", ".join(HYPER_ROLES)),
         (None, "cleaner", "hyper", "cleaner", ", ".join(HYPER_ROLES)),
-        ("bogus", None, None, "bogus", "specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"),
-        (None, "bogus", "changed", "bogus", "specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"),
+        ("bogus", None, None, "bogus", "specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa"),
+        (None, "bogus", "changed", "bogus", "specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa"),
     ],
 )
 def test_window_rejects_an_unknown_role(start: str | None, stop: str | None, mode: str | None, role: str, choices: str) -> None:
@@ -131,6 +134,7 @@ def test_visual_follows_the_hardener_only_when_asked() -> None:
         "coder",
         "cleaner",
         "architect",
+        "design",
         "practices",
         "perf",
         "hardener",
@@ -150,7 +154,16 @@ def test_window_with_visual_names_it_among_the_roles() -> None:
     with pytest.raises(SystemExit) as raised:
         pipeline.window("bogus", None, "changed", True)
     assert str(raised.value) == (
-        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, visual, qa"
+        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, visual, qa"
     )
-    with pytest.raises(SystemExit, match=r"choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa$"):
+    with pytest.raises(
+        SystemExit, match=r"choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa$"
+    ):
         pipeline.window("visual", None)
+
+
+def test_window_keeps_design_between_the_architect_and_practices() -> None:
+    assert [step.name for step in pipeline.window("design", "design")] == ["design"]
+    assert [step.name for step in pipeline.window("architect", "practices")] == ["architect", "design", "practices"]
+    assert [step.name for step in pipeline.window("coder", "architect")] == ["coder", "cleaner", "architect"]
+    assert "design" not in [step.name for step in pipeline.window("coder", "architect", "hyper")]

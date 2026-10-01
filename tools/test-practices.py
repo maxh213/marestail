@@ -99,7 +99,7 @@ def agent_stub(folder: Path, body: str) -> Iterator[None]:
 
 
 def pipeline_order() -> None:
-    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
+    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"])
     judge = cast(Judge, find("practices"))
     expect("practices-bounce-to", judge.bounce_to, "coder")
     expect("practices-tier", judge.tier, None)

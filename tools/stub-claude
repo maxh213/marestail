@@ -30,6 +30,7 @@ elif words[0] == "judge":
         Path("src.py").write_text("tampered\n")
     v = verdict_path(); v.parent.mkdir(parents=True, exist_ok=True)
     verdict = " ".join(w for w in words[1:] if w != "EDIT")
+    verdict = "PASS" if verdict == "design" else verdict
     v.write_text(f"VERDICT: {verdict}\n1. finding from {v.stem}\n")
 elif words[0] == "perf":
     bench = Path("perf/bench_t.py"); bench.parent.mkdir(exist_ok=True)

@@ -75,6 +75,7 @@ def test_mono_and_glyphs() -> None:
 def test_visual_is_coloured_as_a_judge() -> None:
     mono = theme.mono_theme()
     assert theme.role_attr(mono, "visual") == theme.role_attr(mono, "hardener") == mono.judge
+    assert theme.role_attr(mono, "design") == mono.judge
 
 
 def test_color_theme(monkeypatch: Any) -> None:

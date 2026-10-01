@@ -75,6 +75,10 @@ __all__ = [
     "merge_hook",
     "trust_grok_folder",
     "uses_csharp",
+    "uses_elixir",
+    "uses_erlang",
+    "uses_go",
+    "uses_ruby",
     "visual_browser",
     "write_tree",
 ]
@@ -94,9 +98,19 @@ def copy_templates(target: Path) -> None:
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     copy_if_missing(TEMPLATES / PERFORMANCE, target / PERFORMANCE)
     (target / "guidance").mkdir(exist_ok=True)
-    copy_if_missing(TEMPLATES / "guidance" / "ts.md", target / "guidance" / "ts.md")
-    if uses_csharp(target):
-        copy_if_missing(TEMPLATES / "guidance" / "cs.md", target / "guidance" / "cs.md")
+    copy_language(target, "ts", True)
+    copy_language(target, "cs", uses_csharp(target))
+    copy_language(target, "rb", uses_ruby(target))
+    copy_language(target, "ex", uses_elixir(target))
+    copy_language(target, "er", uses_erlang(target))
+    copy_language(target, "go", uses_go(target))
+
+
+def copy_language(target: Path, language: str, wanted: bool) -> None:
+    if not wanted:
+        return
+    copy_if_missing(TEMPLATES / "guidance" / f"{language}.md", target / "guidance" / f"{language}.md")
+    copy_if_missing(TEMPLATES / "guidance" / "patterns" / f"{language}.md", target / "guidance" / "patterns" / f"{language}.md")
 
 
 def apply_hooks(target: Path) -> None:
@@ -152,9 +166,27 @@ def uses_csharp(target: Path) -> bool:
     return next(target.rglob("*.csproj"), None) is not None
 
 
+def uses_erlang(target: Path) -> bool:
+    return next(target.rglob("*.erl"), None) is not None
+
+
+def uses_elixir(target: Path) -> bool:
+    return (target / "mix.exs").is_file()
+
+
+def uses_ruby(target: Path) -> bool:
+    return (target / "Gemfile").is_file()
+
+
+def uses_go(target: Path) -> bool:
+    return (target / "go.mod").is_file()
+
+
 def copy_if_missing(source: Path, destination: Path) -> None:
-    if not destination.exists():
-        shutil.copy(source, destination)
+    if destination.exists():
+        return
+    ensure_dir(destination.parent)
+    shutil.copy(source, destination)
 
 
 def append_instructions(path: Path) -> None:

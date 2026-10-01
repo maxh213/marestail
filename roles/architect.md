@@ -9,3 +9,5 @@ For the code this task touched, decide what the modules should be: one responsib
 Add no features. Weaken no tests. Say in the handoff which boundaries you drew, which interfaces you narrowed, and why.
 
 Length is a reading signal, not a rule. `marestail depth` marks files over 300 lines as long. A long file whose parts change for different reasons is two modules; a long file with one reason to change stays one module, but its internals need names a reader can navigate by. Split by the knowledge a module hides, never because a number was crossed.
+
+Read `guidance/patterns/*.md` and apply a pattern to the code this task touched only when its trigger is present, and only in the rule's form. Never add a dependency. A pattern that needs one goes in the handoff under `## Proposals`. Under `## Patterns`, list each pattern you applied as `- <rule id> <file:line>: <what changed>`, and each trigger you saw but deliberately did not act on with one line saying why. A factory or wrapper that hides nothing is the shallow module the role already rejects.

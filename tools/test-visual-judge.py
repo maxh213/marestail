@@ -185,7 +185,7 @@ def case_skips(folder: Path) -> None:
 def case_role_list_without_section(folder: Path) -> None:
     bed = Bed(folder, visual=None)
     bed.run([], "--from", "visual", "--auto")
-    wanted = "unknown role visual; choose from specifier, critic, coder, cleaner, architect, practices, perf, hardener, qa"
+    wanted = "unknown role visual; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa"
     expect_true("unknown-role", bed.code == 1 and wanted in bed.err)
 
 

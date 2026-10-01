@@ -229,7 +229,7 @@ def absent(tree: str, target: str = "t", script: str = "perf/bench_t") -> dict[s
 
 
 def pipeline_order() -> None:
-    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
+    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"])
     perf = cast(Judge, find("perf"))
     expect("perf-bounce-to", perf.bounce_to, "coder")
     expect("perf-writes", perf.writes, ("perf/**",))
