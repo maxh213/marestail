@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from marestail import cli, depth, graph, install, route, runner
+from marestail import cli, depth, graph, install, nice, route, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -274,6 +274,20 @@ def test_gate_renders_results(gates: Callable[..., Recorder], capsys: pytest.Cap
     gates(PASS, FAIL, scoped=True)
     assert cli.main(["gate"]) == 1
     assert capsys.readouterr().out == f"render ['lint', 'tests'] {make_context(repo, scope_changed=True).scope_summary()}\n"
+
+
+def test_gate_watch_perf_and_hook_do_not_apply_nice(gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch) -> None:
+    applied = Recorder()
+    monkeypatch.setattr(nice, "apply", applied)
+    gates(PASS)
+    fake_tui(monkeypatch)
+    monkeypatch.setattr(samples, "run_command", Recorder(2))
+    stdin(monkeypatch, {})
+    assert cli.main(["gate", "--tier", "fast", "--only", "docs"]) == 0
+    assert cli.main(["watch", "/tmp"]) == 4
+    assert cli.main(["perf", "run", "nope", "--tree", "HEAD"]) == 2
+    assert cli.main(["gate", "--hook"]) == 0
+    assert applied.calls == []
 
 
 def test_gate_prints_json(gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

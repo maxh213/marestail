@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from marestail import audit, backends, freeze, hunks, practices, prompts, ran_against, reported, timeline
+from marestail import audit, backends, freeze, hunks, nice, practices, prompts, ran_against, reported, timeline
 from marestail import config as config_module
 from marestail import route as dandelion
 from marestail.backends import (
@@ -220,6 +220,7 @@ def run_pipeline(
     focus: list[str] | None = None,
 ) -> int:
     config = config_module.load(Path.cwd())
+    nice.apply(config)
     picked = pick_model(config, model, agent, effort)
     scoped = pick_scope(config, scope, focus)
     share_scope(*scoped)

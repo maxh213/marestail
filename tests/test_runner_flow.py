@@ -1,9 +1,10 @@
 import contextlib
 import itertools
 import os
+import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -11,7 +12,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import hunks, pipeline, prompts, ran_against, reported, runner
+from marestail import hunks, nice, pipeline, prompts, ran_against, reported, runner
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -137,13 +138,35 @@ def test_judge_progress_author_requested() -> None:
     assert (progress.author_left, progress.feedback) == (0, runner.AUTHOR_DONE)
 
 
+def remember_nice(order: list[str], calls: list[Config]) -> Callable[[Config], None]:
+    def apply(loaded: Config) -> None:
+        order.append("nice")
+        calls.append(loaded)
+        nice.level(loaded)
+
+    return apply
+
+
+def remember_pick(
+    order: list[str], original: Callable[..., tuple[str | None, str | None, str | None]]
+) -> Callable[..., tuple[str | None, str | None, str | None]]:
+    def pick_model(loaded: Config, model: str | None, agent: str | None, effort: str | None) -> tuple[str | None, str | None, str | None]:
+        order.append("pick_model")
+        return original(loaded, model, agent, effort)
+
+    return pick_model
+
+
 @pytest.fixture
 def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setenv("MARESTAIL_SCOPE", "unset")
     monkeypatch.setenv("MARESTAIL_FOCUS", "unset")
     monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    monkeypatch.delenv("MARESTAIL_NICE", raising=False)
     config = Config(root=tmp_path, raw={"agent": {"model": "cfg-model", "effort": "cfg-effort"}})
     seen_load: list[Path] = []
+    order: list[str] = []
+    nice_calls: list[Config] = []
 
     def load(start: Path) -> Config:
         seen_load.append(start)
@@ -155,7 +178,10 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
         "start": patch(monkeypatch, perf_trees, "record_start"),
         "resolve": patch(monkeypatch, runner, "resolve_focus", {"src/a.py"}),
         "hook": patch(monkeypatch, runner, "hook_focus", {"src/hook.py"}),
+        "real_apply": nice.apply,
     }
+    monkeypatch.setattr(nice, "apply", remember_nice(order, nice_calls))
+    monkeypatch.setattr(runner, "pick_model", remember_pick(order, runner.pick_model))
 
     def steps(state: Run, window: list[Any], auto: bool) -> int:
         seen["state"], seen["window"], seen["auto"] = state, window, auto
@@ -165,6 +191,8 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     monkeypatch.setattr(runner, "run_steps", steps)
     seen["load"] = seen_load
     seen["config"] = config
+    seen["nice"] = nice_calls
+    seen["order"] = order
     return seen
 
 
@@ -251,6 +279,114 @@ def test_run_pipeline_rejects_bad_flags(
 def test_run_pipeline_all_scope_without_focus(pipeline_env: dict[str, Any]) -> None:
     runner.run_pipeline(Path("t.md"), None, None, True, "x", 1, scope="all", focus=[])
     assert pipeline_env["state"].scope_changed is False
+
+
+def test_run_pipeline_applies_nice_once_before_pick_model(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+    assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
+    assert pipeline_env["nice"] == [pipeline_env["config"]]
+    assert pipeline_env["order"] == ["nice", "pick_model"]
+    captured = capsys.readouterr()
+    assert "oom_score_adj" not in captured.out
+    assert "ionice" not in captured.out
+    assert "setpriority" not in captured.out
+
+
+def test_run_pipeline_nice_follows_config_and_environment(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    pipeline_env["config"].raw["run"] = {"nice": 5}
+    assert runner.run_pipeline(Path("t.md"), None, None, True, None, 1) == 7
+    assert nice.level(pipeline_env["config"]) == 5
+    monkeypatch.setenv("MARESTAIL_NICE", "7")
+    pipeline_env["config"].raw["run"] = {"nice": 19}
+    assert runner.run_pipeline(Path("t.md"), None, None, True, None, 1) == 7
+    assert nice.level(pipeline_env["config"]) == 7
+    monkeypatch.setenv("MARESTAIL_NICE", "0")
+    assert runner.run_pipeline(Path("t.md"), None, None, True, None, 1) == 7
+    assert nice.level(pipeline_env["config"]) is None
+    monkeypatch.setenv("MARESTAIL_NICE", "")
+    assert runner.run_pipeline(Path("t.md"), None, None, True, None, 1) == 7
+    assert nice.level(pipeline_env["config"]) is None
+    assert pipeline_env["nice"][-1] is pipeline_env["config"]
+    assert pipeline_env["order"][0] == "nice"
+
+
+@pytest.mark.parametrize(
+    ("env", "raw", "message"),
+    [
+        ("high", {}, "nice must be an integer 0-19, got 'high'"),
+        ("1.5", {}, "nice must be an integer 0-19, got '1.5'"),
+        ("-4", {}, "nice must be an integer 0-19, got -4"),
+        ("true", {}, "nice must be an integer 0-19, got 'true'"),
+        ("false", {}, "nice must be an integer 0-19, got 'false'"),
+        (None, {"run": {"nice": -1}}, "nice must be an integer 0-19, got -1"),
+        (None, {"run": {"nice": 1.5}}, "nice must be an integer 0-19, got 1.5"),
+        (None, {"run": {"nice": "high"}}, "nice must be an integer 0-19, got 'high'"),
+    ],
+)
+def test_run_pipeline_raises_a_bad_nice_before_steps(
+    pipeline_env: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    env: str | None,
+    raw: dict[str, Any],
+    message: str,
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_NICE", env)
+    pipeline_env["config"].raw.update(raw)
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
+    assert str(raised.value) == message
+    assert pipeline_env["order"] == ["nice"]
+    assert "state" not in pipeline_env
+    assert capsys.readouterr().out == ""
+
+
+def test_run_pipeline_raises_a_bad_nice_before_a_bad_model(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_NICE", "high")
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, "dandelion/route", 1, agent="grok")
+    assert str(raised.value) == "nice must be an integer 0-19, got 'high'"
+    assert "drop --agent" not in str(raised.value)
+    assert pipeline_env["order"] == ["nice"]
+    assert "state" not in pipeline_env
+
+
+def test_run_pipeline_reports_a_bad_model_when_nice_is_valid(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, "dandelion/route", 1, agent="grok")
+    assert str(raised.value) == ("--model dandelion/route picks the backend and effort before every session; drop --agent and --effort")
+    assert pipeline_env["order"] == ["nice", "pick_model"]
+    assert "state" not in pipeline_env
+    assert capsys.readouterr().out == ""
+
+
+def ionice_exits(real: Any) -> Any:
+    def run(cmd: list[str] | tuple[str, ...], *args: Any, **kwargs: Any) -> Any:
+        if cmd and cmd[0] == "ionice":
+            return subprocess.CompletedProcess(cmd, 3, "", "")
+        return real(cmd, *args, **kwargs)
+
+    return run
+
+
+def test_run_pipeline_finishes_when_ionice_exits_nonzero(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    root = pipeline_env["config"].root
+    monkeypatch.setattr(os, "setpriority", lambda *args, **kwargs: None)
+    monkeypatch.setattr(subprocess, "run", ionice_exits(subprocess.run))
+    monkeypatch.setattr(nice, "_score_path", lambda: root / "oom_score_adj")
+    monkeypatch.setattr(nice, "apply", pipeline_env["real_apply"])
+    assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
+    assert (root / "oom_score_adj").read_bytes() == b"500"
+
+
+def test_run_pipeline_missing_toml_raises_before_nice(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    calls: list[Config] = []
+    monkeypatch.setattr(nice, "apply", lambda config: calls.append(config))
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
+    assert str(raised.value) == f"no marestail.toml found above {tmp_path.resolve()}"
+    assert calls == []
 
 
 @pytest.fixture

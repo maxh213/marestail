@@ -93,6 +93,8 @@ marestail run tasks/001.md --model dandelion/route        # ask dandelion route 
 marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route --high before every session
 ```
 
+`marestail run` starts at nice 19 with idle I/O and a raised OOM score, so a fleet of pipelines yields the CPU and disk to you and is first in line if the kernel needs memory. Children inherit. `[run] nice = 0` or `MARESTAIL_NICE=0` turns it off; any other integer 1–19 is the level (`MARESTAIL_NICE` wins over the file). `marestail watch` and `marestail gate` stay at the shell's priority.
+
 `--effort` names the reasoning effort for the run and every backend carries it in the commit stamp. Claude takes it as `--effort` (`low`, `medium`, `high`, `xhigh`, `max`), agy as `--effort` (`low`, `medium`, `high`), Grok as `--reasoning-effort`, Kilo as `--variant`, Junie as `--effort` (`low`, `medium`, `high`), Hermes as `--reasoning` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). Cursor has no flag for it: it goes inside the model, `--model 'claude-opus-4-8[context=1m,effort=high]'`, and `--effort` there only labels the commits. Kimi has no flag for it either, so `--effort` only labels the commits. `[agent] effort` in `marestail.toml` sets the default; `MARESTAIL_GROK_EFFORT` and `MARESTAIL_KILO_VARIANT` still work for those two.
 
 ## Routing
@@ -198,6 +200,7 @@ Every variable marestail reads. The `docs` gate ignores common ones such as `HOM
 | Variable | Effect |
 |---|---|
 | `MARESTAIL_AGENT` | default backend for `marestail run` when `--agent` is not given |
+| `MARESTAIL_NICE` | priority for `marestail run`: 0 turns it off, 1–19 is the nice level (default 19); wins over `[run] nice` |
 | `MARESTAIL_CLAUDE` | claude binary (default `claude`) |
 | `MARESTAIL_AGY` | agy binary (default `agy`) |
 | `MARESTAIL_CURSOR` | Cursor agent binary (default `cursor-agent`) |
