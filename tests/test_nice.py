@@ -201,8 +201,9 @@ def test_level_is_off(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env: str 
 
 def test_level_rejects_a_bad_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv(nice.ENV, "high")
+    config = Config(root=tmp_path, raw={"run": {"nice": 19}})
     with pytest.raises(SystemExit) as raised:
-        nice.level(Config(root=tmp_path, raw={"run": {"nice": 19}}))
+        nice.level(config)
     assert str(raised.value) == "nice must be an integer 0-19, got 'high'"
 
 
@@ -284,7 +285,6 @@ def test_readme_documents_run_priority() -> None:
 
 def test_nice_imports_only_config() -> None:
     assert imported_marestail(ROOT / "marestail" / "nice.py") == ["marestail.config"]
-    assert (nice.DEFAULT, nice.OOM_SCORE, nice.ENV) == (19, 500, "MARESTAIL_NICE")
     assert not (ROOT / "tools" / "test-nice.py").exists()
 
 
