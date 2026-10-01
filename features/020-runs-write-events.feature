@@ -98,9 +98,12 @@ Feature: Runs write one event line at every step boundary
 
   `wait` is written from `note_wait`. `reason` is `rate-limit` or
   `dandelion-unrouted`. `until` is `at` plus the `LIMIT_WAIT_SECONDS` then in
-  force, in the same timestamp form. It sits between that attempt's
-  `step-start` and `step-end` and has no `step`. The `still rate limited after
-  12 waits` line writes nothing more.
+  force, in the same timestamp form. A duration of 0 does not prove the
+  addition, because a copied `at` would pass. The check uses 90, patches
+  `runner.time.sleep` so the run does not block, and sets `runner.LIMIT_WAITS`
+  to 12 rather than trusting `MARESTAIL_LIMIT_WAITS`. It sits between that
+  attempt's `step-start` and `step-end` and has no `step`. The
+  `still rate limited after 12 waits` line writes nothing more.
 
   `proposal` is written only after `proposal.write_text` on the justified
   frozen-file path. `files` is the frozen list, in that order. A frozen change
@@ -115,8 +118,9 @@ Feature: Runs write one event line at every step boundary
   worker, and `stopped_at` stays the judge. `exit_code` is an integer.
 
   | ending | result | exit_code | stopped_at | reason |
-  | every step passed, and QA is absent or said `app` | complete | 0 | null | null |
-  | QA said `harness` or `nothing` | complete | 3 | null | the line `ending_for` printed |
+  | every step passed, QA absent or said `app`, and `state.unseen` is false | complete | 0 | null | null |
+  | every step passed, QA absent or said `app`, and `state.unseen` is true | complete | 3 | null | `pipeline complete, NOT verified by eye` |
+  | QA said `harness` or `nothing` | complete | 3 | null | the line `ending_for` printed; `unseen` does not replace it |
   | a step returned False | stopped | 1 | that step | the stop line below |
   | the approval after the critic was declined | stopped | 1 | critic | `not approved` |
   | the bug could not be reproduced | stopped | 1 | the role in the printed line | that line, word for word |
@@ -252,8 +256,9 @@ Feature: Runs write one event line at every step boundary
     Then the outcomes are "failed" then "stopped" and the reason is "coder used all 2 attempts"
     When `--retries 3` and the same missing handoff happens three times
     Then the third outcome is "stopped" and the reason is the coder repeat-guard line, not "coder used all 3 attempts"
-    When `--retries 2`, the first invoke writes nothing and the gate fails, and the second writes a handoff and the gate returns no results
+    When `--retries 2`, the first invoke writes nothing and the gate fails, and the second writes a handoff, the gate returns no results, and `runner.audit.problems` returns []
     Then the outcomes are "failed" then "done" and run-end is complete with exit_code 0
+    And without that audit stub the second outcome is "stopped" with reason "coder used all 2 attempts", because the handoff exists, coder has `audit=True`, and the fresh test repo has no `features/*.feature`
 
   Scenario: a justified frozen edit records a proposal and a revert
     Given the passing specifier/critic window
@@ -373,6 +378,7 @@ Feature: Runs write one event line at every step boundary
 
   Scenario: QA names what it ran against
     Given `--from qa --to qa`, `runner.run_gates` returning [], and a handoff that is the row's line
+    And this window has no visual judge, so `state.unseen` stays false and `ran-against: app` is not claimed for every run
     Then run-end is complete with the row's exit code and reason, and stdout contains that reason when it is not null
     And a null reason still prints "pipeline complete" and does not print "NOT verified"
 
@@ -382,20 +388,34 @@ Feature: Runs write one event line at every step boundary
       | ran-against: harness | 3 | pipeline complete, NOT verified against the running app (qa ran against a harness) |
       | ran-against: nothing | 3 | pipeline complete, NOT verified against the running app (qa ran against nothing) |
 
+  Scenario: a blind visual fallback is complete but not verified by eye
+    Given `[visual]` present and not disabled, and `qa/t.md` contains a visual block with route "/page" and selector "#box"
+    And the task has no `where:` or `symptom:`, `qa/t.md` is committed, `--agent kilo`, no `--model`, and `runner.run_gates` returning []
+    And `runner.run_backend` returning `(1, "rate limit exceeded")`, so the judge model falls back at once and does not sleep
+    When `--from visual --to visual` and the invoke writes "VERDICT: PASS\n"
+    Then run-end is complete, exit_code 3, stopped_at null, reason "pipeline complete, NOT verified by eye"
+    And stdout contains that reason, "visual: claude-fable-5-1 is out of usage; judging with kilo" and "   verdict PASS (geometry only, pictures not seen)"
+    When `--from visual --to qa` and, after that same blind pass, QA writes "ran-against: app\n"
+    Then the reason, exit_code and stopped_at are the same, and stdout contains that reason
+    When that QA writes "ran-against: harness\n" instead
+    Then the reason is "pipeline complete, NOT verified against the running app (qa ran against a harness)", exit_code is 3, and stdout does not contain "NOT verified by eye"
+
   Scenario: a rate limit and a dandelion miss write wait lines
-    Given `--from specifier --to specifier`, `--retries 1`, and `runner.LIMIT_WAIT_SECONDS` set to 0
+    Given `--from specifier --to specifier`, `--retries 1`, `runner.LIMIT_WAIT_SECONDS` set to 90, `runner.LIMIT_WAITS` set to 12, and `runner.time.sleep` replaced so it does not block
     When `runner.run_backend` returns `(1, "rate limit exceeded")` once and then `(0, "ok")`
     Then one wait with reason "rate-limit" sits between that attempt's step-start and step-end
-    And the wait's until equals its at
-    And stdout contains "   rate limited; waiting 0 min before retrying 01-specifier"
+    And the wait's until is its at plus 90 seconds, in the same timestamp form, and is not equal to at
+    And stdout contains "   rate limited; waiting 1 min before retrying 01-specifier"
     When `runner.run_backend` always returns `(1, "rate limit exceeded")`
     Then that attempt has 12 wait lines and then a step-end stopped with reason "specifier used all 1 attempts"
+    And each of those waits has until 90 seconds after its at
     And stdout contains "   01-specifier: still rate limited after 12 waits"
-    Given `--model dandelion/route`, `dandelion.require` a no-op, and `dandelion.choose` returning `(None, "no subscription has quota left")` once and then `Choice("claude-opus-5 high claude", "claude", "claude-opus-5", "high", {})`
+    Given the same 90 seconds, `LIMIT_WAITS` 12 and patched sleep, `--model dandelion/route`, `dandelion.require` a no-op, and `dandelion.choose` returning `(None, "no subscription has quota left")` once and then `Choice("claude-opus-5 high claude", "claude", "claude-opus-5", "high", {})`
     And `runner.run_backend` returning `(0, "ok")`
     Then run-start has agent null, model "dandelion/route" and effort null
     And one wait with reason "dandelion-unrouted" sits between the step-start and the step-end
-    And stdout contains "   dandelion/route: no subscription has quota left; waiting 0 min before retrying 01-specifier"
+    And that wait's until is its at plus 90 seconds
+    And stdout contains "   dandelion/route: no subscription has quota left; waiting 1 min before retrying 01-specifier"
 
   Scenario: the real session line still says finished in
     Given the specifier/critic window and `runner.invoke` left in place

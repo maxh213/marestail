@@ -18,7 +18,7 @@ The script fails until the events writer, the runner wiring, the freeze entry, t
 
 7. `guard ok`. `--retries 0`, specifier writes nothing, three times. Stems stay `01-specifier`, attempts 1, 2, 3, outcomes `failed`, `failed`, `stopped`, handoffs null. Reason is `specifier got the same problems back 3 times in a row; the worker is not making progress, stopping for a human`. Stdout contains `missing handoff .marestail/handoffs/t/01-specifier.md` and does not contain `used all`. Archive is null and the handoffs directory remains.
 
-8. `retries ok`. Coder, gate failing `py.tests`. `--retries 1`: one `01-coder` `stopped`, reason `coder used all 1 attempts`, stdout contains `GATE FAILED: py.tests` and `pipeline stopped at coder` and not `used all 1 attempts`. `--retries 2` with two missing handoffs: `failed` then `stopped`, reason `coder used all 2 attempts`. `--retries 3` with three: the third is `stopped` and the reason is the coder repeat-guard line, not `used all 3 attempts`. `--retries 2` with a failure then a handoff and a passing gate: `failed`, `done`, `run-end` complete, exit 0.
+8. `retries ok`. Coder, gate failing `py.tests`. `--retries 1`: one `01-coder` `stopped`, reason `coder used all 1 attempts`, stdout contains `GATE FAILED: py.tests` and `pipeline stopped at coder` and not `used all 1 attempts`. `--retries 2` with two missing handoffs: `failed` then `stopped`, reason `coder used all 2 attempts`. `--retries 3` with three: the third is `stopped` and the reason is the coder repeat-guard line, not `used all 3 attempts`. `--retries 2` with a failure, then a handoff, a passing gate, and `runner.audit.problems` returning []: `failed`, `done`, `run-end` complete, exit 0. Without that audit stub the second outcome is `stopped` and the reason is `coder used all 2 attempts`, because the handoff exists and the fresh test repo has no `features/*.feature`.
 
 9. `proposal ok`. First specifier appends `\n\n[events]\nkeep = false\n` to `marestail.toml`, commits it, and writes `## Config change` / `Allow the events file.` Then `proposal` for `01-specifier`, path `.marestail/handoffs/t/02-proposal.md`, files `["marestail.toml"]`, step-end `failed` whose subject is `[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal`. Then `03-specifier` done, `04-critic` pass, `run-end` complete. Stdout contains the `frozen, reverted` sentence with that proposal path, and the refused-changes summary is printed after `run-end`. The archive contains `02-proposal.md`. The event path is still the handoffs path.
 
@@ -42,9 +42,9 @@ The script fails until the events writer, the runner wiring, the freeze entry, t
 
 19. `approval ok`. Auto false, stdin a tty, answer `n`, critic writes `VERDICT: PASS`. Events: `01-critic` pass, `run-end` stopped at `critic`, reason `not approved`, exit 1. Stdout contains `continue to coder? [y/N] ` and not `not approved` or `pipeline stopped`. With stdin not a tty, stdout contains `non-interactive: continuing without approval (use --to critic to stop here)` and `pipeline complete`, and `run-end` is complete with exit 0 and reason null.
 
-20. `qa ok`. `--from qa --to qa` and gates returning nothing. `ran-against: app` is complete, exit 0, reason null, and stdout has `pipeline complete` and not `NOT verified`. `ran-against: harness` is exit 3 and reason `pipeline complete, NOT verified against the running app (qa ran against a harness)`. `ran-against: nothing` is exit 3 and reason `pipeline complete, NOT verified against the running app (qa ran against nothing)`.
+20. `qa ok`. `--from qa --to qa` and gates returning nothing. This window has no visual judge, so the run was seen. `ran-against: app` is complete, exit 0, reason null, and stdout has `pipeline complete` and not `NOT verified`. `ran-against: harness` is exit 3 and reason `pipeline complete, NOT verified against the running app (qa ran against a harness)`. `ran-against: nothing` is exit 3 and reason `pipeline complete, NOT verified against the running app (qa ran against nothing)`. `app` is not exit 0 once `state.unseen` is set. `[visual]` enabled, committed `qa/t.md` a visual block with `route: /page` and `selector: #box`, no `where:` or `symptom:`, `--agent kilo`, no `--model`, gates returning nothing, and `run_backend` returning `(1, "rate limit exceeded")`. The invoke writes `VERDICT: PASS`. `--from visual --to visual` is complete, exit 3, stopped_at null, reason `pipeline complete, NOT verified by eye`. Stdout contains that line, `visual: claude-fable-5-1 is out of usage; judging with kilo`, and `   verdict PASS (geometry only, pictures not seen)`. `--from visual --to qa` with QA writing `ran-against: app` has the same reason and exit. The same window with `ran-against: harness` keeps the harness line, exit 3, and stdout does not contain `NOT verified by eye`.
 
-21. `wait ok`. `--retries 1` and `LIMIT_WAIT_SECONDS` 0. One `(1, "rate limit exceeded")` then `(0, "ok")` writes `wait` / `rate-limit` between the step boundaries, with `until` equal to `at`. Stdout contains `   rate limited; waiting 0 min before retrying 01-specifier`. Always limited: 12 waits, then `stopped` with `specifier used all 1 attempts`, and stdout contains `   01-specifier: still rate limited after 12 waits`. `--model dandelion/route`, require a no-op, choose empty once (`no subscription has quota left`) then `Choice("claude-opus-5 high claude", "claude", "claude-opus-5", "high", {})`: `run-start` has agent null, model `dandelion/route`, effort null, and one `dandelion-unrouted` wait. Stdout contains `   dandelion/route: no subscription has quota left; waiting 0 min before retrying 01-specifier`.
+21. `wait ok`. `--retries 1`, `runner.LIMIT_WAIT_SECONDS` 90, `runner.LIMIT_WAITS` 12, and `runner.time.sleep` a no-op. One `(1, "rate limit exceeded")` then `(0, "ok")` writes `wait` / `rate-limit` between the step boundaries, and `until` is `at` plus 90 seconds in the same timestamp form, not a copy of `at`. Stdout contains `   rate limited; waiting 1 min before retrying 01-specifier`. Always limited: 12 waits, each with that same 90-second `until`, then `stopped` with `specifier used all 1 attempts`, and stdout contains `   01-specifier: still rate limited after 12 waits`. `--model dandelion/route`, the same 90 seconds, wait cap and patched sleep, require a no-op, choose empty once (`no subscription has quota left`) then `Choice("claude-opus-5 high claude", "claude", "claude-opus-5", "high", {})`: `run-start` has agent null, model `dandelion/route`, effort null, and one `dandelion-unrouted` wait whose `until` is also 90 seconds after `at`. Stdout contains `   dandelion/route: no subscription has quota left; waiting 1 min before retrying 01-specifier`.
 
 22. `session ok`. Real `invoke`, `run_backend` writes the passing handoff or verdict and returns `(0, "ok")`, `elapsed` returns 0. Stdout contains `   01-specifier finished in 0.0 min: ok` and `pipeline complete`. Stderr is empty.
 
@@ -75,7 +75,7 @@ import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path.cwd()
@@ -93,6 +93,9 @@ ENV_KEYS = (
 )
 BASE = '[git]\nbase = "main"\n[perf]\nenabled = false\n[practices]\nenabled = false\n'
 AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+EYE = "pipeline complete, NOT verified by eye"
+VISUAL_BLOCK = "```visual\nroute: /page\nselector: #box\n```\n"
+WAIT_SECONDS = 90
 ARCHIVE = re.compile(r"^\.marestail/runs/t/handoffs-\d{8}T\d{6}(-\d+)?$")
 KEYS = {
     "run-start": ["v", "at", "event", "pid", "task", "task_path", "branch", "base", "start_commit", "from", "to", "scope", "agent", "model", "effort"],
@@ -152,6 +155,11 @@ def commit_toml(root):
     path.write_text(path.read_text() + "\n\n[events]\nkeep = false\n")
     git(root, "add", "marestail.toml")
     git(root, "commit", "-q", "-m", "edit toml")
+
+
+def plus(stamp, seconds):
+    parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    return (parsed + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def events_path(root, task="t"):
@@ -239,6 +247,8 @@ def drive(root, plan, **kw):
         "require": runner.dandelion.require,
         "choose": runner.dandelion.choose,
         "wait": runner.LIMIT_WAIT_SECONDS,
+        "waits": runner.LIMIT_WAITS,
+        "sleep": runner.time.sleep,
         "rounds": runner.MAX_JUDGE_ROUNDS,
         "summary": runner.proposals_summary,
         "window": runner.window,
@@ -297,6 +307,10 @@ def drive(root, plan, **kw):
             runner.dandelion.choose = kw["choose"]
         if "wait" in kw:
             runner.LIMIT_WAIT_SECONDS = kw["wait"]
+        if "waits" in kw:
+            runner.LIMIT_WAITS = kw["waits"]
+        if "sleep" in kw:
+            runner.time.sleep = kw["sleep"]
         if "rounds" in kw:
             runner.MAX_JUDGE_ROUNDS = kw["rounds"]
         if "window" in kw:
@@ -346,6 +360,8 @@ def drive(root, plan, **kw):
         runner.dandelion.require = saved["require"]
         runner.dandelion.choose = saved["choose"]
         runner.LIMIT_WAIT_SECONDS = saved["wait"]
+        runner.LIMIT_WAITS = saved["waits"]
+        runner.time.sleep = saved["sleep"]
         runner.MAX_JUDGE_ROUNDS = saved["rounds"]
         runner.proposals_summary = saved["summary"]
         runner.window = saved["window"]
@@ -614,9 +630,10 @@ def retries_ok():
     from marestail.report import Result
     fail = [Result("py.tests", False, "nope", [], 1.0)]
 
-    def once(retries, plan, gates, outcomes, reason, complete=False):
+    def once(retries, plan, gates, outcomes, reason, complete=False, audit=None):
         root = make_repo(f"retries-{retries}-{complete}")
-        got = drive(root, plan, start="coder", stop="coder", retries=retries, gates=gates)
+        extra = {"audit": audit} if audit is not None else {}
+        got = drive(root, plan, start="coder", stop="coder", retries=retries, gates=gates, **extra)
         assert got["exc"] is None
         assert [row["outcome"] for row in ends(got["rows"])] == outcomes
         end = got["rows"][-1]
@@ -644,7 +661,7 @@ def retries_ok():
     def gates(*args):
         return fail if calls["n"] < 2 else []
 
-    once(2, later, gates, ["failed", "done"], None, complete=True)
+    once(2, later, gates, ["failed", "done"], None, complete=True, audit=lambda *args: [])
 
 
 def proposal_ok():
@@ -954,10 +971,52 @@ def qa_ok():
             assert "pipeline complete" in got["out"] and "NOT verified" not in got["out"]
         else:
             assert reason in got["out"]
+    limited = lambda *args: (1, "rate limit exceeded")
+
+    def visual_plan(qa=None):
+        def plan(state, label, prompt, rebuild=None):
+            role = label.split("-", 1)[1]
+            if role == "visual":
+                write_report(state, label, "VERDICT: PASS\n")
+            elif role == "qa":
+                write_report(state, label, qa)
+            else:
+                raise AssertionError(label)
+        return plan
+
+    def visual_repo(name):
+        root = make_repo(name, BASE + "[visual]\nenabled = true\n")
+        (root / "qa").mkdir()
+        (root / "qa" / "t.md").write_text(VISUAL_BLOCK)
+        git(root, "add", "qa/t.md")
+        git(root, "commit", "-q", "-m", "qa")
+        return root
+
+    def eye(name, plan, stop, reason, eye_on_stdout):
+        got = drive(
+            visual_repo(name), plan, start="visual", stop=stop, agent="kilo", model=None,
+            gates=lambda *args: [], backend=limited,
+        )
+        end = got["rows"][-1]
+        assert got["exc"] is None and got["value"] == 3
+        assert (end["result"], end["exit_code"], end["stopped_at"], end["reason"]) == ("complete", 3, None, reason)
+        if eye_on_stdout:
+            assert EYE in got["out"]
+        else:
+            assert "NOT verified by eye" not in got["out"] and reason in got["out"]
+        return got
+
+    seen = eye("eye-visual", visual_plan(), "visual", EYE, True)
+    assert "visual: claude-fable-5-1 is out of usage; judging with kilo" in seen["out"]
+    assert "   verdict PASS (geometry only, pictures not seen)" in seen["out"]
+    eye("eye-app", visual_plan("ran-against: app\n"), "qa", EYE, True)
+    harness = "pipeline complete, NOT verified against the running app (qa ran against a harness)"
+    eye("eye-harness", visual_plan("ran-against: harness\n"), "qa", harness, False)
 
 
 def wait_ok():
     from marestail.route import Choice
+    pause = {"wait": WAIT_SECONDS, "waits": 12, "sleep": lambda _seconds: None}
     root = make_repo("wait-once")
     calls = {"n": 0}
 
@@ -966,15 +1025,17 @@ def wait_ok():
         if calls["n"] == 1:
             return 1, "rate limit exceeded"
         return 0, "ok"
-    got = drive(root, None, invoke=False, stop="specifier", retries=1, wait=0, backend=backend, boundary=False)
+    got = drive(root, None, invoke=False, stop="specifier", retries=1, backend=backend, boundary=False, **pause)
     waits = [row for row in got["rows"] if row["event"] == "wait"]
-    assert len(waits) == 1 and waits[0]["reason"] == "rate-limit" and waits[0]["until"] == waits[0]["at"]
+    assert len(waits) == 1 and waits[0]["reason"] == "rate-limit"
+    assert waits[0]["until"] == plus(waits[0]["at"], WAIT_SECONDS) and waits[0]["until"] != waits[0]["at"]
     indexes = [row["event"] for row in got["rows"]]
     assert indexes.index("wait") > indexes.index("step-start") and indexes.index("wait") < indexes.index("step-end")
-    assert "   rate limited; waiting 0 min before retrying 01-specifier" in got["out"]
+    assert "   rate limited; waiting 1 min before retrying 01-specifier" in got["out"]
     root = make_repo("wait-twelve")
-    got = drive(root, None, invoke=False, stop="specifier", retries=1, wait=0, backend=lambda *args: (1, "rate limit exceeded"), boundary=False)
-    assert [row["event"] for row in got["rows"]].count("wait") == 12
+    got = drive(root, None, invoke=False, stop="specifier", retries=1, backend=lambda *args: (1, "rate limit exceeded"), boundary=False, **pause)
+    waits = [row for row in got["rows"] if row["event"] == "wait"]
+    assert len(waits) == 12 and all(row["until"] == plus(row["at"], WAIT_SECONDS) for row in waits)
     assert got["rows"][-1]["reason"] == "specifier used all 1 attempts"
     assert "   01-specifier: still rate limited after 12 waits" in got["out"]
     root = make_repo("wait-route")
@@ -986,14 +1047,15 @@ def wait_ok():
             return None, "no subscription has quota left"
         return Choice("claude-opus-5 high claude", "claude", "claude-opus-5", "high", {}), ""
     got = drive(
-        root, None, invoke=False, stop="specifier", retries=1, wait=0, model="dandelion/route", agent=None,
-        require=lambda: None, choose=choose, backend=lambda *args: (0, "ok"), boundary=False,
+        root, None, invoke=False, stop="specifier", retries=1, model="dandelion/route", agent=None,
+        require=lambda: None, choose=choose, backend=lambda *args: (0, "ok"), boundary=False, **pause,
     )
     start = got["rows"][0]
     assert (start["agent"], start["model"], start["effort"]) == (None, "dandelion/route", None)
     waits = [row for row in got["rows"] if row["event"] == "wait"]
     assert len(waits) == 1 and waits[0]["reason"] == "dandelion-unrouted"
-    assert "   dandelion/route: no subscription has quota left; waiting 0 min before retrying 01-specifier" in got["out"]
+    assert waits[0]["until"] == plus(waits[0]["at"], WAIT_SECONDS)
+    assert "   dandelion/route: no subscription has quota left; waiting 1 min before retrying 01-specifier" in got["out"]
 
 
 def session_ok():
