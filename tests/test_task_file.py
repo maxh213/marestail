@@ -334,6 +334,15 @@ def test_docs_and_import_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert_install_copies_the_readme(tmp_path, monkeypatch, capsys)
 
 
+def test_checkout_root_skips_a_mutants_copy(tmp_path: Path) -> None:
+    copied = tmp_path / "mutants" / "tests" / "test_task_file.py"
+    copied.parent.mkdir(parents=True)
+    direct = tmp_path / "tests" / "test_task_file.py"
+    direct.parent.mkdir()
+    assert checkout_root(copied) == tmp_path
+    assert checkout_root(direct) == tmp_path
+
+
 def test_task_file_is_listed_with_the_foundations() -> None:
     contracts = (ROOT / ".importlinter").read_text()
     layer = next(line for line in contracts.splitlines() if line.strip().startswith("marestail.report :"))
@@ -361,12 +370,19 @@ def assert_documented() -> None:
     assert "/" not in writing.split("\n\n")[-1]
 
 
+def checkout_root(test_file: Path) -> Path:
+    root = test_file.resolve().parent.parent
+    if root.name == "mutants":
+        return root.parent
+    return root
+
+
 def assert_imports() -> None:
-    assert imported_modules(ROOT / "marestail" / "task_file.py") == {"tomllib", "pathlib", "dataclasses"}
+    assert imported_modules(checkout_root(Path(__file__)) / "marestail" / "task_file.py") == {"tomllib", "pathlib", "dataclasses"}
 
 
 def assert_tasks_untouched() -> None:
-    tasks = ROOT / "tasks"
+    tasks = checkout_root(Path(__file__)) / "tasks"
     assert "## Dependencies" not in (tasks / "README.md").read_text()
     assert (tasks / "018-runs-stay-nice.md").read_text().startswith("# 018 — runs stay nice")
     assert (tasks / "019-tasks-say-what-they-depend-on.md").read_text().startswith("# 019 — task files say what they depend on")

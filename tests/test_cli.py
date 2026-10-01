@@ -1171,6 +1171,20 @@ def test_run_keeps_a_blockless_file_and_a_valid_block(tmp_path: Path) -> None:
     assert not (repo / "tasks" / "099-missing.md").exists()
 
 
+def test_critic_env_drops_mutant_under_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MUTANT_UNDER_TEST", "stats")
+    monkeypatch.setenv("QA_KEEP", "yes")
+    stub = tmp_path / "stub"
+    prompt = tmp_path / "prompt"
+    env = critic_env(stub, prompt, {"MUTANT_UNDER_TEST": "marestail.cli.x_main__mutmut_1", "MARESTAIL_NICE": "1"})
+    assert "MUTANT_UNDER_TEST" not in env
+    assert env["QA_KEEP"] == "yes"
+    assert env["MARESTAIL_NICE"] == "1"
+    assert env["MARESTAIL_AGENT"] == "claude"
+    assert env["MARESTAIL_CLAUDE"] == str(stub)
+    assert env["QA_PROMPT"] == str(prompt)
+
+
 def task_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1210,8 +1224,15 @@ def critic_run(
 
 
 def critic_env(stub: Path, prompt: Path, env: dict[str, str] | None) -> dict[str, str]:
-    base = {**os.environ, "MARESTAIL_AGENT": "claude", "MARESTAIL_CLAUDE": str(stub), "QA_PROMPT": str(prompt)}
-    return {**base, **(env or {})}
+    merged = {
+        **os.environ,
+        "MARESTAIL_AGENT": "claude",
+        "MARESTAIL_CLAUDE": str(stub),
+        "QA_PROMPT": str(prompt),
+        **(env or {}),
+    }
+    merged.pop("MUTANT_UNDER_TEST", None)
+    return merged
 
 
 def assert_run_layout(repo: Path, task_id: str, expected: str) -> None:
