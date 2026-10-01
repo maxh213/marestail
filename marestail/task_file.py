@@ -48,12 +48,16 @@ def check(paths: list[Path]) -> list[str]:
 
 def _parse(path: Path, text: str) -> tuple[TaskFile, list[str]]:
     lines = text.splitlines(keepends=True)
-    if not _opens_block(lines):
-        return _blockless(path, text), []
-    closing = _closing_index(lines)
+    closing = _closing_index(lines) if _opens_block(lines) else None
     if closing is None:
-        return _blockless(path, text), [UNCLOSED]
+        return _blockless(path, text), _missing_close(lines)
     return _parse_block(path, "".join(lines[1:closing]), "".join(lines[closing + 1 :]))
+
+
+def _missing_close(lines: list[str]) -> list[str]:
+    if _opens_block(lines):
+        return [UNCLOSED]
+    return []
 
 
 def _opens_block(lines: list[str]) -> bool:
@@ -77,13 +81,18 @@ def _blockless(path: Path, text: str) -> TaskFile:
 
 def _parse_block(path: Path, toml_text: str, body: str) -> tuple[TaskFile, list[str]]:
     table, error = _parse_toml(toml_text)
+    entries, problems = _fields(path.stem, table, error)
+    return _present(path, table, entries, body), problems
+
+
+def _fields(task_id: str, table: dict[str, object], error: str) -> tuple[list[str] | None, list[str]]:
     if error:
-        return _blockless(path, body), [error]
-    entries, depends_problems = _depends_problems(path.stem, table)
+        return None, [error]
+    entries, depends_problems = _depends_problems(task_id, table)
     problems = [*_unknown_keys(table), *depends_problems, *_stack_problems(table, entries)]
     if problems:
-        return _blockless(path, body), problems
-    return _present(path, table, entries, body), []
+        return None, problems
+    return entries, []
 
 
 def _parse_toml(text: str) -> tuple[dict[str, object], str]:

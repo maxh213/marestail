@@ -153,7 +153,8 @@ def assert_tasks_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert tasks_help.value.code == 0
     out = capsys.readouterr().out
     assert "{check}" in out
-    assert "check the front matter and dependencies of task files" in out
+    described = next(line for line in out.splitlines() if line.strip().startswith("check "))
+    assert described.rstrip().endswith("check the front matter and dependencies of task files")
     with pytest.raises(SystemExit) as check_help:
         cli.main(["tasks", "check", "--help"])
     assert check_help.value.code == 0

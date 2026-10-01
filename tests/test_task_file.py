@@ -74,6 +74,7 @@ def rejected(path: Path) -> list[str]:
     with pytest.raises(task_file.TaskFileError) as caught:
         task_file.read(path)
     assert isinstance(caught.value, ValueError)
+    assert str(caught.value) == "\n".join(caught.value.problems)
     return list(caught.value.problems)
 
 
@@ -308,6 +309,13 @@ def test_check_cycles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "twin/019-a.md: dependency cycle: 019-a -> 020-b -> 019-a",
         "twin/019-a.md: dependency cycle: 019-a -> 021-c -> 019-a",
     ]
+
+
+def test_check_sorts_path_strings_ahead_of_path_parts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    place(Path("a/b.md"), "# nested\n")
+    place(Path("a-b.md"), "# flat\n")
+    assert task_file.check([Path("a/b.md"), Path("a-b.md")]) == [f"a-b.md: {NO_FRONT}", f"a/b.md: {NO_FRONT}"]
 
 
 def test_check_orders_lines_by_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
