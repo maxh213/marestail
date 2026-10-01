@@ -11,11 +11,11 @@ Run from the marestail-green checkout with the venv active. Save the script at t
 
 2. `clean ok`. `marestail tasks check empty` on an empty directory exits 0 with empty stdout and stderr. A directory with no `marestail.toml` and `tasks/018-a.md` (`depends = []`), `tasks/019-b.md` (`depends = ["018-a"]`, `stack = true`), `tasks/020-c.md` (`depends = ["018-a", "019-b"]`, `stack = false`) and a CRLF `tasks/021-crlf.md` (`+++\r\ndepends = []\r\n+++\r\n# ok\n`) is clean both as the default `tasks` folder and as a passed folder. Stdout and stderr are empty, exit 0.
 
-3. `folder ok`. In `named/`, `README.md` has a valid `depends = []` block, `readme.md` and `Readme.MD` have no block, `notes.txt` is present, `018-bad.md` is `# no block\n`, and `nested/019-bad.md` is an unclosed block. `marestail tasks check named` exits 1 and stdout is exactly `named/018-bad.md: no front matter: line 1 must be +++\n`. `named/README.md` exits 0. `named/readme.md` exits 1 with `named/readme.md: no front matter: line 1 must be +++\n`. `named/notes.txt` exits 1 with `named/notes.txt: not a .md file\n`. `named/nested/019-bad.md` exits 1 with `named/nested/019-bad.md: front matter is not closed: no +++ line after line 1\n`. `missing_dir/` exits 1 with `missing_dir: no such file or folder\n`. With no arguments in an empty directory, stdout is exactly `tasks: no such file or folder\n`, exit 1. Stderr is empty for every check.
+3. `folder ok`. In `named/`, `README.md` is `# guide\n` with no block, `readme.md` and `Readme.MD` have no block, `notes.txt` is present, `018-bad.md` is `# no block\n`, and `nested/019-bad.md` is an unclosed block. `marestail tasks check named` exits 1 and stdout is exactly `named/018-bad.md: no front matter: line 1 must be +++\n`. `named/README.md` exits 1 with `named/README.md: no front matter: line 1 must be +++\n`. `named/readme.md` exits 1 with `named/readme.md: no front matter: line 1 must be +++\n`. `named/notes.txt` exits 1 with `named/notes.txt: not a .md file\n`. `named/nested/019-bad.md` exits 1 with `named/nested/019-bad.md: front matter is not closed: no +++ line after line 1\n`. `missing_dir/` exits 1 with `missing_dir: no such file or folder\n`. With no arguments in an empty directory, stdout is exactly `tasks: no such file or folder\n`, exit 1. Stderr is empty for every check.
 
 4. `dedup ok`. `once/019-bad.md` is `# title\n`. `marestail tasks check once/sub/../019-bad.md once` exits 1 and stdout is exactly one line: `once/sub/../019-bad.md: no front matter: line 1 must be +++\n`.
 
-5. `rows ok`. For each single-problem row in the feature outline, a directory whose only file is `tasks/019-test.md` makes `marestail tasks check tasks/019-test.md` exit 1, stderr empty, stdout exactly `tasks/019-test.md: <problem>\n`. The rows are the outline in `features/019-tasks-say-what-they-depend-on.feature`, from `# 019 title` through the empty block `+++\n+++\n# x\n`. A wrong `depends` type, bad TOML, or an unclosed block is that one line and nothing else, including when the named dependency file does not exist.
+5. `rows ok`. For each single-problem row in the feature outline, a directory whose only file is `tasks/019-test.md` makes `marestail tasks check tasks/019-test.md` exit 1, stderr empty, stdout exactly `tasks/019-test.md: <problem>\n`. The rows are the outline in `features/019-tasks-say-what-they-depend-on.feature`, from `# 019 title` through the empty block `+++\n+++\n# x\n`. A wrong `depends` type, bad TOML, or an unclosed block is that one line and nothing else, including when the named dependency file does not exist. `tasks/019-empty.md` with `depends = []` and `stack = true` exits 1 and prints, in order, `stack is not allowed when depends is empty` then `stack = true needs exactly one dependency, got 0`. `tasks/019-type.md` with `depends = "018-a"` and `stack = "yes"` exits 1 and prints `depends must be an array of strings` then `stack must be true or false, got 'yes'`, and does not print `stack is required`.
 
 6. `slash ok`. `tasks/019-slash.md` is five LF-terminated lines: `+++`, `depends = ["018`, two bytes of value 92, `a"]`, `stack = true`, `+++`, `# x`. Stdout is one line: `tasks/019-slash.md: depends entry '018`, one byte of value 92, `a' is not a task id; use the file name without .md`, then a newline. Exit 1, stderr empty.
 
@@ -40,17 +40,18 @@ Run from the marestail-green checkout with the venv active. Save the script at t
 
 11. `missing ok`. `ord/019-a.md` with `depends = ["099-z", "098-a"]` and `stack = false` prints `099-z` first and `098-a` second, each `depends on <id>, but ord/<id>.md does not exist`. `left/019-a.md` depending on `020-b` does not see `right/020-b.md`: stdout is `left/019-a.md: depends on 020-b, but left/020-b.md does not exist\n`. The same file addressed as `left/sub/../019-a.md` and depending on `020-gone` prints `left/sub/../019-a.md: depends on 020-gone, but left/sub/../020-gone.md does not exist\n`.
 
-12. `outside ok`. `box/018-prev.md` is `+++\n`. `box/019-next.md` depends on `018-prev` with `stack = true`. Checking only `box/019-next.md` exits 0 with empty stdout. Checking `box` prints only `box/018-prev.md: front matter is not closed: no +++ line after line 1\n`.
+12. `outside ok`. `box/018-prev.md` has `depends = ["019-next"]` and `stack = true`. `box/019-next.md` has `depends = ["018-prev"]` and `stack = true`. Checking only `box/019-next.md` exits 0 with empty stdout and stderr. Checking `box` prints only `box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n`.
 
-13. `dupes ok`. `alpha/019-dup.md`, `beta/019-dup.md` and `mid/019-dup.md`, each `depends = []`, print:
+13. `dupes ok`. `alpha/019-dup.md`, `beta/019-dup.md` and `mid/019-dup.md`, each `depends = []`. `marestail tasks check alpha beta mid` prints:
     ```
     beta/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md
     mid/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md
     ```
+    `marestail tasks check mid alpha` prints only `mid/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md\n`.
 
 14. `cycles ok`. `cycle/020-b.md` depends on `021-c`, `cycle/021-c.md` depends on `019-a`, `cycle/019-a.md` depends on `020-b`, and `cycle/022-d.md` depends on `021-c`, all `stack = true` except none of them uses `stack = false`. Stdout is exactly `cycle/019-a.md: dependency cycle: 019-a -> 020-b -> 021-c -> 019-a\n`. `twin/019-a.md` depends on `020-b` and `021-c` with `stack = false`, and each of those depends on `019-a` with `stack = true`. Stdout is the `020-b` cycle line and then the `021-c` cycle line, both on `twin/019-a.md`.
 
-15. `mixed ok`. `alpha/018-bad.md` is unclosed, `alpha/019-a.md` depends on `099-missing` and `020-b` with `stack = false`, `alpha/020-b.md` depends on `019-a`, `alpha/022-d.md` depends on `019-a`, and `beta/019-a.md` has `depends = []`. Stdout is exactly:
+15. `mixed ok`. `alpha/018-bad.md` is unclosed, `alpha/019-a.md` depends on `099-missing` and `020-b` with `stack = false`, `alpha/020-b.md` depends on `019-a`, `alpha/022-d.md` depends on `019-a`, `alpha/023-on-bad.md` depends only on `018-bad` with `stack = true`, and `beta/019-a.md` has `depends = []`. `023-on-bad` is absent from stdout. Stdout is exactly:
     ```
     alpha/018-bad.md: front matter is not closed: no +++ line after line 1
     alpha/019-a.md: depends on 099-missing, but alpha/099-missing.md does not exist
@@ -60,11 +61,11 @@ Run from the marestail-green checkout with the venv active. Save the script at t
 
 16. `run-bad ok`. In a git repo whose `marestail.toml` is `[git] base = "main"`, `[perf] enabled = false`, `[practices] enabled = false`, with a stub claude that records that it started: the 020 file exits 1, stdout empty, stderr exactly the one `got 2` line, the stub does not start, and `.marestail/runs/020-run-events` does not exist. The 021 file's stderr is the unknown-key line and then the missing-depends line. `MARESTAIL_NICE=high` on the 020 command exits 1 with stderr exactly `nice must be an integer 0-19, got 'high'\n` and no `stack = true`. The 020 command plus `--model dandelion/route --agent grok` keeps the one `got 2` line and does not contain `drop --agent`. `tasks/missing.md` exits 1, stdout empty, stderr contains `FileNotFoundError` and `tasks/missing.md`, and `.marestail/runs/missing` does not exist. In `/tmp/qa-019-empty`, the 020 command exits 1 and stderr is exactly `no marestail.toml found above /tmp/qa-019-empty\n`.
 
-17. `run-ok ok`. `tasks/t.md` bytes `# Add one\n`, critic to critic, `--auto --retries 1`: exit 0, stdout contains `pipeline complete`, stderr empty, the stub started, `.marestail/runs/t/timeline.json` has task `t`, `timeline.md` exists, `.marestail/handoffs/t/` exists, `pipeline.log` does not, and the critic prompt contains `# Task\n# Add one`. `tasks/018-prev.md` is `+++\n` and `tasks/019-demo.md` stacks on `018-prev` with body `# Something else`, a blank line, and `Carry on.`: the same critic run exits 0, the stub starts, the timeline task is `019-demo`, the handoffs folder is `.marestail/handoffs/019-demo/`, and the text under `# Task` is the one-dependency sentence for `018-prev`, a blank line, then that body. The critic prompt contains neither `+++`, nor `depends =`, nor `stack`.
+17. `run-ok ok`. `tasks/t.md` bytes `# Add one\n`, critic to critic, `--auto --retries 1`: exit 0, stdout contains `pipeline complete`, stderr empty, the stub started, `.marestail/runs/t/timeline.json` has task `t`, `timeline.md` exists, `.marestail/handoffs/t/` does not exist, `.marestail/runs/t/` has one `handoffs-*` directory and it contains `01-critic.md`, `pipeline.log` does not, and the critic prompt contains `# Task\n# Add one`. `tasks/018-prev.md` is `+++\n` and `tasks/019-demo.md` stacks on `018-prev` with body `# Something else`, a blank line, and `Carry on.`: the same critic run exits 0, the stub starts, the timeline task is `019-demo`, `.marestail/handoffs/019-demo/` does not exist, `.marestail/runs/019-demo/` has one `handoffs-*` directory containing `01-critic.md`, and the text under `# Task` is the one-dependency sentence for `018-prev`, a blank line, then that body. The critic prompt contains neither `+++`, nor `depends =`, nor `stack`. `tasks/019-absent.md` has `depends = ["099-missing"]` and `stack = false`, and `tasks/099-missing.md` does not exist: the same critic run exits 0, stdout contains `pipeline complete` and does not contain `does not exist`, stderr is empty, and the stub started.
 
-18. `prompts ok`. For a file whose bytes are a space, `Do the thing.`, a space and LF, all three of `worker_prompt`, `judge_prompt` and `perf_author_prompt` have the task text `Do the thing.`. For `# Add one\n` the text is `# Add one`. For a first line `+++ ` (a trailing space) the task text is that whole file with the final LF stripped, fences included. `depends = []` with body `# Title`, a blank line, and `Body.` is that body with the final LF stripped. One dependency uses the singular sentence, and `stack = true` and `stack = false` produce the same text. Two ids use `` `017-a` and `018-b` ``. Three use `` `017-a`, `018-b` and `019-c` ``. Four use `` `017-a`, `018-b`, `019-c` and `020-d` ``. The plural sentence says `which run` and `what they delivered`. The three prompts match. Except for the spaced fence, none of those prompts contains `+++`, `depends =` or `stack`. The function signatures are the ones in `marestail/prompts.py` today.
+18. `prompts ok`. The task text is everything after `# Task\n` up to the next real section, the earliest of `# Specification`, `# Handoffs`, `# Finishing`, `# Authoring` and `# Verdict`. `# Specification files` and `# Handoffs so far` are those headings. A `#` inside the task text, including `# Title` after the dependency sentence, stays. For a file whose bytes are a space, `Do the thing.`, a space and LF, all three of `worker_prompt`, `judge_prompt` and `perf_author_prompt` have the task text `Do the thing.`. For `# Add one\n` the text is `# Add one`. For a first line `+++ ` (a trailing space) the task text is that whole file with the final LF stripped, fences included. `depends = []` with body `# Title`, a blank line, and `Body.` is that body with the final LF stripped. One dependency uses the singular sentence, and `stack = true` and `stack = false` produce the same text. Two ids use `` `017-a` and `018-b` ``. Three use `` `017-a`, `018-b` and `019-c` ``. Four use `` `017-a`, `018-b`, `019-c` and `020-d` ``. The plural sentence says `which run` and `what they delivered`. The three prompts match. Except for the spaced fence, none of those prompts contains `+++`, `depends =` or `stack`. The function signatures are the ones in `marestail/prompts.py` today.
 
-19. `docs ok`. `templates/tasks-README.md` still has the `Name files` line immediately above a blank line and the `## Dependencies` section from the feature, including the four-space fence and `018-runs-stay-nice`. The `## Use` fence gains, on the line after `dandelion/route-best`, `marestail tasks check` plus ten spaces plus `# front matter and dependencies of every task in tasks/; or pass folders and .md files`. `## Writing tasks` contains the paragraph from the feature and that paragraph has no backticked token containing `/`. `marestail install` into an existing empty directory, with `GROK_HOME` and `HOME` in a scratch directory, writes `tasks/README.md` byte-identical to the template. Replacing that file with `keep\n` and installing again leaves `keep\n`. This checkout's `tasks/README.md` has no `## Dependencies` heading. `tasks/018-runs-stay-nice.md` still begins `# 018 — runs stay nice`. `tasks/019-tasks-say-what-they-depend-on.md` still begins `# 019 — task files say what they depend on`. No file in `tasks/` has a first line of `+++`. One `.importlinter` line contains `marestail.report : marestail.config : marestail.changes : marestail._location` and `marestail.task_file`. `foundations-import-nothing-above` lists `marestail.task_file`. `marestail/task_file.py` imports only `tomllib`, `pathlib` and `dataclasses`.
+19. `docs ok`. `templates/tasks-README.md` still has the `Name files` line immediately above a blank line and the `## Dependencies` section from the feature, including the four-space fence and `018-runs-stay-nice`. The `## Use` fence gains, on the line after `dandelion/route-best`, `marestail tasks check` plus ten spaces plus `# front matter and dependencies of every task in tasks/; or pass folders and .md files`. `## Writing tasks` contains the paragraph from the feature. Only that paragraph is checked for a backticked token containing `/`, and it has none. The section's existing `` `tasks/README.md` `` backtick stays. `marestail install` into an existing empty directory, with `GROK_HOME` and `HOME` in a scratch directory, writes `tasks/README.md` byte-identical to the template. Replacing that file with `keep\n` and installing again leaves `keep\n`. This checkout's `tasks/README.md` has no `## Dependencies` heading. `tasks/018-runs-stay-nice.md` still begins `# 018 — runs stay nice`. `tasks/019-tasks-say-what-they-depend-on.md` still begins `# 019 — task files say what they depend on`. No file in `tasks/` has a first line of `+++`. One `.importlinter` line contains `marestail.report : marestail.config : marestail.changes : marestail._location` and `marestail.task_file`. `foundations-import-nothing-above` lists `marestail.task_file`. `marestail/task_file.py` imports only `tomllib`, `pathlib` and `dataclasses`.
 
 20. `.venv/bin/pytest tests/test_task_file.py tests/test_cli.py tests/test_prompts.py tests/test_runner_flow.py -q --tb=no`
     Expected: all pass. `tests/test_runner_flow.py` still calls `run_pipeline` with a missing `t.md`; its fixture stubs `task_file.read` and records one call after `nice.apply` and before `pick_model`. A `TaskFileError` of two problems is a `SystemExit` of both `<path>: <problem>` lines and `run_steps` is not called.
@@ -118,8 +119,6 @@ def expect(label, completed, code, stdout, stderr=None):
 
 def lines(text):
     return text if text.endswith("\n") else text + "\n"
-
-BLOCK = '+++\ndepends = []\n+++\n# x\n'
 
 def one(root, rel, body):
     fresh(root)
@@ -194,14 +193,14 @@ def clean_checks():
 
 def folder_checks():
     root = fresh(WORK / "named")
-    place(root, "named/README.md", decode(BLOCK))
+    place(root, "named/README.md", "# guide\n")
     place(root, "named/readme.md", "# lower\n")
     place(root, "named/Readme.MD", "# mixed\n")
     place(root, "named/notes.txt", "not a task\n")
     place(root, "named/018-bad.md", "# no block\n")
     place(root, "named/nested/019-bad.md", "+++\ndepends = []\n")
     check("named", root, ["tasks", "check", "named"], 1, "named/018-bad.md: no front matter: line 1 must be +++\n")
-    check("readme-name", root, ["tasks", "check", "named/README.md"], 0, "")
+    check("readme-name", root, ["tasks", "check", "named/README.md"], 1, "named/README.md: no front matter: line 1 must be +++\n")
     check("lower", root, ["tasks", "check", "named/readme.md"], 1, "named/readme.md: no front matter: line 1 must be +++\n")
     check("txt", root, ["tasks", "check", "named/notes.txt"], 1, "named/notes.txt: not a .md file\n")
     check("nested", root, ["tasks", "check", "named/nested/019-bad.md"], 1, "named/nested/019-bad.md: front matter is not closed: no +++ line after line 1\n")
@@ -246,6 +245,15 @@ def row_checks():
     for body, problem in ROWS:
         one(root, "tasks/019-test.md", body)
         check(problem, root, ["tasks", "check", "tasks/019-test.md"], 1, f"tasks/019-test.md: {problem}\n")
+    both = fresh(WORK / "both")
+    place(both, "tasks/019-empty.md", "+++\ndepends = []\nstack = true\n+++\n# x\n")
+    check("empty-stack", both, ["tasks", "check", "tasks/019-empty.md"], 1, lines(textwrap.dedent("""\
+        tasks/019-empty.md: stack is not allowed when depends is empty
+        tasks/019-empty.md: stack = true needs exactly one dependency, got 0""")))
+    place(both, "tasks/019-type.md", '+++\ndepends = "018-a"\nstack = "yes"\n+++\n# x\n')
+    check("bad-type", both, ["tasks", "check", "tasks/019-type.md"], 1, lines(textwrap.dedent("""\
+        tasks/019-type.md: depends must be an array of strings
+        tasks/019-type.md: stack must be true or false, got 'yes'""")))
     print("rows ok")
 
 def slash_check():
@@ -313,10 +321,10 @@ def missing_checks():
 
 def outside_check():
     root = fresh(WORK / "box")
-    place(root, "box/018-prev.md", "+++\n")
+    place(root, "box/018-prev.md", task('["019-next"]', "true"))
     place(root, "box/019-next.md", task('["018-prev"]', "true"))
     check("one", root, ["tasks", "check", "box/019-next.md"], 0, "")
-    check("box", root, ["tasks", "check", "box"], 1, "box/018-prev.md: front matter is not closed: no +++ line after line 1\n")
+    check("box", root, ["tasks", "check", "box"], 1, "box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n")
     print("outside ok")
 
 def dupe_check():
@@ -326,6 +334,7 @@ def dupe_check():
     check("dup", root, ["tasks", "check", "alpha", "beta", "mid"], 1, lines(textwrap.dedent("""\
         beta/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md
         mid/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md""")))
+    check("order", root, ["tasks", "check", "mid", "alpha"], 1, "mid/019-dup.md: duplicate task id 019-dup: also alpha/019-dup.md\n")
     print("dupes ok")
 
 def cycle_checks():
@@ -350,6 +359,7 @@ def mixed_check():
     place(root, "alpha/019-a.md", task('["099-missing", "020-b"]', "false"))
     place(root, "alpha/020-b.md", task('["019-a"]', "true"))
     place(root, "alpha/022-d.md", task('["019-a"]', "true"))
+    place(root, "alpha/023-on-bad.md", task('["018-bad"]', "true"))
     place(root, "beta/019-a.md", task("[]", None))
     check("mix", root, ["tasks", "check", "alpha", "beta"], 1, lines(textwrap.dedent("""\
         alpha/018-bad.md: front matter is not closed: no +++ line after line 1
@@ -432,8 +442,9 @@ def run_checks():
     timeline = json.loads((repo / ".marestail" / "runs" / "t" / "timeline.json").read_text())
     if timeline["task"] != "t" or not (repo / ".marestail" / "runs" / "t" / "timeline.md").exists():
         raise SystemExit(timeline)
-    if not (repo / ".marestail" / "handoffs" / "t").is_dir() or (repo / ".marestail" / "runs" / "t" / "pipeline.log").exists():
+    if (repo / ".marestail" / "runs" / "t" / "pipeline.log").exists():
         raise SystemExit("layout")
+    archived_critic(repo, "t")
     if "# Task\n# Add one" not in prompt.read_text():
         raise SystemExit(prompt.read_text())
     place(repo, "tasks/018-prev.md", "+++\n")
@@ -446,14 +457,31 @@ def run_checks():
     if "# Task\n" + sentence not in body or "+++" in body or "depends =" in body or "stack" in body:
         raise SystemExit(body)
     demo_timeline = json.loads((repo / ".marestail" / "runs" / "019-demo" / "timeline.json").read_text())
-    if demo_timeline["task"] != "019-demo" or not (repo / ".marestail" / "handoffs" / "019-demo").is_dir():
+    if demo_timeline["task"] != "019-demo":
         raise SystemExit("demo layout")
+    archived_critic(repo, "019-demo")
+    place(repo, "tasks/019-absent.md", '+++\ndepends = ["099-missing"]\nstack = false\n+++\n# Absent\n')
+    absent = critic(repo, ["run", "tasks/019-absent.md", "--from", "critic", "--to", "critic", "--auto", "--retries", "1"], {}, prompt)
+    if absent.returncode != 0 or "pipeline complete" not in absent.stdout or "does not exist" in absent.stdout or absent.stderr:
+        raise SystemExit(f"absent {absent.returncode}\n{absent.stdout}\n{absent.stderr}")
+    if not prompt.exists():
+        raise SystemExit("absent stub did not start")
     print("run-ok ok")
+
+def archived_critic(repo, task_id):
+    live = repo / ".marestail" / "handoffs" / task_id
+    if live.exists():
+        raise SystemExit(f"live handoffs remain: {live}")
+    found = list((repo / ".marestail" / "runs" / task_id).glob("handoffs-*/01-critic.md"))
+    if len(found) != 1:
+        raise SystemExit(f"archived critic handoff: {found}")
 
 def task_text(prompt):
     rest = prompt.split("# Task\n", 1)[1]
-    end = rest.find("\n\n#")
-    return rest if end < 0 else rest[:end]
+    markers = ("\n\n# Specification", "\n\n# Handoffs", "\n\n# Finishing", "\n\n# Authoring", "\n\n# Verdict")
+    found = [rest.find(marker) for marker in markers]
+    ends = [index for index in found if index >= 0]
+    return rest if not ends else rest[:min(ends)]
 
 def prompt_checks():
     from marestail.config import Config
@@ -521,9 +549,11 @@ def doc_checks():
     if PARAGRAPH not in readme:
         raise SystemExit("writing tasks")
     import re
-    writing = readme.split("## Writing tasks", 1)[1].split("## ", 1)[0]
-    if re.search(r"`[^`\n]*/[^`\n]*`", writing):
-        raise SystemExit("backticked path in Writing tasks")
+    if re.search(r"`[^`\n]*/[^`\n]*`", PARAGRAPH):
+        raise SystemExit("backticked path in the new paragraph")
+    writing = readme.split("## Writing tasks", 1)[1].split("\n## ", 1)[0]
+    if "`tasks/README.md`" not in writing:
+        raise SystemExit("existing tasks/README.md backtick was removed")
     fresh(INSTALL)
     fresh(HOME)
     done = run(["install", str(INSTALL)], ROOT, {"HOME": str(HOME), "GROK_HOME": str(HOME / "grok")})
