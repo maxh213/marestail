@@ -283,6 +283,11 @@ def test_readme_documents_run_priority() -> None:
     assert "\u2013" in ROW
 
 
+def test_nice_is_listed_with_ran_against() -> None:
+    line = next(line for line in (ROOT / ".importlinter").read_text().splitlines() if "marestail.ran_against" in line)
+    assert "marestail.nice" in [part.strip() for part in line.split(":")]
+
+
 def test_nice_imports_only_config() -> None:
     assert imported_marestail(ROOT / "marestail" / "nice.py") == ["marestail.config"]
     assert not (ROOT / "tools" / "test-nice.py").exists()
