@@ -307,6 +307,12 @@ Feature: Task files say what they depend on
     When I run `marestail tasks check box`
     Then the exit code is 1
     And stdout is exactly "box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n"
+    Given "box/017-bad.md" is added after that check, and its bytes are "+++\ndepends = []\n"
+    And "box/016-uses-bad.md" is added after that check, with `depends = ["017-bad"]` and `stack = true`
+    When I run `marestail tasks check box/016-uses-bad.md`
+    Then the exit code is 0
+    And stdout is empty
+    And stderr is empty
 
   Scenario: each later copy of an id is a duplicate, and the earliest path is the one named
     Given "alpha/019-dup.md", "beta/019-dup.md" and "mid/019-dup.md", each with `depends = []`

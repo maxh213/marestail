@@ -40,7 +40,7 @@ Run from the marestail-green checkout with the venv active. Save the script at t
 
 11. `missing ok`. `ord/019-a.md` with `depends = ["099-z", "098-a"]` and `stack = false` prints `099-z` first and `098-a` second, each `depends on <id>, but ord/<id>.md does not exist`. `left/019-a.md` depending on `020-b` does not see `right/020-b.md`: stdout is `left/019-a.md: depends on 020-b, but left/020-b.md does not exist\n`. The same file addressed as `left/sub/../019-a.md` and depending on `020-gone` prints `left/sub/../019-a.md: depends on 020-gone, but left/sub/../020-gone.md does not exist\n`.
 
-12. `outside ok`. `box/018-prev.md` has `depends = ["019-next"]` and `stack = true`. `box/019-next.md` has `depends = ["018-prev"]` and `stack = true`. Checking only `box/019-next.md` exits 0 with empty stdout and stderr. Checking `box` prints only `box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n`.
+12. `outside ok`. `box/018-prev.md` has `depends = ["019-next"]` and `stack = true`. `box/019-next.md` has `depends = ["018-prev"]` and `stack = true`. Checking only `box/019-next.md` exits 0 with empty stdout and stderr. Checking `box` prints only `box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n`. After that check, add `box/017-bad.md` whose bytes are `+++\ndepends = []\n` and `box/016-uses-bad.md` with `depends = ["017-bad"]` and `stack = true`. `marestail tasks check box/016-uses-bad.md` exits 0 with empty stdout and stderr.
 
 13. `dupes ok`. `alpha/019-dup.md`, `beta/019-dup.md` and `mid/019-dup.md`, each `depends = []`. `marestail tasks check alpha beta mid` prints:
     ```
@@ -333,6 +333,9 @@ def outside_check():
     place(root, "box/019-next.md", task('["018-prev"]', "true"))
     check("one", root, ["tasks", "check", "box/019-next.md"], 0, "")
     check("box", root, ["tasks", "check", "box"], 1, "box/018-prev.md: dependency cycle: 018-prev -> 019-next -> 018-prev\n")
+    place(root, "box/017-bad.md", "+++\ndepends = []\n")
+    place(root, "box/016-uses-bad.md", task('["017-bad"]', "true"))
+    check("unread", root, ["tasks", "check", "box/016-uses-bad.md"], 0, "")
     print("outside ok")
 
 def dupe_check():
