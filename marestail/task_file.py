@@ -2,15 +2,18 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-_FENCE = "+++"
-_NO_FRONT = "no front matter: line 1 must be +++"
-_UNCLOSED = "front matter is not closed: no +++ line after line 1"
-_NO_DEPENDS = "front matter has no depends; write depends = [] for a task with no dependencies"
-_BAD_DEPENDS = "depends must be an array of strings"
-_EMPTY_STACK = "stack is not allowed when depends is empty"
-_REQUIRED_STACK = "stack is required when depends is not empty"
-_SELF = "depends on itself"
-_ALLOWED = ("depends", "stack")
+FENCE = "+++"
+KEY_HEADING = "depends and stack"
+KEYS = ("depends", "stack")
+READMES = "readme.md"
+NO_FRONT = "no front matter: line 1 must be +++"
+UNCLOSED = "front matter is not closed: no +++ line after line 1"
+NO_DEPENDS = "front matter has no depends; write depends = [] for a task with no dependencies"
+BAD_DEPENDS = "depends must be an array of strings"
+EMPTY_STACK = "stack is not allowed when depends is empty"
+REQUIRED_STACK = "stack is required when depends is not empty"
+SELF_DEPENDENCY = "depends on itself"
+NOT_AN_ID = "is not a task id; use the file name without .md"
 
 
 @dataclass(frozen=True)
@@ -29,81 +32,41 @@ class TaskFileError(ValueError):
         self.problems = problems
 
 
-@dataclass(frozen=True)
-class _Loaded:
-    file: TaskFile
-    problems: list[str]
-
-
-@dataclass(frozen=True)
-class _Examined:
-    path: Path
-    resolved: Path
-    file: TaskFile | None
-    problems: list[str]
-
-
-@dataclass(frozen=True)
-class _Clean:
-    path: Path
-    resolved: Path
-    file: TaskFile
-
-
-@dataclass
-class _Search:
-    graph: dict[Path, list[Path]]
-    ids: dict[Path, str]
-    stack: list[Path]
-    stacked: set[Path]
-    seen: set[tuple[str, ...]]
-    lines: dict[Path, list[str]]
-
-
 def read(path: Path) -> TaskFile:
-    loaded = _load(path, path.read_text())
-    if loaded.problems:
-        raise TaskFileError(loaded.problems)
-    return loaded.file
+    task, problems = _parse(path, path.read_text())
+    if problems:
+        raise TaskFileError(problems)
+    return task
 
 
 def check(paths: list[Path]) -> list[str]:
-    chosen, early = _collect(paths)
-    examined = [_examine(path) for path in chosen]
-    return _render(_merged(early, examined, _set_problems(_cleans(examined))))
+    chosen, absent = _choose(paths)
+    checked = [_inspect(path) for path in chosen]
+    rows = sorted([*absent, *_file_rows(checked, _set_problems(checked))], key=_row_path)
+    return _render(rows)
 
 
-def _load(path: Path, text: str) -> _Loaded:
-    lines = _front(text)
-    if lines is None:
-        return _Loaded(_blockless(path, text), [])
-    closed = _closed(lines)
-    if closed is None:
-        return _Loaded(_blockless(path, text), [_UNCLOSED])
-    return _parsed(path, closed[0], closed[1])
-
-
-def _front(text: str) -> list[str] | None:
+def _parse(path: Path, text: str) -> tuple[TaskFile, list[str]]:
     lines = text.splitlines(keepends=True)
-    if lines and _fence(lines[0]):
-        return lines
-    return None
+    if not _opens_block(lines):
+        return _blockless(path, text), []
+    closing = _closing_index(lines)
+    if closing is None:
+        return _blockless(path, text), [UNCLOSED]
+    return _parse_block(path, "".join(lines[1:closing]), "".join(lines[closing + 1 :]))
 
 
-def _fence(line: str) -> bool:
-    return line.removesuffix("\n") == _FENCE
+def _opens_block(lines: list[str]) -> bool:
+    return bool(lines) and _is_fence(lines[0])
 
 
-def _closed(lines: list[str]) -> tuple[str, str] | None:
-    index = _close_index(lines)
-    if index is None:
-        return None
-    return "".join(lines[1:index]), "".join(lines[index + 1 :])
+def _is_fence(line: str) -> bool:
+    return line.removesuffix("\n") == FENCE
 
 
-def _close_index(lines: list[str]) -> int | None:
-    for index, line in enumerate(lines[1:], start=1):
-        if _fence(line):
+def _closing_index(lines: list[str]) -> int | None:
+    for index in range(1, len(lines)):
+        if _is_fence(lines[index]):
             return index
     return None
 
@@ -112,370 +75,280 @@ def _blockless(path: Path, text: str) -> TaskFile:
     return TaskFile(path.stem, path, (), None, text, False)
 
 
-def _parsed(path: Path, toml_text: str, body: str) -> _Loaded:
-    data, error = _toml(toml_text)
+def _parse_block(path: Path, toml_text: str, body: str) -> tuple[TaskFile, list[str]]:
+    table, error = _parse_toml(toml_text)
     if error:
-        return _Loaded(_blockless(path, body), [error])
-    found = _entries(data)
-    problems = _file_problems(path.stem, data, found)
+        return _blockless(path, body), [error]
+    entries, depends_problems = _depends_problems(path.stem, table)
+    problems = [*_unknown_keys(table), *depends_problems, *_stack_problems(table, entries)]
     if problems:
-        return _Loaded(_blockless(path, body), problems)
-    return _Loaded(_valid(path, found or [], data, body), [])
+        return _blockless(path, body), problems
+    return _present(path, table, entries, body), []
 
 
-def _toml(text: str) -> tuple[dict[str, object], str]:
+def _parse_toml(text: str) -> tuple[dict[str, object], str]:
     try:
-        loaded = tomllib.loads(text)
+        return tomllib.loads(text), ""
     except tomllib.TOMLDecodeError as error:
         return {}, f"front matter is not valid TOML: {error}"
-    return loaded, ""
 
 
-def _valid(path: Path, found: list[str], data: dict[str, object], body: str) -> TaskFile:
-    depends = tuple(found)
-    if depends:
-        return TaskFile(path.stem, path, depends, _required_bool(data["stack"]), body, True)
-    return TaskFile(path.stem, path, depends, None, body, True)
+def _present(path: Path, table: dict[str, object], entries: list[str] | None, body: str) -> TaskFile:
+    depends = tuple(entries or ())
+    if not depends:
+        return TaskFile(path.stem, path, (), None, body, True)
+    return TaskFile(path.stem, path, depends, table["stack"] is True, body, True)
 
 
-def _required_bool(value: object) -> bool:
-    return value is True
+def _unknown_keys(table: dict[str, object]) -> list[str]:
+    return [f"unknown front matter key {key!r}; allowed keys are {KEY_HEADING}" for key in sorted(table) if key not in KEYS]
 
 
-def _file_problems(task_id: str, data: dict[str, object], found: list[str] | None) -> list[str]:
-    return _unknown(data) + _depends_problems(task_id, data, found) + _stack(data, found)
+def _depends_problems(task_id: str, table: dict[str, object]) -> tuple[list[str] | None, list[str]]:
+    if "depends" not in table:
+        return None, [NO_DEPENDS]
+    entries = _string_list(table["depends"])
+    if entries is None:
+        return None, [BAD_DEPENDS]
+    return entries, _entry_problems(task_id, entries)
 
 
-def _entries(data: dict[str, object]) -> list[str] | None:
-    if "depends" not in data:
-        return None
-    return _copied(data["depends"])
-
-
-def _copied(value: object) -> list[str] | None:
+def _string_list(value: object) -> list[str] | None:
     if not isinstance(value, list):
         return None
-    found: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            return None
-        found.append(item)
-    return found
-
-
-def _depends_problems(task_id: str, data: dict[str, object], found: list[str] | None) -> list[str]:
-    if "depends" not in data:
-        return [_NO_DEPENDS]
-    if found is None:
-        return [_BAD_DEPENDS]
-    return _entry_problems(task_id, found)
+    if not all(isinstance(item, str) for item in value):
+        return None
+    return value
 
 
 def _entry_problems(task_id: str, entries: list[str]) -> list[str]:
-    return _invalid(entries) + _repeated(entries) + _self(entries, task_id)
+    return [*_invalid_entries(entries), *_repeated_entries(entries), *_self_entry(task_id, entries)]
 
 
-def _invalid(entries: list[str]) -> list[str]:
-    return [_entry_line(entry) for entry in entries if _bad_id(entry)]
+def _invalid_entries(entries: list[str]) -> list[str]:
+    return [f"depends entry '{entry}' {NOT_AN_ID}" for entry in entries if _not_an_id(entry)]
 
 
-def _entry_line(entry: str) -> str:
-    return f"depends entry '{entry}' is not a task id; use the file name without .md"
+def _not_an_id(entry: str) -> bool:
+    return not entry or "/" in entry or "\\" in entry or entry.endswith(".md")
 
 
-def _bad_id(entry: str) -> bool:
-    if not entry:
-        return True
-    if "/" in entry or "\\" in entry:
-        return True
-    return entry.endswith(".md")
-
-
-def _repeated(entries: list[str]) -> list[str]:
+def _repeated_entries(entries: list[str]) -> list[str]:
     counts: dict[str, int] = {}
-    order: list[str] = []
     for entry in entries:
-        _tally(entry, counts, order)
-    return [f"depends lists {entry} twice" for entry in order if counts[entry] > 1]
+        counts[entry] = counts.get(entry, 0) + 1
+    return [f"depends lists {entry} twice" for entry in dict.fromkeys(entries) if counts[entry] > 1]
 
 
-def _tally(entry: str, counts: dict[str, int], order: list[str]) -> None:
-    if entry not in counts:
-        order.append(entry)
-    counts[entry] = counts.get(entry, 0) + 1
+def _self_entry(task_id: str, entries: list[str]) -> list[str]:
+    return [SELF_DEPENDENCY] if task_id in entries else []
 
 
-def _self(entries: list[str], task_id: str) -> list[str]:
-    if task_id in entries:
-        return [_SELF]
-    return []
+def _stack_problems(table: dict[str, object], entries: list[str] | None) -> list[str]:
+    if "stack" not in table:
+        return [REQUIRED_STACK] if entries else []
+    value = table["stack"]
+    return [*_stack_type_problems(value), *_stack_rules(value, entries)]
 
 
-def _unknown(data: dict[str, object]) -> list[str]:
-    return [_unknown_line(key) for key in sorted(data) if key not in _ALLOWED]
-
-
-def _unknown_line(key: str) -> str:
-    return f"unknown front matter key {key!r}; allowed keys are depends and stack"
-
-
-def _stack(data: dict[str, object], found: list[str] | None) -> list[str]:
-    if "stack" not in data:
-        return _missing_stack(found)
-    return _typed(data["stack"]) + _stack_rules(data["stack"], found)
-
-
-def _missing_stack(found: list[str] | None) -> list[str]:
-    if found:
-        return [_REQUIRED_STACK]
-    return []
-
-
-def _typed(value: object) -> list[str]:
+def _stack_type_problems(value: object) -> list[str]:
     if isinstance(value, bool):
         return []
     return [f"stack must be true or false, got {value!r}"]
 
 
-def _stack_rules(value: object, found: list[str] | None) -> list[str]:
-    if found is None:
+def _stack_rules(value: object, entries: list[str] | None) -> list[str]:
+    if entries is None:
         return []
-    return _ruled(value, found)
+    if not entries:
+        return [EMPTY_STACK, *_stack_count_problems(value, 0)]
+    return _stack_count_problems(value, len(entries))
 
 
-def _ruled(value: object, found: list[str]) -> list[str]:
-    if found:
-        return _true_count(value, len(found))
-    return [_EMPTY_STACK, *_true_count(value, 0)]
-
-
-def _true_count(value: object, count: int) -> list[str]:
+def _stack_count_problems(value: object, count: int) -> list[str]:
     if value is True and count != 1:
         return [f"stack = true needs exactly one dependency, got {count}"]
     return []
 
 
-def _collect(paths: list[Path]) -> tuple[list[Path], list[tuple[str, list[str]]]]:
+@dataclass(frozen=True)
+class _Checked:
+    path: Path
+    resolved: Path
+    task: TaskFile
+    problems: list[str]
+
+    @property
+    def clean(self) -> bool:
+        return not self.problems
+
+
+def _choose(paths: list[Path]) -> tuple[list[Path], list[tuple[Path, list[str]]]]:
     chosen: dict[Path, Path] = {}
-    early: list[tuple[str, list[str]]] = []
+    absent: list[tuple[Path, list[str]]] = []
     for path in paths:
-        _take(path, chosen, early)
-    return list(chosen.values()), early
+        _choose_one(path, chosen, absent)
+    return list(chosen.values()), absent
 
 
-def _take(path: Path, chosen: dict[Path, Path], early: list[tuple[str, list[str]]]) -> None:
+def _choose_one(path: Path, chosen: dict[Path, Path], absent: list[tuple[Path, list[str]]]) -> None:
     if not path.exists():
-        early.append((str(path), ["no such file or folder"]))
-        return
-    if path.is_dir():
-        _take_dir(path, chosen)
-        return
-    _take_file(path, chosen, early)
+        absent.append((path, ["no such file or folder"]))
+    elif path.is_dir():
+        _choose_folder(path, chosen)
+    elif path.suffix == ".md":
+        chosen.setdefault(path.resolve(), path)
+    else:
+        absent.append((path, ["not a .md file"]))
 
 
-def _take_dir(path: Path, chosen: dict[Path, Path]) -> None:
-    for child in sorted(_markdown(path)):
-        _remember(path / child.name, chosen)
+def _choose_folder(folder: Path, chosen: dict[Path, Path]) -> None:
+    for child in sorted(folder.glob("*.md")):
+        if child.name.lower() != READMES:
+            chosen.setdefault(child.resolve(), folder / child.name)
 
 
-def _markdown(path: Path) -> list[Path]:
-    return [child for child in path.glob("*.md") if child.name.lower() != "readme.md"]
+def _inspect(path: Path) -> _Checked:
+    task, problems = _parse(path, path.read_text())
+    if not problems:
+        problems = _front_problem(task)
+    return _Checked(path, path.resolve(), task, problems)
 
 
-def _take_file(path: Path, chosen: dict[Path, Path], early: list[tuple[str, list[str]]]) -> None:
-    if path.suffix == ".md":
-        _remember(path, chosen)
-        return
-    early.append((str(path), ["not a .md file"]))
+def _front_problem(task: TaskFile) -> list[str]:
+    return [] if task.has_front_matter else [NO_FRONT]
 
 
-def _remember(path: Path, chosen: dict[Path, Path]) -> None:
-    chosen.setdefault(path.resolve(), path)
+def _file_rows(checked: list[_Checked], extra: dict[Path, list[str]]) -> list[tuple[Path, list[str]]]:
+    rows: list[tuple[Path, list[str]]] = []
+    for item in checked:
+        problems = item.problems + extra.get(item.path, [])
+        if problems:
+            rows.append((item.path, problems))
+    return rows
 
 
-def _examine(path: Path) -> _Examined:
-    loaded = _load(path, path.read_text())
-    return _Examined(path, path.resolve(), _clean_file(loaded), _gap(loaded))
+def _render(rows: list[tuple[Path, list[str]]]) -> list[str]:
+    return [f"{path}: {problem}" for path, problems in rows for problem in problems]
 
 
-def _gap(loaded: _Loaded) -> list[str]:
-    if loaded.problems:
-        return loaded.problems
-    if loaded.file.has_front_matter:
-        return []
-    return [_NO_FRONT]
+def _row_path(row: tuple[Path, list[str]]) -> str:
+    return str(row[0])
 
 
-def _clean_file(loaded: _Loaded) -> TaskFile | None:
-    if _gap(loaded):
-        return None
-    return loaded.file
+def _set_problems(checked: list[_Checked]) -> dict[Path, list[str]]:
+    clean = [item for item in checked if item.clean]
+    problems: dict[Path, list[str]] = {}
+    _duplicate_problems(clean, problems)
+    _missing_problems(clean, problems)
+    _cycle_problems(clean, problems)
+    return problems
 
 
-def _merged(early: list[tuple[str, list[str]]], examined: list[_Examined], extra: dict[Path, list[str]]) -> list[tuple[str, list[str]]]:
-    rows = list(early)
-    for item in examined:
-        _add_row(rows, item, extra)
-    return sorted(rows, key=_row_path)
-
-
-def _add_row(rows: list[tuple[str, list[str]]], item: _Examined, extra: dict[Path, list[str]]) -> None:
-    problems = item.problems + extra.get(item.path, [])
-    if problems:
-        rows.append((str(item.path), problems))
-
-
-def _row_path(row: tuple[str, list[str]]) -> str:
-    return row[0]
-
-
-def _render(rows: list[tuple[str, list[str]]]) -> list[str]:
-    lines: list[str] = []
-    for path, problems in rows:
-        lines.extend(_prefixed(path, problems))
-    return lines
-
-
-def _prefixed(path: str, problems: list[str]) -> list[str]:
-    return [f"{path}: {problem}" for problem in problems]
-
-
-def _cleans(examined: list[_Examined]) -> list[_Clean]:
-    found: list[_Clean] = []
-    for item in examined:
-        _keep(found, item)
-    return found
-
-
-def _keep(found: list[_Clean], item: _Examined) -> None:
-    if item.file is None:
-        return
-    found.append(_Clean(item.path, item.resolved, item.file))
-
-
-def _set_problems(clean: list[_Clean]) -> dict[Path, list[str]]:
-    problems: dict[Path, list[str]] = {item.path: [] for item in clean}
-    _add_duplicates(clean, problems)
-    _add_missing(clean, problems)
-    _add_cycles(clean, problems)
-    return {path: lines for path, lines in problems.items() if lines}
-
-
-def _add_duplicates(clean: list[_Clean], problems: dict[Path, list[str]]) -> None:
+def _duplicate_problems(clean: list[_Checked], problems: dict[Path, list[str]]) -> None:
     first: dict[str, Path] = {}
-    for item in sorted(clean, key=_clean_path):
-        _note_id(item, first, problems)
+    for item in sorted(clean, key=_path_string):
+        known = first.setdefault(item.task.id, item.path)
+        if known is not item.path:
+            _add_problem(item.path, f"duplicate task id {item.task.id}: also {known}", problems)
 
 
-def _clean_path(item: _Clean) -> str:
+def _missing_problems(clean: list[_Checked], problems: dict[Path, list[str]]) -> None:
+    for item in clean:
+        for dep in item.task.depends:
+            _missing_problem(item, dep, problems)
+
+
+def _missing_problem(item: _Checked, dep: str, problems: dict[Path, list[str]]) -> None:
+    target = _dependency_path(item.path, dep)
+    if not target.exists():
+        _add_problem(item.path, f"depends on {dep}, but {target} does not exist", problems)
+
+
+def _cycle_problems(clean: list[_Checked], problems: dict[Path, list[str]]) -> None:
+    ordered = sorted(clean, key=_path_string)
+    for path, lines in _cycles(_edges(ordered), _task_ids(ordered)).items():
+        for line in lines:
+            _add_problem(path, line, problems)
+
+
+def _add_problem(path: Path, line: str, problems: dict[Path, list[str]]) -> None:
+    problems.setdefault(path, []).append(line)
+
+
+def _dependency_path(task: Path, dep: str) -> Path:
+    return task.parent / f"{dep}.md"
+
+
+def _path_string(item: _Checked) -> str:
     return str(item.path)
 
 
-def _note_id(item: _Clean, first: dict[str, Path], problems: dict[Path, list[str]]) -> None:
-    if item.file.id not in first:
-        first[item.file.id] = item.path
-        return
-    problems[item.path].append(f"duplicate task id {item.file.id}: also {first[item.file.id]}")
+@dataclass
+class _Trail:
+    edges: dict[Path, list[Path]]
+    ids: dict[Path, str]
+    route: list[Path]
+    on_route: set[Path]
+    seen: set[tuple[str, ...]]
+    lines: dict[Path, list[str]]
 
 
-def _add_missing(clean: list[_Clean], problems: dict[Path, list[str]]) -> None:
-    for item in clean:
-        problems[item.path].extend(_missing_lines(item))
+def _edges(clean: list[_Checked]) -> dict[Path, list[Path]]:
+    by_target = {item.resolved: item.path for item in clean}
+    return {item.path: _destinations(item, by_target) for item in clean}
 
 
-def _missing_lines(item: _Clean) -> list[str]:
-    return [_missing_line(item.path, dep) for dep in item.file.depends if _missing(item.path, dep)]
-
-
-def _missing(path: Path, dep: str) -> bool:
-    return not (path.parent / f"{dep}.md").exists()
-
-
-def _missing_line(path: Path, dep: str) -> str:
-    return f"depends on {dep}, but {path.parent / f'{dep}.md'} does not exist"
-
-
-def _add_cycles(clean: list[_Clean], problems: dict[Path, list[str]]) -> None:
-    graph, ids = _graph(clean)
-    for path, lines in _cycles(graph, ids).items():
-        problems[path].extend(lines)
-
-
-def _graph(clean: list[_Clean]) -> tuple[dict[Path, list[Path]], dict[Path, str]]:
-    ordered = sorted(clean, key=_clean_path)
-    return _adjacency(ordered), _ids(ordered)
-
-
-def _adjacency(ordered: list[_Clean]) -> dict[Path, list[Path]]:
-    by_resolved = {item.resolved: item for item in ordered}
-    return {item.path: _edges(item, by_resolved) for item in ordered}
-
-
-def _ids(ordered: list[_Clean]) -> dict[Path, str]:
-    return {item.path: item.file.id for item in ordered}
-
-
-def _edges(item: _Clean, by_resolved: dict[Path, _Clean]) -> list[Path]:
+def _destinations(item: _Checked, by_target: dict[Path, Path]) -> list[Path]:
     found: list[Path] = []
-    for dep in item.file.depends:
-        _add_edge(item, dep, by_resolved, found)
+    for dep in item.task.depends:
+        target = by_target.get(_dependency_path(item.path, dep).resolve())
+        if target is not None:
+            found.append(target)
     return found
 
 
-def _add_edge(item: _Clean, dep: str, by_resolved: dict[Path, _Clean], found: list[Path]) -> None:
-    linked = by_resolved.get(_resolved_dep(item.path, dep))
-    if linked is None:
+def _task_ids(clean: list[_Checked]) -> dict[Path, str]:
+    return {item.path: item.task.id for item in clean}
+
+
+def _cycles(edges: dict[Path, list[Path]], ids: dict[Path, str]) -> dict[Path, list[str]]:
+    trail = _Trail(edges, ids, [], set(), set(), {})
+    for start in edges:
+        _visit(start, trail)
+    return trail.lines
+
+
+def _visit(node: Path, trail: _Trail) -> None:
+    trail.route.append(node)
+    trail.on_route.add(node)
+    _descend(node, trail)
+    trail.route.pop()
+    trail.on_route.discard(node)
+
+
+def _descend(node: Path, trail: _Trail) -> None:
+    for following in trail.edges[node]:
+        _step(following, trail)
+
+
+def _step(following: Path, trail: _Trail) -> None:
+    if following in trail.on_route:
+        _record_cycle(following, trail)
         return
-    found.append(linked.path)
+    _visit(following, trail)
 
 
-def _resolved_dep(path: Path, dep: str) -> Path:
-    return (path.parent / f"{dep}.md").resolve()
-
-
-def _cycles(graph: dict[Path, list[Path]], ids: dict[Path, str]) -> dict[Path, list[str]]:
-    state = _Search(graph, ids, [], set(), set(), {})
-    for start in graph:
-        _walk(start, state)
-    return state.lines
-
-
-def _walk(node: Path, state: _Search) -> None:
-    state.stack.append(node)
-    state.stacked.add(node)
-    _follow(node, state)
-    state.stack.pop()
-    state.stacked.remove(node)
-
-
-def _follow(node: Path, state: _Search) -> None:
-    for nxt in state.graph[node]:
-        _step(nxt, state)
-
-
-def _step(nxt: Path, state: _Search) -> None:
-    if nxt in state.stacked:
-        _record(state, nxt)
+def _record_cycle(back: Path, trail: _Trail) -> None:
+    cycle_route = trail.route[trail.route.index(back) :]
+    holder, cycle = _named_cycle(cycle_route, trail.ids)
+    if tuple(cycle) in trail.seen:
         return
-    _walk(nxt, state)
+    trail.seen.add(tuple(cycle))
+    _add_problem(holder, f"dependency cycle: {' -> '.join(cycle)}", trail.lines)
 
 
-def _record(state: _Search, back: Path) -> None:
-    cycle = state.stack[state.stack.index(back) :]
-    key = tuple(_turned(cycle, state.ids))
-    if key in state.seen:
-        return
-    state.seen.add(key)
-    state.lines.setdefault(_holder(cycle, state.ids), []).append(f"dependency cycle: {' -> '.join(key)}")
-
-
-def _turned(cycle: list[Path], ids: dict[Path, str]) -> list[str]:
-    names = [ids[path] for path in cycle]
-    index = names.index(min(names))
-    ordered = names[index:] + names[:index]
-    return [*ordered, ordered[0]]
-
-
-def _holder(cycle: list[Path], ids: dict[Path, str]) -> Path:
-    names = [ids[path] for path in cycle]
-    return cycle[names.index(min(names))]
+def _named_cycle(route: list[Path], ids: dict[Path, str]) -> tuple[Path, list[str]]:
+    names = [ids[path] for path in route]
+    start = names.index(min(names))
+    return route[start], [*names[start:], *names[:start], names[start]]

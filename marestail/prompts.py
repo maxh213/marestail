@@ -6,11 +6,11 @@ from marestail.pipeline import Judge, Worker
 
 EMPTY = ""
 PARAGRAPH = "\n\n"
-_ONE = (
+_ONE_DEPENDENCY = (
     "This task depends on `{name}`, which runs before it, so its work is already in the tree. "
     "Treat what it delivered as existing behaviour: build on it and keep it working."
 )
-_MANY = (
+_MANY_DEPENDENCIES = (
     "This task depends on {names}, which run before it, so their work is already in the tree. "
     "Treat what they delivered as existing behaviour: build on it and keep it working."
 )
@@ -25,11 +25,11 @@ def _task_body(task: Path) -> str:
 
 def _dependency_note(depends: tuple[str, ...]) -> str:
     if len(depends) == 1:
-        return _ONE.format(name=depends[0])
-    return _MANY.format(names=_listed(depends))
+        return _ONE_DEPENDENCY.format(name=depends[0])
+    return _MANY_DEPENDENCIES.format(names=_quoted_names(depends))
 
 
-def _listed(depends: tuple[str, ...]) -> str:
+def _quoted_names(depends: tuple[str, ...]) -> str:
     head = ", ".join(f"`{item}`" for item in depends[:-1])
     return f"{head} and `{depends[-1]}`"
 

@@ -197,14 +197,14 @@ def add_tasks(parser: argparse.ArgumentParser) -> None:
 def tasks_check_command(args: argparse.Namespace) -> int:
     from marestail.task_file import check
 
-    return _report_tasks(check(_task_paths(args.paths)))
+    return _check_verdict(check(_check_paths(args.paths)))
 
 
-def _task_paths(given: list[str] | None) -> list[Path]:
+def _check_paths(given: list[str] | None) -> list[Path]:
     return [Path(path) for path in given or ["tasks"]]
 
 
-def _report_tasks(problems: list[str]) -> int:
+def _check_verdict(problems: list[str]) -> int:
     if not problems:
         return 0
     print("\n".join(problems))
