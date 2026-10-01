@@ -3,6 +3,7 @@ import io
 import json
 import os
 import runpy
+import subprocess
 import sys
 import time
 import types
@@ -1086,3 +1087,138 @@ def test_visual_parser_defaults_and_help() -> None:
     assert {action.dest: action.help for action in capture._actions}["task"] == "the task stem; defaults to MARESTAIL_TASK"
     assert parser.parse_args(["visual", "capture", "t"]).visual_command == "capture"
     assert capture.parse_args([]).task is None
+
+
+def test_run_stops_on_a_broken_block_before_an_agent(tmp_path: Path) -> None:
+    repo = task_repo(tmp_path)
+    stub = tmp_path / "stub.py"
+    write_stub(stub)
+    prompt = tmp_path / "prompt.md"
+    broken = '+++\ndepends = ["018-runs-stay-nice", "019-tasks"]\nstack = true\n+++\n# 020\n'
+    write_task(repo / "tasks" / "020-run-events.md", broken)
+    stopped = critic_run(repo, "020-run-events.md", stub, prompt)
+    assert (stopped.returncode, stopped.stdout, stopped.stderr) == (
+        1,
+        "",
+        "tasks/020-run-events.md: stack = true needs exactly one dependency, got 2\n",
+    )
+    assert not prompt.exists()
+    assert not (repo / ".marestail" / "runs" / "020-run-events").exists()
+    write_task(repo / "tasks" / "021-status.md", "+++\ndepend = []\n+++\n# 021\n")
+    typed = critic_run(repo, "021-status.md", stub, prompt)
+    assert (typed.returncode, typed.stdout, typed.stderr) == (
+        1,
+        "",
+        "tasks/021-status.md: unknown front matter key 'depend'; allowed keys are depends and stack\n"
+        "tasks/021-status.md: front matter has no depends; write depends = [] for a task with no dependencies\n",
+    )
+    assert not prompt.exists()
+    nice = critic_run(repo, "020-run-events.md", stub, prompt, {"MARESTAIL_NICE": "high"})
+    assert (nice.returncode, nice.stderr) == (1, "nice must be an integer 0-19, got 'high'\n")
+    assert "stack = true" not in nice.stderr
+    routed = critic_run(repo, "020-run-events.md", stub, prompt, extra=["--model", "dandelion/route", "--agent", "grok"])
+    assert routed.stderr == "tasks/020-run-events.md: stack = true needs exactly one dependency, got 2\n"
+    assert "drop --agent" not in routed.stderr
+    missing = critic_run(repo, "missing.md", stub, prompt)
+    assert missing.returncode == 1
+    assert missing.stdout == ""
+    assert "FileNotFoundError" in missing.stderr
+    assert "tasks/missing.md" in missing.stderr
+    assert not (repo / ".marestail" / "runs" / "missing").exists()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    nowhere = critic_run(empty, "020-run-events.md", stub, prompt)
+    assert (nowhere.returncode, nowhere.stderr) == (1, f"no marestail.toml found above {empty.resolve()}\n")
+    assert "front matter" not in nowhere.stderr
+
+
+def test_run_keeps_a_blockless_file_and_a_valid_block(tmp_path: Path) -> None:
+    repo = task_repo(tmp_path)
+    stub = tmp_path / "stub.py"
+    write_stub(stub)
+    prompt = tmp_path / "prompt.md"
+    write_task(repo / "tasks" / "t.md", "# Add one\n")
+    plain = critic_run(repo, "t.md", stub, prompt)
+    assert plain.returncode == 0
+    assert "pipeline complete" in plain.stdout
+    assert plain.stderr == ""
+    assert prompt.exists()
+    assert_run_layout(repo, "t", "t")
+    assert "# Task\n# Add one" in prompt.read_text()
+    write_task(repo / "tasks" / "018-prev.md", "+++\n")
+    write_task(repo / "tasks" / "019-demo.md", '+++\ndepends = ["018-prev"]\nstack = true\n+++\n# Something else\n\nCarry on.\n')
+    demo = critic_run(repo, "019-demo.md", stub, prompt)
+    assert demo.returncode == 0
+    assert "pipeline complete" in demo.stdout
+    assert demo.stderr == ""
+    body = prompt.read_text()
+    sentence = (
+        "This task depends on `018-prev`, which runs before it, so its work is already in the tree. "
+        "Treat what it delivered as existing behaviour: build on it and keep it working.\n\n# Something else\n\nCarry on."
+    )
+    assert "# Task\n" + sentence in body
+    assert "+++" not in body
+    assert "depends =" not in body
+    assert "stack" not in body
+    assert_run_layout(repo, "019-demo", "019-demo")
+    write_task(repo / "tasks" / "019-absent.md", '+++\ndepends = ["099-missing"]\nstack = false\n+++\n# Absent\n')
+    absent = critic_run(repo, "019-absent.md", stub, prompt)
+    assert absent.returncode == 0
+    assert "pipeline complete" in absent.stdout
+    assert "does not exist" not in absent.stdout
+    assert absent.stderr == ""
+    assert prompt.exists()
+    assert not (repo / "tasks" / "099-missing.md").exists()
+
+
+def task_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "qa@marestail"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "qa"], cwd=repo, check=True)
+    write_task(repo / ".gitignore", ".marestail/\n")
+    write_task(repo / "marestail.toml", '[git]\nbase = "main"\n[perf]\nenabled = false\n[practices]\nenabled = false\n')
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+    return repo
+
+
+def write_stub(path: Path) -> None:
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, re, sys\n"
+        "from pathlib import Path\n"
+        "prompt = sys.stdin.read()\n"
+        "Path(os.environ['QA_PROMPT']).write_text(prompt)\n"
+        "found = re.search(r'Write your verdict to (\\S+) and', prompt)\n"
+        "verdict = Path(found.group(1))\n"
+        "verdict.parent.mkdir(parents=True, exist_ok=True)\n"
+        "verdict.write_text('VERDICT: PASS\\n')\n"
+        "print(json.dumps({'is_error': False, 'num_turns': 1, 'total_cost_usd': 0, 'result': 'ok'}))\n"
+    )
+    path.chmod(0o755)
+
+
+def critic_run(
+    repo: Path, task: str, stub: Path, prompt: Path, env: dict[str, str] | None = None, extra: list[str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    prompt.unlink(missing_ok=True)
+    command = [sys.executable, str(Path(cli.__file__).resolve()), "run", str(Path("tasks") / task)]
+    command.extend(["--from", "critic", "--to", "critic", "--auto", "--retries", "1", *(extra or [])])
+    return subprocess.run(command, cwd=repo, capture_output=True, text=True, env=critic_env(stub, prompt, env), check=False)
+
+
+def critic_env(stub: Path, prompt: Path, env: dict[str, str] | None) -> dict[str, str]:
+    base = {**os.environ, "MARESTAIL_AGENT": "claude", "MARESTAIL_CLAUDE": str(stub), "QA_PROMPT": str(prompt)}
+    return {**base, **(env or {})}
+
+
+def assert_run_layout(repo: Path, task_id: str, expected: str) -> None:
+    folder = repo / ".marestail" / "runs" / task_id
+    timeline = json.loads((folder / "timeline.json").read_text())
+    assert timeline["task"] == expected
+    assert (folder / "timeline.md").is_file()
+    assert not (folder / "pipeline.log").exists()
+    assert not (repo / ".marestail" / "handoffs" / task_id).exists()
+    assert len(list(folder.glob("handoffs-*/01-critic.md"))) == 1
