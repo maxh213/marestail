@@ -1,15 +1,18 @@
 from pathlib import Path
 
+GUIDANCE = "guidance"
+PATTERNS = "patterns"
+
 
 def files(root: Path) -> list[Path]:
-    return markdown(root / "guidance")
+    return markdown_files(root / GUIDANCE)
 
 
 def pattern_files(root: Path) -> list[Path]:
-    return markdown(root / "guidance" / "patterns")
+    return markdown_files(root / GUIDANCE / PATTERNS)
 
 
-def markdown(folder: Path) -> list[Path]:
+def markdown_files(folder: Path) -> list[Path]:
     if not folder.is_dir():
         return []
     return sorted(folder.glob("*.md"))

@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from marestail import audit, backends, freeze, hunks, practices, prompts, ran_against, reported, timeline
 from marestail import config as config_module
@@ -403,9 +403,14 @@ def run_qa(state: Run, worker: Worker) -> bool:
     return settle_ran_against(state, worker, read_qa_ran_against(state))
 
 
-RULEBOOK_SKIPS: dict[str, tuple[str, Callable[[Path], list[Path]]]] = {
-    "practices": ("practices: no guidance files; skipping", practices.files),
-    "design": ("design: no pattern rulebooks; skipping", practices.pattern_files),
+class RulebookSkip(NamedTuple):
+    reason: str
+    present: Callable[[Path], list[Path]]
+
+
+RULEBOOK_SKIPS = {
+    "practices": RulebookSkip(reason="practices: no guidance files; skipping", present=practices.files),
+    "design": RulebookSkip(reason="design: no pattern rulebooks; skipping", present=practices.pattern_files),
 }
 
 
@@ -417,9 +422,9 @@ def skip_reason(state: Run, judge: Judge) -> str:
 
 def missing_rulebooks(root: Path, judge: Judge) -> str:
     skip = RULEBOOK_SKIPS.get(judge.name)
-    if skip is not None and not skip[1](root):
-        return skip[0]
-    return ""
+    if skip is None or skip.present(root):
+        return ""
+    return skip.reason
 
 
 def visual_skip(state: Run, judge: Judge) -> str:

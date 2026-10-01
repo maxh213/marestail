@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 import re
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 GUIDANCE = ROOT / "templates" / "guidance"
 PATTERNS = GUIDANCE / "patterns"
 LANGUAGES = ("cs", "ts", "rb", "ex", "er", "go")
-PATTERN_FILES = ["cs.md", "er.md", "ex.md", "go.md", "rb.md", "ts.md"]
 FIELD_NAMES = ("pattern", "trigger", "form", "not when")
 HEADING = re.compile(r"^- \*\*([A-Z]{2})-P(\d+) — (.+?)\.\*\*$", re.M)
 DEPENDENCY = "already a dependency"
@@ -378,6 +377,21 @@ PARAGRAPH = (
 )
 
 
+class Rule(NamedTuple):
+    number: int
+    name: str
+    fields: dict[str, str]
+    text: str
+
+
+class Book(NamedTuple):
+    text: str
+    rules: list[Rule]
+
+
+Books = dict[str, Book]
+
+
 def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
@@ -389,53 +403,71 @@ def expect_true(name: str, value: object) -> None:
 
 
 def token_re(token: str) -> re.Pattern[str]:
-    if "/" in token:
-        return re.compile(re.escape(token))
-    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])")
+    return token_pattern(token, "/" in token, 0)
 
 
 def banned_re(needle: str) -> re.Pattern[str]:
-    if " " in needle:
-        return re.compile(re.escape(needle), re.I)
-    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(needle)}(?![A-Za-z0-9_])", re.I)
+    return token_pattern(needle, " " in needle, re.I)
+
+
+def token_pattern(token: str, literal: bool, flags: int) -> re.Pattern[str]:
+    body = re.escape(token) if literal else bounded(token)
+    return re.compile(body, flags)
+
+
+def bounded(token: str) -> str:
+    return rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])"
 
 
 def fields(body: str) -> dict[str, str]:
-    return {field: match.group(1).strip() for field in FIELD_NAMES if (match := re.search(rf"^\s*{field}: (.+)$", body, re.M))}
+    found = {}
+    for name in FIELD_NAMES:
+        match = re.search(rf"^\s*{re.escape(name)}: (.+)$", body, re.M)
+        if match:
+            found[name] = match.group(1).strip()
+    return found
 
 
-def block_at(text: str, starts: list[re.Match[str]], index: int) -> dict[str, Any]:
-    found = starts[index]
-    end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
-    body = text[found.end() : end]
-    return {"id": int(found.group(2)), "name": found.group(3), "body": body, "fields": fields(body), "text": found.group(0) + body}
-
-
-def rule_blocks(text: str) -> list[dict[str, Any]]:
+def rule_blocks(text: str) -> list[Rule]:
     starts = list(HEADING.finditer(text))
-    return [block_at(text, starts, index) for index in range(len(starts))]
+    return [rule_at(text, starts, index) for index in range(len(starts))]
 
 
-def load() -> dict[str, tuple[str, list[dict[str, Any]]]]:
-    return {
-        language: ((PATTERNS / f"{language}.md").read_text(), rule_blocks((PATTERNS / f"{language}.md").read_text()))
-        for language in LANGUAGES
-    }
+def rule_at(text: str, starts: list[re.Match[str]], index: int) -> Rule:
+    found = starts[index]
+    body = text[found.end() : rule_end(starts, index, len(text))]
+    return Rule(int(found.group(2)), found.group(3), fields(body), found.group(0) + body)
 
 
-def rule_of(store: dict[str, tuple[str, list[dict[str, Any]]]], language: str, number: int) -> dict[str, Any]:
-    return next(rule for rule in store[language][1] if rule["id"] == number)
+def rule_end(starts: list[re.Match[str]], index: int, length: int) -> int:
+    if index + 1 == len(starts):
+        return length
+    return starts[index + 1].start()
 
 
-def check_shape(language: str, found: list[dict[str, Any]]) -> None:
-    expect(f"{language}-ids", [rule["id"] for rule in found], list(range(1, len(found) + 1)))
-    expect(f"{language}-names", [rule["name"] for rule in found], NAMES[language])
+def load() -> Books:
+    return {language: load_book(language) for language in LANGUAGES}
+
+
+def load_book(language: str) -> Book:
+    text = (PATTERNS / f"{language}.md").read_text()
+    return Book(text, rule_blocks(text))
+
+
+def rule_of(store: Books, language: str, number: int) -> Rule:
+    return next(rule for rule in store[language].rules if rule.number == number)
+
+
+def check_shape(language: str, found: list[Rule]) -> None:
+    expect(f"{language}-ids", [rule.number for rule in found], list(range(1, len(found) + 1)))
+    expect(f"{language}-names", [rule.name for rule in found], NAMES[language])
     for rule in found:
-        expect(f"{language}-{rule['id']}-fields", list(rule["fields"]), list(FIELD_NAMES))
+        expect(f"{language}-{rule.number}-fields", list(rule.fields), list(FIELD_NAMES))
 
 
 def check_files() -> None:
-    expect("pattern-files", sorted(path.name for path in PATTERNS.glob("*.md")), PATTERN_FILES)
+    names = sorted(f"{language}.md" for language in LANGUAGES)
+    expect("pattern-files", sorted(path.name for path in PATTERNS.glob("*.md")), names)
     expect("no-python-rulebook", ((PATTERNS / "py.md").exists(), (GUIDANCE / "py.md").exists()), (False, False))
 
 
@@ -448,59 +480,71 @@ def check_banned(language: str, text: str) -> None:
         expect_true(f"{language}-banned-{needle}", not banned_re(needle).search(text))
 
 
-def check_rule_libraries(language: str, rule: dict[str, Any]) -> None:
+def check_rule_libraries(language: str, rule: Rule) -> None:
     for token in LIBRARIES:
-        found = token_re(token).search(str(rule["text"]))
-        expect_true(f"{language}-P{rule['id']}-{token}", not found or DEPENDENCY in str(rule["text"]))
+        expect_true(f"{language}-P{rule.number}-{token}", allows(token, rule.text))
 
 
-def check_libraries(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
-    for language in store:
-        for rule in store[language][1]:
+def allows(token: str, text: str) -> bool:
+    return token_re(token).search(text) is None or DEPENDENCY in text
+
+
+def check_libraries(store: Books) -> None:
+    for language, book in store.items():
+        for rule in book.rules:
             check_rule_libraries(language, rule)
 
 
-def check_releases(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
-    for rule in store["go"][1]:
+def check_releases(store: Books) -> None:
+    for rule in store["go"].rules:
         for token, version in RELEASES:
-            if token_re(token).search(str(rule["text"])):
-                expect_true(f"go-P{rule['id']}-{token}-release", version in str(rule["text"]) and "go.mod" in str(rule["text"]))
+            if token_re(token).search(rule.text):
+                expect_true(f"go-P{rule.number}-{token}-release", names_release(rule.text, version))
 
 
-def check_required(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
+def names_release(text: str, version: str) -> bool:
+    return version in text and "go.mod" in text
+
+
+def check_required(store: Books) -> None:
     for language, number, name, needles in REQUIRED:
-        value = str(rule_of(store, language, number)["fields"][name])
+        value = rule_of(store, language, number).fields[name]
         for needle in needles:
             expect_true(f"{language}-P{number}-{name}-{needle}", needle in value)
 
 
-def check_citations(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
+def check_citations(store: Books) -> None:
     for prefix, language, cited in (("ER", "er", ER_CITED), ("EX", "ex", EX_CITED)):
-        text = store[language][0]
+        text = store[language].text
         for number in cited:
             expect_true(f"{language}-cites-{prefix}-{number}", f"{prefix}-{number}" in text)
 
 
-def check_order(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
+def check_order(store: Books) -> None:
     for language, number, name in ORDER:
-        expect(f"{language}-order-{number}", rule_of(store, language, number)["name"], name)
+        expect(f"{language}-order-{number}", rule_of(store, language, number).name, name)
 
 
-def check_flavour(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
+def check_flavour(store: Books) -> None:
     for language, numbers, phrase in (("ts", REACT, "React code"), ("rb", RAILS, "Rails app")):
         for number in numbers:
-            expect_true(f"{language}-P{number}-{phrase}", phrase in str(rule_of(store, language, number)["text"]))
+            text = rule_of(store, language, number).text
+            expect_true(f"{language}-P{number}-{phrase}", phrase in text)
 
 
-def check_shipped(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
+def check_shipped(store: Books) -> None:
     for language, number, name in (("ts", 9, "Factory"), ("cs", 16, "Iterator"), ("go", 27, "WaitGroup")):
-        expect(f"shipped-{language}-{number}", rule_of(store, language, number)["name"], name)
+        expect(f"shipped-{language}-{number}", rule_of(store, language, number).name, name)
 
 
-def check_er_simple(store: dict[str, tuple[str, list[dict[str, Any]]]]) -> None:
-    for rule in store["er"][1]:
-        if "simple_one_for_one" in str(rule["text"]):
-            expect_true(f"er-P{rule['id']}-simple", "not allowed" in str(rule["text"]) and "ER-18" in str(rule["text"]))
+def check_er_simple(store: Books) -> None:
+    for rule in store["er"].rules:
+        if "simple_one_for_one" in rule.text:
+            expect_true(f"er-P{rule.number}-simple", refuses_simple(rule.text))
+
+
+def refuses_simple(text: str) -> bool:
+    return "not allowed" in text and "ER-18" in text
 
 
 def go_rule(text: str, number: int) -> str:
@@ -512,37 +556,63 @@ def go_rule(text: str, number: int) -> str:
 
 def check_go_practices() -> None:
     text = (GUIDANCE / "go.md").read_text()
-    lines = [line for line in text.splitlines() if line.strip()]
-    expect("go-heading", lines[0], "# Go best practices")
+    expect("go-heading", first_content_line(text), "# Go best practices")
     expect("go-ids", re.findall(r"^- \*\*GO-(\d+) — ", text, re.M), [str(number) for number in range(1, 11)])
-    expect_true("go-judge", "practices judge" in text and "*.go" in text)
-    expect_true("go-no-doc", "doc comment" not in text and "godoc" not in text)
-    expect_true("go-no-pattern-terms", not any(token in text for token in ("WaitGroup.Go", "iter.Seq", "Ticker", "tickers")))
-    expect_true("go-4-no-ticker", not re.search("ticker", go_rule(text, 4), re.I))
+    expect_go_shape(text)
+    expect_go_needles(text)
+
+
+def first_content_line(text: str) -> str:
+    return next(line for line in text.splitlines() if line.strip())
+
+
+def expect_go_shape(text: str) -> None:
+    expect_true("go-judge", contains_all(text, ("practices judge", "*.go")))
+    expect_true("go-no-doc", contains_none(text, ("doc comment", "godoc")))
+    expect_true("go-no-pattern-terms", contains_none(text, ("WaitGroup.Go", "iter.Seq", "Ticker", "tickers")))
+    expect_true("go-4-no-ticker", re.search("ticker", go_rule(text, 4), re.I) is None)
+
+
+def contains_all(text: str, needles: tuple[str, ...]) -> bool:
+    return all(needle in text for needle in needles)
+
+
+def contains_none(text: str, needles: tuple[str, ...]) -> bool:
+    return all(needle not in text for needle in needles)
+
+
+def expect_go_needles(text: str) -> None:
     for number, needles in GO_NEEDLES:
-        for needle in needles:
-            expect_true(f"go-{number}-{needle}", needle in go_rule(text, number))
+        expect_rule_needles(go_rule(text, number), number, needles)
+
+
+def expect_rule_needles(rule: str, number: int, needles: tuple[str, ...]) -> None:
+    for needle in needles:
+        expect_true(f"go-{number}-{needle}", needle in rule)
 
 
 def check_roles() -> None:
-    architect = (ROOT / "roles" / "architect.md").read_text()
-    for needle in ARCHITECT:
-        expect_true(f"architect-{needle}", needle in architect)
-    design = (ROOT / "roles" / "design.md").read_text()
-    for needle in DESIGN:
-        expect_true(f"design-{needle}", needle in design)
-    toml = (ROOT / "templates" / "marestail.toml").read_text()
-    for needle in TOML:
-        expect_true(f"toml-{needle}", needle in toml)
+    expect_needles("architect", (ROOT / "roles" / "architect.md").read_text(), ARCHITECT)
+    expect_needles("design", (ROOT / "roles" / "design.md").read_text(), DESIGN)
+    expect_needles("toml", (ROOT / "templates" / "marestail.toml").read_text(), TOML)
 
 
-def readme_rows() -> list[list[str]]:
-    lines = [line for line in (ROOT / "README.md").read_text().splitlines() if line.startswith("| ")]
-    return [[cell.strip() for cell in line.strip("|").split("|")] for line in lines]
+def expect_needles(label: str, text: str, needles: tuple[str, ...]) -> None:
+    for needle in needles:
+        expect_true(f"{label}-{needle}", needle in text)
+
+
+def table_rows(text: str) -> list[list[str]]:
+    return [table_cells(line) for line in text.splitlines() if line.startswith("| ")]
+
+
+def table_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip("|").split("|")]
 
 
 def check_readme() -> None:
-    rows = readme_rows()
+    text = (ROOT / "README.md").read_text()
+    rows = table_rows(text)
     steps = [row[0] for row in rows]
     index = steps.index("design")
     expect("readme-order", steps[index - 1 : index + 2], ["architect", "design", "practices"])
@@ -550,7 +620,6 @@ def check_readme() -> None:
     does = rows[index][4]
     for needle in README:
         expect_true(f"readme-{needle}", needle in does)
-    text = (ROOT / "README.md").read_text()
     expect_true("readme-old-sentence", "Other languages get no shipped rulebook" not in text)
     paragraph = text[text.index("Pattern rulebooks live in") :].split("\n\n", 1)[0]
     for needle in PARAGRAPH:
@@ -558,12 +627,19 @@ def check_readme() -> None:
 
 
 def check_task_readmes() -> None:
-    template = (ROOT / "templates" / "tasks-README.md").read_text().splitlines()
+    template = lines_of(ROOT / "templates" / "tasks-README.md")
     shipped = next(line for line in template if "specifier, critic, coder" in line)
     expect_true("task-readmes-design", "architect, design, practices" in shipped)
-    repo = (ROOT / "tasks" / "README.md").read_text().splitlines()
-    without = [shipped.replace("architect, design, practices", "architect, practices") if line == shipped else line for line in template]
-    expect_true("task-readmes-frozen", repo in (template, without))
+    expect_true("task-readmes-frozen", lines_of(ROOT / "tasks" / "README.md") in (template, without_design(template, shipped)))
+
+
+def lines_of(path: Path) -> list[str]:
+    return path.read_text().splitlines()
+
+
+def without_design(lines: list[str], shipped: str) -> list[str]:
+    frozen = shipped.replace("architect, design, practices", "architect, practices")
+    return [frozen if line == shipped else line for line in lines]
 
 
 def check_ported() -> None:
@@ -574,10 +650,10 @@ def check_ported() -> None:
 def main() -> None:
     check_files()
     store = load()
-    for language, (text, found) in store.items():
-        check_shape(language, found)
-        check_canonical(language, text)
-        check_banned(language, text)
+    for language, book in store.items():
+        check_shape(language, book.rules)
+        check_canonical(language, book.text)
+        check_banned(language, book.text)
     check_libraries(store)
     check_releases(store)
     check_required(store)

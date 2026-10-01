@@ -51,6 +51,10 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
 
+def assert_matches_template(target: Path, relative: str) -> None:
+    assert (target / relative).read_text() == (TEMPLATES / relative).read_text()
+
+
 def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert install.install(target) == 0
     for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
@@ -203,10 +207,8 @@ def test_install_copies_every_marker_rulebook_with_its_patterns(home: Path, targ
     (target / "src" / "App.csproj").write_text("<Project />")
     install.install(target)
     for name in ("ts", "cs", "rb", "ex", "er", "go"):
-        assert (target / "guidance" / f"{name}.md").read_text() == (TEMPLATES / "guidance" / f"{name}.md").read_text()
-        assert (target / "guidance" / "patterns" / f"{name}.md").read_text() == (
-            TEMPLATES / "guidance" / "patterns" / f"{name}.md"
-        ).read_text()
+        assert_matches_template(target, f"guidance/{name}.md")
+        assert_matches_template(target, f"guidance/patterns/{name}.md")
 
 
 def test_install_takes_erlang_anywhere_but_the_other_markers_at_the_root_only(home: Path, target: Path) -> None:

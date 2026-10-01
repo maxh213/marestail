@@ -13,6 +13,8 @@ CONFIG = "marestail.toml"
 CLAUDE_MD = "CLAUDE.md"
 AGENTS_MD = "AGENTS.md"
 SONAR = "sonar-project.properties"
+GUIDANCE = "guidance"
+PATTERNS = "patterns"
 HOOKS = "hooks"
 STOP = "Stop"
 AGY_GATE = "marestail-gate"
@@ -97,20 +99,34 @@ def copy_templates(target: Path) -> None:
     (target / "tasks").mkdir(exist_ok=True)
     copy_if_missing(TEMPLATES / "tasks-README.md", target / "tasks" / "README.md")
     copy_if_missing(TEMPLATES / PERFORMANCE, target / PERFORMANCE)
-    (target / "guidance").mkdir(exist_ok=True)
-    copy_language(target, "ts", True)
-    copy_language(target, "cs", uses_csharp(target))
-    copy_language(target, "rb", uses_ruby(target))
-    copy_language(target, "ex", uses_elixir(target))
-    copy_language(target, "er", uses_erlang(target))
-    copy_language(target, "go", uses_go(target))
+    copy_guidance(target)
 
 
-def copy_language(target: Path, language: str, wanted: bool) -> None:
-    if not wanted:
-        return
-    copy_if_missing(TEMPLATES / "guidance" / f"{language}.md", target / "guidance" / f"{language}.md")
-    copy_if_missing(TEMPLATES / "guidance" / "patterns" / f"{language}.md", target / "guidance" / "patterns" / f"{language}.md")
+def copy_guidance(target: Path) -> None:
+    (target / GUIDANCE).mkdir(exist_ok=True)
+    for language in guidance_languages(target):
+        copy_language(target, language)
+
+
+def guidance_languages(target: Path) -> tuple[str, ...]:
+    markers = (
+        ("cs", uses_csharp(target)),
+        ("rb", uses_ruby(target)),
+        ("ex", uses_elixir(target)),
+        ("er", uses_erlang(target)),
+        ("go", uses_go(target)),
+    )
+    return ("ts", *(language for language, present in markers if present))
+
+
+def copy_language(target: Path, language: str) -> None:
+    name = f"{language}.md"
+    copy_if_missing(guidance_template(name), target / GUIDANCE / name)
+    copy_if_missing(guidance_template(PATTERNS, name), target / GUIDANCE / PATTERNS / name)
+
+
+def guidance_template(*parts: str) -> Path:
+    return TEMPLATES.joinpath(GUIDANCE, *parts)
 
 
 def apply_hooks(target: Path) -> None:
@@ -163,23 +179,31 @@ def visual_enabled(target: Path) -> bool:
 
 
 def uses_csharp(target: Path) -> bool:
-    return next(target.rglob("*.csproj"), None) is not None
+    return has_any_file(target, "*.csproj")
 
 
 def uses_erlang(target: Path) -> bool:
-    return next(target.rglob("*.erl"), None) is not None
+    return has_any_file(target, "*.erl")
+
+
+def has_any_file(target: Path, pattern: str) -> bool:
+    return next(target.rglob(pattern), None) is not None
 
 
 def uses_elixir(target: Path) -> bool:
-    return (target / "mix.exs").is_file()
+    return has_root_file(target, "mix.exs")
 
 
 def uses_ruby(target: Path) -> bool:
-    return (target / "Gemfile").is_file()
+    return has_root_file(target, "Gemfile")
 
 
 def uses_go(target: Path) -> bool:
-    return (target / "go.mod").is_file()
+    return has_root_file(target, "go.mod")
+
+
+def has_root_file(target: Path, name: str) -> bool:
+    return (target / name).is_file()
 
 
 def copy_if_missing(source: Path, destination: Path) -> None:

@@ -407,8 +407,14 @@ def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     assert ran_against.NOTE in capsys.readouterr().out
 
 
+def write_rulebook_file(folder: Path, markdown: bool) -> None:
+    folder.mkdir()
+    name = "g.md" if markdown else "g.txt"
+    (folder / name).write_text("g")
+
+
 @pytest.mark.parametrize(
-    ("judge", "raw", "guidance", "expected"),
+    ("judge", "raw", "markdown", "expected"),
     [
         (PERF, {"perf": {"enabled": False}}, False, "perf disabled in marestail.toml; skipping\n"),
         (PERF, {"perf": {}}, False, ""),
@@ -424,13 +430,11 @@ def test_run_steps_qa_ending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, st
     ],
 )
 def test_run_step_judge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, judge: Any, raw: dict[str, Any], guidance: bool, expected: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, judge: Any, raw: dict[str, Any], markdown: bool, expected: str
 ) -> None:
     loop = patch(monkeypatch, runner, "run_judge_loop", "looped")
-    (tmp_path / "guidance").mkdir()
-    (tmp_path / "guidance" / ("g.md" if guidance else "g.txt")).write_text("g")
-    (tmp_path / "guidance" / "patterns").mkdir()
-    (tmp_path / "guidance" / "patterns" / ("g.md" if guidance else "g.txt")).write_text("g")
+    write_rulebook_file(tmp_path / "guidance", markdown)
+    write_rulebook_file(tmp_path / "guidance" / "patterns", markdown)
     state = make_state(tmp_path, raw=raw)
     outcome = runner.run_step(state, judge)
     assert capsys.readouterr().out == expected
