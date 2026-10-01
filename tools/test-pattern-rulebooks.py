@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from marestail.freeze import ALLOWED, matches
 
 ROOT = Path(__file__).resolve().parent.parent
 GUIDANCE = ROOT / "templates" / "guidance"
@@ -253,6 +259,7 @@ LIBRARIES = (
     "golang.org/x/time/rate",
 )
 RELEASES = (
+    ("errors.Join", "1.20"),
     ("WithCancelCause", "1.20"),
     ("ServeMux", "1.22"),
     ("sync.OnceValue", "1.21"),
@@ -264,6 +271,22 @@ RELEASES = (
     ("unique", "1.23"),
     ("sync.WaitGroup.Go", "1.25"),
     ("testing/synctest", "1.25"),
+    ("errors.AsType", "1.26"),
+)
+PORTED = (
+    ("origin/main", "ts"),
+    ("origin/main", "cs"),
+    ("dfdb550", "er"),
+    ("dfdb550", "ex"),
+    ("dfdb550", "rb"),
+)
+LATER_RUBY = re.compile(r"\bRB-(?:49|5\d|6\d|7[0-3])\b")
+RB_CITES = (
+    (7, ("RB-4", "RB-12"), ("PaymentGateway",)),
+    (20, ("RB-11",), ("last resort",)),
+    (21, ("RB-9",), ("WeeklyReport",)),
+    (22, ("RB-16",), ("Billing::SubscribeCustomer",)),
+    (27, ("RB-8",), ("STI",)),
 )
 REQUIRED = (
     ("cs", 16, "trigger", ("hand-written",)),
@@ -336,8 +359,13 @@ ORDER = (
 ARCHITECT = (
     "Prefer a few deep modules over many shallow ones",
     "guidance/patterns/*.md",
+    "the code this task touched",
+    "only when its trigger is present, and only in the rule's form",
+    "Never add a dependency",
     "## Proposals",
     "## Patterns",
+    "- <rule id> <file:line>: <what changed>",
+    "one line saying why",
     "A factory or wrapper that hides nothing is the shallow module the role already rejects.",
 )
 DESIGN = (
@@ -363,7 +391,19 @@ TOML = (
     "the design judge runs between architect and practices unless false",
     "skips repos with no guidance/patterns/*.md",
 )
-README = ("<rule id> <file:line>", "bounces to the architect", "design: no pattern rulebooks; skipping")
+README = (
+    "<rule id> <file:line>",
+    "bounces to the architect",
+    "design: no pattern rulebooks; skipping",
+    "a pattern applied with no trigger",
+    "a form other than the rule's",
+    "neither applied nor explained under `## Patterns`",
+)
+KEPT = (
+    "the curated TypeScript/React/Next.js rulebook (rules numbered `TS-1`",
+    "(`CS-1`) requires every test to follow Arrange, Act, Assert",
+    "frozen (`guidance/**` in `freeze.SPEC`)",
+)
 PARAGRAPH = (
     "Pattern rulebooks live in `guidance/patterns/`",
     "The architect reads them",
@@ -497,9 +537,19 @@ def check_libraries(store: Books) -> None:
 
 def check_releases(store: Books) -> None:
     for rule in store["go"].rules:
-        for token, version in RELEASES:
-            if token_re(token).search(rule.text):
-                expect_true(f"go-P{rule.number}-{token}-release", names_release(rule.text, version))
+        require_releases(f"go-P{rule.number}", rule.text)
+    require_practice_releases((GUIDANCE / "go.md").read_text())
+
+
+def require_practice_releases(text: str) -> None:
+    for number in re.findall(r"^- \*\*GO-(\d+) — ", text, re.M):
+        require_releases(f"GO-{number}", go_rule(text, int(number)))
+
+
+def require_releases(label: str, text: str) -> None:
+    for token, version in RELEASES:
+        if token_re(token).search(text):
+            expect_true(f"{label}-{token}-release", names_release(text, version))
 
 
 def names_release(text: str, version: str) -> bool:
@@ -518,6 +568,18 @@ def check_citations(store: Books) -> None:
         text = store[language].text
         for number in cited:
             expect_true(f"{language}-cites-{prefix}-{number}", f"{prefix}-{number}" in text)
+
+
+def check_ruby_cites(store: Books) -> None:
+    for number, ids, banned in RB_CITES:
+        text = rule_of(store, "rb", number).text
+        expect_needles(f"rb-P{number}", text, ids)
+        expect_absent(f"rb-P{number}", text, banned)
+
+
+def expect_absent(label: str, text: str, needles: tuple[str, ...]) -> None:
+    for needle in needles:
+        expect_true(f"{label}-restates-{needle}", needle not in text)
 
 
 def check_order(store: Books) -> None:
@@ -613,24 +675,46 @@ def table_cells(line: str) -> list[str]:
 def check_readme() -> None:
     text = (ROOT / "README.md").read_text()
     rows = table_rows(text)
-    steps = [row[0] for row in rows]
-    index = steps.index("design")
-    expect("readme-order", steps[index - 1 : index + 2], ["architect", "design", "practices"])
+    index = step_index(rows, "design")
+    expect("readme-order", neighbor_steps(rows, index), ["architect", "design", "practices"])
     expect("readme-cells", rows[index][1:4], ["judge", "none", "—"])
-    does = rows[index][4]
-    for needle in README:
-        expect_true(f"readme-{needle}", needle in does)
+    expect_needles("readme", rows[index][4], README)
     expect_true("readme-old-sentence", "Other languages get no shipped rulebook" not in text)
-    paragraph = text[text.index("Pattern rulebooks live in") :].split("\n\n", 1)[0]
-    for needle in PARAGRAPH:
-        expect_true(f"readme-paragraph-{needle}", needle in paragraph)
+    expect_needles("readme-kept", best_practices(text), KEPT)
+    expect_needles("readme-paragraph", pattern_paragraph(text), PARAGRAPH)
+
+
+def step_index(rows: list[list[str]], name: str) -> int:
+    return [row[0] for row in rows].index(name)
+
+
+def neighbor_steps(rows: list[list[str]], index: int) -> list[str]:
+    return [row[0] for row in rows][index - 1 : index + 2]
+
+
+def best_practices(text: str) -> str:
+    start = text.index("## Best practices")
+    return text[start : text.index("\n## ", start + 1)]
+
+
+def pattern_paragraph(text: str) -> str:
+    return text[text.index("Pattern rulebooks live in") :].split("\n\n", 1)[0]
 
 
 def check_task_readmes() -> None:
     template = lines_of(ROOT / "templates" / "tasks-README.md")
-    shipped = next(line for line in template if "specifier, critic, coder" in line)
+    shipped = pipeline_line(template)
     expect_true("task-readmes-design", "architect, design, practices" in shipped)
-    expect_true("task-readmes-frozen", lines_of(ROOT / "tasks" / "README.md") in (template, without_design(template, shipped)))
+    expect("task-readmes-frozen", lines_of(ROOT / "tasks" / "README.md"), without_design(template, shipped))
+    expect_true("task-readme-not-allowed", not readme_allowed())
+
+
+def pipeline_line(lines: list[str]) -> str:
+    return next(line for line in lines if "specifier, critic, coder" in line)
+
+
+def readme_allowed() -> bool:
+    return any(matches("tasks/README.md", pattern) for group in ALLOWED.values() for pattern in group)
 
 
 def lines_of(path: Path) -> list[str]:
@@ -643,8 +727,36 @@ def without_design(lines: list[str], shipped: str) -> list[str]:
 
 
 def check_ported() -> None:
-    ruby = (GUIDANCE / "rb.md").read_text()
-    expect_true("rb-ends-at-RB-48", "RB-48" in ruby and "RB-49" not in ruby)
+    for rev, name in PORTED:
+        expect_blob(rev, name)
+    expect_true("rb-cited-ids", ruby_ids_known())
+    expect_true("no-rb-49", not later_ruby())
+
+
+def expect_blob(rev: str, name: str) -> None:
+    if (GUIDANCE / f"{name}.md").read_text() != git_show(rev, name):
+        raise SystemExit(f"{name}-blob: differs from {rev}:templates/guidance/{name}.md")
+
+
+def git_show(rev: str, name: str) -> str:
+    completed = subprocess.run(
+        ["git", "show", f"{rev}:templates/guidance/{name}.md"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout
+
+
+def ruby_ids_known() -> bool:
+    present = set(re.findall(r"\bRB-\d+\b", (GUIDANCE / "rb.md").read_text()))
+    cited = set(re.findall(r"\bRB-\d+\b", (PATTERNS / "rb.md").read_text()))
+    return bool(cited) and cited <= present
+
+
+def later_ruby() -> bool:
+    return any(LATER_RUBY.search(path.read_text()) for path in GUIDANCE.rglob("*.md"))
 
 
 def main() -> None:
@@ -658,6 +770,7 @@ def main() -> None:
     check_releases(store)
     check_required(store)
     check_citations(store)
+    check_ruby_cites(store)
     check_order(store)
     check_flavour(store)
     check_shipped(store)

@@ -485,6 +485,26 @@ def test_alias_attributes_keeps_only_attributes_read_off_a_known_alias() -> None
     assert found == [("marestail.perf.db", "prune")]
 
 
+DRYRUN_DROPPED = ("MODEL", "EFFORT", "SCOPE", "FOCUS")
+DRYRUN_LINE = "remaining plan lines: 0"
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+def test_dryrun_finishes_the_plan(tmp_path: Path) -> None:
+    env = {key: value for key, value in os.environ.items() if key not in DRYRUN_DROPPED}
+    completed = subprocess.run(
+        ["bash", str(ROOT / "tools" / "dryrun.sh"), str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert last_line(completed.stdout) == DRYRUN_LINE
+
+
 @pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
 def test_tools_test_perf_fails_as_before(script_env: dict[str, str]) -> None:
     completed = run_tools_script("test-perf.py", script_env)
