@@ -442,6 +442,28 @@ def test_run_step_judge(
     assert loop.calls == ([] if expected else [(state, judge)])
 
 
+def test_design_skips_when_only_top_guidance_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    loop = patch(monkeypatch, runner, "run_judge_loop", "looped")
+    write_rulebook_file(tmp_path / "guidance", True)
+    state = make_state(tmp_path)
+    step = cast(Judge, find("design"))
+    outcome = runner.run_step(state, step)
+    assert capsys.readouterr().out == "design: no pattern rulebooks; skipping\n"
+    assert outcome is True
+    assert loop.calls == []
+
+
+def test_design_runs_when_only_patterns_guidance_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    loop = patch(monkeypatch, runner, "run_judge_loop", True)
+    (tmp_path / "guidance" / "patterns").mkdir(parents=True)
+    (tmp_path / "guidance" / "patterns" / "ts.md").write_text("ts")
+    state = make_state(tmp_path)
+    step = cast(Judge, find("design"))
+    assert runner.run_step(state, step) is True
+    assert capsys.readouterr().out == ""
+    assert loop.calls == [(state, step)]
+
+
 def test_design_bounces_to_the_architect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("PASS", None, "ok"))
     worker = patch(monkeypatch, runner, "run_worker", True)

@@ -196,7 +196,7 @@ CANONICAL = {
 }
 BANNED_ANY = ("singleflight", "graceful shutdown", "golang.org/x/sync", "state_functions", "doc comment")
 BANNED_FILE = {
-    "go": ("%w", "errors.Is", "log/slog", "-race"),
+    "go": ("%w", "errors.Is", "log/slog", "-race", "godoc"),
     "er": (
         "a case on a shape this module owns",
         "#mod_state{}",
@@ -368,16 +368,25 @@ ARCHITECT = (
     "one line saying why",
     "A factory or wrapper that hides nothing is the shallow module the role already rejects.",
 )
+ARCHITECT_PARAGRAPH = (
+    "Read `guidance/patterns/*.md` and apply a pattern to the code this task touched only when its trigger is present,"
+    " and only in the rule's form. Never add a dependency. A pattern that needs one goes in the handoff under"
+    " `## Proposals`. Under `## Patterns`, list each pattern you applied as `- <rule id> <file:line>: <what changed>`,"
+    " and each trigger you saw but deliberately did not act on with one line saying why."
+    " A factory or wrapper that hides nothing is the shallow module the role already rejects."
+)
 DESIGN = (
     "guidance/patterns/",
     "## Patterns",
     "## Pre-existing",
     "VERDICT: BOUNCE",
     "VERDICT: PASS",
-    "src/order.ts:4",
-    "src/Walk.cs:10",
-    "src/pool.go:18",
-    "src/old.go:3",
+    "TS-P9 src/order.ts:4",
+    "CS-P16 src/Walk.cs:10",
+    "GO-P27 src/pool.go:18",
+    "- GO-P27 src/old.go:3: Add(1) / go func / defer Done()",
+    "a silent `## Patterns` still passes",
+    "omit that heading when there is nothing to list",
     "plain function",
     "TS-11",
     "TS-15",
@@ -391,6 +400,10 @@ TOML = (
     "the design judge runs between architect and practices unless false",
     "skips repos with no guidance/patterns/*.md",
 )
+TOML_ADDED = [
+    "# [design]",
+    "# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md",
+]
 README = (
     "<rule id> <file:line>",
     "bounces to the architect",
@@ -409,15 +422,17 @@ PARAGRAPH = (
     "The architect reads them",
     "`design` judge reads them and bounces the architect",
     "The `practices` judge does not read them",
-    "ships `er.md`",
-    "`ex.md`",
-    "`rb.md`",
-    "`go.md`",
+    "`er.md` (any `*.erl`)",
+    "`ex.md` (root `mix.exs`)",
+    "`rb.md` (root `Gemfile`)",
+    "`go.md` (root `go.mod`)",
+    "patterns/ts.md",
     "`[design]` key `enabled` defaults to true",
 )
 
 
 class Rule(NamedTuple):
+    prefix: str
     number: int
     name: str
     fields: dict[str, str]
@@ -462,7 +477,7 @@ def bounded(token: str) -> str:
 def fields(body: str) -> dict[str, str]:
     found = {}
     for name in FIELD_NAMES:
-        match = re.search(rf"^\s*{re.escape(name)}: (.+)$", body, re.M)
+        match = re.search(rf"^\s*{re.escape(name)}:\s*(.*)$", body, re.M)
         if match:
             found[name] = match.group(1).strip()
     return found
@@ -476,7 +491,7 @@ def rule_blocks(text: str) -> list[Rule]:
 def rule_at(text: str, starts: list[re.Match[str]], index: int) -> Rule:
     found = starts[index]
     body = text[found.end() : rule_end(starts, index, len(text))]
-    return Rule(int(found.group(2)), found.group(3), fields(body), found.group(0) + body)
+    return Rule(found.group(1), int(found.group(2)), found.group(3), fields(body), found.group(0) + body)
 
 
 def rule_end(starts: list[re.Match[str]], index: int, length: int) -> int:
@@ -502,7 +517,14 @@ def check_shape(language: str, found: list[Rule]) -> None:
     expect(f"{language}-ids", [rule.number for rule in found], list(range(1, len(found) + 1)))
     expect(f"{language}-names", [rule.name for rule in found], NAMES[language])
     for rule in found:
-        expect(f"{language}-{rule.number}-fields", list(rule.fields), list(FIELD_NAMES))
+        check_rule_shape(language, rule)
+
+
+def check_rule_shape(language: str, rule: Rule) -> None:
+    expect(f"{language}-{rule.number}-prefix", rule.prefix, language.upper())
+    expect(f"{language}-{rule.number}-fields", list(rule.fields), list(FIELD_NAMES))
+    for field, value in rule.fields.items():
+        expect_true(f"{language}-{rule.number}-{field}-nonempty", bool(value.strip()))
 
 
 def check_files() -> None:
@@ -568,6 +590,7 @@ def check_citations(store: Books) -> None:
         text = store[language].text
         for number in cited:
             expect_true(f"{language}-cites-{prefix}-{number}", f"{prefix}-{number}" in text)
+    expect_true("ex-P12-cites-EX-12", "EX-12" in rule_of(store, "ex", 12).text)
 
 
 def check_ruby_cites(store: Books) -> None:
@@ -657,6 +680,34 @@ def check_roles() -> None:
     expect_needles("architect", (ROOT / "roles" / "architect.md").read_text(), ARCHITECT)
     expect_needles("design", (ROOT / "roles" / "design.md").read_text(), DESIGN)
     expect_needles("toml", (ROOT / "templates" / "marestail.toml").read_text(), TOML)
+    check_architect_diff()
+    check_toml_diff()
+
+
+def check_architect_diff() -> None:
+    removed, added = git_diff_lines("roles/architect.md")
+    expect("architect-no-deletions", removed, [])
+    expect("architect-added-paragraph", [line for line in added if line.strip()], [ARCHITECT_PARAGRAPH])
+
+
+def check_toml_diff() -> None:
+    removed, added = git_diff_lines("templates/marestail.toml")
+    expect("toml-no-deletions", removed, [])
+    expect("toml-added-block", [line.strip() for line in added if line.strip()], TOML_ADDED)
+
+
+def git_diff_lines(path: str) -> tuple[list[str], list[str]]:
+    completed = subprocess.run(
+        ["git", "diff", "a2f6786", "--", path],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    diff = completed.stdout
+    removed = [line[1:] for line in diff.splitlines() if line.startswith("-") and not line.startswith("---")]
+    added = [line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
+    return removed, added
 
 
 def expect_needles(label: str, text: str, needles: tuple[str, ...]) -> None:
