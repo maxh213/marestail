@@ -13,6 +13,16 @@ TEMPLATES = _install.TEMPLATES
 GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
 CURSOR_GATE = {"command": "marestail gate --hook", "timeout": 900, "loop_limit": 5}
 ROOT = Path(__file__).resolve().parent.parent
+INSTALLED_DIRECTORIES = [
+    ".agents",
+    ".claude",
+    ".cursor",
+    ".grok",
+    ".grok/hooks",
+    "guidance",
+    "guidance/patterns",
+    "tasks",
+]
 INSTALL_HARD_CASES = (
     "full_install_creates_gate",
     "hard_install_creates_neither",
@@ -55,11 +65,17 @@ def assert_matches_template(target: Path, relative: str) -> None:
     assert (target / relative).read_text() == (TEMPLATES / relative).read_text()
 
 
+def relative_directories(root: Path) -> list[str]:
+    found = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()]
+    return sorted(found)
+
+
 def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert install.install(target) == 0
     for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
         assert (target / name).read_text() == (TEMPLATES / name).read_text()
     assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
     assert not (target / "guidance" / "cs.md").exists()
     guidance = sorted(str(path.relative_to(target / "guidance")) for path in (target / "guidance").rglob("*.md"))
     assert guidance == ["patterns/ts.md", "ts.md"]
@@ -170,8 +186,15 @@ def test_classic_installs_leave_the_git_exclude_alone(home: Path, git_repo: Path
 def test_install_twice_changes_nothing(home: Path, target: Path) -> None:
     assert install.install(target, gitignore_generated=True) == 0
     before = {path: path.read_text() for path in target.rglob("*") if path.is_file()}
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
     install.install(target, gitignore_generated=True)
     assert {path: path.read_text() for path in target.rglob("*") if path.is_file()} == before
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
+
+
+def test_copy_templates_directory_names(target: Path) -> None:
+    _install.copy_templates(target)
+    assert relative_directories(target) == ["guidance", "guidance/patterns", "tasks"]
 
 
 def test_install_is_classic_unless_hyper_is_asked(home: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:

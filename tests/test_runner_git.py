@@ -1,4 +1,6 @@
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from marestail.runner import Run
 from tests.conftest import commit_all, git
 
 LABEL = "m e"
+STAMP_WAIT = 2
 
 
 def make_state(root: Path, **fields: Any) -> Run:
@@ -551,16 +554,28 @@ def test_archive_handoffs_when_the_runs_folder_exists(tmp_path: Path, monkeypatc
     assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "h"
 
 
+def archive_report(state: Run, text: str) -> None:
+    state.next_report("coder").write_text(text)
+    runner.archive_handoffs(state)
+
+
+def finished(action: Callable[[], None]) -> bool:
+    worker = threading.Thread(target=action, daemon=True)
+    worker.start()
+    worker.join(STAMP_WAIT)
+    return not worker.is_alive()
+
+
 def test_archive_handoffs_keeps_a_repeated_stamp_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(perf_trees, "archive_start", lambda *args: None)
     monkeypatch.setattr(time, "strftime", lambda fmt: "now")
     state = make_state(tmp_path)
-    state.next_report("coder").write_text("one")
-    runner.archive_handoffs(state)
-    state.next_report("coder").write_text("two")
-    runner.archive_handoffs(state)
+    archive_report(state, "one")
+    archive_report(state, "two")
+    assert finished(lambda: archive_report(state, "three"))
     assert (state.folder / "handoffs-now" / "01-coder.md").read_text() == "one"
     assert (state.folder / "handoffs-now-1" / "01-coder.md").read_text() == "two"
+    assert (state.folder / "handoffs-now-2" / "01-coder.md").read_text() == "three"
 
 
 def test_frozen_changes_under_hyper_freeze_files_that_are_neither_source_nor_test(repo: Path) -> None:
