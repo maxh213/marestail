@@ -111,7 +111,12 @@ Feature: Runs write one event line at every step boundary
   no `proposal` line.
 
   `run-end` is written after the ending line is printed and before
-  `proposals_summary`. `archive` is the repo-relative directory
+  `proposals_summary`. On a completed run `archive_handoffs` has already moved
+  the handoffs, so the summary globs an empty directory, returns `""`, and
+  stdout ends `pipeline complete\n\n` with no
+  `## Config changes the agents asked for and were refused`. That heading is
+  printed only when the run stops before `complete_pipeline`, while the
+  handoffs directory is still there. `archive` is the repo-relative directory
   `archive_handoffs` actually moved the handoffs to, or null. `stopped_at` is
   the window role `run_steps` was on, or null when the run completed or failed
   before any step. During a rework the worker's own events still name the
@@ -279,9 +284,30 @@ Feature: Runs write one event line at every step boundary
     And the proposal path is ".marestail/handoffs/t/02-proposal.md" and files is ["marestail.toml"]
     And 01-specifier's head is the revert commit, whose subject is "[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal"
     And stdout contains "marestail.toml: frozen, reverted. Your reason was recorded as .marestail/handoffs/t/02-proposal.md for a human to consider after the run. Find a way within the current configuration."
-    And stdout contains "## Config changes the agents asked for and were refused"
-    And that summary is printed after run-end is in the file
+    And `proposals_summary` runs only after run-end is in the file, and the text it returns is empty
+    And stdout ends with "pipeline complete\n\n" and does not contain "## Config changes the agents asked for and were refused"
     And the archived folder contains "02-proposal.md", while the proposal event still names the handoffs path
+
+  Scenario: a stopped justified edit keeps the proposal and prints the heading
+    Given `--from specifier --to specifier` and `--retries 1`
+    When the only specifier invoke commits the same justified "marestail.toml" edit and writes no second success
+    Then the events are exactly:
+      | event | step | marker |
+      | run-start | - | - |
+      | step-start | 01-specifier | - |
+      | proposal | 01-specifier | - |
+      | step-end | 01-specifier | stopped |
+      | run-end | - | stopped |
+    And there is one specifier attempt, and it is attempt 1
+    And the repeat guard does not fire, because one attempt cannot make three identical shapes
+    And the proposal path is ".marestail/handoffs/t/02-proposal.md" and files is ["marestail.toml"]
+    And the step-end head's subject is "[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal"
+    And run-end has exit_code 1, stopped_at "specifier", reason "specifier used all 1 attempts" and archive null
+    And ".marestail/handoffs/t" remains, "02-proposal.md" is still in it, and nothing was archived
+    And stdout contains "marestail.toml: frozen, reverted. Your reason was recorded as .marestail/handoffs/t/02-proposal.md for a human to consider after the run. Find a way within the current configuration."
+    And stdout contains "## Config changes the agents asked for and were refused" after "pipeline stopped at specifier"
+    And stdout does not contain "used all"
+    And that summary is printed after run-end is in the file
 
   Scenario: a frozen edit without a justification, and a dirty one, write no proposal
     Given `--from specifier --to specifier` and `--retries 1`

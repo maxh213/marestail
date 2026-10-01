@@ -20,7 +20,7 @@ The script fails until the events writer, the runner wiring, the freeze entry, t
 
 8. `retries ok`. Coder, gate failing `py.tests`. `--retries 1`: one `01-coder` `stopped`, reason `coder used all 1 attempts`, stdout contains `GATE FAILED: py.tests` and `pipeline stopped at coder` and not `used all 1 attempts`. `--retries 2` with two missing handoffs: `failed` then `stopped`, reason `coder used all 2 attempts`. `--retries 3` with three: the third is `stopped` and the reason is the coder repeat-guard line, not `used all 3 attempts`. `--retries 2` with a failure, then a handoff, a passing gate, and `runner.audit.problems` returning []: `failed`, `done`, `run-end` complete, exit 0. Without that audit stub the second outcome is `stopped` and the reason is `coder used all 2 attempts`, because the handoff exists and the fresh test repo has no `features/*.feature`.
 
-9. `proposal ok`. First specifier appends `\n\n[events]\nkeep = false\n` to `marestail.toml`, commits it, and writes `## Config change` / `Allow the events file.` Then `proposal` for `01-specifier`, path `.marestail/handoffs/t/02-proposal.md`, files `["marestail.toml"]`, step-end `failed` whose subject is `[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal`. Then `03-specifier` done, `04-critic` pass, `run-end` complete. Stdout contains the `frozen, reverted` sentence with that proposal path, and the refused-changes summary is printed after `run-end`. The archive contains `02-proposal.md`. The event path is still the handoffs path.
+9. `proposal ok`. First specifier appends `\n\n[events]\nkeep = false\n` to `marestail.toml`, commits it, and writes `## Config change` / `Allow the events file.` Then `proposal` for `01-specifier`, path `.marestail/handoffs/t/02-proposal.md`, files `["marestail.toml"]`, step-end `failed` whose subject is `[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal`. Then `03-specifier` done, `04-critic` pass, `run-end` complete. Stdout contains the `frozen, reverted` sentence with that proposal path. `proposals_summary` runs after `run-end` is in the file and the text it returns is empty: stdout ends `pipeline complete\n\n` and does not contain `## Config changes the agents asked for and were refused`. The archive contains `02-proposal.md`. The event path is still the handoffs path. A second run, `--from specifier --to specifier` and `--retries 1`, makes only that justified edit and does not succeed again. One `01-specifier` attempt, outcome `stopped`, reason `specifier used all 1 attempts` (one attempt cannot trip the repeat guard). `archive` is null. `.marestail/handoffs/t/02-proposal.md` remains and is not archived. Stdout contains the frozen-reverted sentence and, after `pipeline stopped at specifier`, the refused-changes heading, and does not contain `used all`. The summary still runs after `run-end`.
 
 10. `plain ok`. `--retries 1`. A committed toml change whose handoff has no `## Config change` writes no proposal. The head subject is `[claude/m] Revert change to frozen files by 01-specifier` and does not contain `recorded as a proposal`. Stdout contains `marestail.toml is frozen for specifier; reverted. Work within the current configuration.` A dirty uncommitted toml writes no proposal and no revert. Stdout contains `marestail.toml is frozen for specifier` and does not contain `reverted`.
 
@@ -696,9 +696,38 @@ def proposal_ok():
     assert (proposal["path"], proposal["files"]) == (".marestail/handoffs/t/02-proposal.md", ["marestail.toml"])
     failed = ends(got["rows"])[0]
     assert git(root, "log", "-1", "--format=%s", failed["head"]) == "[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal"
-    assert "marestail.toml: frozen, reverted. Your reason was recorded as .marestail/handoffs/t/02-proposal.md" in got["out"]
-    assert "## Config changes the agents asked for and were refused" in got["out"]
+    sentence = "marestail.toml: frozen, reverted. Your reason was recorded as .marestail/handoffs/t/02-proposal.md"
+    assert sentence in got["out"]
+    assert got["order"] == ["summary"]
+    assert got["out"].endswith("pipeline complete\n\n")
+    assert "## Config changes the agents asked for and were refused" not in got["out"]
     assert (root / got["rows"][-1]["archive"] / "02-proposal.md").is_file()
+    stopped = make_repo("proposal-stopped")
+
+    def once(state, label, prompt, rebuild=None):
+        commit_toml(stopped)
+        write_report(state, label, "# Specifier handoff\n\n## Config change\nAllow the events file.\n\n## What I did\n\nwrote it\n")
+
+    held = drive(stopped, once, stop="specifier", retries=1)
+    assert held["exc"] is None and held["value"] == 1
+    assert sequence(held["rows"]) == [
+        ("run-start", None, None),
+        ("step-start", "01-specifier", None),
+        ("proposal", "01-specifier", None),
+        ("step-end", "01-specifier", "stopped"),
+        ("run-end", None, "stopped"),
+    ]
+    assert held["rows"][1]["attempt"] == 1
+    assert (held["rows"][2]["path"], held["rows"][2]["files"]) == (".marestail/handoffs/t/02-proposal.md", ["marestail.toml"])
+    subject = git(stopped, "log", "-1", "--format=%s", ends(held["rows"])[0]["head"])
+    assert subject == "[claude/m] Revert change to frozen files by 01-specifier, recorded as a proposal"
+    end = held["rows"][-1]
+    assert (end["exit_code"], end["stopped_at"], end["reason"], end["archive"]) == (1, "specifier", "specifier used all 1 attempts", None)
+    assert (stopped / ".marestail" / "handoffs" / "t" / "02-proposal.md").is_file()
+    assert list((stopped / ".marestail" / "runs" / "t").glob("handoffs-*")) == []
+    assert sentence in held["out"] and "used all" not in held["out"]
+    assert held["out"].index("## Config changes the agents asked for and were refused") > held["out"].index("pipeline stopped at specifier")
+    assert held["order"] == ["summary"]
 
 
 def plain_ok():
