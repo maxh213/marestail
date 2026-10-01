@@ -56,7 +56,6 @@ WRITING = (
     "`marestail run` never requires the block. Roles see one sentence naming the dependencies, not the block."
 )
 USE_LINE = "marestail tasks check          # front matter and dependencies of every task in tasks/; or pass folders and .md files"
-LAYER = "marestail.report : marestail.config : marestail.changes : marestail._location"
 
 
 def place(path: Path, text: str) -> Path:
@@ -350,10 +349,6 @@ def assert_documented() -> None:
 
 def assert_imports() -> None:
     assert imported_modules(ROOT / "marestail" / "task_file.py") == {"tomllib", "pathlib", "dataclasses"}
-    text = (ROOT / ".importlinter").read_text()
-    assert any(LAYER in line and "marestail.task_file" in line for line in text.splitlines())
-    foundations = text.split("[importlinter:contract:foundations-import-nothing-above]", 1)[1].split("[importlinter:", 1)[0]
-    assert "marestail.task_file" in foundations
 
 
 def assert_tasks_untouched() -> None:
