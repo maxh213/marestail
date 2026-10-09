@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ import marestail.reported as reported
 import marestail.runner as runner
 import marestail.timeline as timeline
 from marestail.config import Config
-from marestail.pipeline import Step
+from marestail.pipeline import Judge, Step
 from marestail.report import Result
 from marestail.route import Choice
 from marestail.runner import Run
@@ -251,31 +252,42 @@ def drive(root: Path, plan: Any, **kw: Any) -> dict[str, Any]:
         _restore_drive_state(saved_env, saved)
 
 
+def _attr(owner: Any, name: str) -> Any:
+    return getattr(owner, name)
+
+
+def _set(owner: Any, name: str, value: Any) -> None:
+    setattr(owner, name, value)
+
+
 def _save_drive_state() -> tuple[dict[str, str | None], dict[str, Any]]:
     saved_env = {key: os.environ.get(key) for key in ENV_KEYS}
     for key in ENV_KEYS:
         os.environ.pop(key, None)
+    config_module = _attr(runner, "config_module")
+    nice = _attr(runner, "nice")
+    dandelion = _attr(runner, "dandelion")
     saved = {
-        "load": runner.config_module.load,
-        "apply": runner.nice.apply,
+        "load": config_module.load,
+        "apply": nice.apply,
         "invoke": runner.invoke,
-        "gates": runner.run_gates,
-        "audit": runner.audit.problems,
-        "hunks": runner.hunks.problems,
+        "gates": _attr(runner, "run_gates"),
+        "audit": _attr(runner, "audit").problems,
+        "hunks": _attr(runner, "hunks").problems,
         "backend": runner.run_backend,
-        "elapsed": runner.elapsed,
-        "require": runner.dandelion.require,
-        "choose": runner.dandelion.choose,
+        "elapsed": _attr(runner, "elapsed"),
+        "require": dandelion.require,
+        "choose": dandelion.choose,
         "wait": runner.LIMIT_WAIT_SECONDS,
         "waits": runner.LIMIT_WAITS,
-        "sleep": runner.time.sleep,
+        "sleep": _attr(runner, "time").sleep,
         "rounds": runner.MAX_JUDGE_ROUNDS,
         "summary": runner.proposals_summary,
-        "window": runner.window,
-        "read": runner.task_file.read,
-        "focus": runner.resolve_focus,
-        "hook": runner.hook_focus,
-        "reproduce": reported.visual.reproduce,
+        "window": _attr(runner, "window"),
+        "read": _attr(runner, "task_file").read,
+        "focus": _attr(runner, "resolve_focus"),
+        "hook": _attr(runner, "hook_focus"),
+        "reproduce": _attr(reported, "visual").reproduce,
         "sigterm": signal.getsignal(signal.SIGTERM),
         "sigint": signal.getsignal(signal.SIGINT),
         "stdin": sys.stdin,
@@ -295,12 +307,12 @@ def _install_drive_mocks(
     saved: dict[str, Any],
     kw: dict[str, Any],
 ) -> None:
-    runner.config_module.load = lambda _start: config
-    runner.nice.apply = lambda _config=None: None
+    _set(_attr(runner, "config_module"), "load", lambda _start: config)
+    _set(_attr(runner, "nice"), "apply", lambda _config=None: None)
     if kw.get("invoke", True):
         runner.invoke = _make_drive_invoke(root, task, plan, heads, prompts, kw)
     if kw.get("watch_summary", True) and kw.get("invoke", True):
-        runner.proposals_summary = _make_drive_summary(root, task, out, order, saved["summary"])
+        _set(runner, "proposals_summary", _make_drive_summary(root, task, out, order, saved["summary"]))
     _apply_extra_mocks(kw)
 
 
@@ -356,11 +368,11 @@ _SIMPLE_MOCKS = (
 
 def _module_mock_targets() -> list[tuple[str, Any, str]]:
     return [
-        ("sleep", runner.time, "sleep"),
-        ("audit", runner.audit, "problems"),
-        ("hunks", runner.hunks, "problems"),
-        ("read", runner.task_file, "read"),
-        ("reproduce", reported.visual, "reproduce"),
+        ("sleep", _attr(runner, "time"), "sleep"),
+        ("audit", _attr(runner, "audit"), "problems"),
+        ("hunks", _attr(runner, "hunks"), "problems"),
+        ("read", _attr(runner, "task_file"), "read"),
+        ("reproduce", _attr(reported, "visual"), "reproduce"),
     ]
 
 
@@ -385,7 +397,7 @@ def _map_module_mocks(kw: dict[str, Any]) -> None:
 
 def _set_runner_attr(attr: str, value: Any) -> None:
     if attr in ("require", "choose"):
-        setattr(runner.dandelion, attr, value)
+        _set(_attr(runner, "dandelion"), attr, value)
     else:
         setattr(runner, attr, value)
 
@@ -437,26 +449,27 @@ def _run_drive(
 
 
 def _restore_drive_state(saved_env: dict[str, str | None], saved: dict[str, Any]) -> None:
-    runner.config_module.load = saved["load"]
-    runner.nice.apply = saved["apply"]
+    _set(_attr(runner, "config_module"), "load", saved["load"])
+    _set(_attr(runner, "nice"), "apply", saved["apply"])
     runner.invoke = saved["invoke"]
-    runner.run_gates = saved["gates"]
-    runner.audit.problems = saved["audit"]
-    runner.hunks.problems = saved["hunks"]
+    _set(runner, "run_gates", saved["gates"])
+    _set(_attr(runner, "audit"), "problems", saved["audit"])
+    _set(_attr(runner, "hunks"), "problems", saved["hunks"])
     runner.run_backend = saved["backend"]
-    runner.elapsed = saved["elapsed"]
-    runner.dandelion.require = saved["require"]
-    runner.dandelion.choose = saved["choose"]
+    _set(runner, "elapsed", saved["elapsed"])
+    dandelion = _attr(runner, "dandelion")
+    _set(dandelion, "require", saved["require"])
+    _set(dandelion, "choose", saved["choose"])
     runner.LIMIT_WAIT_SECONDS = saved["wait"]
     runner.LIMIT_WAITS = saved["waits"]
-    runner.time.sleep = saved["sleep"]
+    _set(_attr(runner, "time"), "sleep", saved["sleep"])
     runner.MAX_JUDGE_ROUNDS = saved["rounds"]
     runner.proposals_summary = saved["summary"]
-    runner.window = saved["window"]
-    runner.task_file.read = saved["read"]
-    runner.resolve_focus = saved["focus"]
-    runner.hook_focus = saved["hook"]
-    reported.visual.reproduce = saved["reproduce"]
+    _set(runner, "window", saved["window"])
+    _set(_attr(runner, "task_file"), "read", saved["read"])
+    _set(runner, "resolve_focus", saved["focus"])
+    _set(runner, "hook_focus", saved["hook"])
+    _set(_attr(reported, "visual"), "reproduce", saved["reproduce"])
     signal.signal(signal.SIGTERM, saved["sigterm"])
     signal.signal(signal.SIGINT, saved["sigint"])
     sys.stdin = saved["stdin"]
@@ -822,8 +835,8 @@ def _perf_author_plan(root: Path) -> Callable[..., None]:
 
 def test_perf_authoring_not_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = make_repo(tmp_path / "perf", '[git]\nbase = "main"\n[practices]\nenabled = false\n')
-    monkeypatch.setattr(runner.perf_db, "prepare", lambda *args: None)
-    monkeypatch.setattr(runner.perf_db, "release", lambda *args: None)
+    monkeypatch.setattr(_attr(runner, "perf_db"), "prepare", lambda *args: None)
+    monkeypatch.setattr(_attr(runner, "perf_db"), "release", lambda *args: None)
     got = drive(root, _perf_author_plan(root), start="perf", stop="perf", retries=2)
     assert got["exc"] is None
     assert got["value"] == 0
@@ -968,12 +981,18 @@ def test_judge_round_cap_and_bounce_cap(tmp_path: Path) -> None:
     _check_bounce_cap(tmp_path)
 
 
+def _one_bounce(step: Step) -> Step:
+    if isinstance(step, Judge) and step.name == "critic":
+        return replace(step, bounces=1)
+    return step
+
+
 def _check_bounce_cap(tmp_path: Path) -> None:
     root = make_repo(tmp_path / "cap")
-    real = runner.window
+    real = _attr(runner, "window")
 
     def window(start: Any, stop: Any, mode: Any = None, visual: Any = False) -> list[Step]:
-        return [replace(step, bounces=1) if step.name == "critic" else step for step in real(start, stop, mode, visual)]
+        return [_one_bounce(step) for step in real(start, stop, mode, visual)]
 
     seen = {"n": 0}
 
@@ -1050,7 +1069,8 @@ def test_give_up_keeps_a_written_non_verdict_report(tmp_path: Path) -> None:
 
 def test_run_start_without_writer_is_a_noop(tmp_path: Path) -> None:
     state = Run(config=Config(root=tmp_path, raw={}), task=tmp_path / "t.md", model=None, retries=0)
-    assert runner.record_run_start(state, []) is None
+    start_run: Any = runner.record_run_start
+    assert start_run(state, []) is None
     assert not (tmp_path / ".marestail").exists()
 
 
@@ -1110,7 +1130,9 @@ def _limited(*args: Any) -> tuple[int, str]:
 def _visual_plan(qa_text: str | None = None) -> Callable[..., None]:
     def plan(state: Run, label: str, prompt: str, rebuild: Any = None) -> None:
         role = label.split("-", 1)[1]
-        write_report(state, label, {"visual": "VERDICT: PASS\n", "qa": qa_text}[role])
+        text = {"visual": "VERDICT: PASS\n", "qa": qa_text}[role]
+        assert isinstance(text, str)
+        write_report(state, label, text)
 
     return plan
 
@@ -1286,7 +1308,7 @@ def test_signals_and_exceptions_propagate(tmp_path: Path) -> None:
 def _raising_plan(raised: Any) -> Callable[..., None]:
     def plan(state: Run, label: str, prompt: str, rebuild: Any = None) -> None:
         if raised == "term":
-            handler = signal.getsignal(signal.SIGTERM)
+            handler: Any = signal.getsignal(signal.SIGTERM)
             try:
                 handler(signal.SIGTERM, None)
             except BaseException as caught:
@@ -1302,7 +1324,7 @@ def _run_signal_case(root: Path, raised: Any, kind: type, result: str, code: int
     got = drive(root, _raising_plan(raised), stop="specifier")
     assert isinstance(got["exc"], kind)
     if raised == "term":
-        assert got["exc"].code == 143
+        assert _attr(got["exc"], "code") == 143
     events_list = [row["event"] for row in got["rows"]]
     assert "step-end" not in events_list
     assert events_list[1] == "step-start"
@@ -1355,7 +1377,7 @@ def test_bug_cannot_be_reproduced(tmp_path: Path) -> None:
 
 
 def test_scope_model_effort_branch_values(tmp_path: Path) -> None:
-    def one(name: str, **kw: Any) -> dict[str, Any]:
+    def one(name: str, **kw: Any) -> Any:
         repo_root = kw.pop("root", None) or make_repo(tmp_path / name, kw.pop("toml", BASE_TOML))
         got = drive(repo_root, handoff_plan(HANDOFF_BODY), stop="specifier", **kw)
         assert got["exc"] is None
@@ -1542,26 +1564,45 @@ def _record(calls: list[tuple[str, Any, Any]], name: str, arg: Any, extra: Any) 
     calls.append((name, arg, extra))
 
 
+def _opened(calls: list[tuple[str, Any, Any]], _file: Any, flags: int, mode: int = 0o777) -> int:
+    _record(calls, "open", flags, mode)
+    return 7
+
+
+def _written(calls: list[tuple[str, Any, Any]], fd: Any, data: bytes) -> int:
+    _record(calls, "write", fd, data)
+    return len(data)
+
+
+def _synced(calls: list[tuple[str, Any, Any]], fd: Any) -> None:
+    _record(calls, "fsync", fd, None)
+
+
+def _closed(calls: list[tuple[str, Any, Any]], fd: Any) -> None:
+    _record(calls, "close", fd, None)
+
+
 def _fake_os(calls: list[tuple[str, Any, Any]]) -> dict[str, Any]:
     return {
-        "open": lambda file, flags, mode=0o777: _record(calls, "open", flags, mode) or 7,
-        "write": lambda fd, data: _record(calls, "write", fd, data) or len(data),
-        "fsync": lambda fd: _record(calls, "fsync", fd, None),
-        "close": lambda fd: _record(calls, "close", fd, None),
+        "open": partial(_opened, calls),
+        "write": partial(_written, calls),
+        "fsync": partial(_synced, calls),
+        "close": partial(_closed, calls),
     }
 
 
 def _check_module_os_calls(folder: Path, at: str, line: str) -> None:
     calls: list[tuple[str, Any, Any]] = []
     fakes = _fake_os(calls)
-    saved = {name: getattr(events.os, name) for name in fakes}
+    events_os = _attr(events, "os")
+    saved = {name: getattr(events_os, name) for name in fakes}
     for name, fake in fakes.items():
-        setattr(events.os, name, fake)
+        setattr(events_os, name, fake)
     try:
         events.Log(folder / "flags.jsonl").append("wait", {"reason": "rate-limit", "until": at}, at, 4)
     finally:
         for name, original in saved.items():
-            setattr(events.os, name, original)
+            setattr(events_os, name, original)
     flags, mode = calls[0][1], calls[0][2]
     assert flags & os.O_WRONLY
     assert flags & os.O_APPEND
