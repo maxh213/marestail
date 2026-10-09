@@ -30,7 +30,7 @@ def first_spec_role(roles: list[str]) -> str | None:
     return next((role for role in roles if role in _SPEC_ROLES), None)
 
 
-def unreproduced_reason(role: str) -> str:
+def unreproduced_reason(role: str | None) -> str:
     return f"pipeline stopped before {role}: the bug could not be reproduced"
 
 

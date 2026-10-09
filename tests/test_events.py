@@ -512,6 +512,8 @@ def test_pass_specifier_critic(tmp_path: Path) -> None:
         "m",
         None,
     )
+    starts = [row for row in rows if row["event"] == "step-start"]
+    assert [(row["role"], row["kind"], row["attempt"]) for row in starts] == [("specifier", "worker", 1), ("critic", "judge", 1)]
     spec, critic = ends(rows)
     assert (spec["handoff"], spec["bounce_to"]) == (".marestail/handoffs/t/01-specifier.md", None)
     assert (critic["handoff"], critic["bounce_to"]) == (".marestail/handoffs/t/02-critic.md", None)
@@ -520,6 +522,7 @@ def test_pass_specifier_critic(tmp_path: Path) -> None:
     assert git_run(root, "log", "-1", "--format=%s", critic["head"]) == "[claude/m] critic verdict: PASS"
     finish = rows[-1]
     assert (finish["exit_code"], finish["stopped_at"], finish["reason"]) == (0, None, None)
+    assert finish["head"] == git_run(root, "rev-parse", "HEAD")
     assert ARCHIVE_REGEX.fullmatch(finish["archive"])
     assert got["out"].endswith("pipeline complete\n\n")
     assert got["order"] == ["summary"]
@@ -597,8 +600,16 @@ def test_worker_repeat_guard_stop(tmp_path: Path) -> None:
     assert got["value"] == 1
     assert got["exc"] is None
     pairs = [row for row in got["rows"] if row["event"] in {"step-start", "step-end"}]
-    assert [row["attempt"] for row in pairs if row["event"] == "step-start"] == [1, 2, 3]
-    assert [row["outcome"] for row in pairs if row["event"] == "step-end"] == ["failed", "failed", "stopped"]
+    assert [(row["role"], row["kind"], row["attempt"]) for row in pairs if row["event"] == "step-start"] == [
+        ("specifier", "worker", 1),
+        ("specifier", "worker", 2),
+        ("specifier", "worker", 3),
+    ]
+    assert [(row["role"], row["attempt"], row["outcome"]) for row in pairs if row["event"] == "step-end"] == [
+        ("specifier", 1, "failed"),
+        ("specifier", 2, "failed"),
+        ("specifier", 3, "stopped"),
+    ]
     assert all(row["step"] == "01-specifier" and row["handoff"] is None for row in ends(got["rows"]))
     end = got["rows"][-1]
     assert (end["result"], end["stopped_at"], end["reason"], end["archive"]) == (
@@ -630,7 +641,9 @@ def _retries_once(
     extra: dict[str, Any] = {"audit": audit} if audit is not None else {}
     got = drive(root, plan, start="coder", stop="coder", retries=retries, gates=gates, **extra)
     assert got["exc"] is None
-    assert [row["outcome"] for row in ends(got["rows"])] == outcomes
+    assert [(row["role"], row["attempt"], row["outcome"]) for row in ends(got["rows"])] == [
+        ("coder", index, outcome) for index, outcome in enumerate(outcomes, 1)
+    ]
     end = got["rows"][-1]
     if complete:
         assert (end["result"], got["value"]) == ("complete", 0)
@@ -1283,6 +1296,7 @@ def test_events_directory_warns_once(tmp_path: Path) -> None:
     assert first["value"] == second["value"] == 0
     assert second["err"].count("\n") == 1
     assert second["err"].startswith("warning: cannot write run events to ")
+    assert "Is a directory" in second["err"]
     assert "events.jsonl" in second["err"]
     third = drive(other, passing(other), elapsed=lambda started: 0, boundary=False, shape=False, watch_summary=False)
     assert third["err"].count("\n") == 1
@@ -1314,6 +1328,7 @@ def _raising_plan(raised: Any) -> Callable[..., None]:
             except BaseException as caught:
                 assert not isinstance(caught, Exception)
                 assert not isinstance(caught, (SystemExit, KeyboardInterrupt))
+                assert caught.args == (signal.SIGTERM,)
                 raise
         raise raised
 
@@ -1537,6 +1552,23 @@ def _check_task_and_role_failures(root: Path) -> None:
     )
 
 
+def test_step_end_without_timeline_writes_nothing(tmp_path: Path) -> None:
+    root = tmp_path / "bare"
+    root.mkdir()
+    path = root / "events.jsonl"
+    state = Run(
+        config=Config(root=root, raw={}),
+        task=root / "tasks" / "t.md",
+        model="m",
+        retries=0,
+        events=events.Log(path),
+        last_report=root / "01-specifier.md",
+    )
+    runner.record_step_end(state, "specifier", 1, "done", None)
+    assert state.last_timeline_step is None
+    assert not path.exists()
+
+
 def test_module_writes_bytes(tmp_path: Path) -> None:
     folder = tmp_path / "module"
     folder.mkdir()
@@ -1625,7 +1657,10 @@ def _check_module_warning(folder: Path, at: str) -> None:
         blocked.append("wait", {"reason": "rate-limit", "until": at}, at, 4)
         blocked.append("wait", {"reason": "rate-limit", "until": at}, at, 4)
         events.Log(directory).append("wait", {"reason": "rate-limit", "until": at}, at, 4)
-    assert warned.getvalue().count("warning: cannot write run events to ") == 2
+    text = warned.getvalue()
+    assert text.count("warning: cannot write run events to ") == 2
+    assert text.count("Is a directory") == 2
+    assert blocked._warned is True
 
 
 def _check_module_source() -> None:

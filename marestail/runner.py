@@ -156,6 +156,7 @@ class Run:
     events: events_module.Log | None = None
     current_step: str | None = None
     stop_reason: str | None = None
+    ending_line: str = ""
     last_timeline_step: dict[str, Any] | None = None
     last_report: Path | None = None
 
@@ -297,11 +298,11 @@ def _run_pipeline_steps(state: Run, steps: list[Step], auto: bool) -> int:
     state.reproduction, reproduced = reported.reproduce_first(state.config, state.task, roles)
     if reproduced:
         return run_steps(state, steps, auto)
-    return _stop_unreproduced(state, steps, roles)
+    return _stop_unreproduced(state, roles)
 
 
-def _stop_unreproduced(state: Run, steps: list[Step], roles: list[str]) -> int:
-    role = reported.first_spec_role(roles) or steps[0].name
+def _stop_unreproduced(state: Run, roles: list[str]) -> int:
+    role = reported.first_spec_role(roles)
     record_run_end(state, "stopped", 1, role, reported.unreproduced_reason(role), None)
     return 1
 
@@ -534,16 +535,14 @@ def run_steps(state: Run, steps: list[Step], auto: bool) -> int:
 def complete_pipeline(state: Run, steps: list[Step]) -> int:
     archive = archive_handoffs(state)
     code = ending_for(state, steps)
-    reason = completion_reason(code, state, steps)
+    reason = completion_reason(code, state.ending_line)
     record_run_end(state, "complete", code, None, reason, archive)
     return code
 
 
-def completion_reason(code: int, state: Run, steps: list[Step]) -> str | None:
+def completion_reason(code: int, line: str) -> str | None:
     if code == 0:
         return None
-    against = (state.ran_against or "nothing") if includes_qa(steps) else "app"
-    line, _ = ran_against.finish(against, not state.unseen)
     return line
 
 
@@ -556,15 +555,23 @@ def say_complete(by_eye: bool = True) -> int:
 
 
 def ending_for(state: Run, steps: list[Step]) -> int:
-    if not includes_qa(steps):
-        return say_complete(not state.unseen)
-    return qa_ending(state.ran_against or "nothing", not state.unseen)
+    code = say_complete(not state.unseen) if not includes_qa(steps) else qa_ending(state.ran_against or "nothing", not state.unseen)
+    state.ending_line = _spoken[0]
+    return code
 
 
 def qa_ending(against: str, by_eye: bool = True) -> int:
     line, code = ran_against.finish(against, by_eye)
     print(line)
+    _remember(line)
     return code
+
+
+def _remember(line: str) -> None:
+    _spoken[:] = [line]
+
+
+_spoken: list[str] = []
 
 
 def paused(state: Run, step: Step, auto: bool) -> bool:

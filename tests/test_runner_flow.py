@@ -534,6 +534,12 @@ def test_latest_qa_text_and_read(tmp_path: Path) -> None:
     assert runner.read_qa_ran_against(state) == "harness"
 
 
+def test_completion_reason_is_the_printed_line() -> None:
+    assert runner.completion_reason(0, "pipeline complete") is None
+    assert runner.completion_reason(3, "pipeline complete, NOT verified by eye") == "pipeline complete, NOT verified by eye"
+    assert runner.completion_reason(1, "pipeline complete") == "pipeline complete"
+
+
 def test_qa_ending_and_not_verified(capsys: Any) -> None:
     harness_line, harness_code = ran_against.finish("harness", True)
     nothing_line, nothing_code = ran_against.finish("nothing", True)
@@ -552,7 +558,9 @@ def test_includes_qa_and_ending_for(tmp_path: Path, capsys: Any) -> None:
     assert runner.includes_qa([find("coder")]) is False
     assert runner.includes_qa([find("qa")]) is True
     state = make_state(tmp_path)
+    assert state.ending_line == ""
     assert runner.ending_for(state, [find("coder")]) == 0
+    assert state.ending_line == COMPLETE_LINE
     assert capsys.readouterr().out == f"{COMPLETE_LINE}\n"
     state.ran_against = "harness"
     assert runner.ending_for(state, [find("qa")]) == 3

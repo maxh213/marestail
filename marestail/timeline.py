@@ -23,11 +23,16 @@ def time_plus(stamp: str, seconds: int) -> str:
 
 
 def duration_seconds(started_at: str, ended_at: str) -> float:
-    return round((_parse_stamp(ended_at) - _parse_stamp(started_at)).total_seconds(), 3)
+    return _whole_ms(started_at, ended_at) / 1000
+
+
+def _whole_ms(started_at: str, ended_at: str) -> int:
+    delta = _parse_stamp(ended_at) - _parse_stamp(started_at)
+    return round(delta.total_seconds() * 1000)
 
 
 def _parse_stamp(stamp: str) -> datetime:
-    return datetime.strptime(stamp, _STAMP + "Z").replace(tzinfo=UTC)
+    return datetime.strptime(stamp[:-1], _STAMP)
 
 
 def verdict_text(verdict: str, target: str | None) -> str:

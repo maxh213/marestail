@@ -43,14 +43,14 @@ class Log:
             self._warn(err)
 
     def _warn(self, err: OSError) -> None:
-        if not self._warned:
+        if self._warned is False:
             self._warned = True
             sys.stderr.write(f"warning: cannot write run events to {self.path}: {err}\n")
 
 
 def _encoded_line(event: str, fields: dict[str, Any], at: str, pid: int) -> bytes:
     data = {"v": 1, "at": at, "event": event, "pid": pid, **_payload(event, fields)}
-    return (json.dumps(data) + "\n").encode("utf-8")
+    return (json.dumps(data) + "\n").encode()
 
 
 def _payload(event: str, fields: dict[str, Any]) -> dict[str, Any]:
