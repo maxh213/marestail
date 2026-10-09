@@ -635,6 +635,9 @@ def test_suite_passes_without_network_or_agent_clis(tmp_path: Path) -> None:
         pytest.skip("already hermetic")
     if shutil.which("unshare") is None:
         pytest.skip("unshare is not installed")
+    probe = subprocess.run(["unshare", "-r", "-n", "true"], capture_output=True, timeout=30)
+    if probe.returncode != 0:
+        pytest.skip("user namespaces are not permitted")
     home = tmp_path / "home"
     home.mkdir()
     env = ["HOME=" + str(home), "PATH=" + str(hermetic_bin(tmp_path / "bin")), "MARESTAIL_HERMETIC=1"]
