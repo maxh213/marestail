@@ -544,6 +544,9 @@ def test_completion_reason_is_the_printed_line(tmp_path: Path) -> None:
     assert runner.completion_reason(-1, state, steps) == "kept from the printed line"
     state.ending_line = "pipeline complete"
     assert runner.completion_reason(1, state, steps) == "pipeline complete"
+    assert runner.completion_reason(3, state) == "pipeline complete"
+    assert runner.completion_reason(0, state) is None
+    assert runner.completion_reason(3, state, None) == "pipeline complete"
     assert runner.completion_reason(3, state, steps) != ran_against.finish("harness", True)[0]
 
 

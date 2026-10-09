@@ -535,12 +535,12 @@ def run_steps(state: Run, steps: list[Step], auto: bool) -> int:
 def complete_pipeline(state: Run, steps: list[Step]) -> int:
     archive = archive_handoffs(state)
     code = ending_for(state, steps)
-    reason = completion_reason(code, state, steps)
+    reason = completion_reason(code, state)
     record_run_end(state, "complete", code, None, reason, archive)
     return code
 
 
-def completion_reason(code: int, state: Run, _steps: list[Step]) -> str | None:
+def completion_reason(code: int, state: Run, _steps: list[Step] | None = None) -> str | None:
     if code == 0:
         return None
     return state.ending_line
