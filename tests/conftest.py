@@ -12,6 +12,8 @@ from marestail.config import Config
 from marestail.context import Context
 from marestail.report import Result
 
+os.environ["MARESTAIL_REMOTE"] = "0"
+
 Reply = tuple[int, str]
 MUTMUT_COPIES = (
     "templates",
