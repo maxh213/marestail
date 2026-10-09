@@ -25,3 +25,5 @@ Run from the marestail-green checkout. `bash bin/marestail` is the command. Noth
 11. Python rulebook. `marestail install` on an existing directory whose only file is an empty `pyproject.toml` leaves `guidance/py.md` containing `## Python-native idioms`, and stdout ends with `installed into <dir>; edit marestail.toml and sonar-project.properties`. The same command on an existing empty directory leaves no `guidance/py.md`.
 
 12. Removed helpers. `python3 -c "import marestail.tui.collect as c, marestail.gates.ts_tests as t; assert not any(hasattr(c, n) for n in ('list_dirs','self_repo','log_name')); assert not any(hasattr(t, n) for n in ('failures','empty_failures'))"` exits 0.
+
+13. Docs. The README "Environment variables" section contains `` `USER` `` and says it is the ssh user when `remote.toml` has no `user` key, otherwise `max`. `bash bin/marestail gate --tier fast --only docs` exits 0 and ends `GATE PASSED`. `guidance/` still contains only `ts.md` and `cs.md`. `templates/guidance/py.md` still exists. The README does not contain the backtick path `` `guidance/py.md` ``.

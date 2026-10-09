@@ -15,7 +15,9 @@ Feature: The merge of main is green
     And the result lines, in order, are py.tests, py.crap, py.lint, py.deps, py.runtime, comments, depth, deadcode, docs, py.mutation, sonar
     And every result line matches "^\[(ok  |FAIL)\] .{14}.+  \(\d+\.\d+s\)$"
     And every result line starts with "[ok  ]"
-    And passing this command is the proof that ruff, mypy --strict, coverage and mutant killing are clean, including the split of playwright_failures, playwright_spec_findings, count_tests, run_mutation, ensure_up, status_command and running_jobs
+    And passing this command is the proof that ruff, mypy --strict, coverage and mutant killing are clean
+    And the functions over complexity 4 are split: playwright_failures, playwright_spec_findings, count_tests, run_mutation, ensure_up, status_command, running_jobs, walk_beds and remote_label
+    And deadcode is clean, so offloads in marestail/remote.py and has_marestail in marestail/tui/collect.py are called or gone
 
   Scenario: the scripts that pin the merged features still pass
     When I run each script below with the repo on PYTHONPATH
@@ -171,6 +173,16 @@ Feature: The merge of main is green
     Given an existing empty directory
     When I run "marestail install <that directory>"
     Then guidance/py.md does not exist
+
+  Scenario: docs match the code without new rulebooks in this repo
+    When I read the "Environment variables" section of "README.md"
+    Then it lists `USER` as the ssh user on the box when remote.toml has no user key, and `max` when USER is unset
+    And it still lists every variable features/000-green-the-repo.feature names
+    When I run "marestail gate --tier fast --only docs"
+    Then the exit code is 0 and the output ends with "GATE PASSED"
+    And this repo's guidance/ still contains only guidance/ts.md and guidance/cs.md
+    And the shipped rulebooks stay templates/guidance/py.md, templates/guidance/rb.md, templates/guidance/er.md, templates/guidance/ex.md and templates/guidance/go.md
+    And README no longer cites a missing backtick path such as guidance/py.md
 
   Scenario: helpers the merge removed stay removed
     Then marestail.tui.collect has no list_dirs, self_repo or log_name
