@@ -19,21 +19,25 @@ _LAST = -1
 
 
 def reproduce_first(config: Config, task: Path, roles: list[str]) -> tuple[Reproduction | None, bool]:
-    first = _first_spec_role(roles)
+    first = first_spec_role(roles)
     report = visual.bug_report(config, task) if first is not None else None
     if first is None or report is None:
         return None, True
     return _reproduced(config, report, first)
 
 
-def _first_spec_role(roles: list[str]) -> str | None:
+def first_spec_role(roles: list[str]) -> str | None:
     return next((role for role in roles if role in _SPEC_ROLES), None)
+
+
+def unreproduced_reason(role: str) -> str:
+    return f"pipeline stopped before {role}: the bug could not be reproduced"
 
 
 def _reproduced(config: Config, report: visual.Report, first: str) -> tuple[Reproduction | None, bool]:
     reproduction = visual.reproduce(config, report)
     if reproduction is None:
-        print(f"pipeline stopped before {first}: the bug could not be reproduced")
+        print(unreproduced_reason(first))
     return reproduction, reproduction is not None
 
 

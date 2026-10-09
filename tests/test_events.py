@@ -14,6 +14,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import marestail.events as events
 import marestail.freeze as freeze
 import marestail.reported as reported
@@ -818,15 +820,11 @@ def _perf_author_plan(root: Path) -> Callable[..., None]:
     return plan
 
 
-def test_perf_authoring_not_step(tmp_path: Path) -> None:
+def test_perf_authoring_not_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = make_repo(tmp_path / "perf", '[git]\nbase = "main"\n[practices]\nenabled = false\n')
-    saved = (runner.perf_db.prepare, runner.perf_db.release)
-    runner.perf_db.prepare = lambda *args: None
-    runner.perf_db.release = lambda *args: None
-    try:
-        got = drive(root, _perf_author_plan(root), start="perf", stop="perf", retries=2)
-    finally:
-        runner.perf_db.prepare, runner.perf_db.release = saved
+    monkeypatch.setattr(runner.perf_db, "prepare", lambda *args: None)
+    monkeypatch.setattr(runner.perf_db, "release", lambda *args: None)
+    got = drive(root, _perf_author_plan(root), start="perf", stop="perf", retries=2)
     assert got["exc"] is None
     assert got["value"] == 0
     assert got["out"].count("   perf-author-1: benches unchanged") == 2
@@ -1565,7 +1563,10 @@ def _check_module_os_calls(folder: Path, at: str, line: str) -> None:
         for name, original in saved.items():
             setattr(events.os, name, original)
     flags, mode = calls[0][1], calls[0][2]
-    assert flags & os.O_WRONLY and flags & os.O_APPEND and flags & os.O_CREAT and mode == 0o644
+    assert flags & os.O_WRONLY
+    assert flags & os.O_APPEND
+    assert flags & os.O_CREAT
+    assert mode == 0o644
     assert calls[1][0] == "write"
     assert calls[1][2] == line.encode()
     assert ("fsync", 7, None) in calls
