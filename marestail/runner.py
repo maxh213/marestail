@@ -8,7 +8,6 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -341,23 +340,6 @@ def repo_path(path: Path | str, root: Path) -> str:
         return str(resolved)
 
 
-_STAMP = "%Y-%m-%dT%H:%M:%S.%fZ"
-_STAMP_OUT = "%Y-%m-%dT%H:%M:%S.%f"
-
-
-def _parse_stamp(stamp: str) -> datetime:
-    return datetime.strptime(stamp, _STAMP).replace(tzinfo=UTC)
-
-
-def time_plus(stamp: str, seconds: int) -> str:
-    return (_parse_stamp(stamp) + timedelta(seconds=seconds)).strftime(_STAMP_OUT)[:-3] + "Z"
-
-
-def duration_seconds(started_at: str, ended_at: str) -> float:
-    elapsed = (_parse_stamp(ended_at) - _parse_stamp(started_at)).total_seconds()
-    return round(elapsed, 3)
-
-
 def current_branch(config: Config) -> str | None:
     code, output = run([GIT, "branch", "--show-current"], cwd=config.root)
     name = output.strip()
@@ -446,7 +428,7 @@ def step_end_fields(
         "bounce_to": bounce_to,
         "head": head(config),
         "handoff": handoff_path(report, config.root),
-        "seconds": duration_seconds(tstep["started_at"], tstep["ended_at"]),
+        "seconds": timeline.duration_seconds(tstep["started_at"], tstep["ended_at"]),
     }
 
 
@@ -1654,7 +1636,7 @@ def record_wait(state: Run, reason: str) -> None:
     if state.events is None:
         return
     at = timeline.utc_now()
-    _append_event(state, "wait", {"reason": reason, "until": time_plus(at, LIMIT_WAIT_SECONDS)}, at)
+    _append_event(state, "wait", {"reason": reason, "until": timeline.time_plus(at, LIMIT_WAIT_SECONDS)}, at)
 
 
 def record_proposal(state: Run, report: Path, proposal: Path, frozen: list[str]) -> None:

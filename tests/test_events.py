@@ -1557,6 +1557,7 @@ def test_module_writes_bytes(tmp_path: Path) -> None:
     )
     assert '"stopped_at": null' in other.read_text()
     _check_module_os_calls(folder, at, line)
+    _check_schema(folder, at)
     _check_module_source()
 
 
@@ -1643,6 +1644,24 @@ def _check_module_source() -> None:
     assert "os.environ" not in source
 
 
+def _check_schema(folder: Path, at: str) -> None:
+    path = folder / "order.jsonl"
+    events.Log(path).append("wait", {"until": at, "extra": True, "reason": "rate-limit"}, at, 4)
+    line = (
+        '{"v": 1, "at": "2026-09-28T14:03:07.412Z", "event": "wait", "pid": 4, '
+        '"reason": "rate-limit", "until": "2026-09-28T14:03:07.412Z"}\n'
+    )
+    assert path.read_text() == line
+    events.Log(path).append("wait", {}, at, 4)
+    missing = json.loads(path.read_text().splitlines()[1])
+    assert list(missing) == ["v", "at", "event", "pid", "reason", "until"]
+    assert missing["reason"] is None
+    assert missing["until"] is None
+    other = folder / "later.jsonl"
+    events.Log(other).append("later", {"z": 1, "a": 2}, at, 4)
+    assert other.read_text() == '{"v": 1, "at": "2026-09-28T14:03:07.412Z", "event": "later", "pid": 4, "z": 1, "a": 2}\n'
+
+
 def test_timeline_freeze_imports_readme(tmp_path: Path) -> None:
     folder = tmp_path / "timeline"
     folder.mkdir()
@@ -1655,6 +1674,7 @@ def test_timeline_freeze_imports_readme(tmp_path: Path) -> None:
     assert "verdict" not in returned
     assert returned["ended_at"] == data["steps"][0]["ended_at"]
     _check_freeze_paths()
+    _check_importlinter_contracts()
     _check_readme_content()
 
 
@@ -1664,6 +1684,38 @@ def _check_freeze_paths() -> None:
     assert freeze.frozen_paths(config, "coder", old) == old[:2]
     paths = [*old[:2], ".marestail/runs/t/events.jsonl", "src/a.py"]
     assert freeze.frozen_paths(config, "coder", paths) == [*old[:2], ".marestail/runs/t/events.jsonl"]
+
+
+def _module_line(line: str, which: str, taking: bool) -> tuple[bool, list[str]]:
+    key = line.split("=")[0].strip()
+    if key in {"source_modules", "forbidden_modules"}:
+        return key == which, []
+    if not line.startswith("    "):
+        return False, []
+    return (taking, [line.strip()]) if taking else (False, [])
+
+
+def _contract_modules(text: str, name: str, which: str) -> list[str]:
+    body = text.split(f"[importlinter:contract:{name}]", 1)[1].split("\n[", 1)[0]
+    modules: list[str] = []
+    taking = False
+    for line in body.splitlines():
+        taking, added = _module_line(line, which, taking)
+        modules.extend(added)
+    return modules
+
+
+def _check_importlinter_contracts() -> None:
+    text = (ROOT / ".importlinter").read_text()
+    layer = next(
+        line for line in text.splitlines() if "marestail.report : marestail.config : marestail.changes : marestail._location" in line
+    )
+    assert "marestail.events" in layer
+    assert "marestail.task_file" in layer
+    assert "marestail.events" in _contract_modules(text, "foundations-import-nothing-above", "source_modules")
+    assert set(_contract_modules(text, "events-stays-below-runner", "forbidden_modules")) == set(
+        _contract_modules(text, "timeline-stays-below-runner", "forbidden_modules")
+    )
 
 
 def _check_readme_content() -> None:

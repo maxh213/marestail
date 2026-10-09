@@ -1,20 +1,33 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from marestail.report import Result
 from marestail.shell import ensure_dir
 
-__all__ = ["record", "utc_now", "verdict_text"]
+__all__ = ["duration_seconds", "record", "time_plus", "utc_now", "verdict_text"]
 
 _JSON_NAME = "timeline.json"
 _MD_NAME = "timeline.md"
+_STAMP = "%Y-%m-%dT%H:%M:%S.%f"
 _STEP_KEYS = ("id", "role", "attempt", "started_at", "ended_at", "gate", "waits", "agent", "verdict", "commits", "files", "done")
 
 
 def utc_now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime(_STAMP)[:-3] + "Z"
+
+
+def time_plus(stamp: str, seconds: int) -> str:
+    return (_parse_stamp(stamp) + timedelta(seconds=seconds)).strftime(_STAMP)[:-3] + "Z"
+
+
+def duration_seconds(started_at: str, ended_at: str) -> float:
+    return round((_parse_stamp(ended_at) - _parse_stamp(started_at)).total_seconds(), 3)
+
+
+def _parse_stamp(stamp: str) -> datetime:
+    return datetime.strptime(stamp, _STAMP + "Z").replace(tzinfo=UTC)
 
 
 def verdict_text(verdict: str, target: str | None) -> str:

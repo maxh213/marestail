@@ -115,6 +115,15 @@ def test_done_line_empty(tmp_path: Path) -> None:
     assert timeline._done_line(tmp_path / "missing", [], None) == ""
 
 
+def test_stamp_span() -> None:
+    start = "2026-09-28T14:03:07.412Z"
+    end = timeline.time_plus(start, 90)
+    assert end == "2026-09-28T14:04:37.412Z"
+    assert timeline.time_plus(start, 0) == start
+    assert timeline.duration_seconds(start, end) == 90
+    assert timeline.duration_seconds(start, "2026-09-28T14:03:08.912Z") == 1.5
+
+
 def test_verdict_text() -> None:
     assert timeline.verdict_text("PASS", None) == "PASS"
     assert timeline.verdict_text("BOUNCE", "specifier") == "BOUNCE specifier"
