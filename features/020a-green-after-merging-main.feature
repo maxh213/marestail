@@ -60,13 +60,14 @@ Feature: The merge of main is green
     And the summary does not contain "killed by timeout"
 
   Scenario: C# still fails a CompileError and forgives a Timeout the same way
-    Given a dotnet pair that gets past the stryker preconditions and a report of one mutant
-    When the mutant status is CompileError
-    Then cs.mutation is not ok, the summary is "1 of 1 mutants not killed" and the finding contains "CompileError"
-    When the mutant status is Timeout and [dotnet] mutation_timeouts is not "fail"
-    Then cs.mutation is ok and the summary is "all 1 mutants killed (1 killed by timeout)"
-    When the mutant status is Timeout and [dotnet] mutation_timeouts = "fail"
-    Then cs.mutation is not ok, the summary is "1 of 1 mutants not killed" and the finding contains "Timeout"
+    Given a dotnet pair App/App.csproj and AppTests/AppTests.csproj, [dotnet] mutation_scope "all", and dotnet tool restore exits 0
+    And stryker writes a report whose only mutant is in App/A.cs: status S, mutatorName "Equality", replacement "a != b", location.start.line 3
+    When S is CompileError
+    Then cs.mutation is not ok, the summary is "1 of 1 mutants not killed" and the findings are exactly "App/A.cs:3 Equality CompileError: a != b"
+    When S is Timeout and [dotnet] has no mutation_timeouts
+    Then cs.mutation is ok, the summary is "all 1 mutants killed (1 killed by timeout)" and there are no findings
+    When S is Timeout and [dotnet] mutation_timeouts = "fail"
+    Then cs.mutation is not ok, the summary is "1 of 1 mutants not killed" and the findings are exactly "App/A.cs:3 Equality Timeout: a != b"
     And that summary does not contain "killed by timeout"
 
   Scenario: Elixir forgives a timeout unless the section says fail
@@ -102,34 +103,41 @@ Feature: The merge of main is green
       container = "mt"
       """
     And gcloud, ssh and rsync on PATH are fakes, and the Python fixture above is the repo
+    And gcloud prints nothing for "auth print-access-token", so nothing reaches the network
+    And the ssh job command is the one containing "flock /var/lib/marestail/job.lock"
     When gcloud describe prints a TERMINATED instance and gcloud start exits 1 with stderr "PERMISSION_DENIED"
     Then the gate exits 0 and the summary contains "all 2 mutants killed (1 killed by timeout) (remote unavailable: PERMISSION_DENIED; ran locally)"
     And mutmut's arguments are "run --max-children 4"
     And remote-usage.jsonl is absent
-    When gcloud describe prints RUNNING with natIP 1.2.3.4, ssh exits 0 at once and rsync deposits the same meta file
+    When gcloud describe prints RUNNING with natIP 1.2.3.4, every ssh exits 0 at once and the rsync whose last argument ends in "/mutants/" writes the same meta file there
     Then the summary contains "all 2 mutants killed (1 killed by timeout) (on marestail-mutation, 0s)"
-    And the ssh command contains "max-children 8", "docker exec mt", "flock /var/lib/marestail/job.lock", "/var/lib/marestail/busy.d/" and "npm ci --no-audit --no-fund --loglevel=error"
-    And remote-usage.jsonl is one line whose keys start ts, event, instance, gate, repo, result, seconds, usd_per_hour, usd
+    And the local mutmut did not run
+    And the ssh job command contains "max-children 8", "docker exec mt", "docker exec -w", " mt setsid", "flock /var/lib/marestail/job.lock", "/var/lib/marestail/busy.d/" and "npm ci --no-audit --no-fund --loglevel=error"
+    And remote-usage.jsonl is one line whose keys are, in order, ts, event, instance, gate, repo, result, seconds, usd_per_hour, usd
     And event is "job", instance is "marestail-mutation", gate is "py.mutation", result is "ok", seconds is 0, usd_per_hour is 1.2, usd is 0.0
     And ts matches "^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$" and repo is the fixture root
     When MARESTAIL_REMOTE is 0 and the same toml exists
     Then the summary is "all 2 mutants killed (1 killed by timeout)" and contains neither "(on " nor "remote unavailable"
     When the box is RUNNING but rsync exits 1 with stderr "connection reset"
-    Then the summary contains "(remote sync failed: connection reset; ran locally)" and mutmut still runs locally
-    When the job ssh exits 255 with empty output and the next gcloud describe exits 1
-    Then the summary is "no mutants were generated (connection to marestail-mutation dropped mid-run and it did not come back: instance is unknown)"
-    When the job ssh exits 255 with empty output twice and the box stays RUNNING
-    Then the summary is "no mutants were generated (connection to marestail-mutation dropped twice mid-run; not rerun locally)"
+    Then the summary contains "(remote sync failed: connection reset; ran locally)", mutmut's arguments are "run --max-children 4" and remote-usage.jsonl is absent
+    When the box is RUNNING, the job ssh exits 255 and prints nothing, and every gcloud describe after the first exits 1
+    Then the exit code is 1 and the result line starts "[FAIL] py.mutation    mutmut failed (connection to marestail-mutation dropped mid-run and it did not come back: instance is unknown)  ("
+    And the output ends with "GATE FAILED: py.mutation" and the local mutmut did not run
+    And remote-usage.jsonl is one job line with result "dropped", seconds 0 and usd 0.0
+    When the box stays RUNNING and the job ssh exits 255 and prints nothing both times it runs
+    Then the exit code is 1 and the result line starts "[FAIL] py.mutation    mutmut failed (connection to marestail-mutation dropped twice mid-run; not rerun locally)  ("
+    And the job ssh ran twice and the local mutmut did not run
+    And remote-usage.jsonl is one job line with result "dropped"
 
   Scenario: remote status prints the box, the jobs and the spend, or says it is not configured
     Given HOME is /tmp/qa-020a-empty and that directory has no remote.toml
     When I run "marestail remote status"
     Then the exit code is 1 and stdout is "no remote configured (/tmp/qa-020a-empty/.config/marestail/remote.toml)\n"
-    Given the toml from the offload scenario and a fake gcloud whose describe prints RUNNING 1.2.3.4
-    And ssh prints "/repo/web stryker 01:02 running"
-    And the monitoring request fails, as it does for a fake access token
+    Given a fresh HOME with the toml from the offload scenario and no remote-usage.jsonl
+    And the fake gcloud describe prints RUNNING 1.2.3.4 and prints nothing for "auth print-access-token", so spend is unknown and nothing reaches the network
+    And the status ssh is the one whose command contains "marestail-idle-check", and it prints "/repo/web stryker 01:02 running"
     When I run "marestail remote status"
-    Then stdout is
+    Then the exit code is 0 and stdout is
       """
       marestail-mutation (proj/europe-west1-b): RUNNING 1.2.3.4
       offloaded gates: py.mutation
@@ -140,6 +148,11 @@ Feature: The merge of main is green
     When ssh instead prints "idle 120 15"
     Then the third line matches "^  no jobs: idle for 2 min, powers itself off after 15 idle min \(about \d{2}:\d{2}\)$"
     And the running line is absent
+    Given remote-usage.jsonl holds, stamped with the current UTC time, a job line with seconds 1800, a job line with seconds 5400 and a vm-start line, and a job line stamped "2000-01-01T00:00:00+00:00" with seconds 3600
+    And ssh prints "/repo/web stryker 01:02 queued"
+    When I run "marestail remote status"
+    Then the third line is "  running: stryker for web, 01:02 (queued)"
+    And the last two lines are "today: VM up unknown; 2 jobs, 2.00h busy" and "this month: VM up unknown; 2 jobs, 2.00h busy"
 
   Scenario: help lists remote, and status and queue stay absent
     When I run "marestail --help"
