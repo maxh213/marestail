@@ -71,22 +71,31 @@ Feature: The merge of main is green
     And that summary does not contain "killed by timeout"
 
   Scenario: Elixir forgives a timeout unless the section says fail
-    Given mix muex prints a JSON report of one mutation, file lib/app.ex, line 4, mutator "Elixir.Muex.Mutators.Arithmetic", status "timeout", description "plus"
-    When [elixir] mutation_timeouts is not "fail"
-    Then ex.mutation is ok and the summary is "all 1 mutants killed (1 killed by timeout)"
+    Given an elixir root with lib/app.ex and [elixir] mutation_scope = "all", so no base note is added
+    And MARESTAIL_REMOTE is 0 and "mix help muex" exits 0
+    And the muex run exits 0 and prints {"mutations": [{"location": {"file": "lib/app.ex", "line": 4}, "mutator": "Elixir.Muex.Mutators.Arithmetic", "status": "timeout", "description": "plus"}]}
+    When [elixir] has no mutation_timeouts
+    Then ex.mutation is ok, the summary is "all 1 mutants killed (1 killed by timeout)" and there are no findings
     When [elixir] mutation_timeouts = "fail"
     Then ex.mutation is not ok and the summary is "1 of 1 mutants not killed"
-    And the finding is "lib/app.ex:4 Arithmetic timeout: plus"
+    And the findings are exactly "lib/app.ex:4 Arithmetic timeout: plus"
     And the summary does not contain "killed by timeout"
 
   Scenario: Java, Rust and Erlang do not grow a timeout phrase
-    Given a PIT mutations.xml whose only mutation has status TIMED_OUT
-    Then java.mutation is ok and the summary is "all 1 mutants killed" and does not contain "killed by timeout"
-    And [java] mutation_timeouts = "fail" leaves that summary unchanged
-    Given a cargo-mutants outcomes.json whose only mutant summary is Timeout
-    Then rs.mutation is ok and the summary is "all 1 mutants killed" and does not contain "killed by timeout"
-    Given an Erlang mutant whose status is timeout
-    Then er.mutation is ok and the summary is "all 1 mutants killed" and does not contain "killed by timeout"
+    Given MARESTAIL_REMOTE is 0
+    And a maven root with a pom.xml that declares pitest-maven, src/main/java/app/App.java, src/test/java/app/AppTest.java and [java] mutation_scope = "all"
+    And PIT writes mutations.xml with one mutation: status TIMED_OUT, sourceFile App.java, mutatedClass app.App, mutatedMethod run, lineNumber 5, mutator VoidMethodCallMutator, description "removed call to helper"
+    Then java.mutation is ok, the summary is "all 1 mutants killed" and there are no findings
+    And [java] mutation_timeouts = "fail" gives the same result
+    Given a crate with src/lib.rs, "cargo mutants --version" exits 0 and the gate runs without --scope changed
+    And outcomes.json is a Baseline outcome with summary "Success" and one outcome whose scenario is {"Mutant": {"file": "src/lib.rs", "name": "src/lib.rs:5:5: replace + with * in add", "span": {"start": {"line": 5, "column": 5}}, "function": {"function_name": "add"}}} and whose summary is "Timeout"
+    Then rs.mutation is ok, the summary is "all 1 mutants killed" and there are no findings
+    And [rust] mutation_timeouts = "fail" gives the same result
+    Given src/a.erl, test/a_tests.erl and [erlang] mutation_scope = "all"
+    And the generated manifest holds one mutant: src/a.erl line 3, operator comparison, "<" replaced by ">="
+    And the sources, the tests and the mutant compile, the unmutated eunit run exits 0, and the mutant's eunit run exits 124
+    Then er.mutation is ok, the summary is "all 1 mutants killed" and there are no findings
+    And [erlang] mutation_timeouts = "fail" gives the same result
 
   Scenario: an offloaded mutation names the box or says why it ran locally
     Given HOME has .config/marestail/remote.toml
@@ -204,6 +213,10 @@ Feature: The merge of main is green
   Scenario: the suite does not call the real box
     Given MARESTAIL_REMOTE is 0, off, false or no
     Then remote settings are ignored even if ~/.config/marestail/remote.toml exists
-    And a test that exercises the box monkeypatches gcloud, ssh, rsync, describe and ensure_up
-    And points remote.CONFIG and remote.USAGE at files under tmp_path
-    And never reads the real remote.toml or remote-usage.jsonl
+    And a test that exercises the box monkeypatches remote.gcloud, remote.ssh, remote.rsync, remote.describe and remote.ensure_up as it needs
+    And a test that reaches status_command also fakes remote.uptime_seconds, or its "gcloud auth print-access-token" subprocess and urllib.request.urlopen, because uptime_seconds calls neither remote.gcloud nor remote.ssh
+    And the urlopen branch of uptime_seconds is covered with a fake response, never a real request
+    And such a test points remote.CONFIG, remote.USAGE and remote.LOCK at files under tmp_path, so ensure_up never locks ~/.config/marestail/remote.lock, which a live marestail on this machine holds while it offloads
+    And the hermetic guard in tests/conftest.py still refuses sockets
+    When the whole of tests/ runs with HOME set to a fresh empty directory and PATH starting with gcloud, ssh and rsync tripwires that append their arguments to a log and exit 99
+    Then pytest passes, the log is empty and the fresh HOME has no .config/marestail
