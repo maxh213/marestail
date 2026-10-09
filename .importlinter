@@ -16,7 +16,7 @@ layers =
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
     marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice
-    marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file
+    marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events
     marestail.shell
 
 [importlinter:contract:gates-do-not-reach-up]
@@ -55,6 +55,7 @@ source_modules =
     marestail.changes
     marestail._location
     marestail.task_file
+    marestail.events
     marestail.pipeline
     marestail.freeze
     marestail.sonar.client
@@ -419,6 +420,33 @@ name = Timeline artefacts do not import orchestration or agents
 type = forbidden
 source_modules =
     marestail.timeline
+forbidden_modules =
+    marestail.hunks
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.freeze
+
+[importlinter:contract:events-stays-below-runner]
+name = Events writer does not import orchestration or agents
+type = forbidden
+source_modules =
+    marestail.events
 forbidden_modules =
     marestail.hunks
     marestail.runner

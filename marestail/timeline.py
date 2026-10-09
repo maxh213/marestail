@@ -35,7 +35,7 @@ def record(
     commits: list[dict[str, str]],
     files: list[str],
     handoff: Path,
-) -> None:
+) -> dict[str, Any]:
     step = _build_step(
         report_id,
         role,
@@ -51,6 +51,7 @@ def record(
         _done_line(handoff, commits, agent),
     )
     _append_step(folder, task, step)
+    return step
 
 
 def _gate_entries(results: list[Result]) -> list[dict[str, Any]]:

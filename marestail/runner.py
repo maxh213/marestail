@@ -3,15 +3,18 @@ import functools
 import os
 import re
 import shutil
+import signal
 import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from marestail import audit, backends, freeze, hunks, nice, practices, prompts, ran_against, reported, task_file, timeline
 from marestail import config as config_module
+from marestail import events as events_module
 from marestail import route as dandelion
 from marestail.backends import (
     AGENT_TIMEOUT,
@@ -151,6 +154,11 @@ class Run:
     blind: bool = False
     unseen: bool = False
     reproduction: visual_gate.Reproduction | None = None
+    events: events_module.Log | None = None
+    current_step: str | None = None
+    stop_reason: str | None = None
+    last_timeline_step: dict[str, Any] | None = None
+    last_report: Path | None = None
 
     @property
     def task_name(self) -> str:
@@ -186,6 +194,14 @@ class Run:
         ensure_dir(self.handoffs)
         existing = list(self.handoffs.glob("*.md"))
         return self.handoffs / f"{len(existing) + 1:02d}-{role}.md"
+
+
+class Terminated(BaseException):
+    pass
+
+
+def _sigterm_handler(signum: int, frame: Any) -> None:
+    raise Terminated(signum)
 
 
 def gate_tier(tier: str) -> tuple[str, set[str] | None]:
@@ -237,12 +253,184 @@ def run_pipeline(
     state.start = head(config)
     perf_trees.record_start(config, state.task_name)
     steps = window(start, stop, state.scope_name, config.section(VISUAL) is not None)
-    state.reproduction, reproduced = reported.reproduce_first(config, state.task, [step.name for step in steps])
-    outcome = run_steps(state, steps, auto) if reproduced else 1
+    return _execute_pipeline(state, steps, auto)
+
+
+def _execute_pipeline(state: Run, steps: list[Step], auto: bool) -> int:
+    old_term = signal.signal(signal.SIGTERM, _sigterm_handler)
+    try:
+        record_run_start(state, steps)
+        outcome = _run_pipeline_steps(state, steps, auto)
+    except KeyboardInterrupt:
+        record_run_end(state, "interrupted", 130, state.current_step, "SIGINT", None)
+        raise
+    except Terminated:
+        record_run_end(state, "interrupted", 143, state.current_step, "SIGTERM", None)
+        raise SystemExit(143) from None
+    except BaseException as exc:
+        code, reason = exception_exit_and_reason(exc)
+        record_run_end(state, "failed", code, state.current_step, reason, None)
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, old_term)
+    _finish_pipeline(state)
+    return outcome
+
+
+def _run_pipeline_steps(state: Run, steps: list[Step], auto: bool) -> int:
+    roles = [step.name for step in steps]
+    state.reproduction, reproduced = reported.reproduce_first(state.config, state.task, roles)
+    if reproduced:
+        return run_steps(state, steps, auto)
+    first = reported._first_spec_role(roles) or steps[0].name
+    reason = f"pipeline stopped before {first}: the bug could not be reproduced"
+    record_run_end(state, "stopped", 1, first, reason, None)
+    return 1
+
+
+def _finish_pipeline(state: Run) -> None:
     print(proposals_summary(state))
     if state.perf_changes:
         print(state.perf_changes)
-    return outcome
+
+
+def exception_exit_and_reason(exc: BaseException) -> tuple[int, str]:
+    if isinstance(exc, SystemExit):
+        return _system_exit_code_and_reason(exc)
+    code = 1
+    name = type(exc).__name__
+    msg = str(exc).splitlines()[0] if str(exc) else ""
+    return code, f"{name}: {msg}"
+
+
+def _system_exit_code_and_reason(exc: SystemExit) -> tuple[int, str]:
+    code = 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
+    msg = str(exc).splitlines()[0] if str(exc) else ""
+    return code, f"SystemExit: {msg}"
+
+
+def repo_path(path: Path | str, root: Path) -> str:
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def time_plus(stamp: str, seconds: int) -> str:
+    parsed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+    return (parsed + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def duration_seconds(started_at: str, ended_at: str) -> float:
+    started = datetime.strptime(started_at, "%Y-%m-%dT%H:%M:%S.%fZ")
+    ended = datetime.strptime(ended_at, "%Y-%m-%dT%H:%M:%S.%fZ")
+    return round((ended - started).total_seconds(), 3)
+
+
+def current_branch(config: Config) -> str | None:
+    code, output = run([GIT, "branch", "--show-current"], cwd=config.root)
+    name = output.strip()
+    return name if code == 0 and name else None
+
+
+def run_scope(state: Run) -> str:
+    if state.hyper:
+        return HYPER
+    if state.hard:
+        return "hard"
+    if state.scope_changed:
+        return CHANGED
+    return "all"
+
+
+def record_run_start(state: Run, steps: list[Step]) -> None:
+    if state.events is None:
+        return
+    fields = {
+        "task": state.task_name,
+        "task_path": repo_path(state.task, state.config.root),
+        "branch": current_branch(state.config),
+        "base": state.config.get("git", "base", "origin/master"),
+        "start_commit": state.start,
+        "from": steps[0].name,
+        "to": steps[-1].name,
+        "scope": run_scope(state),
+        "agent": None if state.route else resolve_agent(state),
+        "model": state.route if state.route else state.model,
+        "effort": state.effort,
+    }
+    state.events.append("run-start", fields, timeline.utc_now(), os.getpid())
+
+
+def record_run_end(state: Run, result: str, code: int, stopped_at: str | None, reason: str | None, archive: str | None) -> None:
+    if state.events is None:
+        return
+    fields = {
+        "result": result,
+        "exit_code": code,
+        "head": head(state.config),
+        "stopped_at": stopped_at,
+        "reason": reason,
+        "archive": archive,
+    }
+    state.events.append("run-end", fields, timeline.utc_now(), os.getpid())
+
+
+def record_step_start(state: Run, step: str, role: str, kind: str, attempt: int, started_at: str) -> None:
+    if state.events is None:
+        return
+    fields = {"step": step, "role": role, "kind": kind, "attempt": attempt}
+    state.events.append("step-start", fields, started_at, os.getpid())
+
+
+def record_step_end(state: Run, role: str, attempt: int, outcome: str, bounce_to: str | None) -> None:
+    if state.events is None or state.last_timeline_step is None or state.last_report is None:
+        return
+    tstep = state.last_timeline_step
+    fields = step_end_fields(state.config, tstep, role, attempt, outcome, bounce_to, state.last_report)
+    state.events.append("step-end", fields, tstep["ended_at"], os.getpid())
+
+
+def record_judge_step_end(state: Run, judge: Judge, report: Path, attempt: int, outcome: Verdict | None, tstep: dict[str, Any]) -> None:
+    if state.events is None:
+        return
+    outcome_name, bounce_to = judge_outcome_and_bounce(judge, outcome)
+    fields = step_end_fields(state.config, tstep, judge.name, attempt, outcome_name, bounce_to, report)
+    state.events.append("step-end", fields, tstep["ended_at"], os.getpid())
+
+
+def step_end_fields(
+    config: Config, tstep: dict[str, Any], role: str, attempt: int, outcome: str, bounce_to: str | None, report: Path
+) -> dict[str, Any]:
+    return {
+        "step": tstep["id"],
+        "role": role,
+        "attempt": attempt,
+        "outcome": outcome,
+        "bounce_to": bounce_to,
+        "head": head(config),
+        "handoff": handoff_path(report, config.root),
+        "seconds": duration_seconds(tstep["started_at"], tstep["ended_at"]),
+    }
+
+
+def handoff_path(report: Path, root: Path) -> str | None:
+    if not report.exists():
+        return None
+    return repo_path(report, root)
+
+
+def judge_outcome_and_bounce(judge: Judge, outcome: Verdict | None) -> tuple[str, str | None]:
+    if outcome is None or outcome[0] == AUTHOR:
+        return "failed", None
+    return verdict_marker(judge, outcome)
+
+
+def verdict_marker(judge: Judge, outcome: Verdict) -> tuple[str, str | None]:
+    if outcome[0] == PASS:
+        return "pass", None
+    return "bounce", outcome[1] or judge.bounce_to
 
 
 def make_run(
@@ -267,6 +455,7 @@ def make_run(
         hard=hard,
         hyper=hyper,
         route=route,
+        events=events_module.Log(config.work / "runs" / task.stem / "events.jsonl"),
     )
 
 
@@ -314,17 +503,31 @@ def scoped_focus(config: Config, scope_changed: bool, hard: bool, paths: list[st
 
 def run_steps(state: Run, steps: list[Step], auto: bool) -> int:
     for step in steps:
+        state.current_step = step.name
         if not run_step(state, step):
             print(f"pipeline stopped at {step.name}")
+            record_run_end(state, "stopped", 1, step.name, state.stop_reason, None)
             return 1
         if paused(state, step, auto):
+            record_run_end(state, "stopped", 1, step.name, "not approved", None)
             return 1
     return complete_pipeline(state, steps)
 
 
 def complete_pipeline(state: Run, steps: list[Step]) -> int:
-    archive_handoffs(state)
-    return ending_for(state, steps)
+    archive = archive_handoffs(state)
+    code = ending_for(state, steps)
+    reason = completion_reason(code, state, steps)
+    record_run_end(state, "complete", code, None, reason, archive)
+    return code
+
+
+def completion_reason(code: int, state: Run, steps: list[Step]) -> str | None:
+    if code == 0:
+        return None
+    against = state.ran_against or "nothing" if includes_qa(steps) else "app"
+    line, _ = ran_against.finish(against, not state.unseen)
+    return line
 
 
 def includes_qa(steps: list[Step]) -> bool:
@@ -453,6 +656,7 @@ def run_judge_loop(state: Run, judge: Judge) -> bool:
         done, previous = judge_round(state, judge, previous, bounce)
         if done is not None:
             return done
+    state.stop_reason = f"{judge.name} ran {MAX_JUDGE_ROUNDS} rounds without a pass"
     return False
 
 
@@ -463,6 +667,7 @@ def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[b
     stop = stall_reason(judge, previous, report, bounce)
     if stop:
         print(stop)
+        state.stop_reason = stop
         return False, report
     if rework(state, judge, target, report):
         return None, report
@@ -478,8 +683,12 @@ def stall_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
 
 
 def rework(state: Run, judge: Judge, target: str | None, report: str) -> bool:
-    worker = find(target or judge.bounce_to, state.scope_name)
-    return isinstance(worker, Worker) and run_worker(state, worker, report)
+    target_role = target or judge.bounce_to
+    worker = find(target_role, state.scope_name)
+    if not isinstance(worker, Worker):
+        state.stop_reason = f"{judge.name} bounced to {target_role}, which is not a worker"
+        return False
+    return run_worker(state, worker, report)
 
 
 def same_findings(previous: str, current: str) -> bool:
@@ -506,18 +715,43 @@ def attempts(retries: int) -> Iterator[int]:
 def run_worker(state: Run, worker: Worker, feedback: str) -> bool:
     before = head(state.config)
     streak: list[str] = []
+    limit = attempt_limit(state.retries)
     for attempt in attempts(state.retries):
-        problems = worker_attempt(state, worker, feedback, attempt, before)
-        if not problems:
-            return True
-        print(problems)
-        feedback = problems
-        streak = next_streak(streak, problems)
-        if len(streak) >= WORKER_REPEAT_LIMIT:
-            print(
-                f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human"
-            )
-            return False
+        done, feedback, streak = worker_round(state, worker, feedback, attempt, before, streak, limit)
+        if done is not None:
+            return done
+    return retries_spent(state, worker, limit)
+
+
+def worker_round(
+    state: Run, worker: Worker, feedback: str, attempt: int, before: str, streak: list[str], limit: int
+) -> tuple[bool | None, str, list[str]]:
+    problems = worker_attempt(state, worker, feedback, attempt, before)
+    if not problems:
+        record_step_end(state, worker.name, attempt, "done", None)
+        return True, feedback, streak
+    print(problems)
+    streak = next_streak(streak, problems)
+    if repeat_guard(state, worker, streak, attempt):
+        return False, problems, streak
+    if attempt < limit:
+        record_step_end(state, worker.name, attempt, "failed", None)
+    return None, problems, streak
+
+
+def repeat_guard(state: Run, worker: Worker, streak: list[str], attempt: int) -> bool:
+    if len(streak) < WORKER_REPEAT_LIMIT:
+        return False
+    reason = f"{worker.name} got the same problems back {WORKER_REPEAT_LIMIT} times in a row; the worker is not making progress, stopping for a human"
+    print(reason)
+    state.stop_reason = reason
+    record_step_end(state, worker.name, attempt, "stopped", None)
+    return True
+
+
+def retries_spent(state: Run, worker: Worker, limit: int) -> bool:
+    state.stop_reason = f"{worker.name} used all {limit} attempts"
+    record_step_end(state, worker.name, limit, "stopped", None)
     return False
 
 
@@ -527,6 +761,7 @@ def worker_attempt(state: Run, worker: Worker, feedback: str, attempt: int, befo
     attempt_before = head(state.config)
     reset_attempt(state)
     print(f"== {worker.name} ({report.stem}) attempt {attempt}")
+    record_step_start(state, report.stem, worker.name, "worker", attempt, started_at)
     prompt = prompts.worker_prompt(
         state.config,
         worker,
@@ -566,8 +801,8 @@ def record_attempt(
     before: str,
     gate_results: list[Result],
     verdict: str | None,
-) -> None:
-    timeline.record(
+) -> dict[str, Any]:
+    tstep = timeline.record(
         state.folder,
         state.task_name,
         report.stem,
@@ -582,6 +817,9 @@ def record_attempt(
         attempt_files(state.config, before),
         report,
     )
+    state.last_timeline_step = tstep
+    state.last_report = report
+    return tstep
 
 
 def attempt_commits(config: Config, before: str) -> list[dict[str, str]]:
@@ -616,7 +854,15 @@ def run_judge(state: Run, judge: Judge) -> Verdict:
         if outcome is not None:
             return outcome
     shown = attempts_shown(state.retries)
-    return BOUNCE, None, f"{judge.name} produced no verdict after {shown} attempts"
+    report = f"{judge.name} produced no verdict after {shown} attempts"
+    keep_give_up_report(state, report)
+    return BOUNCE, None, report
+
+
+def keep_give_up_report(state: Run, report: str) -> None:
+    path = state.last_report
+    if path is not None and not path.exists():
+        path.write_text(report + NEWLINE)
 
 
 def judged(state: Run, judge: Judge, gate: tuple[str, bool, list[Result]], progress: JudgeProgress, attempt: int) -> Verdict | None:
@@ -625,10 +871,16 @@ def judged(state: Run, judge: Judge, gate: tuple[str, bool, list[Result]], progr
     before = head(state.config)
     reset_attempt(state)
     print(f"== {judge.name} ({report.stem}) attempt {attempt}")
+    record_step_start(state, report.stem, judge.name, "judge", attempt, started_at)
     with measuring(state, judge) as session:
         prepare_perf(state, judge, gate[1], session, progress)
         outcome, progress.feedback = judge_attempt(state, judge, report, gate, session, progress.feedback)
-    record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(state, outcome))
+    tstep = record_attempt(state, report, judge.name, attempt, started_at, before, gate[2], outcome_verdict(state, outcome))
+    record_judge_step_end(state, judge, report, attempt, outcome, tstep)
+    return _settle_judge_progress(outcome, progress)
+
+
+def _settle_judge_progress(outcome: Verdict | None, progress: JudgeProgress) -> Verdict | None:
     if outcome is not None and outcome[0] == AUTHOR:
         progress.author_requested()
         return None
@@ -1079,6 +1331,9 @@ def reject_config_change(state: Run, worker: Worker, report: Path, before: str, 
     )
     proposal = state.next_report("proposal")
     proposal.write_text(body)
+    if state.events is not None:
+        path = repo_path(proposal, config.root)
+        state.events.append("proposal", {"step": report.stem, "path": path, "files": frozen}, timeline.utc_now(), os.getpid())
     return [
         f"{COMMA_JOIN.join(frozen)}: frozen, reverted. Your reason was recorded as {proposal.relative_to(config.root)} "
         "for a human to consider after the run. Find a way within the current configuration."
@@ -1307,12 +1562,15 @@ def free_handoffs_folder(folder: Path) -> Path:
     return destination
 
 
-def archive_handoffs(state: Run) -> None:
+def archive_handoffs(state: Run) -> str | None:
     destination = free_handoffs_folder(state.folder)
+    archived = None
     if state.handoffs.exists():
         ensure_dir(state.folder)
         shutil.move(str(state.handoffs), str(destination))
+        archived = repo_path(destination, state.config.root)
     perf_trees.archive_start(state.config, state.task_name, destination if destination.exists() else None)
+    return archived
 
 
 def head(config: Config) -> str:
@@ -1350,6 +1608,10 @@ def invoke_once(state: Run, label: str, prompt: str, prompt_file: Path, rebuild:
 
 def note_wait(state: Run, reason: str) -> None:
     state.attempt_waits.append({"reason": reason, "seconds": LIMIT_WAIT_SECONDS})
+    if state.events is not None:
+        at = timeline.utc_now()
+        until = time_plus(at, LIMIT_WAIT_SECONDS)
+        state.events.append("wait", {"reason": reason, "until": until}, at, os.getpid())
 
 
 def wait(message: str) -> None:

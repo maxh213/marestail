@@ -108,6 +108,17 @@ marestail tasks check          # front matter and dependencies of every task in 
 
 `tools/overnight.sh tasks/000.md tasks/002.md ...` runs tasks in order, each to the hardener by default (`STOP_AT=qa` to include QA), stops at the first failure, waits out rate limits for up to six hours, and writes `.marestail/runs/overnight-<stamp>.md` with one section per task: exit code, minutes, HEAD, the role and verdict lines, any config proposals, and the performance changes. Each task run also writes `.marestail/runs/<task>/timeline.md` and `timeline.json` (role, attempt, gate and agent timings, waits, verdict, commits, and a one-line done); overnight embeds that markdown under the task section. `AGENT`, `MODEL`, `EFFORT`, `SCOPE` and `FOCUS` (a space-separated list of paths) in the environment pass the matching flags through. Start it detached: `nohup setsid tools/overnight.sh ... > /dev/null 2>&1 &`.
 
+`.marestail/runs/<task>/events.jsonl` gets one JSON line per run start, attempt start, attempt end, wait, proposal and run end; it is appended across resumes; the latest run starts at the last `run-start`; and a run with no `run-end` whose pid is gone was killed.
+
+| event | fields after pid |
+|---|---|
+| `run-start` | task, task_path, branch, base, start_commit, from, to, scope, agent, model, effort |
+| `step-start` | step, role, kind, attempt |
+| `step-end` | step, role, attempt, outcome, bounce_to, head, handoff, seconds |
+| `wait` | reason, until |
+| `proposal` | step, path, files |
+| `run-end` | result, exit_code, head, stopped_at, reason, archive |
+
 Kilo Code pipeline runs (`--agent kilo`) use `kilo run --auto --format json`, prompt on stdin, JSONL on stdout. Default model is StepFun Step 3.7 Flash (free) at variant `high`; `--model` overrides. A judge `VERDICT:` in the JSONL stream still counts. Kilo has no command Stop hook; the runner's four-hour cap is the timeout.
 
 Kimi Code pipeline runs (`--agent kimi`) use `kimi -p --output-format stream-json`, JSONL on stdout; the `-p` text only points at the prompt file under `.marestail/runs/<task>/`, because a full worker prompt is longer than one argv entry allows (128 KB); `-p` mode needs no permission flags. `--model` passes through as `-m`. A judge `VERDICT:` in the JSONL stream still counts. Kimi has no command Stop hook; the runner's four-hour cap is the timeout.
