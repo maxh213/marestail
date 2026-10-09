@@ -108,6 +108,7 @@ try:
     critic = pipeline.find("critic")
     specifier = pipeline.find("specifier")
     steps = [pipeline.find("specifier"), pipeline.find("qa")]
+    qa_steps = [pipeline.find("qa")]
     log_type = named(events, "Log")
     encoded = named(events, "_encoded_line")
     payload = named(events, "_payload")
@@ -224,8 +225,8 @@ try:
     else:
         for target in SCOPE_TARGETS:
             harness.absent(target)
-    time_when(completion_reason, "runner.completion_reason", lambda: completion_reason(3, state.ending_line))
-    time_when(completion_reason, "runner.completion_reason zero", lambda: completion_reason(0, state.ending_line))
+    time_when(completion_reason, "runner.completion_reason", lambda: completion_reason(3, state, qa_steps))
+    time_when(completion_reason, "runner.completion_reason zero", lambda: completion_reason(0, state, qa_steps))
     boom = RuntimeError("boom")
     raised = SystemExit(143)
     time_when(exit_reason, "runner.exception_exit_and_reason", lambda: exit_reason(boom))
