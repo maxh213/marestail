@@ -535,15 +535,15 @@ def run_steps(state: Run, steps: list[Step], auto: bool) -> int:
 def complete_pipeline(state: Run, steps: list[Step]) -> int:
     archive = archive_handoffs(state)
     code = ending_for(state, steps)
-    reason = completion_reason(code, state.ending_line)
+    reason = completion_reason(code, state, steps)
     record_run_end(state, "complete", code, None, reason, archive)
     return code
 
 
-def completion_reason(code: int, line: str) -> str | None:
+def completion_reason(code: int, state: Run, _steps: list[Step]) -> str | None:
     if code == 0:
         return None
-    return line
+    return state.ending_line
 
 
 def includes_qa(steps: list[Step]) -> bool:

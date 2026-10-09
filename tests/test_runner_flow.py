@@ -534,10 +534,17 @@ def test_latest_qa_text_and_read(tmp_path: Path) -> None:
     assert runner.read_qa_ran_against(state) == "harness"
 
 
-def test_completion_reason_is_the_printed_line() -> None:
-    assert runner.completion_reason(0, "pipeline complete") is None
-    assert runner.completion_reason(3, "pipeline complete, NOT verified by eye") == "pipeline complete, NOT verified by eye"
-    assert runner.completion_reason(1, "pipeline complete") == "pipeline complete"
+def test_completion_reason_is_the_printed_line(tmp_path: Path) -> None:
+    state = make_state(tmp_path)
+    state.ran_against = "harness"
+    state.ending_line = "kept from the printed line"
+    steps = [find("qa")]
+    assert runner.completion_reason(0, state, steps) is None
+    assert runner.completion_reason(3, state, steps) == "kept from the printed line"
+    assert runner.completion_reason(-1, state, steps) == "kept from the printed line"
+    state.ending_line = "pipeline complete"
+    assert runner.completion_reason(1, state, steps) == "pipeline complete"
+    assert runner.completion_reason(3, state, steps) != ran_against.finish("harness", True)[0]
 
 
 def test_qa_ending_and_not_verified(capsys: Any) -> None:
