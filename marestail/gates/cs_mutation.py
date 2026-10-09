@@ -13,7 +13,8 @@ from marestail.shell import tail
 GATE = "cs.mutation"
 OUTPUT_DIR = "stryker"
 REPORT = Path("reports") / "mutation-report.json"
-BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
+BAD = {"Survived", "NoCoverage", "RuntimeError", "CompileError"}
+TIMEOUT = "Timeout"
 SENTRY = re.compile(r'<PackageReference\s+Include="Sentry', re.IGNORECASE)
 SENTRY_SWITCH = "<SentryDisableSourceGenerator>true</SentryDisableSourceGenerator>"
 INSTALL = "dotnet-stryker is not installed: run `dotnet tool install dotnet-stryker` in the .NET root"
@@ -122,20 +123,27 @@ def verdict(ctx: Context, mutants: list[tuple[str, dict[str, Any]]], output: str
     kept = ctx.on_changed_lines(mutants, placed)
     if not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    findings = failures(kept)
-    return Result(GATE, not findings, summary(len(findings), len(kept), note), findings, elapsed(started))
+    strict = ctx.timeouts_fail("dotnet")
+    findings = failures(kept, strict)
+    timed_out = 0 if strict else sum(1 for _, mutant in kept if mutant["status"] == TIMEOUT)
+    return Result(GATE, not findings, summary(len(findings), len(kept), note, timed_out), findings, elapsed(started))
 
 
-def failures(mutants: list[tuple[str, dict[str, Any]]]) -> list[str]:
-    return [describe(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
+def failures(mutants: list[tuple[str, dict[str, Any]]], strict: bool) -> list[str]:
+    return [describe(name, mutant) for name, mutant in mutants if failed(mutant, strict)]
+
+
+def failed(mutant: dict[str, Any], strict: bool) -> bool:
+    return mutant["status"] in BAD or (strict and mutant["status"] == TIMEOUT)
 
 
 def placed(entry: tuple[str, dict[str, Any]]) -> str:
     return describe(*entry)
 
 
-def summary(failed: int, total: int, note: str) -> str:
+def summary(failed: int, total: int, note: str, timed_out: int = 0) -> str:
     text = f"{failed} of {total} mutants not killed" if failed else f"all {total} mutants killed"
+    text += f" ({timed_out} killed by timeout)" if timed_out else ""
     return text + (f" {note}" if note else "")
 
 

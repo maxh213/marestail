@@ -363,6 +363,7 @@ def labels() -> None:
     expect("label-kimi", agent_label(state("kimi")), "kimi/mymodel")
     expect("label-kimi-no-model", agent_label(state("kimi", model=None)), "kimi")
     expect("label-kimi-effort", agent_label(state("kimi", effort="high")), "kimi/mymodel high")
+    expect("label-cursor-auto", agent_label(state("cursor", model="auto", effort="high")), "cursor/auto high")
     expect(
         "kimi-effort-unflagged",
         kimi_command(state("kimi", effort="high"), PROMPT),

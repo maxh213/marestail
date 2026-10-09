@@ -7,9 +7,10 @@ from operator import ne
 from pathlib import Path
 from typing import Any
 
+from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
 from marestail.report import Result, elapsed
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 GATE = "py.mutation"
 STATUS_BY_EXIT_CODE = {
@@ -30,6 +31,7 @@ STATUS_BY_EXIT_CODE = {
     None: "not checked",
 }
 PASSING = {"killed", "skipped", "caught by type check"}
+TIMEOUT = "timeout"
 MUTMUT = "__mutmut_"
 ORIGINAL = "__mutmut_orig"
 METHOD_MARK = "ǁ"
@@ -55,29 +57,37 @@ def nothing_to_mutate(scope: MutationScope, patterns: list[str]) -> bool:
 
 def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Result:
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
-    workers = str(ctx.python("mutation_workers", 4))
-    code, output = run(
-        [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", workers],
-        cwd=ctx.python_root(),
-        timeout=7200,
-    )
+    outcome = remote.run_mutation(ctx, GATE, lambda on_remote: command(ctx, patterns, on_remote), ctx.python_root(), timeout=7200, pull=(mutants_dir(ctx),))
+    code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
-        return Result(GATE, False, "mutmut failed", tail(output), elapsed(started))
+        return Result(GATE, False, "mutmut failed" + outcome.where, tail(output), elapsed(started))
     statuses = mutant_statuses(ctx.python_root() / "mutants", tuple(map(mutant_prefix, patterns)))
     if not statuses:
-        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    return judged(ctx.on_changed_lines(statuses, MutantLines(ctx).where), note, started)
+        return Result(GATE, False, "no mutants were generated" + outcome.where, tail(output), elapsed(started))
+    return judged(ctx, ctx.on_changed_lines(statuses, MutantLines(ctx).where), (note + outcome.where).strip(), started)
 
 
-def judged(statuses: list[Status], note: str, started: float) -> Result:
+def command(ctx: Context, patterns: list[str], on_remote: bool) -> list[str]:
+    workers = remote.workers(ctx, GATE, ctx.python("mutation_workers", 4), on_remote)
+    return [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", str(workers)]
+
+
+def mutants_dir(ctx: Context) -> str:
+    return str((ctx.python_root() / "mutants").relative_to(ctx.root))
+
+
+def judged(ctx: Context, statuses: list[Status], note: str, started: float) -> Result:
     if not statuses:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    survivors = [f"{name}: {status}" for name, status in statuses if status not in PASSING]
-    return Result(GATE, not survivors, mutation_summary(len(statuses), survivors, note), survivors, elapsed(started))
+    passing = PASSING if ctx.timeouts_fail("python") else PASSING | {TIMEOUT}
+    survivors = [f"{name}: {status}" for name, status in statuses if status not in passing]
+    timed_out = sum(1 for _, status in statuses if status == TIMEOUT) if TIMEOUT in passing else 0
+    return Result(GATE, not survivors, mutation_summary(len(statuses), survivors, note, timed_out), survivors, elapsed(started))
 
 
-def mutation_summary(total: int, survivors: list[str], note: str) -> str:
+def mutation_summary(total: int, survivors: list[str], note: str, timed_out: int = 0) -> str:
     summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
     return summary + (f" {note}" if note else "")
 
 

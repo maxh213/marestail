@@ -38,6 +38,7 @@ GATE_CONFIG = [
     "**/babel.config.*",
     "**/.babelrc*",
     "**/next.config.*",
+    "**/playwright.config.*",
     "**/*.csproj",
     "**/*.sln",
     "**/*.props",

@@ -1,10 +1,12 @@
 import time
 from typing import Any
 
+from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.gates._stryker import (
     COMMAND_SUFFIXES,
     KILLED,
+    RUN_SECONDS,
     TS_SUFFIXES,
     Placed,
     Proof,
@@ -17,8 +19,10 @@ from marestail.javascript import config_flag, tool
 from marestail.report import Result, elapsed
 
 REPORT = "reports/mutation/mutation.json"
+INCREMENTAL = "reports/stryker-incremental.json"
 TEMP_DIR = ".stryker-tmp"
-BAD = {"Survived", "NoCoverage", "Timeout", "RuntimeError", "CompileError"}
+BAD = {"Survived", "NoCoverage", "RuntimeError"}
+TIMED_OUT = "Timeout"
 GATE = "ts.mutation"
 PROOF = "(proof: mutation via [hyper] test_cmd)"
 HINT = (
@@ -46,7 +50,7 @@ def mutated(ctx: Context, scope: MutationScope, started: float) -> Result:
 def mutation_run(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
     if ctx.test_cmd:
         return proven(ctx, command_proof(ctx, mutate), started)
-    return stryker_result(ctx, scope, mutation_command(ctx, mutate), started)
+    return stryker_result(ctx, scope, mutate, started)
 
 
 def suffixes(ctx: Context) -> tuple[str, ...]:
@@ -56,13 +60,13 @@ def suffixes(ctx: Context) -> tuple[str, ...]:
 def proven(ctx: Context, proof: Proof, started: float) -> Result:
     if proof.failed:
         return proof.failure(GATE, started)
-    return proof_verdict(placed(proof.report or {}, ctx), started)
+    return proof_verdict(ctx, placed(proof.report or {}, ctx), started)
 
 
-def proof_verdict(mutants: list[Placed], started: float) -> Result:
+def proof_verdict(ctx: Context, mutants: list[Placed], started: float) -> Result:
     if not mutants:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    result = survivor_result(survivors_of(mutants), PROOF, started)
+    result = judged(ctx, mutants, PROOF, started)
     result.findings = hint(mutants, result.findings) + result.findings
     return result
 
@@ -72,27 +76,36 @@ def hint(mutants: list[Placed], survivors: list[str]) -> list[str]:
     return [HINT] if survivors and not killed else []
 
 
-def stryker_result(ctx: Context, scope: MutationScope, command: list[str], started: float) -> Result:
-    proof = execute(ctx, command, ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT)
+def stryker_result(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
+    pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
+    proof = execute(ctx, lambda on_remote: mutation_command(ctx, mutate, on_remote), ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, pull)
     if proof.report is None:
         return proof.failure(GATE, started)
-    return verdict(ctx, proof.report, scope.note, started)
+    return verdict(ctx, proof.report, (scope.note + proof.where).strip(), started)
 
 
 def verdict(ctx: Context, report: dict[str, Any], note: str, started: float) -> Result:
     mutants = placed(report, ctx)
     if ctx.hyper and not mutants:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    return survivor_result(survivors_of(mutants), note, started)
+    return judged(ctx, mutants, note, started)
 
 
-def survivor_result(survivors: list[str], note: str, started: float) -> Result:
+def judged(ctx: Context, mutants: list[Placed], note: str, started: float) -> Result:
+    strict = ctx.timeouts_fail("ts")
+    survivors = survivors_of(mutants, strict)
+    timed_out = 0 if strict else sum(1 for _, mutant in mutants if mutant["status"] == TIMED_OUT)
+    return survivor_result(survivors, note, started, timed_out)
+
+
+def survivor_result(survivors: list[str], note: str, started: float, timed_out: int = 0) -> Result:
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
     summary += f" {note}" if note else ""
     return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
-def mutation_command(ctx: Context, mutate: list[str]) -> list[str]:
+def mutation_command(ctx: Context, mutate: list[str], on_remote: bool = False) -> list[str]:
     command = [
         *tool(ctx, "stryker"),
         "run",
@@ -103,10 +116,22 @@ def mutation_command(ctx: Context, mutate: list[str]) -> list[str]:
         TEMP_DIR,
         "--cleanTempDir",
         "always",
+        "--dryRunTimeoutMinutes",
+        str(RUN_SECONDS // 60),
     ]
+    workers = concurrency(ctx, on_remote)
+    if workers:
+        command += ["--concurrency", str(workers)]
+    if ctx.ts("mutation_incremental", False):
+        command += ["--incremental", "--incrementalFile", INCREMENTAL]
     if mutate:
         command += ["--mutate", ",".join(mutate)]
     return command
+
+
+def concurrency(ctx: Context, on_remote: bool) -> int:
+    configured = ctx.ts("mutation_concurrency")
+    return remote.workers(ctx, GATE, int(configured) if configured else 0, on_remote)
 
 
 def placed(report: dict[str, Any], ctx: Context) -> list[Placed]:
@@ -118,8 +143,12 @@ def where(entry: Placed) -> str:
     return f"{entry[0]}:{entry[1]['location']['start']['line']}"
 
 
-def survivors_of(mutants: list[Placed]) -> list[str]:
-    return [survivor(name, mutant) for name, mutant in mutants if mutant["status"] in BAD]
+def survivors_of(mutants: list[Placed], strict: bool = False) -> list[str]:
+    return [survivor(name, mutant) for name, mutant in mutants if failed(mutant, strict)]
+
+
+def failed(mutant: dict[str, Any], strict: bool) -> bool:
+    return mutant["status"] in BAD or (strict and mutant["status"] == TIMED_OUT)
 
 
 def replacement_text(mutant: dict[str, Any]) -> str:

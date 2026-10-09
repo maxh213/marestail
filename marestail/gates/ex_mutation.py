@@ -1,9 +1,11 @@
 import json
 import time
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.elixir import project_files
 from marestail.report import Result, elapsed
@@ -20,6 +22,39 @@ ELIXIR_SUFFIXES = (EX, EXS)
 MUTATIONS_KEY = "mutations"
 MUTATOR_KEY = "mutator"
 DOT = "."
+TIMEOUT = "timeout"
+RUN_LIMIT = 300
+WATCHDOG = r"""
+limit=$1; poll=$2; shift 2
+pattern="mix test --max""-failures"
+"$@" &
+main=$!
+descends() {
+  local pid=$1
+  while [ "$pid" -gt 1 ] 2>/dev/null; do
+    [ "$pid" = "$main" ] && return 0
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -n "$pid" ] || return 1
+  done
+  return 1
+}
+reap() {
+  local child
+  for child in $(pgrep -P "$1"); do reap "$child"; done
+  kill -9 "$1" 2>/dev/null
+}
+while kill -0 "$main" 2>/dev/null; do
+  sleep "$poll"
+  for run in $(pgrep -f -- "$pattern"); do
+    age=$(ps -o etimes= -p "$run" 2>/dev/null | tr -d ' ')
+    if [ -n "$age" ] && [ "$age" -gt "$limit" ] && descends "$run"; then
+      echo "marestail: killed a muex test run after ${age}s (limit ${limit}s)" >&2
+      reap "$run"
+    fi
+  done
+done
+wait "$main"
+"""
 
 
 def run_gate(ctx: Context) -> Result:
@@ -42,11 +77,15 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
     missing = muex_missing(root)
     if missing:
         return Result(GATE, False, *missing, elapsed(started))
-    _, output = run(command(ctx, files), cwd=root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
-    report = read_report(output)
+    outcome = remote.run_mutation(ctx, GATE, lambda on_remote: guarded(ctx, command(ctx, files, on_remote)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    report = read_report(outcome.output)
     if isinstance(report, str):
-        return Result(GATE, False, report, tail(output), elapsed(started))
-    return report_result(ctx, scope, mutation_list(report), output, started)
+        return Result(GATE, False, report + outcome.where, tail(outcome.output), elapsed(started))
+    return report_result(ctx, located(scope, outcome.where), mutation_list(report), outcome.output, started)
+
+
+def located(scope: MutationScope, where: str) -> MutationScope:
+    return scope if not where else replace(scope, note=(scope.note + where).strip())
 
 
 def mutation_list(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -83,13 +122,15 @@ def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, 
     mutations = ctx.on_changed_lines(mutations, partial(describe, ctx))
     if not mutations:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    findings = failures(ctx, mutations)
-    summary = mutation_summary(len(findings), counted(mutations), scope.note)
+    passing = PASSING if ctx.timeouts_fail("elixir") else PASSING | {TIMEOUT}
+    findings = failures(ctx, mutations, passing)
+    timed_out = sum(1 for mutation in mutations if status(mutation) == TIMEOUT) if TIMEOUT in passing else 0
+    summary = mutation_summary(len(findings), counted(mutations), scope.note, timed_out)
     return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
-def failures(ctx: Context, mutations: list[dict[str, Any]]) -> list[str]:
-    return [describe(ctx, mutation) for mutation in mutations if status(mutation) not in PASSING]
+def failures(ctx: Context, mutations: list[dict[str, Any]], passing: set[str]) -> list[str]:
+    return [describe(ctx, mutation) for mutation in mutations if status(mutation) not in passing]
 
 
 def status(mutation: dict[str, Any]) -> str:
@@ -100,8 +141,9 @@ def counted(mutations: list[dict[str, Any]]) -> int:
     return sum(1 for mutation in mutations if status(mutation) != "invalid")
 
 
-def mutation_summary(failing: int, total: int, note: str) -> str:
+def mutation_summary(failing: int, total: int, note: str, timed_out: int = 0) -> str:
     summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
     return summary + (f" {note}" if note else "")
 
 
@@ -112,10 +154,15 @@ def mutation_timeout(ctx: Context) -> int | None:
     return int(value)
 
 
-def command(ctx: Context, files: list[str]) -> list[str]:
+def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
+    limit = int(ctx.elixir("muex_run_limit", RUN_LIMIT))
+    return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
+
+
+def command(ctx: Context, files: list[str], on_remote: bool = False) -> list[str]:
     parts = ["mix", "muex", "--format", "json", "--fail-at", "0", *switches(ctx)]
     parts += option("--preset", ctx.elixir("muex_preset"))
-    parts += option("--concurrency", ctx.elixir("muex_concurrency", 4))
+    parts += option("--concurrency", remote.workers(ctx, GATE, ctx.elixir("muex_concurrency", 4), on_remote))
     parts += option("--max-mutations", ctx.elixir("muex_max_mutations"))
     parts += mirror_option(ctx.elixir("muex_mirror"))
     if files:

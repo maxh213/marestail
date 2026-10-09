@@ -103,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False
     )
+    remote_parser = commands.add_parser("remote", help="the remote box that offloaded gates run on")
+    remote_parser.add_subparsers(dest="remote_command", required=True).add_parser("status", help="box state, uptime and estimated spend today and this month").set_defaults(handler=remote_status_command)
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
@@ -242,6 +244,12 @@ def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refresh", type=float, default=2.0, help=HELP_REFRESH)
     parser.add_argument("--all", action=STORE_TRUE, help=HELP_WATCH_ALL)
     parser.set_defaults(handler=watch_command)
+
+
+def remote_status_command(args: argparse.Namespace) -> int:
+    from marestail import remote
+
+    return remote.status_command(args)
 
 
 def gate_command(args: argparse.Namespace) -> int:

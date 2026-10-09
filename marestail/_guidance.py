@@ -1,4 +1,5 @@
 import shutil
+import tomllib
 from pathlib import Path
 
 from marestail.shell import ensure_dir
@@ -6,6 +7,7 @@ from marestail.shell import ensure_dir
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 _GUIDANCE = "guidance"
 _PATTERNS = "patterns"
+_PYTHON_MARKERS = ("pyproject.toml", "requirements.txt", "setup.py")
 
 
 def copy(target: Path) -> None:
@@ -30,6 +32,7 @@ def _markers(target: Path) -> tuple[tuple[str, bool], ...]:
         ("ex", _uses_elixir(target)),
         ("er", _uses_erlang(target)),
         ("go", _uses_go(target)),
+        ("py", _uses_python(target)),
     )
 
 
@@ -44,7 +47,7 @@ def _template(*parts: str) -> Path:
 
 
 def _copy(source: Path, destination: Path) -> None:
-    if destination.exists():
+    if destination.exists() or not source.exists():
         return
     ensure_dir(destination.parent)
     shutil.copy(source, destination)
@@ -64,6 +67,19 @@ def _uses_go(target: Path) -> bool:
 
 def _uses_erlang(target: Path) -> bool:
     return _anywhere(target, "*.erl")
+
+
+def _uses_python(target: Path) -> bool:
+    return any(_at_root(folder, name) for folder in {target, _python_root(target)} for name in _PYTHON_MARKERS)
+
+
+def _python_root(target: Path) -> Path:
+    config = target / "marestail.toml"
+    if not config.exists():
+        return target
+    with config.open("rb") as handle:
+        root = str(tomllib.load(handle).get("python", {}).get("root", "."))
+    return target / root
 
 
 def _anywhere(target: Path, pattern: str) -> bool:

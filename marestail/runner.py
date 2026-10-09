@@ -256,7 +256,44 @@ def run_pipeline(
     state.start = head(config)
     perf_trees.record_start(config, state.task_name)
     steps = window(start, stop, state.scope_name, config.section(VISUAL) is not None)
-    return _execute_pipeline(state, steps, auto)
+    return logged(state, lambda: _execute_pipeline(state, steps, auto))
+
+
+def logged(state: Run, execute: Callable[[], int]) -> int:
+    log = PipelineLog(sys.stdout, state.folder / "pipeline.log")
+    sys.stdout = log
+    try:
+        return execute()
+    finally:
+        sys.stdout = log.primary
+        log.close()
+
+
+class PipelineLog:
+    def __init__(self, primary: Any, path: Path) -> None:
+        self.primary = primary
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = path.open("a", encoding="utf-8")
+
+    def write(self, data: str) -> int:
+        self.primary.write(data)
+        self.file.write(data)
+        self.file.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        self.primary.flush()
+        self.file.flush()
+
+    def isatty(self) -> bool:
+        found: bool = self.primary.isatty()
+        return found
+
+    def close(self) -> None:
+        self.file.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.primary, name)
 
 
 def _execute_pipeline(state: Run, steps: list[Step], auto: bool) -> int:

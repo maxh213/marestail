@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from functools import partial
 from pathlib import Path
 
-from marestail import java
+from marestail import java, remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.report import Result, elapsed
 from marestail.shell import tail
@@ -58,14 +58,18 @@ def targeted(ctx: Context, relative: str, wanted: set[str] | None) -> bool:
 def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Result:
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
-    code, output = java.mvn(ctx, command(ctx, targets, out), timeout=int(ctx.java("mutation_timeout", 7200)))
+    outcome = remote.run_mutation(
+        ctx, "java.mutation", lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)], ctx.java_root(),
+        timeout=int(ctx.java("mutation_timeout", 7200)), pull=(str(out.relative_to(ctx.root)),),
+    )
+    code, output = outcome.code, outcome.output
     report = out / "mutations.xml"
     if not report.exists():
-        return Result(GATE, False, java.maven_hint(code, output) or missing(output, code), tail(output), elapsed(started))
+        return Result(GATE, False, (java.maven_hint(code, output) or missing(output, code)) + outcome.where, tail(output), elapsed(started))
     mutants = viable(report)
     if not mutants:
-        return Result(GATE, False, NO_MUTANTS, tail(output), elapsed(started))
-    return judged(ctx, ctx.on_changed_lines(mutants, partial(describe, ctx)), note, started)
+        return Result(GATE, False, NO_MUTANTS + outcome.where, tail(output), elapsed(started))
+    return judged(ctx, ctx.on_changed_lines(mutants, partial(describe, ctx)), (note + outcome.where).strip(), started)
 
 
 def judged(ctx: Context, mutants: list[ET.Element], note: str, started: float) -> Result:
@@ -88,7 +92,7 @@ def summarise(survived: int, total: int, note: str) -> str:
     return summary + (f" {note}" if note else "")
 
 
-def command(ctx: Context, targets: list[Path], out: Path) -> list[str]:
+def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool = False) -> list[str]:
     classes = target_classes(ctx, targets)
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [
@@ -98,7 +102,7 @@ def command(ctx: Context, targets: list[Path], out: Path) -> list[str]:
         "-DoutputFormats=XML",
         "-DtimestampedReports=false",
         f"-DreportsDirectory={out}",
-        f"-Dthreads={ctx.java('mutation_threads', 2)}",
+        f"-Dthreads={remote.workers(ctx, GATE, ctx.java('mutation_threads', 2), on_remote)}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
 

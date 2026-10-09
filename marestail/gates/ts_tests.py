@@ -18,12 +18,16 @@ UNINSTRUMENTED = re.compile(r"^Failed to collect coverage from (.+)$", re.M)
 GATE = "ts.tests"
 VITEST = "vitest"
 JEST = "jest"
+PLAYWRIGHT = "playwright"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
 KNOWN_RUNNERS = (VITEST, JEST)
+RUNNERS = (VITEST, JEST, PLAYWRIGHT)
 DEPENDENCY_KEYS = ("dependencies", "devDependencies")
 NO_RUNNER = "hyper: set [hyper] test_cmd to the command that runs this repository's tests"
 ADVISORY = "; coverage advisory: not measured with [hyper] test_cmd"
+PLAYWRIGHT_JSON = "PLAYWRIGHT_JSON_OUTPUT_NAME"
+FAILED_STATUSES = {"failed", "timedOut", "interrupted"}
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -60,23 +64,19 @@ def listed_packages(manifest: dict[str, Any]) -> set[str]:
 
 def runner_tests(ctx: Context, started: float) -> Result:
     runner = chosen_runner(ctx)
-    command = jest_command(ctx) if runner == JEST else vitest_command(ctx)
-    code, output = run(command, cwd=ctx.ts_root(), timeout=1800)
+    if runner not in RUNNERS:
+        return Result(GATE, False, f"unknown [ts] runner {runner!r}; use vitest, jest or playwright", [], elapsed(started))
+    missing = missing_tools(ctx, runner)
+    if missing:
+        return Result(GATE, False, missing, [], elapsed(started))
+    env = playwright_env(ctx) if runner == PLAYWRIGHT else None
+    code, output = run(command_for(ctx, runner), cwd=ctx.ts_root(), env=env, timeout=1800)
     if code != 0:
-        return Result(GATE, False, "tests failed", failures(ctx, runner == JEST) or tail(output), elapsed(started))
-    return passed(ctx, output, started)
+        return Result(GATE, False, "tests failed", failure_findings(ctx, runner) or tail(output), elapsed(started))
+    return passed(ctx, output, started, runner)
 
 
-def empty_failures(_ctx: Context) -> list[str]:
-    return EMPTY_LIST
-
-
-def failures(ctx: Context, jest: bool) -> list[str]:
-    chosen = (empty_failures, jest_failures)[jest]
-    return chosen(ctx)
-
-
-def passed(ctx: Context, output: str, started: float) -> Result:
+def passed(ctx: Context, output: str, started: float, runner: str = "") -> Result:
     uninstrumented = in_scope_findings([f"{relative_path(name, ctx)}:1 not instrumented" for name in UNINSTRUMENTED.findall(output)], ctx)
     if uninstrumented:
         return Result(GATE, False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, elapsed(started))
@@ -84,7 +84,7 @@ def passed(ctx: Context, output: str, started: float) -> Result:
     if not coverage:
         return Result(GATE, False, "no coverage report; check [ts] runner and sources", tail(output), elapsed(started))
     findings = coverage_findings(coverage, ctx)
-    summary = f"{count_tests(output)} passed, {len(findings)} uncovered lines/branches (need 0)"
+    summary = f"{count_tests(output, ctx, runner)} passed, {len(findings)} uncovered lines/branches (need 0)"
     return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
@@ -92,6 +92,37 @@ def read_coverage(ctx: Context) -> dict[str, Any]:
     report = ctx.work / COVERAGE_DIR / "coverage-final.json"
     coverage: dict[str, Any] = json.loads(report.read_text()) if report.exists() else {}
     return coverage
+
+
+def missing_tools(ctx: Context, runner: str) -> str:
+    if runner != PLAYWRIGHT:
+        return EMPTY
+    root = ctx.ts_root()
+    if not (root / "node_modules" / ".bin" / "playwright").exists():
+        return "playwright is not installed at node_modules/.bin/playwright; add @playwright/test"
+    if not (root / "node_modules" / ".bin" / "c8").exists():
+        return "c8 is not installed at node_modules/.bin/c8; add c8 so playwright coverage can be collected"
+    return EMPTY
+
+
+def command_for(ctx: Context, runner: str) -> list[str]:
+    if runner == JEST:
+        return jest_command(ctx)
+    if runner == PLAYWRIGHT:
+        return playwright_command(ctx)
+    return vitest_command(ctx)
+
+
+def failure_findings(ctx: Context, runner: str) -> list[str]:
+    if runner == JEST:
+        return jest_failures(ctx)
+    if runner == PLAYWRIGHT:
+        return playwright_failures(ctx)
+    return EMPTY_LIST
+
+
+def playwright_env(ctx: Context) -> dict[str, str]:
+    return {PLAYWRIGHT_JSON: str(ctx.work / JEST_RESULTS)}
 
 
 def vitest_command(ctx: Context) -> list[str]:
@@ -130,6 +161,92 @@ def json_list(data: dict[str, Any], key: str) -> list[Any]:
         return EMPTY_LIST
     found: list[Any] = data[key]
     return found
+
+
+def playwright_command(ctx: Context) -> list[str]:
+    root = ctx.ts_root()
+    coverage = ctx.work / COVERAGE_DIR
+    coverage.mkdir(parents=True, exist_ok=True)
+    sources = ctx.ts("sources") or [ctx.ts("source", "src")]
+    command = [
+        str(root / "node_modules" / ".bin" / "c8"),
+        "--reporter=json",
+        "--reporter=lcov",
+        f"--reports-dir={coverage}",
+        "--all",
+    ]
+    for folder in sources:
+        command.append(f"--include={folder}/**")
+    command += [
+        "--exclude=**/*.spec.ts",
+        "--exclude=**/*.spec.tsx",
+        "--exclude=**/*.test.ts",
+        "--exclude=**/*.test.tsx",
+        "--exclude=**/*.spec.js",
+        "--exclude=**/*.test.js",
+        str(root / "node_modules" / ".bin" / "playwright"),
+        "test",
+        "--reporter=line",
+        "--reporter=json",
+    ]
+    return command
+
+
+def playwright_failures(ctx: Context) -> list[str]:
+    path = ctx.work / JEST_RESULTS
+    if not path.exists():
+        return []
+    try:
+        report = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return [f"{JEST_RESULTS}:1 playwright JSON report is not valid JSON"]
+    findings = []
+    for spec in playwright_specs(report.get("suites") or []):
+        findings.extend(playwright_spec_findings(spec, ctx))
+    for error in report.get("errors") or []:
+        findings.append(playwright_error_finding(error, ctx))
+    return findings
+
+
+def playwright_specs(suites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for suite in suites:
+        specs.extend(suite.get("specs") or [])
+        specs.extend(playwright_specs(suite.get("suites") or []))
+    return specs
+
+
+def playwright_spec_findings(spec: dict[str, Any], ctx: Context) -> list[str]:
+    if spec.get("ok", True):
+        return []
+    title = spec.get("title") or "test"
+    findings = []
+    for case in spec.get("tests") or []:
+        for result in case.get("results") or []:
+            if result.get("status") not in FAILED_STATUSES:
+                continue
+            error = result.get("error") or {}
+            findings.append(playwright_case_finding(spec, title, error, result.get("status"), ctx))
+    if not findings:
+        findings.append(playwright_case_finding(spec, title, {}, "failed", ctx))
+    return findings
+
+
+def playwright_case_finding(spec: dict[str, Any], title: str, error: dict[str, Any], status: str, ctx: Context) -> str:
+    loc = error.get("location") or {}
+    file = loc.get("file") or spec.get("file") or "playwright"
+    line = loc.get("line") or spec.get("line") or 1
+    message = first_line(error.get("message") or status or "failed")
+    return f"{relative_path(str(file), ctx)}:{line} {title} failed: {message}"
+
+
+def playwright_error_finding(error: dict[str, Any] | str, ctx: Context) -> str:
+    if not isinstance(error, dict):
+        return f"playwright:1 {first_line(str(error))}"
+    loc = error.get("location") or {}
+    file = loc.get("file") or "playwright"
+    line = loc.get("line") or 1
+    return f"{relative_path(str(file), ctx)}:{line} {first_line(error.get('message') or 'playwright error')}"
 
 
 def jest_failures(ctx: Context) -> list[str]:
@@ -223,8 +340,35 @@ def passed_count(line: str) -> str:
     return line.split("passed")[0].split()[-1]
 
 
-def count_tests(output: str) -> str:
+def passed_token(line: str) -> str | None:
+    stripped = line.strip()
+    if " passed" not in stripped:
+        return None
+    token = stripped.split(" passed", 1)[0].split()[-1]
+    return token if token.isdigit() else None
+
+
+def playwright_count(ctx: Context | None, runner: str) -> str | None:
+    if runner != PLAYWRIGHT or ctx is None:
+        return None
+    path = ctx.work / JEST_RESULTS
+    if not path.exists():
+        return None
+    try:
+        stats = json.loads(path.read_text()).get("stats") or {}
+    except json.JSONDecodeError:
+        stats = {}
+    return str(stats["expected"]) if "expected" in stats else None
+
+
+def count_tests(output: str, ctx: Context | None = None, runner: str = "") -> str:
+    counted = playwright_count(ctx, runner)
+    if counted is not None:
+        return counted
     for line in output.splitlines():
         if "Tests" in line and "passed" in line:
             return passed_count(line)
+        token = passed_token(line)
+        if token is not None:
+            return token
     return "?"

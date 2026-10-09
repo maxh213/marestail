@@ -47,6 +47,29 @@ NAMED_TOOLS = ("rspec", "rubocop", "mutmut", "mutant", "stryker", "pytest", "vit
 FIELD_KEYS = ("file_path", "command", "pattern")
 MODEL_FLAGS = frozenset({"--model", "-m"})
 EMPTY = ""
+DEEPSEEK_CONFIG_ENV = "DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"
+DEEPSEEK_HOME_DEFAULT = "~/.claude-deepseek"
+PIPELINE_LOG = "pipeline.log"
+MAX_DEPTH = 4
+SKIP_DIRS = {
+    ".git",
+    ".marestail",
+    ".next",
+    ".scannerwork",
+    ".stryker-tmp",
+    ".venv",
+    ".yarn",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "mutants",
+    "node_modules",
+    "StrykerOutput",
+    "target",
+    "vendor",
+    "venv",
+}
 
 ProcRow = tuple[int, int, int, list[str]]
 
@@ -113,20 +136,31 @@ def has_marestail(child: Path) -> bool:
     return work_path(child).is_dir()
 
 
-def self_repo(root: Path) -> list[Path]:
-    return {True: [root]}.get(has_marestail(root), [])
-
-
-def discover_root(root: Path) -> list[Path]:
-    return [*self_repo(root), *filter(has_marestail, list_dirs(root))]
-
-
 def discover(roots: list[Path]) -> list[Path]:
-    return list(chain.from_iterable(map(discover_root, roots)))
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        walk_beds(root, 0, found, seen)
+    return found
 
 
-def list_dirs(root: Path) -> list[Path]:
-    return sorted(filter(Path.is_dir, entries(root)))
+def walk_beds(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
+    real = real_path(path)
+    if real in seen:
+        return
+    seen.add(real)
+    if (path / ".marestail").is_dir():
+        found.append(path)
+    if depth >= MAX_DEPTH:
+        return
+    try:
+        children = sorted(p for p in path.iterdir() if p.is_dir() and not p.is_symlink())
+    except OSError:
+        return
+    for child in children:
+        if child.name in SKIP_DIRS or child.name.startswith("."):
+            continue
+        walk_beds(child, depth + 1, found, seen)
 
 
 def collect_repo(root: Path) -> RepoState:
@@ -258,11 +292,28 @@ def stripped_lines(log_path: Path) -> list[str]:
 
 
 def collect_fleet(roots: list[Path]) -> Fleet:
-    return Fleet(repos=list(map(collect_repo, discover(roots))), scanned_at=time.time())
+    return Fleet(repos=[named_repo(root, roots) for root in discover(roots)], scanned_at=time.time())
+
+
+def named_repo(root: Path, roots: list[Path]) -> RepoState:
+    state = collect_repo(root)
+    state.name = display_name(root, roots)
+    return state
 
 
 def add_live(sections: list[tuple[str, str]], live: list[str]) -> None:
     sections.append((LIVE, "\n".join(live)))
+
+
+def display_name(bed: Path, roots: list[Path]) -> str:
+    real = real_path(bed)
+    for root in roots:
+        try:
+            relative = real.relative_to(real_path(root)).as_posix()
+        except ValueError:
+            continue
+        return real.name if relative == "." else relative
+    return real.name
 
 
 def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
@@ -316,22 +367,19 @@ def dir_mtime(path: Path) -> float:
     return 0.0
 
 
-def log_name(path: Path) -> str:
-    return path.name
-
-
 def newest_log(logs: list[Path]) -> Path:
-    return max(logs, key=log_name)
+    return max(logs, key=dir_mtime)
 
 
 def latest_log(root: Path) -> Path | None:
-    logs = overnight_logs(work_path(root, RUNS))
+    logs = run_logs(work_path(root, RUNS))
     chosen = (none_of, newest_log)[bool(logs)]
     return chosen(logs)
 
 
-def overnight_logs(runs: Path) -> list[Path]:
-    return list(filter(is_overnight_log, entries(runs)))
+def run_logs(runs: Path) -> list[Path]:
+    found = entries(runs)
+    return [*filter(is_overnight_log, found), *filter(Path.is_file, (path / PIPELINE_LOG for path in found))]
 
 
 def is_overnight_log(path: Path) -> bool:
@@ -522,7 +570,15 @@ def expand_named(name: str) -> Path:
 
 
 def work_home() -> Path:
-    return Path(next(filter(None, (os.environ.get(WORK_CONFIG_ENV), WORK_HOME_DEFAULT)))).expanduser()
+    return home_from(WORK_CONFIG_ENV, WORK_HOME_DEFAULT)
+
+
+def deepseek_home() -> Path:
+    return home_from(DEEPSEEK_CONFIG_ENV, DEEPSEEK_HOME_DEFAULT)
+
+
+def home_from(env: str, default: str) -> Path:
+    return Path(next(filter(None, (os.environ.get(env), default)))).expanduser()
 
 
 def configured_home(home: Path | None) -> list[Path]:
@@ -530,7 +586,7 @@ def configured_home(home: Path | None) -> list[Path]:
 
 
 def claude_homes() -> list[Path]:
-    return [Path.home() / CLAUDE_HOME, work_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
+    return [Path.home() / CLAUDE_HOME, work_home(), deepseek_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
@@ -894,12 +950,17 @@ def skipped_gate(tokens: list[str], names: list[str]) -> bool:
     return True in (is_pipeline(tokens), bool(BACKENDS.intersection(names)))
 
 
+REMOTE_MARK = "☁"
+REMOTE_TOOLS = ("muex", "stryker", "mutmut", "pitest")
+
+
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
     return first_present(gate_candidates(tokens, names))
 
 
 def gate_candidates(tokens: list[str], names: list[str]) -> tuple[str | None, ...]:
     return (
+        remote_label(tokens, names),
         named_one(names, "muex"),
         mix_gate(tokens),
         named_command(tokens, "dotnet", "test", "dotnet test"),
@@ -1020,6 +1081,22 @@ def basename_is(tokens: list[str], name: str, index: int) -> bool:
 
 def token_after(tokens: list[str], index: int) -> str:
     return tokens[index + 1]
+
+
+def remote_label(tokens: list[str], names: list[str]) -> str | None:
+    alias = re.search(r"HostKeyAlias=(\S+)", " ".join(tokens))
+    host = alias.group(1) if alias else None
+    if names and names[0] == "gcloud" and "instances" in tokens and "start" in tokens:
+        return f"{REMOTE_MARK} starting {after(tokens, 'start') or 'vm'}"
+    if host is None:
+        return None
+    if names[0] == "rsync":
+        return f"{REMOTE_MARK} syncing to {host}"
+    command = " ".join(tokens)
+    if names[0] == "ssh" and "busy.d" in command:
+        tool = next((tool for tool in REMOTE_TOOLS if tool in command), "gate")
+        return f"{REMOTE_MARK} {tool} on {host}"
+    return None
 
 
 def after(tokens: list[str], name: str) -> str | None:

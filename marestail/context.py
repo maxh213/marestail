@@ -96,6 +96,9 @@ class Context:
     def ruby(self, key: str, default: Any = None) -> Any:
         return self.config.get("ruby", key, default)
 
+    def timeouts_fail(self, section: str) -> bool:
+        return str(self.config.get(section, "mutation_timeouts", "kill")).lower() == "fail"
+
     def python_bin(self, tool: str) -> str:
         venv = self.root / self.python("venv", ".venv")
         return str(venv / "bin" / tool)

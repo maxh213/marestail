@@ -7,7 +7,7 @@ from itertools import repeat, starmap
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from .collect import collect_fleet
+from .collect import REMOTE_MARK, collect_fleet
 from .model import Fleet, RepoState
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
 from .theme import GLYPH_FLOURISH, ROUND, full_vine, init_theme
@@ -17,6 +17,7 @@ MIN_H = 20
 TICK_MS = 125
 SESSION_TICKS = 10000
 REPOS_ATTR = "repos"
+EMPTY = ""
 KEY_LABEL = " key "
 BACK_ACTION = "back"
 COLLECT_PREFIX = "collect failed: "
@@ -296,7 +297,13 @@ def draw_header(win: curses.window, width: int, state: WatchState) -> None:
 
 
 def status_text(state: WatchState) -> str:
-    return f"{len(getattr(state.fleet, REPOS_ATTR, []))} beds · {len(worker_rows(state.fleet))} workers · {time.strftime(TIME_FMT)} "
+    repos: list[RepoState] = getattr(state.fleet, REPOS_ATTR, [])
+    return f"{on_vm(repos)}{len(repos)} beds · {len(worker_rows(state.fleet))} workers · {time.strftime(TIME_FMT)} "
+
+
+def on_vm(repos: list[RepoState]) -> str:
+    remote = sum(1 for repo in repos if (repo.gate_activity or EMPTY).startswith(REMOTE_MARK))
+    return f"{REMOTE_MARK} {remote} on vm · " if remote else EMPTY
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:

@@ -1,15 +1,17 @@
 import json
 import shutil
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from marestail import remote
 from marestail.context import Context, is_benchmark
 from marestail.javascript import rel as relative
 from marestail.javascript import tool
 from marestail.report import Result, elapsed
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 TS_SUFFIXES = (".ts", ".tsx")
 COMMAND_SUFFIXES = (".js", ".mjs", ".cjs", *TS_SUFFIXES)
@@ -17,6 +19,7 @@ COMMAND_CONFIG = "stryker/command.config.json"
 COMMAND_REPORT = "stryker/mutation.json"
 COMMAND_TEMP = ".marestail/stryker-tmp"
 KILLED = "Killed"
+RUN_SECONDS = 7200
 MEMO = "stryker.command"
 EMPTY_LIST: list[Any] = []
 EMPTY_MAP: dict[str, Any] = {}
@@ -29,13 +32,14 @@ class Proof:
     code: int
     output: str
     report: dict[str, Any] | None
+    where: str = ""
 
     @property
     def failed(self) -> bool:
         return self.report is None and self.code != 0
 
     def failure(self, gate: str, started: float) -> Result:
-        return Result(gate, False, f"stryker produced no report (exit {self.code})", tail(self.output), elapsed(started))
+        return Result(gate, False, f"stryker produced no report (exit {self.code}){self.where}", tail(self.output), elapsed(started))
 
     def line_statuses(self, ctx: Context) -> LineStatuses:
         found: LineStatuses = defaultdict(lambda: defaultdict(set))
@@ -44,12 +48,12 @@ class Proof:
         return found
 
 
-def execute(ctx: Context, command: list[str], temp: Path, report: Path) -> Proof:
+def execute(ctx: Context, build: Callable[[bool], list[str]], temp: Path, report: Path, gate: str = "", pull: tuple[str, ...] = ()) -> Proof:
     drop_tree(temp)
     report.unlink(missing_ok=True)
     try:
-        code, output = run(command, cwd=ctx.ts_root(), timeout=7200)
-        return Proof(code, output, json.loads(report.read_text()) if report.exists() else None)
+        outcome = remote.run_mutation(ctx, gate, build, ctx.ts_root(), timeout=RUN_SECONDS, pull=pull)
+        return Proof(outcome.code, outcome.output, json.loads(report.read_text()) if report.exists() else None, outcome.where)
     finally:
         drop_tree(temp)
 
@@ -61,7 +65,7 @@ def command_targets(ctx: Context) -> list[str]:
 def command_proof(ctx: Context, mutate: list[str]) -> Proof:
     if MEMO not in ctx.memo:
         command = [*tool(ctx, "stryker"), "run", str(command_config(ctx, mutate))]
-        ctx.memo[MEMO] = execute(ctx, command, ctx.ts_root() / COMMAND_TEMP, ctx.work / COMMAND_REPORT)
+        ctx.memo[MEMO] = execute(ctx, lambda on_remote: command, ctx.ts_root() / COMMAND_TEMP, ctx.work / COMMAND_REPORT)
     found: Proof = ctx.memo[MEMO]
     return found
 

@@ -12,6 +12,7 @@ MODES = {"dandelion/route": (), "dandelion/route-best": ("--high",)}
 BACKENDS = {
     "claude": backends.CLAUDE,
     "claude-work": backends.CLAUDE,
+    "claude-deepseek": backends.CLAUDE,
     "agy": backends.AGY,
     "kimi": backends.KIMI,
     "grok": backends.GROK,
@@ -106,8 +107,15 @@ def parse(line: str) -> Choice:
     return Choice(line, BACKENDS[provider], words[0], effort, account_env(provider))
 
 
+CONFIG_DIRS = {
+    "claude-work": ("DANDELION_CLAUDE_WORK_CONFIG_DIR", "~/.claude-work"),
+    "claude-deepseek": ("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/.claude-deepseek"),
+}
+
+
 def account_env(provider: str) -> dict[str, str]:
-    if provider != "claude-work":
+    configured = CONFIG_DIRS.get(provider)
+    if configured is None:
         return {}
-    configured = os.environ.get("DANDELION_CLAUDE_WORK_CONFIG_DIR") or "~/.claude-work"
-    return {"CLAUDE_CONFIG_DIR": str(Path(configured).expanduser())}
+    name, fallback = configured
+    return {"CLAUDE_CONFIG_DIR": str(Path(os.environ.get(name) or fallback).expanduser())}
