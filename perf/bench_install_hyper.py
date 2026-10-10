@@ -28,7 +28,7 @@ fake_bin.mkdir()
 (fake_bin / "npm").chmod(0o755)
 os.environ["PATH"] = f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
 supports_hyper = "hyper" in inspect.signature(install.install).parameters
-mutation_takes_ctx = len(inspect.signature(ts_mutation.mutation_command).parameters) == 2
+mutation_params = list(inspect.signature(ts_mutation.mutation_command).parameters)
 
 
 def git_repo(path: Path) -> Path:
@@ -67,7 +67,11 @@ def tooling_ctx(with_tooling: bool) -> Context:
 
 
 def mutation(ctx: Context) -> list[str]:
-    return ts_mutation.mutation_command(ctx, MUTATE) if mutation_takes_ctx else ts_mutation.mutation_command(MUTATE)
+    if mutation_params[0] != "ctx":
+        return ts_mutation.mutation_command(MUTATE)
+    if "workers" in mutation_params:
+        return ts_mutation.mutation_command(ctx, MUTATE, ts_mutation.local_concurrency(ctx))
+    return ts_mutation.mutation_command(ctx, MUTATE)
 
 
 def command_targets(label: str, ctx: Context) -> None:
