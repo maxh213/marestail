@@ -140,6 +140,11 @@ Feature: The merge of main is green
     And ts matches "^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$" and repo is the fixture root
     When MARESTAIL_REMOTE is 0 and the same toml exists
     Then the summary is "all 2 mutants killed (1 killed by timeout)" and contains neither "(on " nor "remote unavailable"
+    When MARESTAIL_REMOTE is unset, the box would describe as RUNNING, and the toml is the same except for 'gates = ["ts.mutation"]'
+    Then the gate exits 0 and the summary is exactly "all 2 mutants killed (1 killed by timeout)", with neither "(on " nor "remote unavailable"
+    And mutmut's arguments are "run --max-children 4"
+    And gcloud, ssh and rsync were never called
+    And remote-usage.jsonl is absent
     When the box is RUNNING but rsync exits 1 with stderr "connection reset"
     Then the summary contains "(remote sync failed: connection reset; ran locally)", mutmut's arguments are "run --max-children 4" and remote-usage.jsonl is absent
     When the box is RUNNING, the job ssh exits 255 and prints nothing, and every gcloud describe after the first exits 1
@@ -169,7 +174,11 @@ Feature: The merge of main is green
     Then the exit code is 1 and stdout is "no remote configured (/tmp/qa-020a-empty/.config/marestail/remote.toml)\n"
     Given a fresh HOME with the toml from the offload scenario and no remote-usage.jsonl
     And the fake gcloud describe prints RUNNING 1.2.3.4 and prints nothing for "auth print-access-token", so spend is unknown and nothing reaches the network
-    And the status ssh is the one whose command contains "marestail-idle-check", and it prints "/repo/web stryker 01:02 running"
+    And the status ssh is the one whose command contains "marestail-idle-check", and it prints
+      """
+      /repo/web stryker 01:02 running
+      idle 120 15
+      """
     When I run "marestail remote status"
     Then the exit code is 0 and stdout is
       """
@@ -179,13 +188,31 @@ Feature: The merge of main is green
       today: VM up unknown; 0 jobs, 0.00h busy
       this month: VM up unknown; 0 jobs, 0.00h busy
       """
-    When ssh instead prints "idle 120 15"
+    And no line contains "no jobs:"
+    When the status ssh prints the same two lines but exits 1
+    Then the exit code is 0 and stdout is
+      """
+      marestail-mutation (proj/europe-west1-b): RUNNING 1.2.3.4
+      offloaded gates: py.mutation
+      today: VM up unknown; 0 jobs, 0.00h busy
+      this month: VM up unknown; 0 jobs, 0.00h busy
+      """
+    When every gcloud describe exits 1
+    Then the exit code is 0 and stdout is
+      """
+      marestail-mutation (proj/europe-west1-b): unknown
+      offloaded gates: py.mutation
+      today: VM up unknown; 0 jobs, 0.00h busy
+      this month: VM up unknown; 0 jobs, 0.00h busy
+      """
+    And the first line has no trailing space and no ssh was run
+    When ssh instead prints only "idle 120 15"
     Then the third line matches "^  no jobs: idle for 2 min, powers itself off after 15 idle min \(about \d{2}:\d{2}\)$"
     And the running line is absent
     Given remote-usage.jsonl holds, stamped with the current UTC time, a job line with seconds 1800, a job line with seconds 5400 and a vm-start line, and a job line stamped "2000-01-01T00:00:00+00:00" with seconds 3600
-    And ssh prints "/repo/web stryker 01:02 queued"
+    And ssh prints "/repo/web stryker 01:02 queued" and then "idle 120 15" on the next line
     When I run "marestail remote status"
-    Then the third line is "  running: stryker for web, 01:02 (queued)"
+    Then the third line is "  running: stryker for web, 01:02 (queued)" and no line contains "no jobs:"
     And the last two lines are "today: VM up unknown; 2 jobs, 2.00h busy" and "this month: VM up unknown; 2 jobs, 2.00h busy"
 
   Scenario: remote status prices uptime per instance when monitoring answers
