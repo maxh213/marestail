@@ -118,6 +118,19 @@ Feature: The merge of main is green
     Then the gate exits 0 and the summary contains "all 2 mutants killed (1 killed by timeout) (remote unavailable: PERMISSION_DENIED; ran locally)"
     And mutmut's arguments are "run --max-children 4"
     And remote-usage.jsonl is absent
+    When describe prints STOPPED and gcloud start exits 1 and prints nothing
+    Then the summary contains "(remote unavailable: start failed; ran locally)" and mutmut's arguments are "run --max-children 4"
+    When describe prints TERMINATED, gcloud start exits 0, and every later describe prints RUNNING with natIP 1.2.3.4
+    Then the summary contains "all 2 mutants killed (1 killed by timeout) (on marestail-mutation, 0s)" and the local mutmut did not run
+    And gcloud ran "compute instances start marestail-mutation --project=proj --zone=europe-west1-b --quiet" once and describe twice
+    And remote-usage.jsonl is two lines: first {"ts", "event": "vm-start", "instance": "marestail-mutation", "usd_per_hour": 1.2} with keys in that order, then the job line with result "ok"
+    When the first describe prints SUSPENDED and the rest print RUNNING
+    Then gcloud ran "compute instances resume marestail-mutation …" and not "start", and the usage file again starts with a vm-start line
+    When the first two describes print STOPPING, the third TERMINATED, and the rest RUNNING
+    Then the gate sleeps 5 seconds once (between the second and third describe), runs start once, describes four times and the summary contains "(on marestail-mutation, 0s)"
+    And SUSPENDING is waited for the same way, and the wait is not counted in the job's seconds
+    When describe prints RUNNING but the ssh readiness probe "sg docker -c 'docker exec mt true'" never exits 0
+    Then after BOOT_WAIT (240 seconds, which a test may shorten) the summary contains "(remote unavailable: ssh never came up; ran locally)"
     When gcloud describe prints RUNNING with natIP 1.2.3.4, every ssh exits 0 at once and the rsync whose last argument ends in "/mutants/" writes the same meta file there
     Then the summary contains "all 2 mutants killed (1 killed by timeout) (on marestail-mutation, 0s)"
     And the local mutmut did not run
@@ -137,6 +150,18 @@ Feature: The merge of main is green
     Then the exit code is 1 and the result line starts "[FAIL] py.mutation    mutmut failed (connection to marestail-mutation dropped twice mid-run; not rerun locally)  ("
     And the job ssh ran twice and the local mutmut did not run
     And remote-usage.jsonl is one job line with result "dropped"
+    When the box stays RUNNING, the first job ssh exits 255 and prints nothing, and the second exits 0
+    Then the exit code is 0 and the summary contains "all 2 mutants killed (1 killed by timeout) (on marestail-mutation, 0s)"
+    And the job ssh ran twice, describe ran twice and the local mutmut did not run
+    And remote-usage.jsonl is one job line with result "ok"
+    When the box is RUNNING and the job ssh exits 1 and prints "boom"
+    Then the exit code is 1 and the output contains
+      """
+      [FAIL] py.mutation    mutmut failed (on marestail-mutation, 0s)
+             boom
+      """
+    And the output ends with "GATE FAILED: py.mutation", the job ssh ran once and the local mutmut did not run
+    And remote-usage.jsonl is one job line with result "exit 1", seconds 0 and usd 0.0
 
   Scenario: remote status prints the box, the jobs and the spend, or says it is not configured
     Given HOME is /tmp/qa-020a-empty and that directory has no remote.toml
@@ -162,6 +187,20 @@ Feature: The merge of main is green
     When I run "marestail remote status"
     Then the third line is "  running: stryker for web, 01:02 (queued)"
     And the last two lines are "today: VM up unknown; 2 jobs, 2.00h busy" and "this month: VM up unknown; 2 jobs, 2.00h busy"
+
+  Scenario: remote status prices uptime per instance when monitoring answers
+    This is a test-level case: QA cannot fake the monitoring API at the UI.
+    Given remote.CONFIG holds the offload scenario's toml (usd_per_hour 1.2) and remote.USAGE holds one job line stamped now for instance "old-box" with seconds 1800 and usd_per_hour 0.5
+    And describe gives RUNNING 1.2.3.4 and the status ssh prints "idle 120 15"
+    And the "gcloud auth print-access-token" subprocess prints "tok"
+    And urllib.request.urlopen is faked to return {"timeSeries": [{"points": [{"value": {"doubleValue": 3600.0}}, {"value": {"doubleValue": 1800.0}}]}]}
+    When status_command runs
+    Then it returns 0 and the last two lines are "today: VM up 3.00h = $2.55; 1 jobs, 0.50h busy" and "this month: VM up 3.00h = $2.55; 1 jobs, 0.50h busy"
+    And urlopen was called four times: old-box then marestail-mutation for today, then the same for this month
+    And each request is to "https://monitoring.googleapis.com/v3/projects/proj/timeSeries", with header Authorization "Bearer tok" and timeout 20
+    And its query has filter 'metric.type="compute.googleapis.com/instance/uptime" AND metric.labels.instance_name="<instance>"', aggregation.perSeriesAligner "ALIGN_SUM", interval.startTime today's or the month's first UTC midnight as "YYYY-MM-DDT00:00:00Z", and aggregation.alignmentPeriod the window in whole seconds, at least 60, followed by "s"
+    When urlopen raises OSError, or returns a body that is not JSON
+    Then both lines read "VM up unknown" and the job counts stay "1 jobs, 0.50h busy"
 
   Scenario: help lists remote, and status and queue stay absent
     When I run "marestail --help"
@@ -215,7 +254,7 @@ Feature: The merge of main is green
     Then remote settings are ignored even if ~/.config/marestail/remote.toml exists
     And a test that exercises the box monkeypatches remote.gcloud, remote.ssh, remote.rsync, remote.describe and remote.ensure_up as it needs
     And a test that reaches status_command also fakes remote.uptime_seconds, or its "gcloud auth print-access-token" subprocess and urllib.request.urlopen, because uptime_seconds calls neither remote.gcloud nor remote.ssh
-    And the urlopen branch of uptime_seconds is covered with a fake response, never a real request
+    And the urlopen branch of uptime_seconds is covered with the fake response of the pricing scenario, never a real request
     And such a test points remote.CONFIG, remote.USAGE and remote.LOCK at files under tmp_path, so ensure_up never locks ~/.config/marestail/remote.lock, which a live marestail on this machine holds while it offloads
     And the hermetic guard in tests/conftest.py still refuses sockets
     When the whole of tests/ runs with HOME set to a fresh empty directory and PATH starting with gcloud, ssh and rsync tripwires that append their arguments to a log and exit 99
