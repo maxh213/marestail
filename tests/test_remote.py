@@ -799,15 +799,15 @@ def job_id(monkeypatch: pytest.MonkeyPatch) -> str:
 def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch, job_id: str) -> None:
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     remote._execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100)
+    session = "/var/lib/marestail-jobs/job-abc"
     inner = (
-        "echo $$ > /tmp/marestail-job-abc; " + remote.PREPARE + "; "
-        "timeout -k 30 100 mutmut run 'x y'; code=$?; rm -f /tmp/marestail-job-abc; exit $code"
+        f"mkdir -p -m 700 /var/lib/marestail-jobs && echo $$ > {session}; " + remote.PREPARE + "; "
+        f"timeout -k 30 100 mutmut run 'x y'; code=$?; rm -f {session}; exit $code"
     )
     docker = (
         f"docker exec -w '/repo/a b' -e PATH=/usr/bin:/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=dumb -e NO_COLOR=1 -e A=1 "
         f"mt setsid -w bash -c {shlex.quote(inner)}"
     )
-    session = "/tmp/marestail-job-abc"
     stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
     cleanup = "sg docker -c " + shlex.quote("docker exec mt bash -c " + shlex.quote(stop))
     script = (
