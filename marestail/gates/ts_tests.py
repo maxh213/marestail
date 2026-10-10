@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from marestail.context import Context
@@ -28,6 +29,8 @@ NO_RUNNER = "hyper: set [hyper] test_cmd to the command that runs this repositor
 ADVISORY = "; coverage advisory: not measured with [hyper] test_cmd"
 PLAYWRIGHT_JSON = "PLAYWRIGHT_JSON_OUTPUT_NAME"
 FAILED_STATUSES = {"failed", "timedOut", "interrupted"}
+INVALID_REPORT = f"{JEST_RESULTS}:1 playwright JSON report is not valid JSON"
+UNREPORTED = {"status": "failed"}
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -64,11 +67,19 @@ def listed_packages(manifest: dict[str, Any]) -> set[str]:
 
 def runner_tests(ctx: Context, started: float) -> Result:
     runner = chosen_runner(ctx)
+    problem = runner_problem(ctx, runner)
+    if problem:
+        return Result(GATE, False, problem, [], elapsed(started))
+    return ran_tests(ctx, runner, started)
+
+
+def runner_problem(ctx: Context, runner: str) -> str:
     if runner not in RUNNERS:
-        return Result(GATE, False, f"unknown [ts] runner {runner!r}; use vitest, jest or playwright", [], elapsed(started))
-    missing = missing_tools(ctx, runner)
-    if missing:
-        return Result(GATE, False, missing, [], elapsed(started))
+        return f"unknown [ts] runner {runner!r}; use vitest, jest or playwright"
+    return missing_tools(ctx, runner)
+
+
+def ran_tests(ctx: Context, runner: str, started: float) -> Result:
     env = playwright_env(ctx) if runner == PLAYWRIGHT else None
     code, output = run(command_for(ctx, runner), cwd=ctx.ts_root(), env=env, timeout=1800)
     if code != 0:
@@ -76,7 +87,7 @@ def runner_tests(ctx: Context, started: float) -> Result:
     return passed(ctx, output, started, runner)
 
 
-def passed(ctx: Context, output: str, started: float, runner: str = "") -> Result:
+def passed(ctx: Context, output: str, started: float, runner: str) -> Result:
     uninstrumented = in_scope_findings([f"{relative_path(name, ctx)}:1 not instrumented" for name in UNINSTRUMENTED.findall(output)], ctx)
     if uninstrumented:
         return Result(GATE, False, f"{len(uninstrumented)} files could not be instrumented", uninstrumented, elapsed(started))
@@ -195,58 +206,77 @@ def playwright_command(ctx: Context) -> list[str]:
 def playwright_failures(ctx: Context) -> list[str]:
     path = ctx.work / JEST_RESULTS
     if not path.exists():
-        return []
+        return EMPTY_LIST
+    report = read_report(path)
+    if report is None:
+        return [INVALID_REPORT]
+    return report_findings(report, ctx)
+
+
+def read_report(path: Path) -> dict[str, Any] | None:
     try:
-        report = json.loads(path.read_text())
+        report: dict[str, Any] = json.loads(path.read_text())
     except json.JSONDecodeError:
-        return [f"{JEST_RESULTS}:1 playwright JSON report is not valid JSON"]
-    findings = []
-    for spec in playwright_specs(report.get("suites") or []):
-        findings.extend(playwright_spec_findings(spec, ctx))
-    for error in report.get("errors") or []:
-        findings.append(playwright_error_finding(error, ctx))
-    return findings
+        return None
+    return report
+
+
+def listed(data: dict[str, Any], key: str) -> list[Any]:
+    found: list[Any] = data.get(key) or EMPTY_LIST
+    return found
+
+
+def report_findings(report: dict[str, Any], ctx: Context) -> list[str]:
+    specs = [finding for spec in playwright_specs(listed(report, "suites")) for finding in playwright_spec_findings(spec, ctx)]
+    return specs + [playwright_error_finding(error, ctx) for error in listed(report, "errors")]
 
 
 def playwright_specs(suites: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    specs: list[dict[str, Any]] = []
-    for suite in suites:
-        specs.extend(suite.get("specs") or [])
-        specs.extend(playwright_specs(suite.get("suites") or []))
-    return specs
+    return [spec for suite in suites for spec in suite_specs(suite)]
+
+
+def suite_specs(suite: dict[str, Any]) -> list[dict[str, Any]]:
+    return listed(suite, "specs") + playwright_specs(listed(suite, "suites"))
 
 
 def playwright_spec_findings(spec: dict[str, Any], ctx: Context) -> list[str]:
     if spec.get("ok", True):
-        return []
-    title = spec.get("title") or "test"
-    findings = []
-    for case in spec.get("tests") or []:
-        for result in case.get("results") or []:
-            if result.get("status") not in FAILED_STATUSES:
-                continue
-            error = result.get("error") or {}
-            findings.append(playwright_case_finding(spec, title, error, result.get("status"), ctx))
-    if not findings:
-        findings.append(playwright_case_finding(spec, title, {}, "failed", ctx))
-    return findings
+        return EMPTY_LIST
+    return failed_spec_findings(spec, spec.get("title") or "test", ctx)
 
 
-def playwright_case_finding(spec: dict[str, Any], title: str, error: dict[str, Any], status: str, ctx: Context) -> str:
-    loc = error.get("location") or {}
-    file = loc.get("file") or spec.get("file") or "playwright"
-    line = loc.get("line") or spec.get("line") or 1
-    message = first_line(error.get("message") or status or "failed")
-    return f"{relative_path(str(file), ctx)}:{line} {title} failed: {message}"
+def failed_spec_findings(spec: dict[str, Any], title: str, ctx: Context) -> list[str]:
+    findings = [playwright_case_finding(spec, title, result, ctx) for result in failed_results(spec)]
+    return findings or [playwright_case_finding(spec, title, UNREPORTED, ctx)]
+
+
+def failed_results(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    return [result for case in listed(spec, "tests") for result in listed(case, "results") if result.get("status") in FAILED_STATUSES]
+
+
+def playwright_case_finding(spec: dict[str, Any], title: str, result: dict[str, Any], ctx: Context) -> str:
+    error = result.get("error") or {}
+    message = first_line(error.get("message") or result["status"])
+    return f"{place(error, spec, ctx)} {title} failed: {message}"
 
 
 def playwright_error_finding(error: dict[str, Any] | str, ctx: Context) -> str:
     if not isinstance(error, dict):
         return f"playwright:1 {first_line(str(error))}"
+    return f"{place(error, {}, ctx)} {first_line(error.get('message') or 'playwright error')}"
+
+
+def place(error: dict[str, Any], fallback: dict[str, Any], ctx: Context) -> str:
     loc = error.get("location") or {}
-    file = loc.get("file") or "playwright"
-    line = loc.get("line") or 1
-    return f"{relative_path(str(file), ctx)}:{line} {first_line(error.get('message') or 'playwright error')}"
+    return f"{relative_path(place_file(loc, fallback), ctx)}:{place_line(loc, fallback)}"
+
+
+def place_file(loc: dict[str, Any], fallback: dict[str, Any]) -> str:
+    return str(loc.get("file") or fallback.get("file") or "playwright")
+
+
+def place_line(loc: dict[str, Any], fallback: dict[str, Any]) -> str:
+    return str(loc.get("line") or fallback.get("line") or 1)
 
 
 def jest_failures(ctx: Context) -> list[str]:
@@ -344,31 +374,35 @@ def passed_token(line: str) -> str | None:
     stripped = line.strip()
     if " passed" not in stripped:
         return None
-    token = stripped.split(" passed", 1)[0].split()[-1]
+    token = stripped.partition(" passed")[0].split()[-1]
     return token if token.isdigit() else None
 
 
 def playwright_count(ctx: Context | None, runner: str) -> str | None:
     if runner != PLAYWRIGHT or ctx is None:
         return None
-    path = ctx.work / JEST_RESULTS
+    return report_count(ctx.work / JEST_RESULTS)
+
+
+def report_count(path: Path) -> str | None:
     if not path.exists():
         return None
-    try:
-        stats = json.loads(path.read_text()).get("stats") or {}
-    except json.JSONDecodeError:
-        stats = {}
+    return stats_count(read_report(path) or {})
+
+
+def stats_count(report: dict[str, Any]) -> str | None:
+    stats = report.get("stats") or {}
     return str(stats["expected"]) if "expected" in stats else None
 
 
-def count_tests(output: str, ctx: Context | None = None, runner: str = "") -> str:
+def count_tests(output: str, ctx: Context | None = None, runner: str = EMPTY) -> str:
     counted = playwright_count(ctx, runner)
     if counted is not None:
         return counted
-    for line in output.splitlines():
-        if "Tests" in line and "passed" in line:
-            return passed_count(line)
-        token = passed_token(line)
-        if token is not None:
-            return token
-    return "?"
+    return next(filter(None, map(line_count, output.splitlines())), "?")
+
+
+def line_count(line: str) -> str | None:
+    if "Tests" in line and "passed" in line:
+        return passed_count(line)
+    return passed_token(line)

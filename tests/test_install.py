@@ -549,3 +549,48 @@ def test_refuse_hyper_fails_the_test(tmp_path: Path) -> None:
 
 def test_playwright_is_the_only_js_dependency() -> None:
     assert read_json(ROOT / "marestail" / "js" / "package.json")["dependencies"].keys() == {"playwright"}
+
+
+def test_install_copies_the_python_rulebook_only_for_a_python_target(
+    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    python = tmp_path / "python"
+    python.mkdir()
+    (python / "pyproject.toml").write_text("")
+    install.install(python)
+    assert "## Python-native idioms\n" in (python / "guidance" / "py.md").read_text()
+    assert_matches_template(python, "guidance/py.md")
+    assert capsys.readouterr().out.endswith(f"installed into {python}; edit marestail.toml and sonar-project.properties\n")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    install.install(empty)
+    assert not (empty / "guidance" / "py.md").exists()
+    assert (empty / "guidance" / "ts.md").exists()
+
+
+@pytest.mark.parametrize("marker", ["pyproject.toml", "requirements.txt", "setup.py"])
+def test_uses_python_finds_a_marker_at_the_root_without_a_config(target: Path, marker: str) -> None:
+    assert _guidance._uses_python(target) is False
+    (target / marker).write_text("")
+    assert _guidance._uses_python(target) is True
+
+
+def test_uses_python_follows_the_python_root(target: Path) -> None:
+    (target / "marestail.toml").write_text('[python]\nroot = "backend"\n')
+    (target / "backend").mkdir()
+    assert _guidance._uses_python(target) is False
+    (target / "backend" / "requirements.txt").write_text("")
+    assert _guidance._uses_python(target) is True
+
+
+def test_uses_python_ignores_a_marker_that_is_a_folder(target: Path) -> None:
+    (target / "setup.py").mkdir()
+    assert _guidance._uses_python(target) is False
+
+
+def test_python_root_defaults_to_the_target(target: Path) -> None:
+    assert _guidance._python_root(target) == target
+    (target / "marestail.toml").write_text("[git]\n")
+    assert _guidance._python_root(target) == target / "."
+    (target / "marestail.toml").write_text('[python]\nroot = "svc"\n')
+    assert _guidance._python_root(target) == target / "svc"

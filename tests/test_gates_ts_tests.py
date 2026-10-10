@@ -99,14 +99,14 @@ def test_jest_command(tmp_path: Path, ts: dict[str, Any], globs: list[str]) -> N
 
 
 def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run: Any) -> None:
-    fake = fake_run(ts_tests, [(1, "\n".join(f"line {n}" for n in range(40)))])
+    lines = [f"line {n}" for n in range(40)]
+    fake = fake_run(ts_tests, [(1, "\n".join(lines))])
 
     result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
 
-    assert (result.gate, result.ok, result.summary) == ("ts.tests", False, "tests failed")
-    assert result.findings == [f"line {n}" for n in range(10, 40)]
+    assert (result.gate, result.ok, result.summary, result.findings) == ("ts.tests", False, "tests failed", lines[10:])
     assert fake.calls[0][:2] == ["npx", "vitest"]
-    assert fake.options[0] == {"cwd": tmp_path / "web", "timeout": 1800}
+    assert fake.options[0] == {"cwd": tmp_path / "web", "env": None, "timeout": 1800}
 
 
 def test_jest_failure_reads_the_results(tmp_path: Path, fake_run: Any) -> None:
@@ -281,9 +281,12 @@ def test_finding_file_splits_on_the_first_colon() -> None:
     assert _coverage.finding_file(":leading") == ""
 
 
-def test_failures_without_jest_ignores_results(tmp_path: Path) -> None:
+def test_vitest_failure_findings_ignore_the_jest_results(tmp_path: Path) -> None:
     write_jest(tmp_path, [{"name": "a.test.ts", "status": "failed", "message": "boom", "assertionResults": []}])
-    assert ts_tests.failures(make_context(tmp_path, TS), False) == []
+    ctx = make_context(tmp_path, TS)
+
+    assert ts_tests.failure_findings(ctx, "vitest") == []
+    assert ts_tests.failure_findings(ctx, "jest") == ["web/a.test.ts:1 suite failed to run: boom"]
 
 
 def test_jest_failures_default_missing_results(tmp_path: Path) -> None:
@@ -395,3 +398,345 @@ def test_hyper_does_not_count_a_runner_installed_only_in_tooling(tmp_path: Path,
     assert (hyper.ok, hyper.summary) == (False, ts_tests.NO_RUNNER)
     assert diff.summary == "tests failed"
     assert fake.calls[0][0] == str(tooling / "node_modules" / ".bin" / "vitest")
+
+
+PLAYWRIGHT = {"ts": {"root": "web", "runner": "playwright", "sources": ["app", "lib"]}}
+
+
+def install_playwright(root: Path, *names: str) -> Path:
+    folder = root / "web" / "node_modules" / ".bin"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_text("")
+    return folder
+
+
+def write_report(root: Path, report: dict[str, Any] | str) -> Path:
+    path = root / ".marestail" / ts_tests.JEST_RESULTS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report if isinstance(report, str) else json.dumps(report))
+    return path
+
+
+def playwright_call(root: Path, bins: Path) -> list[str]:
+    return [
+        str(bins / "c8"),
+        "--reporter=json",
+        "--reporter=lcov",
+        f"--reports-dir={root / '.marestail' / 'ts-coverage'}",
+        "--all",
+        "--include=app/**",
+        "--include=lib/**",
+        "--exclude=**/*.spec.ts",
+        "--exclude=**/*.spec.tsx",
+        "--exclude=**/*.test.ts",
+        "--exclude=**/*.test.tsx",
+        "--exclude=**/*.spec.js",
+        "--exclude=**/*.test.js",
+        str(bins / "playwright"),
+        "test",
+        "--reporter=line",
+        "--reporter=json",
+    ]
+
+
+def test_unknown_runner_fails_before_running(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(ts_tests)
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, {"ts": {"runner": "mocha"}})), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "unknown [ts] runner 'mocha'; use vitest, jest or playwright", [])
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize(
+    ("runner", "names", "expected"),
+    [
+        ("vitest", (), ""),
+        ("jest", (), ""),
+        ("playwright", (), "playwright is not installed at node_modules/.bin/playwright; add @playwright/test"),
+        ("playwright", ("c8",), "playwright is not installed at node_modules/.bin/playwright; add @playwright/test"),
+        ("playwright", ("playwright",), "c8 is not installed at node_modules/.bin/c8; add c8 so playwright coverage can be collected"),
+        ("playwright", ("playwright", "c8"), ""),
+    ],
+)
+def test_runner_problem(tmp_path: Path, runner: str, names: tuple[str, ...], expected: str) -> None:
+    install_playwright(tmp_path, *names)
+
+    assert ts_tests.runner_problem(make_context(tmp_path, PLAYWRIGHT), runner) == expected
+
+
+def test_playwright_without_c8_fails_before_running(tmp_path: Path, fake_run: Any) -> None:
+    install_playwright(tmp_path, "playwright")
+    fake = fake_run(ts_tests)
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, PLAYWRIGHT)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (
+        False,
+        "c8 is not installed at node_modules/.bin/c8; add c8 so playwright coverage can be collected",
+        [],
+    )
+    assert fake.calls == []
+
+
+def test_playwright_command(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, PLAYWRIGHT)
+
+    assert ts_tests.playwright_command(ctx) == playwright_call(tmp_path, tmp_path / "web" / "node_modules" / ".bin")
+    assert (tmp_path / ".marestail" / "ts-coverage").is_dir()
+    assert ts_tests.playwright_command(make_context(tmp_path, {"ts": {"source": "app"}}))[5:7] == [
+        "--include=app/**",
+        "--exclude=**/*.spec.ts",
+    ]
+    assert ts_tests.playwright_command(make_context(tmp_path, {"ts": {}}))[5:7] == ["--include=src/**", "--exclude=**/*.spec.ts"]
+
+
+@pytest.mark.parametrize(
+    ("runner", "first"),
+    [
+        ("vitest", ["npx", "vitest"]),
+        ("jest", ["{root}/web/node_modules/.bin/jest", "--ci"]),
+        ("playwright", ["{root}/web/node_modules/.bin/c8", "--reporter=json"]),
+    ],
+)
+def test_command_for(tmp_path: Path, runner: str, first: list[str]) -> None:
+    command = ts_tests.command_for(make_context(tmp_path, TS), runner)
+
+    assert command[:2] == [part.format(root=tmp_path) for part in first]
+
+
+def test_playwright_run_passes_with_c8_coverage(tmp_path: Path, fake_run: Any) -> None:
+    bins = install_playwright(tmp_path, "playwright", "c8")
+    report = write_report(tmp_path, {"stats": {"expected": 5, "unexpected": 0}})
+    write_coverage(tmp_path, {str(tmp_path / "web" / "app" / "a.ts"): coverage_entry({"1": 1}, {"1": [1, 2]})})
+    fake = fake_run(ts_tests, [(0, "  6 passed (1.2s)\n")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, PLAYWRIGHT)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (True, "5 passed, 0 uncovered lines/branches (need 0)", [])
+    assert fake.calls == [playwright_call(tmp_path, bins)]
+    assert fake.options == [{"cwd": tmp_path / "web", "env": {"PLAYWRIGHT_JSON_OUTPUT_NAME": str(report)}, "timeout": 1800}]
+
+
+def test_playwright_run_reports_c8_gaps(tmp_path: Path, fake_run: Any) -> None:
+    install_playwright(tmp_path, "playwright", "c8")
+    write_coverage(tmp_path, {str(tmp_path / "web" / "app" / "a.ts"): coverage_entry({"1": 0}, {"1": [1, 0]})})
+    fake_run(ts_tests, [(0, "  4 passed (1.2s)\n")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, PLAYWRIGHT)), ts_tests.GATE)
+
+    assert (result.ok, result.summary) == (False, "4 passed, 2 uncovered lines/branches (need 0)")
+    assert result.findings == ["web/app/a.ts:10 not covered", "web/app/a.ts:11 branch arm 1 not taken"]
+
+
+def test_playwright_run_failure_reads_the_report(tmp_path: Path, fake_run: Any) -> None:
+    install_playwright(tmp_path, "playwright", "c8")
+    write_report(tmp_path, {"errors": ["global setup broke\nstack"]})
+    fake_run(ts_tests, [(1, "raw")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, PLAYWRIGHT)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "tests failed", ["playwright:1 global setup broke"])
+
+
+def test_playwright_run_failure_without_a_report_shows_output(tmp_path: Path, fake_run: Any) -> None:
+    install_playwright(tmp_path, "playwright", "c8")
+    fake_run(ts_tests, [(1, "raw failure")])
+
+    result = checked(ts_tests.run_gate(make_context(tmp_path, PLAYWRIGHT)), ts_tests.GATE)
+
+    assert (result.ok, result.summary, result.findings) == (False, "tests failed", ["raw failure"])
+
+
+def test_playwright_failures_without_a_report(tmp_path: Path) -> None:
+    assert ts_tests.playwright_failures(make_context(tmp_path, PLAYWRIGHT)) == []
+
+
+def test_playwright_failures_with_an_invalid_report(tmp_path: Path) -> None:
+    write_report(tmp_path, "{nope")
+
+    assert ts_tests.playwright_failures(make_context(tmp_path, PLAYWRIGHT)) == ["ts-tests.json:1 playwright JSON report is not valid JSON"]
+
+
+def test_playwright_failures_reads_specs_then_errors(tmp_path: Path) -> None:
+    spec_file = str(tmp_path / "web" / "e2e" / "a.spec.ts")
+    report = {
+        "suites": [
+            {
+                "specs": [
+                    {"title": "passes", "ok": True, "file": "p.spec.ts", "line": 2},
+                    {"title": "unmarked", "file": "u.spec.ts", "line": 3},
+                    {
+                        "title": "breaks",
+                        "ok": False,
+                        "file": "a.spec.ts",
+                        "line": 4,
+                        "tests": [
+                            {
+                                "results": [
+                                    {"status": "passed", "error": {"message": "ignored"}},
+                                    {
+                                        "status": "failed",
+                                        "error": {"message": "\nExpected 1\nReceived 2", "location": {"file": spec_file, "line": 9}},
+                                    },
+                                    {"status": "interrupted", "error": {"location": {"file": "b.spec.ts"}}},
+                                ]
+                            },
+                            {"results": None},
+                            {"results": [{"status": "skipped"}, {"status": "timedOut", "error": None}]},
+                        ],
+                    },
+                ],
+                "suites": [{"specs": [{"ok": False, "tests": None}], "suites": None}],
+            },
+            {"specs": None},
+        ],
+        "errors": [{"message": "config broke", "location": {"file": "playwright.config.ts", "line": 7}}, {}, "plain\nrest"],
+    }
+    write_report(tmp_path, report)
+
+    assert ts_tests.playwright_failures(make_context(tmp_path, PLAYWRIGHT)) == [
+        "web/e2e/a.spec.ts:9 breaks failed: Expected 1",
+        "web/b.spec.ts:4 breaks failed: interrupted",
+        "web/a.spec.ts:4 breaks failed: timedOut",
+        "web/playwright:1 test failed: failed",
+        "web/playwright.config.ts:7 config broke",
+        "web/playwright:1 playwright error",
+        "playwright:1 plain",
+    ]
+
+
+def test_playwright_failures_with_an_empty_report(tmp_path: Path) -> None:
+    write_report(tmp_path, {"suites": None, "errors": None})
+
+    assert ts_tests.playwright_failures(make_context(tmp_path, PLAYWRIGHT)) == []
+
+
+def test_read_report(tmp_path: Path) -> None:
+    path = tmp_path / "r.json"
+    path.write_text('{"a": 1}')
+    assert ts_tests.read_report(path) == {"a": 1}
+    path.write_text("{")
+    assert ts_tests.read_report(path) is None
+
+
+@pytest.mark.parametrize(("data", "expected"), [({}, []), ({"k": None}, []), ({"k": []}, []), ({"k": [1, 2]}, [1, 2])])
+def test_listed(data: dict[str, Any], expected: list[Any]) -> None:
+    assert ts_tests.listed(data, "k") == expected
+
+
+def test_playwright_specs_walks_nested_suites_in_order() -> None:
+    suites = [
+        {"specs": [{"title": "a"}], "suites": [{"specs": [{"title": "b"}], "suites": [{"specs": [{"title": "c"}]}]}]},
+        {"suites": [{"specs": [{"title": "d"}]}], "specs": [{"title": "e"}]},
+    ]
+
+    assert [spec["title"] for spec in ts_tests.playwright_specs(suites)] == ["a", "b", "c", "e", "d"]
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ({"title": "t"}, []),
+        ({"title": "t", "ok": True}, []),
+        ({"title": "t", "ok": False, "file": "f.ts", "line": 3}, ["web/f.ts:3 t failed: failed"]),
+        ({"ok": False, "tests": [{"results": [{"status": "timedOut"}]}]}, ["web/playwright:1 test failed: timedOut"]),
+    ],
+)
+def test_playwright_spec_findings(tmp_path: Path, spec: dict[str, Any], expected: list[str]) -> None:
+    assert ts_tests.playwright_spec_findings(spec, make_context(tmp_path, PLAYWRIGHT)) == expected
+
+
+@pytest.mark.parametrize(
+    ("status", "failed"),
+    [("failed", True), ("timedOut", True), ("interrupted", True), ("passed", False), ("skipped", False), (None, False)],
+)
+def test_failed_results_keeps_only_failed_statuses(status: str | None, failed: bool) -> None:
+    result = {"status": status}
+
+    assert ts_tests.failed_results({"tests": [{"results": [result]}]}) == [result] * failed
+
+
+@pytest.mark.parametrize(
+    ("loc", "fallback", "file", "line"),
+    [
+        ({"file": "a.ts", "line": 2}, {"file": "b.ts", "line": 3}, "a.ts", "2"),
+        ({"file": "", "line": 0}, {"file": "b.ts", "line": 3}, "b.ts", "3"),
+        ({}, {}, "playwright", "1"),
+    ],
+)
+def test_place_file_and_line(loc: dict[str, Any], fallback: dict[str, Any], file: str, line: str) -> None:
+    assert (ts_tests.place_file(loc, fallback), ts_tests.place_line(loc, fallback)) == (file, line)
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [({"location": {"file": "x/a.ts", "line": 5}}, "web/x/a.ts:5"), ({"location": None}, "web/s.ts:6"), ({}, "web/s.ts:6")],
+)
+def test_place(tmp_path: Path, error: dict[str, Any], expected: str) -> None:
+    assert ts_tests.place(error, {"file": "s.ts", "line": 6}, make_context(tmp_path, PLAYWRIGHT)) == expected
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        ({}, None),
+        ({"stats": None}, None),
+        ({"stats": {"unexpected": 1}}, None),
+        ({"stats": {"expected": 0}}, "0"),
+        ({"stats": {"expected": 12}}, "12"),
+    ],
+)
+def test_stats_count(report: dict[str, Any], expected: str | None) -> None:
+    assert ts_tests.stats_count(report) == expected
+
+
+def test_report_count(tmp_path: Path) -> None:
+    path = tmp_path / "r.json"
+    assert ts_tests.report_count(path) is None
+    path.write_text("{")
+    assert ts_tests.report_count(path) is None
+    path.write_text('{"stats": {"expected": 3}}')
+    assert ts_tests.report_count(path) == "3"
+
+
+def test_playwright_count_only_for_playwright_with_a_context(tmp_path: Path) -> None:
+    write_report(tmp_path, {"stats": {"expected": 7}})
+    ctx = make_context(tmp_path, PLAYWRIGHT)
+
+    assert ts_tests.playwright_count(ctx, "playwright") == "7"
+    assert ts_tests.playwright_count(ctx, "vitest") is None
+    assert ts_tests.playwright_count(None, "playwright") is None
+
+
+def test_count_tests_prefers_the_playwright_report(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, PLAYWRIGHT)
+
+    assert ts_tests.count_tests("  2 passed (1s)", ctx, "playwright") == "2"
+    write_report(tmp_path, {"stats": {"expected": 0}})
+    assert ts_tests.count_tests("  2 passed (1s)", ctx, "playwright") == "0"
+    assert ts_tests.count_tests("  2 passed (1s)", ctx, "vitest") == "2"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("Tests  9 passed (9)", "9"),
+        ("Tests: x passed", "x"),
+        ("  3 passed (666ms)", "3"),
+        ("  some passed", None),
+        ("done 3 passed (1s)", "3"),
+        ("3 passed, 4 passed", "3"),
+        ("3 passedx", "3"),
+        ("3passed", None),
+        ("Tests failed", None),
+        ("nothing", None),
+    ],
+)
+def test_line_count(line: str, expected: str | None) -> None:
+    assert ts_tests.line_count(line) == expected
+
+
+def test_the_removed_failure_helpers_stay_removed() -> None:
+    assert (hasattr(ts_tests, "failures"), hasattr(ts_tests, "empty_failures")) == (False, False)

@@ -1,12 +1,13 @@
 import itertools
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from marestail import java
+from marestail import java, remote
 from marestail.context import Context
 from marestail.gates import java_mutation
 from marestail.report import Result
@@ -52,19 +53,45 @@ def mutation(status: str, cls: str = "app.App", line: str = "5", source: str = "
     )
 
 
-def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply: tuple[int, str] = (0, "")) -> list[Any]:
+class Workers:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Context, str, int, bool]] = []
+
+    def __call__(self, ctx: Context, gate: str, local: int, on_remote: bool) -> int:
+        self.calls.append((ctx, gate, local, on_remote))
+        return 16 if on_remote is True else local
+
+
+@pytest.fixture(autouse=True)
+def workers(monkeypatch: pytest.MonkeyPatch) -> Workers:
+    fake = Workers()
+    monkeypatch.setattr(remote, "workers", fake)
+    return fake
+
+
+def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply: tuple[int, str] = (0, ""), where: str = "") -> list[Any]:
     calls: list[Any] = []
 
-    def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = None) -> tuple[int, str]:
-        calls.append((args, timeout))
+    def run_mutation(
+        ctx: Context,
+        gate: str,
+        build: Callable[[bool], list[str]],
+        cwd: Path,
+        env: dict[str, str] | None = None,
+        timeout: int | None = 7200,
+        pull: tuple[str, ...] = (),
+    ) -> remote.Outcome:
+        args = build(False)
+        calls.append((args, timeout, build(True), ctx))
+        assert (gate, cwd, env, pull) == ("java.mutation", ctx.java_root(), None, (".marestail/pit",))
         out = Path(next(arg for arg in args if arg.startswith("-DreportsDirectory=")).split("=", 1)[1])
         if mutations is not None:
             write(
                 out / "mutations.xml", f'<?xml version="1.0" encoding="UTF-8"?>\n<mutations partial="true">{"".join(mutations)}</mutations>'
             )
-        return reply
+        return remote.Outcome(*reply, where)
 
-    monkeypatch.setattr(java, "mvn", reject_none(mvn))
+    monkeypatch.setattr(remote, "run_mutation", reject_none(run_mutation))
     return calls
 
 
@@ -107,28 +134,33 @@ def test_skips_excluded_sources(tmp_path: Path) -> None:
     assert fields(untimed(java_mutation.run_gate(ctx), java_mutation.GATE)) == ("java.mutation", True, "skipped: no Java sources", [], 0.0)
 
 
-def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def pit(out: Path, threads: str) -> list[str]:
+    return [
+        "mvn",
+        "-B",
+        "-ntp",
+        "test-compile",
+        "org.pitest:pitest-maven:mutationCoverage",
+        "-DtargetClasses=app.App,app.App$*,app.core.Core,app.core.Core$*",
+        "-DoutputFormats=XML",
+        "-DtimestampedReports=false",
+        f"-DreportsDirectory={out}",
+        f"-Dthreads={threads}",
+        "-DtargetTests=app.*,app.core.*",
+    ]
+
+
+def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: Workers) -> None:
     project(tmp_path)
     stale = write(tmp_path / ".marestail" / "pit" / "old.xml")
     calls = fake_mvn(monkeypatch, [mutation("KILLED"), mutation("TIMED_OUT"), mutation("NON_VIABLE")])
     ctx = make_context(tmp_path, {"java": {"mutation_scope": "all", "mutation_timeout": "60", "mutation_threads": 8}})
     assert fields(checked(java_mutation.run_gate(ctx), java_mutation.GATE)) == ("java.mutation", True, "all 2 mutants killed", [], 0.25)
     out = tmp_path / ".marestail" / "pit"
-    assert calls == [
-        (
-            [
-                "test-compile",
-                "org.pitest:pitest-maven:mutationCoverage",
-                "-DtargetClasses=app.App,app.App$*,app.core.Core,app.core.Core$*",
-                "-DoutputFormats=XML",
-                "-DtimestampedReports=false",
-                f"-DreportsDirectory={out}",
-                "-Dthreads=8",
-                "-DtargetTests=app.*,app.core.*",
-            ],
-            60,
-        )
-    ]
+    assert calls == [(pit(out, "8"), 60, pit(out, "16"), ctx)]
+    assert calls[0][3] is ctx
+    assert workers.calls == [(ctx, "java.mutation", 8, False), (ctx, "java.mutation", 8, True)]
+    assert all(seen is ctx for seen, *_ in workers.calls)
     assert not stale.exists()
 
 
@@ -148,7 +180,7 @@ def test_reports_survivors_for_changed_files(tmp_path: Path, monkeypatch: pytest
         [f"{APP}:9 run: removed call to helper survived", "app.gone.Gone:0 run: removed call to helper no coverage"],
         0.25,
     )
-    assert calls[0][0][2] == "-DtargetClasses=app.App,app.App$*"
+    assert calls[0][0][5] == "-DtargetClasses=app.App,app.App$*"
     assert calls[0][1] == 7200
 
 
@@ -184,6 +216,45 @@ def test_reports_no_viable_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.parametrize(
+    ("mutations", "reply", "verdict"),
+    [
+        (None, (1, "BUILD FAILURE"), (False, "PIT produced no report (exit 1) (on box, 2s)", ["BUILD FAILURE"])),
+        ([mutation("NON_VIABLE")], (0, "done"), (False, "no mutants were generated (on box, 2s)", ["done"])),
+        ([mutation("KILLED")], (0, ""), (True, "all 1 mutants killed (on box, 2s)", [])),
+    ],
+)
+def test_summary_names_where_it_ran(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutations: list[str] | None,
+    reply: tuple[int, str],
+    verdict: tuple[bool, str, list[str]],
+) -> None:
+    project(tmp_path)
+    fake_mvn(monkeypatch, mutations, reply, " (on box, 2s)")
+    result = checked(java_mutation.run_gate(make_context(tmp_path, ALL)), java_mutation.GATE)
+    assert fields(result) == ("java.mutation", *verdict, 0.25)
+
+
+def test_scope_note_comes_before_where_it_ran(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(git_repo)
+    fake_mvn(monkeypatch, [mutation("SURVIVED")], where=" (on box, 2s)")
+    result = checked(java_mutation.run_gate(make_context(git_repo)), java_mutation.GATE)
+    assert result.summary == "1 of 1 mutants not killed (no base origin/master; full run) (on box, 2s)"
+
+
+@pytest.mark.parametrize("section", [{"mutation_scope": "all"}, {"mutation_scope": "all", "mutation_timeouts": "fail"}])
+def test_java_timeout_is_killed_without_a_phrase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, section: dict[str, Any]) -> None:
+    write(tmp_path / "pom.xml", POM)
+    write(tmp_path / APP)
+    write(tmp_path / "src/test/java/app/AppTest.java")
+    calls = fake_mvn(monkeypatch, [mutation("TIMED_OUT")])
+    result = checked(java_mutation.run_gate(make_context(tmp_path, {"java": section})), java_mutation.GATE)
+    assert fields(result) == ("java.mutation", True, "all 1 mutants killed", [], 0.25)
+    assert calls[0][0][5] == "-DtargetClasses=app.App,app.App$*"
+
+
+@pytest.mark.parametrize(
     ("survived", "note", "expected"),
     [(0, "", "all 4 mutants killed"), (2, "", "2 of 4 mutants not killed"), (1, "(note)", "1 of 4 mutants not killed (note)")],
 )
@@ -194,7 +265,7 @@ def test_summarise(survived: int, note: str, expected: str) -> None:
 def test_command_without_tests(tmp_path: Path) -> None:
     write(tmp_path / APP)
     ctx = make_context(tmp_path)
-    args = java_mutation.command(ctx, [tmp_path / APP, tmp_path / "elsewhere" / "X.java"], Path("/out"))
+    args = java_mutation.command(ctx, [tmp_path / APP, tmp_path / "elsewhere" / "X.java"], Path("/out"), False)
     assert args == [
         "test-compile",
         "org.pitest:pitest-maven:mutationCoverage",
@@ -209,7 +280,7 @@ def test_command_without_tests(tmp_path: Path) -> None:
 def test_command_with_default_package_test(tmp_path: Path) -> None:
     write(tmp_path / "src/test/java/TopTest.java")
     write(tmp_path / "src/test/java/b/BTest.java")
-    args = java_mutation.command(make_context(tmp_path), [], Path("/out"))
+    args = java_mutation.command(make_context(tmp_path), [], Path("/out"), False)
     assert args[2] == "-DtargetClasses="
     assert args[-1] == "-DtargetTests=*,b.*"
 

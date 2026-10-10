@@ -1772,7 +1772,7 @@ def _check_readme_content() -> None:
 def test_existing_commands_keep_text(tmp_path: Path) -> None:
     seen = child(["--help"])
     assert seen.returncode == 0
-    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,graph,depth}" in seen.stdout
+    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,remote,graph,depth}" in seen.stdout
     run_help = child(["run", "--help"]).stdout
     flags = ["--from", "--to", "--auto", "--scope", "--focus", "--model", "--retries", "--effort", "--agent"]
     indexes = [run_help.index(flag) for flag in flags]

@@ -48,7 +48,9 @@ class Proof:
         return found
 
 
-def execute(ctx: Context, build: Callable[[bool], list[str]], temp: Path, report: Path, gate: str = "", pull: tuple[str, ...] = ()) -> Proof:
+def execute(
+    ctx: Context, build: Callable[[bool], list[str]], temp: Path, report: Path, gate: str = "", pull: tuple[str, ...] = ()
+) -> Proof:
     drop_tree(temp)
     report.unlink(missing_ok=True)
     try:

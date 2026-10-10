@@ -26,6 +26,7 @@ from marestail.pipeline import Judge, Worker, find
 from marestail.report import Result
 from marestail.route import Choice
 from marestail.runner import JudgeProgress, Run
+from tests.conftest import commit_all
 
 CRITIC = Judge("critic", None, bounce_to="specifier")
 PERF = Judge("perf", None, bounce_to="coder", writes=("perf/**",), pinned_bounce=True, optional=True)
@@ -1653,3 +1654,98 @@ def test_run_pipeline_keeps_the_reproduction_and_stops_when_it_fails(pipeline_en
     pipeline_env.pop("state")
     assert runner.run_pipeline(Path("t.md"), "specifier", "critic", True, None, 0) == 1
     assert "state" not in pipeline_env
+
+
+class Terminal:
+    def __init__(self, tty: bool) -> None:
+        self.tty = tty
+        self.text = ""
+        self.flushes = 0
+        self.encoding = "utf-8-test"
+
+    def write(self, data: str) -> int:
+        self.text += data
+        return len(data)
+
+    def flush(self) -> None:
+        self.flushes += 1
+
+    def isatty(self) -> bool:
+        return self.tty
+
+
+def test_pipeline_log_copies_every_write_and_appends(tmp_path: Path) -> None:
+    path = tmp_path / "runs" / "t" / "pipeline.log"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n")
+    terminal = Terminal(True)
+    log = runner.PipelineLog(terminal, path)
+    assert log.write("héllo\n") == 6
+    assert path.read_text(encoding="utf-8") == "before\nhéllo\n"
+    log.flush()
+    assert terminal.flushes == 1
+    assert log.isatty() is True
+    assert log.encoding == "utf-8-test"
+    assert log.primary is terminal
+    assert log.file.encoding == "utf-8"
+    log.close()
+    assert log.file.closed is True
+    assert terminal.text == "héllo\n"
+
+
+def test_pipeline_log_makes_its_folder_and_reports_a_plain_terminal(tmp_path: Path) -> None:
+    path = tmp_path / "a" / "b" / "pipeline.log"
+    log = runner.PipelineLog(Terminal(False), path)
+    assert log.isatty() is False
+    log.close()
+    assert path.read_text() == ""
+
+
+def test_logged_tees_stdout_while_the_pipeline_runs_and_restores_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    terminal = Terminal(False)
+    monkeypatch.setattr(sys, "stdout", terminal)
+    state = cast(Run, SimpleNamespace(folder=tmp_path / "runs" / "t"))
+    seen: list[object] = []
+
+    def execute() -> int:
+        seen.append(sys.stdout)
+        print("stage one")
+        return 3
+
+    assert runner.logged(state, execute) == 3
+    assert sys.stdout is terminal
+    assert isinstance(seen[0], runner.PipelineLog)
+    assert seen[0].file.closed is True
+    assert (tmp_path / "runs" / "t" / "pipeline.log").read_text() == "stage one\n"
+    assert terminal.text == "stage one\n"
+
+
+def test_logged_restores_stdout_when_the_pipeline_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    terminal = Terminal(False)
+    monkeypatch.setattr(sys, "stdout", terminal)
+    state = cast(Run, SimpleNamespace(folder=tmp_path / "runs" / "t"))
+
+    def execute() -> int:
+        print("partial")
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit):
+        runner.logged(state, execute)
+    assert sys.stdout is terminal
+    assert (tmp_path / "runs" / "t" / "pipeline.log").read_text() == "partial\n"
+
+
+def test_a_run_copies_its_terminal_text_into_pipeline_log(git_repo: Path) -> None:
+    (git_repo / "tasks").mkdir()
+    (git_repo / "tasks" / "t.md").write_text("# t\n")
+    (git_repo / ".gitignore").write_text(".marestail/\n")
+    (git_repo / "marestail.toml").write_text('[git]\nbase = "main"\n[perf]\nenabled = false\n[practices]\nenabled = false\n')
+    commit_all(git_repo, "init")
+    env = {key: value for key, value in os.environ.items() if key not in ("MARESTAIL_CLAUDE", "MUTANT_UNDER_TEST")}
+    command = [sys.executable, str(Path(runner.__file__).resolve().parent / "cli.py"), "run", "tasks/t.md"]
+    command += ["--from", "specifier", "--to", "specifier", "--auto", "--retries", "1", "--model", "m", "--agent", "claude"]
+    completed = subprocess.run(command, cwd=git_repo, capture_output=True, env={**env, "PATH": "/usr/bin:/bin"}, check=False)
+    assert (completed.returncode, completed.stderr) == (1, b"")
+    assert b"pipeline stopped at specifier" in completed.stdout
+    assert b"missing handoff .marestail/handoffs/t/01-specifier.md" in completed.stdout
+    assert (git_repo / ".marestail" / "runs" / "t" / "pipeline.log").read_bytes() == completed.stdout

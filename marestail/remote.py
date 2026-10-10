@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,22 +17,36 @@ from typing import Any
 from marestail.context import Context
 from marestail.shell import clean, run
 
-CONFIG = Path.home() / ".config" / "marestail" / "remote.toml"
-USAGE = Path.home() / ".config" / "marestail" / "remote-usage.jsonl"
-LOCK = Path.home() / ".config" / "marestail" / "remote.lock"
+FOLDER = Path.home() / ".config" / "marestail"
+CONFIG = FOLDER / "remote.toml"
+USAGE = FOLDER / "remote-usage.jsonl"
+LOCK = FOLDER / "remote.lock"
 ENV = "MARESTAIL_REMOTE"
 GATES = "MARESTAIL_REMOTE_GATES"
 BUSY = "/var/lib/marestail/busy.d"
 JOB_LOCK = "/var/lib/marestail/job.lock"
-EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump", "target/")
+EXCLUDES = (
+    "/.git/",
+    "/.marestail/",
+    ".stryker-tmp/",
+    ".elixir_ls/",
+    "node_modules/",
+    ".next/",
+    "_build/",
+    ".venv/",
+    "cover/",
+    "erl_crash.dump",
+    "target/",
+)
 PREPARE = (
-    'if [ -f package-lock.json ]; then '
-    'lock=$(sha256sum package-lock.json | cut -c1-16); '
+    "if [ -f package-lock.json ]; then "
+    "lock=$(sha256sum package-lock.json | cut -c1-16); "
     'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
     'npm ci --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
-    'fi; fi'
+    "fi; fi"
 )
 BOOT_WAIT = 240
+AUTHORIZATION = "Authorization"
 
 
 @dataclass(frozen=True)
@@ -56,10 +70,21 @@ class Outcome:
     where: str
 
 
+@dataclass(frozen=True)
+class Job:
+    ctx: Context
+    gate: str
+    build: Callable[[bool], list[str]]
+    cwd: Path
+    env: dict[str, str] | None
+    timeout: int | None
+    pull: tuple[str, ...]
+
+
 def settings(ctx: Context) -> Settings | None:
-    if os.environ.get(ENV, "").lower() in {"0", "off", "false", "no"}:
+    if ENV in os.environ and os.environ[ENV].lower() in {"0", "off", "false", "no"}:
         return None
-    if ctx.config.get("remote", "enabled", True) is False:
+    if ctx.config.get("remote", "enabled") is False:
         return None
     return load()
 
@@ -70,12 +95,16 @@ def load() -> Settings | None:
     raw = tomllib.loads(CONFIG.read_text()).get("remote", {})
     if not raw.get("enabled", True):
         return None
+    return parsed(raw)
+
+
+def parsed(raw: dict[str, Any]) -> Settings:
     return Settings(
         instance=raw["instance"],
         project=raw["project"],
         zone=raw["zone"],
         container=raw.get("container", "mt"),
-        gates=tuple(os.environ[GATES].split(",")) if os.environ.get(GATES) else tuple(raw.get("gates", [])),
+        gates=offloaded_gates(raw),
         workers={str(k): int(v) for k, v in raw.get("workers", {}).items()},
         env={str(k): str(v) for k, v in raw.get("env", {}).items()},
         usd_per_hour=float(raw.get("usd_per_hour", 0)),
@@ -84,16 +113,17 @@ def load() -> Settings | None:
     )
 
 
+def offloaded_gates(raw: dict[str, Any]) -> tuple[str, ...]:
+    if os.environ.get(GATES):
+        return tuple(os.environ[GATES].split(","))
+    return tuple(raw.get("gates", []))
+
+
 def workers(ctx: Context, gate: str, local: int, on_remote: bool) -> int:
     found = settings(ctx)
     if not on_remote or found is None or gate not in found.gates:
         return local
     return found.workers.get(gate, local)
-
-
-def offloads(ctx: Context, gate: str) -> bool:
-    found = settings(ctx)
-    return found is not None and gate in found.gates
 
 
 def run_mutation(
@@ -106,37 +136,68 @@ def run_mutation(
     pull: tuple[str, ...] = (),
 ) -> Outcome:
     found = settings(ctx)
+    job = Job(ctx, gate, build, cwd, env, timeout, pull)
     if found is None or gate not in found.gates:
-        return local(build(False), cwd, env, timeout, "")
+        return locally(job, "")
+    return offloaded(found, job)
+
+
+def offloaded(found: Settings, job: Job) -> Outcome:
     ip, problem = ensure_up(found)
     if ip is None:
-        return local(build(False), cwd, env, timeout, f" (remote unavailable: {problem}; ran locally)")
+        return locally(job, f" (remote unavailable: {problem}; ran locally)")
     started = time.time()
-    problem = push(found, ip, ctx.root, gate)
+    problem = push(found, ip, job.ctx.root, job.gate)
     if problem:
-        return local(build(False), cwd, env, timeout, f" (remote sync failed: {problem}; ran locally)")
-    code, output = execute(found, ip, build(True), cwd, env, timeout)
-    if dropped(code, output):
-        ip, problem = ensure_up(found)
-        if ip is None:
-            record_job(found, gate, ctx, started, "dropped")
-            return Outcome(code, output, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
-        code, output = execute(found, ip, build(True), cwd, env, timeout)
-        if dropped(code, output):
-            record_job(found, gate, ctx, started, "dropped")
-            return Outcome(code, output, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
-    for path in pull:
-        fetch(found, ip, ctx.root, path)
-    seconds = record_job(found, gate, ctx, started, "ok" if code == 0 else f"exit {code}")
+        return locally(job, f" (remote sync failed: {problem}; ran locally)")
+    reply = remotely(found, ip, job)
+    if dropped(*reply):
+        return retried(found, job, started, reply)
+    return finished(found, ip, job, started, reply)
+
+
+def retried(found: Settings, job: Job, started: float, reply: tuple[int, str]) -> Outcome:
+    ip, problem = ensure_up(found)
+    if ip is None:
+        record_job(found, job, started, "dropped")
+        return Outcome(*reply, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
+    reply = remotely(found, ip, job)
+    if dropped(*reply):
+        record_job(found, job, started, "dropped")
+        return Outcome(*reply, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
+    return finished(found, ip, job, started, reply)
+
+
+def finished(found: Settings, ip: str, job: Job, started: float, reply: tuple[int, str]) -> Outcome:
+    code, output = reply
+    for path in job.pull:
+        fetch(found, ip, job.ctx.root, path)
+    seconds = record_job(found, job, started, "ok" if code == 0 else f"exit {code}")
     return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
 
 
-def record_job(found: Settings, gate: str, ctx: Context, started: float, result: str) -> float:
+def locally(job: Job, where: str) -> Outcome:
+    return local(job.build(False), job.cwd, job.env, job.timeout, where)
+
+
+def remotely(found: Settings, ip: str, job: Job) -> tuple[int, str]:
+    return execute(found, ip, job.build(True), job.cwd, job.env, job.timeout)
+
+
+def record_job(found: Settings, job: Job, started: float, result: str) -> float:
     seconds = time.time() - started
-    record({
-        "event": "job", "instance": found.instance, "gate": gate, "repo": str(ctx.root), "result": result,
-        "seconds": round(seconds), "usd_per_hour": found.usd_per_hour, "usd": round(seconds / 3600 * found.usd_per_hour, 3),
-    })
+    record(
+        {
+            "event": "job",
+            "instance": found.instance,
+            "gate": job.gate,
+            "repo": str(job.ctx.root),
+            "result": result,
+            "seconds": round(seconds),
+            "usd_per_hour": found.usd_per_hour,
+            "usd": round(seconds / 3600 * found.usd_per_hour, 3),
+        }
+    )
     return seconds
 
 
@@ -158,24 +219,52 @@ def ensure_up(found: Settings) -> tuple[str | None, str]:
     LOCK.parent.mkdir(parents=True, exist_ok=True)
     with LOCK.open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        status, ip = describe(found)
-        if status in {"STOPPING", "SUSPENDING"}:
-            status, ip = wait_for_stop(found)
-        if status in {"TERMINATED", "STOPPED", "SUSPENDED"}:
-            verb = "resume" if status == "SUSPENDED" else "start"
-            code, output = gcloud(found, ["compute", "instances", verb, found.instance])
-            if code != 0:
-                return None, output.strip().splitlines()[-1] if output.strip() else f"{verb} failed"
-            record({"event": "vm-start", "instance": found.instance, "usd_per_hour": found.usd_per_hour})
-            status, ip = describe(found)
-        if status != "RUNNING" or not ip:
-            return None, f"instance is {status or 'unknown'}"
-        deadline = time.time() + BOOT_WAIT
-        while time.time() < deadline:
-            if ssh(found, ip, "sg docker -c 'docker exec " + found.container + " true'", timeout=20)[0] == 0:
-                return ip, ""
-            time.sleep(5)
-        return None, "ssh never came up"
+        return booted(found)
+
+
+def booted(found: Settings) -> tuple[str | None, str]:
+    status, ip = settled(found)
+    if status not in {"TERMINATED", "STOPPED", "SUSPENDED"}:
+        return running(found, status, ip)
+    problem = power_on(found, status)
+    if problem:
+        return None, problem
+    return running(found, *describe(found))
+
+
+def settled(found: Settings) -> tuple[str, str]:
+    status, ip = describe(found)
+    if status in {"STOPPING", "SUSPENDING"}:
+        return wait_for_stop(found)
+    return status, ip
+
+
+def power_on(found: Settings, status: str) -> str:
+    verb = "resume" if status == "SUSPENDED" else "start"
+    code, output = gcloud(found, ["compute", "instances", verb, found.instance])
+    if code != 0:
+        return last_line(output, f"{verb} failed")
+    record({"event": "vm-start", "instance": found.instance, "usd_per_hour": found.usd_per_hour})
+    return ""
+
+
+def running(found: Settings, status: str, ip: str) -> tuple[str | None, str]:
+    if status != "RUNNING" or not ip:
+        return None, f"instance is {status or 'unknown'}"
+    return reachable(found, ip)
+
+
+def reachable(found: Settings, ip: str) -> tuple[str | None, str]:
+    deadline = time.time() + BOOT_WAIT
+    while time.time() < deadline:
+        if ssh(found, ip, "sg docker -c 'docker exec " + found.container + " true'", timeout=20)[0] == 0:
+            return ip, ""
+        time.sleep(5)
+    return None, "ssh never came up"
+
+
+def last_line(text: str, fallback: str) -> str:
+    return text.strip().splitlines()[-1] if text.strip() else fallback
 
 
 def wait_for_stop(found: Settings) -> tuple[str, str]:
@@ -192,27 +281,36 @@ def describe(found: Settings) -> tuple[str, str]:
     if code != 0:
         return "", ""
     data = json.loads(output)
-    configs = data.get("networkInterfaces", [{}])[0].get("accessConfigs", [{}])
-    return data.get("status", ""), configs[0].get("natIP", "") if configs else ""
+    configs = data.get("networkInterfaces", [{}])[0].get("accessConfigs") or [{}]
+    return data.get("status", ""), configs[0].get("natIP", "")
 
 
 def gcloud(found: Settings, args: list[str]) -> tuple[int, str]:
     completed = subprocess.run(
         ["gcloud", *args, f"--project={found.project}", f"--zone={found.zone}", "--quiet"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return completed.returncode, completed.stdout if completed.returncode == 0 else completed.stderr
 
 
 def ssh_options(found: Settings) -> list[str]:
     return [
-        "-i", str(found.key),
-        "-o", f"HostKeyAlias={found.instance}",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", f"UserKnownHostsFile={Path.home() / '.ssh' / 'marestail_known_hosts'}",
-        "-o", "ServerAliveInterval=30",
-        "-o", "ConnectTimeout=15",
-        "-o", "BatchMode=yes",
+        "-i",
+        str(found.key),
+        "-o",
+        f"HostKeyAlias={found.instance}",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"UserKnownHostsFile={Path.home() / '.ssh' / 'marestail_known_hosts'}",
+        "-o",
+        "ServerAliveInterval=30",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "BatchMode=yes",
     ]
 
 
@@ -221,7 +319,10 @@ def ssh(found: Settings, ip: str, remote: str, timeout: int | None = None, tty: 
     try:
         completed = subprocess.run(
             ["ssh", *hangup, *ssh_options(found), f"{found.user}@{ip}", remote],
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return 124, f"ssh timed out after {timeout}s"
@@ -234,30 +335,45 @@ def rsync(found: Settings, args: list[str]) -> tuple[int, str]:
     return completed.returncode, completed.stderr
 
 
-def push(found: Settings, ip: str, root: Path, gate: str = "") -> str:
+def push(found: Settings, ip: str, root: Path, gate: str) -> str:
     ssh(found, ip, f"mkdir -p {shlex.quote(str(root))}", timeout=30)
     keep = {".venv/"} if gate.startswith("py.") else set()
-    excludes = [f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep]
-    code, error = rsync(found, [*excludes, f"{root}/", f"{found.user}@{ip}:{root}/"])
+    code, error = rsync(found, [*excludes(keep), f"{root}/", f"{found.user}@{ip}:{root}/"])
     if code != 0:
-        return error.strip().splitlines()[-1] if error.strip() else f"rsync exit {code}"
-    for toolchain in toolchains(root if keep else None):
+        return last_line(error, f"rsync exit {code}")
+    copy_toolchains(found, ip, toolchains(root if keep else None))
+    return ""
+
+
+def excludes(keep: set[str]) -> list[str]:
+    return [f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep]
+
+
+def copy_toolchains(found: Settings, ip: str, found_toolchains: list[Path]) -> None:
+    for toolchain in found_toolchains:
         ssh(found, ip, f"mkdir -p {shlex.quote(str(toolchain))}", timeout=30)
         rsync(found, [f"{toolchain}/", f"{found.user}@{ip}:{toolchain}/"])
-    return ""
 
 
 def toolchains(venv_root: Path | None = None) -> list[Path]:
     home = Path.home()
-    found = []
+    return list(dict.fromkeys([*uv_store(home, venv_root), *nvm_bins(home)]))
+
+
+def uv_store(home: Path, venv_root: Path | None) -> list[Path]:
     store = home / ".local" / "share" / "uv" / "python"
     if venv_root is not None and (venv_root / ".venv" / "bin" / "python").resolve().is_relative_to(store):
-        found.append(store)
-    for entry in os.environ.get("PATH", "").split(os.pathsep):
-        path = Path(entry)
-        if path.name == "bin" and path.parent.parent == home / ".nvm" / "versions" / "node" and path.is_dir():
-            found.append(path.parent)
-    return list(dict.fromkeys(found))
+        return [store]
+    return []
+
+
+def nvm_bins(home: Path) -> list[Path]:
+    versions = home / ".nvm" / "versions" / "node"
+    return [path.parent for path in map(Path, os.get_exec_path()) if nvm_bin(path, versions)]
+
+
+def nvm_bin(path: Path, versions: Path) -> bool:
+    return path.name == "bin" and path.parent.parent == versions and path.is_dir()
 
 
 def fetch(found: Settings, ip: str, root: Path, path: str) -> None:
@@ -268,14 +384,14 @@ def fetch(found: Settings, ip: str, root: Path, path: str) -> None:
 
 
 def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
-    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1", **found.env, **(env or {})}
-    flags = " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
+    flags = env_flags(found, env)
     job = uuid.uuid4().hex
-    session = f"/tmp/marestail-job-{job}"
+    folder = cwd / ".marestail"
+    session = shlex.quote(str(folder / f"job-{job}"))
     inner = shlex.join(command)
     if timeout:
         inner = f"timeout -k 30 {int(timeout)} {inner}"
-    inner = f"echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
+    inner = f"mkdir -p {shlex.quote(str(folder))}; echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
     docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} setsid -w bash -c {shlex.quote(inner)}"
     stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
     cleanup = f"sg docker -c {shlex.quote(f'docker exec {found.container} bash -c {shlex.quote(stop)}')}"
@@ -286,6 +402,19 @@ def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[s
         f"{queued} & wait $!; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
     )
     return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None, tty=True)
+
+
+def env_flags(found: Settings, env: dict[str, str] | None) -> str:
+    passed = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(Path.home()),
+        "LANG": "C.UTF-8",
+        "TERM": "dumb",
+        "NO_COLOR": "1",
+        **found.env,
+        **(env or {}),
+    }
+    return " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
 
 
 def record(entry: dict[str, Any]) -> None:
@@ -299,29 +428,57 @@ def status_command(_args: object) -> int:
     if found is None:
         print(f"no remote configured ({CONFIG})")
         return 1
+    show_box(found)
+    show_spend(found)
+    return 0
+
+
+def show_box(found: Settings) -> None:
     status, ip = describe(found)
     print(f"{found.instance} ({found.project}/{found.zone}): {status or 'unknown'} {ip}".rstrip())
     print(f"offloaded gates: {', '.join(found.gates) or 'none'}")
+    for line in box_jobs(found, status, ip):
+        print(f"  {line}")
+
+
+def box_jobs(found: Settings, status: str, ip: str) -> list[str]:
     if status == "RUNNING" and ip:
-        for line in running_jobs(found, ip):
-            print(f"  {line}")
+        return running_jobs(found, ip)
+    return []
+
+
+def show_spend(found: Settings) -> None:
     now = datetime.now(UTC)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     entries = usage()
     for label, since in (("today", midnight), ("this month", midnight.replace(day=1))):
-        hours, dollars, known = 0.0, 0.0, True
-        for instance, rate in instances(found, entries).items():
-            seconds = uptime_seconds(replace(found, instance=instance), since, now)
-            if seconds is None:
-                known = False
-                continue
-            hours += seconds / 3600
-            dollars += seconds / 3600 * rate
-        jobs = [entry for entry in entries if entry.get("event") == "job" and when(entry) >= since]
+        billed_text = billed(found, entries, since, now)
+        jobs = jobs_since(entries, since)
         busy = sum(entry.get("seconds", 0) for entry in jobs)
-        billed_text = f"{hours:.2f}h = ${dollars:.2f}" if known else "unknown"
         print(f"{label}: VM up {billed_text}; {len(jobs)} jobs, {busy / 3600:.2f}h busy")
-    return 0
+
+
+def billed(found: Settings, entries: list[dict[str, Any]], since: datetime, now: datetime) -> str:
+    measured = measured_uptimes(found, entries, since, now)
+    known = [(seconds, rate) for seconds, rate in measured if seconds is not None]
+    if len(known) < len(measured):
+        return "unknown"
+    return priced(known)
+
+
+def measured_uptimes(found: Settings, entries: list[dict[str, Any]], since: datetime, now: datetime) -> list[tuple[float | None, float]]:
+    rates = instances(found, entries)
+    return [(uptime_seconds(found.project, instance, since, now), rate) for instance, rate in rates.items()]
+
+
+def priced(known: list[tuple[float, float]]) -> str:
+    hours = sum(seconds / 3600 for seconds, _rate in known)
+    dollars = sum(seconds / 3600 * rate for seconds, rate in known)
+    return f"{hours:.2f}h = ${dollars:.2f}"
+
+
+def jobs_since(entries: list[dict[str, Any]], since: datetime) -> list[dict[str, Any]]:
+    return [entry for entry in entries if entry.get("event") == "job" and when(entry) >= since]
 
 
 JOBS = r"""
@@ -342,20 +499,26 @@ def running_jobs(found: Settings, ip: str) -> list[str]:
     code, output = ssh(found, ip, JOBS, timeout=30)
     if code != 0:
         return []
-    jobs = []
-    idle = None
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) == 4:
-            repo, tool, age, state = parts
-            jobs.append(f"running: {tool} for {Path(repo).name}, {age}" + (" (queued)" if state == "queued" else ""))
-        elif len(parts) == 3 and parts[0] == "idle":
-            idle = (int(parts[1]), int(parts[2]))
-    if jobs or idle is None:
-        return jobs
-    seconds, limit = idle
-    off = datetime.now(UTC).astimezone() + timedelta(seconds=max(0, limit * 60 - seconds))
-    return [f"no jobs: idle for {seconds // 60} min, powers itself off after {limit} idle min (about {off:%H:%M})"]
+    rows = list(map(str.split, output.splitlines()))
+    jobs, idles = job_rows(rows), idle_rows(rows)
+    return jobs or idles[-1:]
+
+
+def job_rows(rows: list[list[str]]) -> list[str]:
+    return [job_line(*parts) for parts in rows if len(parts) == 4]
+
+
+def job_line(repo: str, tool: str, age: str, state: str) -> str:
+    return f"running: {tool} for {Path(repo).name}, {age}" + (" (queued)" if state == "queued" else "")
+
+
+def idle_rows(rows: list[list[str]]) -> list[str]:
+    return [idle_line(int(parts[1]), int(parts[2])) for parts in rows if len(parts) == 3 and parts[0] == "idle"]
+
+
+def idle_line(seconds: int, limit: int) -> str:
+    off = datetime.now().astimezone() + timedelta(seconds=max(0, limit * 60 - seconds))
+    return f"no jobs: idle for {seconds // 60} min, powers itself off after {limit} idle min (about {off:%H:%M})"
 
 
 def instances(found: Settings, entries: list[dict[str, Any]]) -> dict[str, float]:
@@ -375,21 +538,35 @@ def usage() -> list[dict[str, Any]]:
     return [json.loads(line) for line in USAGE.read_text().splitlines() if line.strip()]
 
 
-def uptime_seconds(found: Settings, since: datetime, until: datetime) -> float | None:
+def uptime_seconds(project: str, instance: str, since: datetime, until: datetime) -> float | None:
     token = subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, check=False).stdout.strip()
     if not token:
         return None
+    data = monitored(uptime_url(project, instance, since, until), token)
+    if data is None:
+        return None
+    return total_uptime(data)
+
+
+def total_uptime(data: dict[str, Any]) -> float:
+    return float(sum(point["value"]["doubleValue"] for series in data.get("timeSeries", []) for point in series.get("points", [])))
+
+
+def uptime_url(project: str, instance: str, since: datetime, until: datetime) -> str:
     query = {
-        "filter": f'metric.type="compute.googleapis.com/instance/uptime" AND metric.labels.instance_name="{found.instance}"',
+        "filter": f'metric.type="compute.googleapis.com/instance/uptime" AND metric.labels.instance_name="{instance}"',
         "interval.startTime": since.isoformat().replace("+00:00", "Z"),
         "interval.endTime": until.isoformat().replace("+00:00", "Z"),
         "aggregation.alignmentPeriod": f"{max(60, int((until - since).total_seconds()))}s",
         "aggregation.perSeriesAligner": "ALIGN_SUM",
     }
-    url = f"https://monitoring.googleapis.com/v3/projects/{found.project}/timeSeries?{urllib.parse.urlencode(query)}"
+    return f"https://monitoring.googleapis.com/v3/projects/{project}/timeSeries?{urllib.parse.urlencode(query)}"
+
+
+def monitored(url: str, token: str) -> dict[str, Any] | None:
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"}), timeout=20) as response:
-            data = json.load(response)
+        with urllib.request.urlopen(urllib.request.Request(url, headers={AUTHORIZATION: f"Bearer {token}"}), timeout=20) as response:
+            data: dict[str, Any] = json.load(response)
     except (OSError, ValueError):
         return None
-    return float(sum(point["value"]["doubleValue"] for series in data.get("timeSeries", []) for point in series.get("points", [])))
+    return data

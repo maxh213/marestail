@@ -162,16 +162,52 @@ def test_reports_surviving_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == (
         "cs.mutation",
         False,
-        "3 of 5 mutants not killed",
+        "2 of 5 mutants not killed (1 killed by timeout)",
         [
             "App/A.cs:7 Equality Survived: a != b",
             "App/A.cs:9 Equality NoCoverage: a != b",
-            "App/A.cs:11 Equality Timeout: a != b",
         ],
     )
     assert fake.calls[1][0][-2:] == ["-m", "!**/App/Gen"]
     assert fake.calls[1][0][3:7] == ["--test-project", str(tmp_path / "AppTests" / "AppTests.csproj"), "--project", "App.csproj"]
     assert fake.calls[1][0][7:9] == ["-O", str(tmp_path / ".marestail" / cs_mutation.OUTPUT_DIR)]
+
+
+@pytest.mark.parametrize(
+    ("status", "section", "verdict"),
+    [
+        ("CompileError", {}, (False, "1 of 1 mutants not killed", ["App/A.cs:3 Equality CompileError: a != b"])),
+        ("Timeout", {}, (True, "all 1 mutants killed (1 killed by timeout)", [])),
+        ("Timeout", {"mutation_timeouts": "fail"}, (False, "1 of 1 mutants not killed", ["App/A.cs:3 Equality Timeout: a != b"])),
+    ],
+)
+def test_cs_fails_a_compile_error_and_forgives_a_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str, section: dict[str, Any], verdict: tuple[bool, str, list[str]]
+) -> None:
+    only = {"status": status, "mutatorName": "Equality", "replacement": "a != b", "location": {"start": {"line": 3}}}
+    install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, only)))
+    ctx = project(tmp_path, section={"mutation_scope": "all", **section})
+    assert view(checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)) == ("cs.mutation", *verdict)
+
+
+def test_judged_counts_forgiven_timeouts(tmp_path: Path) -> None:
+    kept = [("A.cs", mutant("Timeout", 2)), ("A.cs", mutant("Survived", 4)), ("A.cs", mutant("Timeout", 6))]
+    result = cs_mutation.judged(kept, False, ("(n)", 0.0))
+    assert view(result) == (
+        "cs.mutation",
+        False,
+        "1 of 3 mutants not killed (2 killed by timeout) (n)",
+        ["A.cs:4 Equality Survived: a != b"],
+    )
+    strict = cs_mutation.judged(kept, True, ("", 0.0))
+    findings = ["A.cs:2 Equality Timeout: a != b", "A.cs:4 Equality Survived: a != b", "A.cs:6 Equality Timeout: a != b"]
+    assert view(strict) == ("cs.mutation", False, "3 of 3 mutants not killed", findings)
+
+
+def test_timed_out_is_zero_when_timeouts_fail() -> None:
+    kept = [("A.cs", mutant("Timeout")), ("A.cs", mutant("Timeout")), ("A.cs", mutant("Killed"))]
+    assert cs_mutation.timed_out(kept, False) == 2
+    assert cs_mutation.timed_out(kept, True) == 0
 
 
 def test_scoped_run_targets_changed_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

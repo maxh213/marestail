@@ -117,16 +117,23 @@ def listed_mutants(data: dict[str, Any]) -> Any:
 
 
 def verdict(ctx: Context, mutants: list[tuple[str, dict[str, Any]]], output: str, run_info: tuple[str, float]) -> Result:
-    note, started = run_info
+    started = run_info[1]
     if not mutants:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
     kept = ctx.on_changed_lines(mutants, placed)
     if not kept:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    strict = ctx.timeouts_fail("dotnet")
+    return judged(kept, ctx.timeouts_fail("dotnet"), run_info)
+
+
+def judged(kept: list[tuple[str, dict[str, Any]]], strict: bool, run_info: tuple[str, float]) -> Result:
+    note, started = run_info
     findings = failures(kept, strict)
-    timed_out = 0 if strict else sum(1 for _, mutant in kept if mutant["status"] == TIMEOUT)
-    return Result(GATE, not findings, summary(len(findings), len(kept), note, timed_out), findings, elapsed(started))
+    return Result(GATE, not findings, summary(len(findings), len(kept), note, timed_out(kept, strict)), findings, elapsed(started))
+
+
+def timed_out(kept: list[tuple[str, dict[str, Any]]], strict: bool) -> int:
+    return 0 if strict else sum(1 for _, mutant in kept if mutant["status"] == TIMEOUT)
 
 
 def failures(mutants: list[tuple[str, dict[str, Any]]], strict: bool) -> list[str]:

@@ -148,7 +148,7 @@ KNIP = """{
 """
 WEB_TOML = '[ts]\nroot = "web"\nsource = "src"\ntooling = ".marestail/tooling"\n'
 JEST_TOML = '[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n'
-REPORTERS = ["--reporters", "json,progress", "--tempDirName", ".stryker-tmp", "--cleanTempDir", "always"]
+REPORTERS = ["--reporters", "json,progress", "--tempDirName", ".stryker-tmp", "--cleanTempDir", "always", "--dryRunTimeoutMinutes", "120"]
 
 
 def expect(name: str, got: object, wanted: object) -> None:

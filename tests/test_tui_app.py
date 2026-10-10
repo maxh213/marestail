@@ -736,3 +736,25 @@ def test_sync_detail_uses_the_fleet(tmp_path: Path, monkeypatch: Any) -> None:
     session.state.fleet = Fleet(repos=[other], scanned_at=0)
     session.sync_detail()
     assert session.detail.repo.task == "changed"
+
+
+def test_on_vm_counts_beds_whose_gate_runs_on_the_box(tmp_path: Path) -> None:
+    def active(activity: str | None) -> RepoState:
+        state = repo(tmp_path)
+        state.gate_activity = activity
+        return state
+
+    assert app.on_vm([]) == ""
+    assert app.on_vm([active(None), active("stryker 5s"), active("")]) == ""
+    assert app.on_vm([active("☁ stryker on box")]) == "☁ 1 on vm · "
+    assert app.on_vm([active("☁ stryker on box"), active(None), active("pytest ☁"), active("☁ syncing to box")]) == "☁ 2 on vm · "
+    assert app.on_remote(active("☁ starting vm")) is True
+    assert app.on_remote(active(None)) is False
+
+
+def test_status_text_leads_with_the_vm_count(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr("marestail.tui.app.time.strftime", lambda fmt: "01:02:03")
+    state = repo(tmp_path)
+    state.gate_activity = "☁ mutmut on box"
+    watch = WatchState(fleet=Fleet(repos=[state], scanned_at=0), theme=mono_theme(), tick=0)
+    assert app.status_text(watch) == "☁ 1 on vm · 1 beds · 1 workers · 01:02:03 "

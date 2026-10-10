@@ -228,7 +228,7 @@ def install_template() -> None:
         elixir = target / "guidance" / "ex.md"
         expect("install-creates-elixir-guidance", elixir.is_file(), True)
         expect("install-elixir-guidance-matches", elixir.read_text(), (ROOT / "templates" / "guidance" / "ex.md").read_text())
-        (target / "Gemfile").write_text("source \"https://rubygems.org\"\n")
+        (target / "Gemfile").write_text('source "https://rubygems.org"\n')
         with quiet():
             install.install(target)
         ruby = target / "guidance" / "rb.md"
@@ -243,7 +243,7 @@ def install_template() -> None:
         expect("install-python-guidance-matches", python.read_text(), (ROOT / "templates" / "guidance" / "py.md").read_text())
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp)
-        (target / "pyproject.toml").write_text("[project]\nname = \"box\"\n")
+        (target / "pyproject.toml").write_text('[project]\nname = "box"\n')
         with quiet():
             install.install(target)
         expect("install-creates-python-guidance-from-pyproject", (target / "guidance" / "py.md").is_file(), True)
@@ -267,7 +267,7 @@ def csharp_rulebook_content() -> None:
         expect(f"cs mentions {needle}", needle in text, True)
 
 
-def erlang_rulebook_content():
+def erlang_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "er.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*ER-(\d+)", text)]
     expect("er-rule-count", len(ids) >= 40, True)
@@ -275,11 +275,20 @@ def erlang_rulebook_content():
     expect("er-rule-lines", len(text.splitlines()) <= 250, True)
     for heading in ["## Errors & functional style", "## OTP & concurrency", "## Testing", "## Types & style", "## Cowboy & real-time"]:
         expect(f"er heading {heading}", heading in text, True)
-    for needle in ["maybe", "gen_statem", "handle_event_function", "list_to_existing_atom", "handle_continue", "pg:", "cowboy_websocket", "simple_one_for_one"]:
+    for needle in [
+        "maybe",
+        "gen_statem",
+        "handle_event_function",
+        "list_to_existing_atom",
+        "handle_continue",
+        "pg:",
+        "cowboy_websocket",
+        "simple_one_for_one",
+    ]:
         expect(f"er mentions {needle}", needle in text, True)
 
 
-def ruby_rulebook_content():
+def ruby_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "rb.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*RB-(\d+)", text)]
     expect("rb-rule-count", len(ids) >= 40, True)
@@ -291,7 +300,7 @@ def ruby_rulebook_content():
         expect(f"rb mentions {needle}", needle in text, True)
 
 
-def python_rulebook_content():
+def python_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "py.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*PY-(\d+)", text)]
     expect("py-rule-count", len(ids) >= 40, True)
@@ -303,7 +312,7 @@ def python_rulebook_content():
         expect(f"py mentions {needle}", needle in text, True)
 
 
-def elixir_rulebook_content():
+def elixir_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "ex.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*EX-(\d+)", text)]
     expect("ex-rule-count", len(ids) >= 40, True)

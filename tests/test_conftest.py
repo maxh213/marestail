@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -161,3 +163,22 @@ def test_pytest_configure_uses_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.chdir(tmp_path)
     conftest.pytest_configure(cast(pytest.Config, object()))
     assert seen == [tmp_path]
+
+
+@pytest.mark.parametrize("program", ["gcloud", "ssh", "rsync", "/usr/bin/ssh"])
+def test_the_box_binaries_are_refused(program: str) -> None:
+    with pytest.raises(conftest.ForbiddenCallError, match=f"^tests must fake {program}$"):
+        subprocess.run([program, "--version"], check=False)
+
+
+def test_a_shell_string_naming_a_box_binary_is_refused() -> None:
+    with pytest.raises(conftest.ForbiddenCallError, match=r"^tests must fake rsync -a a b$"):
+        conftest.GuardedPopen("rsync -a a b", shell=True)
+
+
+def test_the_box_binaries_stay_forbidden() -> None:
+    assert {"gcloud", "ssh", "rsync"} <= conftest.FORBIDDEN_BINARIES
+
+
+def test_the_suite_switches_the_remote_off() -> None:
+    assert os.environ["MARESTAIL_REMOTE"] == "0"

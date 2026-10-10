@@ -59,8 +59,12 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
     outcome = remote.run_mutation(
-        ctx, "java.mutation", lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)], ctx.java_root(),
-        timeout=int(ctx.java("mutation_timeout", 7200)), pull=(str(out.relative_to(ctx.root)),),
+        ctx,
+        "java.mutation",
+        lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)],
+        ctx.java_root(),
+        timeout=int(ctx.java("mutation_timeout", 7200)),
+        pull=(str(out.relative_to(ctx.root)),),
     )
     code, output = outcome.code, outcome.output
     report = out / "mutations.xml"
@@ -92,7 +96,7 @@ def summarise(survived: int, total: int, note: str) -> str:
     return summary + (f" {note}" if note else "")
 
 
-def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool = False) -> list[str]:
+def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool) -> list[str]:
     classes = target_classes(ctx, targets)
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [

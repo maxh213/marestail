@@ -104,7 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
         "route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False
     )
     remote_parser = commands.add_parser("remote", help="the remote box that offloaded gates run on")
-    remote_parser.add_subparsers(dest="remote_command", required=True).add_parser("status", help="box state, uptime and estimated spend today and this month").set_defaults(handler=remote_status_command)
+    remote_parser.add_subparsers(dest="remote_command", required=True).add_parser(
+        "status", help="box state, uptime and estimated spend today and this month"
+    ).set_defaults(handler=remote_status_command)
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser

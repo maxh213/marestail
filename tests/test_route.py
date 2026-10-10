@@ -159,7 +159,7 @@ def test_parse_claude_work(monkeypatch: pytest.MonkeyPatch) -> None:
         ("a b c claude", "dandelion route printed 'a b c claude'; expected `<model> [effort] <provider>`"),
         (
             "gpt high codex",
-            "dandelion route picked 'codex', which marestail has no backend for; it knows claude, claude-work, agy, kimi, grok, cursor, junie, hermes",
+            "dandelion route picked 'codex', which marestail has no backend for; it knows claude, claude-work, claude-deepseek, agy, kimi, grok, cursor, junie, hermes",
         ),
     ],
 )

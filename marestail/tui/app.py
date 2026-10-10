@@ -7,7 +7,7 @@ from itertools import repeat, starmap
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from .collect import REMOTE_MARK, collect_fleet
+from .collect import REMOTE_MARK, collect_fleet, first_text
 from .model import Fleet, RepoState
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
 from .theme import GLYPH_FLOURISH, ROUND, full_vine, init_theme
@@ -302,8 +302,12 @@ def status_text(state: WatchState) -> str:
 
 
 def on_vm(repos: list[RepoState]) -> str:
-    remote = sum(1 for repo in repos if (repo.gate_activity or EMPTY).startswith(REMOTE_MARK))
-    return f"{REMOTE_MARK} {remote} on vm · " if remote else EMPTY
+    remote = len(list(filter(on_remote, repos)))
+    return {0: EMPTY}.get(remote, f"{REMOTE_MARK} {remote} on vm · ")
+
+
+def on_remote(repo: RepoState) -> bool:
+    return first_text(repo.gate_activity).startswith(REMOTE_MARK)
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:

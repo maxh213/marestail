@@ -287,3 +287,13 @@ def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(tmp_path: Path, fa
     lines = {"src/a.erl": {9}}
     result = run(tmp_path, fake_run, [mutant(tmp_path, 1)], [], scope_changed=True, hyper=True, changed=set(lines), changed_lines_map=lines)
     assert shape(result) == ("er.mutation", True, "no mutants on changed lines", [])
+
+
+@pytest.mark.parametrize("settings", [{}, {"mutation_timeouts": "fail"}])
+def test_erlang_timeout_is_killed_without_a_phrase(tmp_path: Path, fake_run: Callable[..., FakeRun], settings: dict[str, Any]) -> None:
+    fake = fake_run(erlang, toolchain([mutant(tmp_path, 1)], [(0, "")] * 5 + [(124, "")]))
+    result = checked(er_mutation.run_gate(project(tmp_path, settings=settings)), er_mutation.GATE)
+    assert shape(result) == ("er.mutation", True, "all 1 mutants killed", [])
+    assert len(fake.calls) == 6
+    report = json.loads((tmp_path / ".marestail" / "er-mutation.json").read_text())
+    assert [entry["status"] for entry in report["mutants"]] == ["timeout"]

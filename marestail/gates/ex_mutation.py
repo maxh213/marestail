@@ -77,7 +77,14 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
     missing = muex_missing(root)
     if missing:
         return Result(GATE, False, *missing, elapsed(started))
-    outcome = remote.run_mutation(ctx, GATE, lambda on_remote: guarded(ctx, command(ctx, files, on_remote)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
+    outcome = remote.run_mutation(
+        ctx,
+        GATE,
+        lambda on_remote: guarded(ctx, command(ctx, files, on_remote)),
+        root,
+        env={"MIX_ENV": "test"},
+        timeout=mutation_timeout(ctx),
+    )
     report = read_report(outcome.output)
     if isinstance(report, str):
         return Result(GATE, False, report + outcome.where, tail(outcome.output), elapsed(started))
@@ -122,11 +129,22 @@ def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, 
     mutations = ctx.on_changed_lines(mutations, partial(describe, ctx))
     if not mutations:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    passing = PASSING if ctx.timeouts_fail("elixir") else PASSING | {TIMEOUT}
+    return judged(ctx, scope.note, mutations, started)
+
+
+def judged(ctx: Context, note: str, mutations: list[dict[str, Any]], started: float) -> Result:
+    passing = passing_statuses(ctx)
     findings = failures(ctx, mutations, passing)
-    timed_out = sum(1 for mutation in mutations if status(mutation) == TIMEOUT) if TIMEOUT in passing else 0
-    summary = mutation_summary(len(findings), counted(mutations), scope.note, timed_out)
+    summary = mutation_summary(len(findings), counted(mutations), note, timed_out(mutations, passing))
     return Result(GATE, not findings, summary, findings, elapsed(started))
+
+
+def passing_statuses(ctx: Context) -> set[str]:
+    return PASSING if ctx.timeouts_fail("elixir") else PASSING | {TIMEOUT}
+
+
+def timed_out(mutations: list[dict[str, Any]], passing: set[str]) -> int:
+    return sum(1 for mutation in mutations if status(mutation) == TIMEOUT) if TIMEOUT in passing else 0
 
 
 def failures(ctx: Context, mutations: list[dict[str, Any]], passing: set[str]) -> list[str]:
@@ -141,7 +159,7 @@ def counted(mutations: list[dict[str, Any]]) -> int:
     return sum(1 for mutation in mutations if status(mutation) != "invalid")
 
 
-def mutation_summary(failing: int, total: int, note: str, timed_out: int = 0) -> str:
+def mutation_summary(failing: int, total: int, note: str, timed_out: int) -> str:
     summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"
     summary += f" ({timed_out} killed by timeout)" if timed_out else ""
     return summary + (f" {note}" if note else "")
@@ -159,7 +177,7 @@ def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
     return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
 
 
-def command(ctx: Context, files: list[str], on_remote: bool = False) -> list[str]:
+def command(ctx: Context, files: list[str], on_remote: bool) -> list[str]:
     parts = ["mix", "muex", "--format", "json", "--fail-at", "0", *switches(ctx)]
     parts += option("--preset", ctx.elixir("muex_preset"))
     parts += option("--concurrency", remote.workers(ctx, GATE, ctx.elixir("muex_concurrency", 4), on_remote))

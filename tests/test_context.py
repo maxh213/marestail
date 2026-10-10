@@ -416,3 +416,18 @@ def test_memo_starts_empty_per_context(tmp_path: Path) -> None:
     first = make_context(tmp_path)
     first.memo["x"] = 1
     assert make_context(tmp_path).memo == {}
+
+
+def test_timeouts_fail_reads_the_section_with_a_kill_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, str, Any]] = []
+    real = Config.get
+
+    def get(self: Config, section: str, key: str, default: Any = None) -> Any:
+        seen.append((section, key, default))
+        return real(self, section, key, default)
+
+    monkeypatch.setattr(Config, "get", get)
+    ctx = make_context(tmp_path, {"ts": {"mutation_timeouts": "FAIL"}, "python": {"mutation_workers": 2}})
+
+    assert (ctx.timeouts_fail("ts"), ctx.timeouts_fail("python"), ctx.timeouts_fail("go")) == (True, False, False)
+    assert seen == [("ts", "mutation_timeouts", "kill"), ("python", "mutation_timeouts", "kill"), ("go", "mutation_timeouts", "kill")]

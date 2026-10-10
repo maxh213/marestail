@@ -14,12 +14,12 @@ ROOT = Path(__file__).resolve().parent.parent
 CLI = ROOT / "marestail" / "cli.py"
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def expect_exit(name, raw):
+def expect_exit(name: str, raw: object) -> None:
     try:
         parse(raw)
     except SystemExit as error:
@@ -28,7 +28,7 @@ def expect_exit(name, raw):
     raise SystemExit(f"{name}: expected SystemExit for {raw!r}")
 
 
-def parses():
+def parses() -> None:
     expect("true", parse(True), DEFAULT)
     expect("false", parse(False), None)
     expect("empty", parse(""), None)
@@ -44,7 +44,7 @@ def parses():
     expect_exit("floatish", "1.5")
 
 
-def levels():
+def levels() -> None:
     empty = Config(root=ROOT, raw={})
     expect("default-no-config", level(None), DEFAULT)
     expect("default-empty-toml", level(empty), DEFAULT)
@@ -74,7 +74,7 @@ def probe(body: str, extra_env: dict[str, str] | None = None) -> str:
     return completed.stdout
 
 
-def applies():
+def applies() -> None:
     body = "\n".join(
         [
             "import os, subprocess, sys",
@@ -98,7 +98,7 @@ def applies():
         expect("apply-io", "idle" in lines["io"], True)
 
 
-def skips_when_off():
+def skips_when_off() -> None:
     before = os.getpriority(os.PRIO_PROCESS, 0)
     body = "\n".join(
         [
@@ -112,10 +112,16 @@ def skips_when_off():
         ]
     )
     expect("skip-toml", probe(body).strip(), str(before))
-    expect("skip-env", probe(body.replace("apply(Config(root=Path('.'), raw={'run': {'nice': 0}}))", "apply(Config(root=Path('.'), raw={}))"), {ENV: "0"}).strip(), str(before))
+    expect(
+        "skip-env",
+        probe(
+            body.replace("apply(Config(root=Path('.'), raw={'run': {'nice': 0}}))", "apply(Config(root=Path('.'), raw={}))"), {ENV: "0"}
+        ).strip(),
+        str(before),
+    )
 
 
-def pipeline_applies():
+def pipeline_applies() -> None:
     with tempfile.TemporaryDirectory(prefix="marestail-nice-") as temp:
         repo = Path(temp) / "repo"
         repo.mkdir()

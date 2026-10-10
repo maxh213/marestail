@@ -60,9 +60,11 @@ def test_discover_roots_and_children(tmp_path: Path) -> None:
     assert collect.discover([tmp_path]) == [tmp_path, nested]
 
 
-def test_list_dirs_oserror(tmp_path: Path, monkeypatch: Any) -> None:
+def test_walk_beds_oserror_on_iterdir_keeps_the_bed(tmp_path: Path, monkeypatch: Any) -> None:
+    write(tmp_path / ".marestail" / "x", "1")
+    write(tmp_path / "child" / ".marestail" / "x", "1")
     monkeypatch.setattr(Path, "iterdir", lambda self: (_ for _ in ()).throw(OSError("no")))
-    assert collect.list_dirs(tmp_path) == []
+    assert collect.discover([tmp_path]) == [tmp_path]
 
 
 def test_repo_shell_and_collect(tmp_path: Path, monkeypatch: Any) -> None:
@@ -446,12 +448,12 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     assert tmp_path / "child" in collect.entries(tmp_path)
     assert collect.has_marestail(tmp_path) is False
     write(tmp_path / ".marestail" / "x", "1")
-    assert collect.self_repo(tmp_path) == [tmp_path]
+    assert collect.has_marestail(tmp_path) is True
     assert collect.row_pid((9, 1, 2, ["a"])) == 9
     assert collect.last_item(["a", "b"]) == "b"
     assert collect.last_or_none([]) is None
     assert collect.newest_name([tmp_path]) == tmp_path.name
-    assert collect.log_name(tmp_path / "overnight-a.log") == "overnight-a.log"
+    assert collect.pipeline_log(tmp_path / "t") == tmp_path / "t" / "pipeline.log"
     assert collect.secs_fmt(10) == "10s"
     assert collect.secs_fmt(60) is None
     assert collect.mins_fmt(120) == "2m"
@@ -590,7 +592,7 @@ def test_collect_helpers(tmp_path: Path, monkeypatch: Any) -> None:
     worker = Worker(step=step(), process=None, result_path=None, prompt_path=None, handoff_path=None)
     assert collect.worker_texts(worker) == []
     assert collect.list_task_dirs(tmp_path / "gone") == []
-    assert collect.overnight_logs(tmp_path) == []
+    assert collect.run_logs(tmp_path) == []
     assert collect.is_overnight_log(tmp_path) is False
     assert collect.read_lines(tmp_path / "gone") == []
     assert collect.accept_start([], "not a start") is False
@@ -735,11 +737,12 @@ def test_transcript_conversation_uses_default_window(tmp_path: Path, monkeypatch
     assert seen == [(None, collect.CONV_MAX_LINES, collect.CONV_BYTES)]
 
 
-def test_self_repo_empty_and_list_dirs_files(tmp_path: Path) -> None:
+def test_walkable_and_list_task_dirs_skip_files(tmp_path: Path) -> None:
     (tmp_path / "file.txt").write_text("x")
     (tmp_path / "child").mkdir()
-    assert collect.self_repo(tmp_path) == []
-    assert collect.list_dirs(tmp_path) == [tmp_path / "child"]
+    assert collect.discover([tmp_path]) == []
+    assert collect.walkable(tmp_path / "file.txt") is False
+    assert collect.walkable(tmp_path / "child") is True
     (tmp_path / collect.HANDOFFS).mkdir()
     (tmp_path / collect.HANDOFFS / "note.txt").write_text("x")
     (tmp_path / collect.HANDOFFS / "task").mkdir()
@@ -1190,3 +1193,246 @@ def test_str_or_raw_and_result_field() -> None:
     assert collect.str_or_raw(1, "raw") == "raw"
     assert collect.result_field({"result": "ok"}) == "ok"
     assert collect.result_field(["no"]) is None
+
+
+def bed(path: Path) -> Path:
+    (path / ".marestail").mkdir(parents=True)
+    return path
+
+
+def test_discover_stops_at_the_depth_limit(tmp_path: Path) -> None:
+    deepest = bed(tmp_path / "a" / "b" / "c" / "d")
+    bed(deepest / "e")
+    assert collect.MAX_DEPTH == 4
+    assert collect.discover([tmp_path]) == [deepest]
+
+
+def test_discover_sorts_children_and_skips_symlinks_skip_dirs_and_dot_dirs(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = bed(tmp_path / "outside")
+    (root / "link").parent.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    bed(root / "node_modules")
+    bed(root / "vendor")
+    bed(root / ".hidden")
+    write(root / "file.txt", "x")
+    zed = bed(root / "zed")
+    alpha = bed(root / "alpha")
+    assert collect.discover([root]) == [alpha, zed]
+
+
+def test_discover_skips_every_named_dir() -> None:
+    assert collect.SKIP_DIRS == {
+        ".git",
+        ".marestail",
+        ".next",
+        ".scannerwork",
+        ".stryker-tmp",
+        ".venv",
+        ".yarn",
+        "__pycache__",
+        "build",
+        "coverage",
+        "dist",
+        "mutants",
+        "node_modules",
+        "StrykerOutput",
+        "target",
+        "vendor",
+        "venv",
+    }
+
+
+def test_discover_visits_each_real_path_once(tmp_path: Path) -> None:
+    root = bed(tmp_path / "root")
+    child = bed(root / "child")
+    (tmp_path / "alias").symlink_to(root, target_is_directory=True)
+    assert collect.discover([root, tmp_path / "alias", child, root]) == [root, child]
+    assert collect.discover([]) == []
+
+
+def test_walk_beds_skips_a_seen_path(tmp_path: Path) -> None:
+    root = bed(tmp_path / "root")
+    found: list[Path] = []
+    collect.walk_beds(root, 0, found, {root.resolve()})
+    assert found == []
+    seen: set[Path] = set()
+    collect.walk_beds(root, 0, found, seen)
+    assert found == [root]
+    assert seen == {root.resolve()}
+
+
+def test_visit_bed_at_the_limit_does_not_walk_children(tmp_path: Path) -> None:
+    root = bed(tmp_path / "root")
+    bed(root / "child")
+    found: list[Path] = []
+    seen: set[Path] = set()
+    collect.visit_bed(root, collect.MAX_DEPTH, found, seen, tmp_path / "real")
+    assert found == [root]
+    assert seen == {tmp_path / "real"}
+    collect.visit_bed(root, collect.MAX_DEPTH - 1, found, seen, root)
+    assert found == [root, root, root / "child"]
+
+
+def test_walk_children_walks_one_level_deeper(tmp_path: Path) -> None:
+    child = bed(tmp_path / "child")
+    bed(child / "a" / "b")
+    found: list[Path] = []
+    collect.walk_children(tmp_path, collect.MAX_DEPTH - 3, found, set())
+    assert found == [child, child / "a" / "b"]
+    found.clear()
+    collect.walk_children(tmp_path, collect.MAX_DEPTH - 2, found, set())
+    assert found == [child]
+
+
+def test_walkable_keeps_only_plain_dirs(tmp_path: Path) -> None:
+    (tmp_path / "plain").mkdir()
+    (tmp_path / ".dot").mkdir()
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "plain", target_is_directory=True)
+    write(tmp_path / "file", "x")
+    assert collect.walkable(tmp_path / "plain") is True
+    assert collect.walkable(tmp_path / ".dot") is False
+    assert collect.walkable(tmp_path / "dist") is False
+    assert collect.walkable(tmp_path / "link") is False
+    assert collect.walkable(tmp_path / "file") is False
+    assert collect.walkable(tmp_path / "gone") is False
+
+
+def test_collect_fleet_names_each_discovered_bed(tmp_path: Path, monkeypatch: Any) -> None:
+    nested = bed(tmp_path / "hermes" / "doin_it")
+    top = bed(tmp_path / "top")
+    monkeypatch.setattr(collect, "collect_repo", lambda root: repo(root))
+    monkeypatch.setattr("marestail.tui.collect.time.time", lambda: 7.0)
+    fleet = collect.collect_fleet([tmp_path])
+    assert [(state.root, state.name) for state in fleet.repos] == [(nested, "hermes/doin_it"), (top, "top")]
+    assert fleet.scanned_at == 7.0
+
+
+def test_display_name_is_relative_to_the_first_containing_root(tmp_path: Path) -> None:
+    nested = tmp_path / "hermes" / "doin_it"
+    nested.mkdir(parents=True)
+    assert collect.display_name(nested, [tmp_path]) == "hermes/doin_it"
+    assert collect.display_name(nested, [tmp_path / "other", tmp_path / "hermes", tmp_path]) == "doin_it"
+    assert collect.display_name(nested, [tmp_path, tmp_path / "hermes"]) == "hermes/doin_it"
+    assert collect.display_name(tmp_path, [tmp_path]) == tmp_path.name
+    assert collect.display_name(nested, [tmp_path / "other"]) == "doin_it"
+    assert collect.display_name(nested, []) == "doin_it"
+
+
+def test_display_name_resolves_symlinks(tmp_path: Path) -> None:
+    real = tmp_path / "real" / "bed"
+    real.mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    assert collect.display_name(tmp_path / "alias" / "bed", [tmp_path / "real"]) == "bed"
+    assert collect.display_name(real, [tmp_path / "alias"]) == "bed"
+    assert collect.display_name(real, [tmp_path]) == "real/bed"
+
+
+def test_relative_under(tmp_path: Path) -> None:
+    assert collect.relative_under(tmp_path / "a" / "b", tmp_path) == "a/b"
+    assert collect.relative_under(tmp_path, tmp_path) == "."
+    assert collect.relative_under(tmp_path, tmp_path / "a") is None
+
+
+def test_run_logs_lists_overnight_logs_then_pipeline_logs(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    overnight = write(runs / "overnight-1.log", "x")
+    write(runs / "overnight-2.txt", "x")
+    write(runs / "other.log", "x")
+    (runs / "overnight-3.log").mkdir()
+    pipeline = write(runs / "task" / "pipeline.log", "x")
+    (runs / "empty").mkdir()
+    (runs / "dir" / "pipeline.log").mkdir(parents=True)
+    assert collect.run_logs(runs) == [overnight, pipeline]
+    assert collect.run_logs(tmp_path / "gone") == []
+
+
+def test_deepseek_home(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", raising=False)
+    assert collect.deepseek_home() == tmp_path / ".claude-deepseek"
+    monkeypatch.setenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "")
+    assert collect.deepseek_home() == tmp_path / ".claude-deepseek"
+    monkeypatch.setenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/ds")
+    assert collect.deepseek_home() == tmp_path / "ds"
+    monkeypatch.setenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "/opt/ds")
+    assert collect.deepseek_home() == Path("/opt/ds")
+    assert collect.claude_homes()[2] == Path("/opt/ds")
+
+
+ALIAS = ["-o", "HostKeyAlias=box"]
+JOB = "echo $$ > /var/lib/marestail/busy.d/ab; flock /var/lib/marestail/job.lock sg docker -c 'docker exec mt npx stryker run'"
+
+
+def label(tokens: list[str]) -> str | None:
+    return collect.remote_label(tokens, [os.path.basename(token) for token in tokens])
+
+
+def test_remote_label_starting_the_vm() -> None:
+    assert label(["gcloud", "compute", "instances", "start", "marestail-mutation", "--quiet"]) == "☁ starting marestail-mutation"
+    assert label(["/usr/bin/gcloud", "compute", "instances", "start", "b"]) == "☁ starting b"
+    assert label(["gcloud", "compute", "instances", "start"]) == "☁ starting vm"
+    assert label(["gcloud", "compute", "instances", "start", ""]) == "☁ starting vm"
+    assert label(["gcloud", "compute", "instances", "start", "b", *ALIAS]) == "☁ starting b"
+    assert label(["gcloud", "compute", "instances", "stop", "b"]) is None
+    assert label(["gcloud", "compute", "disks", "start", "b"]) is None
+    assert label(["gcloud", "compute", "ssh", "b", "--", *ALIAS, JOB]) is None
+    assert collect.remote_label(["gcloud", "instances", "start", "b"], ["gcutil"]) is None
+
+
+def test_remote_label_syncing_needs_a_host() -> None:
+    assert label(["rsync", "-a", "-e", "ssh -o HostKeyAlias=box", "/r/", "max@1.2.3.4:/r/"]) == "☁ syncing to box"
+    assert label(["/usr/bin/rsync", "-e", "ssh -o HostKeyAlias=a -o HostKeyAlias=b", "/r/"]) == "☁ syncing to a"
+    assert label(["rsync", "-a", "/r/", "max@1.2.3.4:/r/"]) is None
+    assert label(["rsync", "-a", "HostKeyAlias=", "/r/"]) is None
+
+
+def test_remote_label_names_the_job_tool() -> None:
+    assert label(["ssh", *ALIAS, "max@1.2.3.4", JOB]) == "☁ stryker on box"
+    assert label(["ssh", *ALIAS, "h", "busy.d mix muex"]) == "☁ muex on box"
+    assert label(["ssh", *ALIAS, "h", "busy.d mutmut run"]) == "☁ mutmut on box"
+    assert label(["ssh", *ALIAS, "h", "busy.d mvn pitest:mutationCoverage"]) == "☁ pitest on box"
+    assert label(["ssh", *ALIAS, "h", "busy.d stryker muex"]) == "☁ muex on box"
+    assert label(["ssh", *ALIAS, "h", "busy.d", "true"]) == "☁ gate on box"
+    assert label(["ssh", *ALIAS, "h", "rsync", "--server", "."]) is None
+    assert label(["ssh", "h", JOB]) is None
+    assert label(["scp", *ALIAS, JOB]) is None
+    assert label([]) is None
+    assert collect.classify_gate(["ssh", *ALIAS, "h", JOB]) == "☁ stryker on box"
+
+
+def test_remote_label_helpers() -> None:
+    assert collect.REMOTE_MARK == "☁"
+    assert collect.REMOTE_TOOLS == ("muex", "stryker", "mutmut", "pitest")
+    assert collect.alias_host("ssh -o HostKeyAlias=a.b-c x") == "a.b-c"
+    assert collect.alias_host("ssh x") is None
+    matched = collect.ALIAS_RE.search("HostKeyAlias=z y")
+    assert matched is not None
+    assert collect.first_group(matched) == "z"
+    assert collect.starts_vm(["instances", "start"], "gcloud") is True
+    assert collect.starts_vm(["instances", "start"], "ssh") is False
+    assert collect.starts_vm(["start"], "gcloud") is False
+    assert collect.starts_vm(["instances"], "gcloud") is False
+    assert collect.started_vm(["start", "box"]) == "box"
+    assert collect.started_vm(["start"]) == "vm"
+    assert collect.vm_start_label(["instances", "start", "x"], "gcloud") == "☁ starting x"
+    assert collect.vm_start_label(["instances", "start", "x"], "rsync") is None
+    assert collect.host_label("rsync", "", None) is None
+    assert collect.host_label("rsync", "", "h") == "☁ syncing to h"
+    assert collect.hosted_label("ssh", "busy.d", "h") == "☁ gate on h"
+    assert collect.hosted_label("ssh", "plain", "h") is None
+    assert collect.hosted_label("gcloud", "busy.d", "h") is None
+    assert collect.job_label("busy.d mutmut", "h") == "☁ mutmut on h"
+    assert collect.job_label("mutmut", "h") is None
+    assert collect.remote_tool("pitest and mutmut") == "mutmut"
+    assert collect.remote_tool("nothing") == "gate"
+    assert collect.in_command("a muex b", "muex") is True
+    assert collect.in_command("a b", "muex") is False
+
+
+def test_helpers_the_merge_removed_stay_removed() -> None:
+    from marestail.gates import ts_tests
+
+    assert [name for name in ("list_dirs", "self_repo", "log_name") if hasattr(collect, name)] == []
+    assert [name for name in ("failures", "empty_failures") if hasattr(ts_tests, name)] == []

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from marestail import cli, depth, graph, install, nice, route, runner
+from marestail import cli, depth, graph, install, nice, remote, route, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -27,6 +27,7 @@ from tests.conftest import make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
+COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,perf,visual,route,remote,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -104,14 +105,14 @@ def test_main_requires_a_command(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_help_lists_commands_in_order() -> None:
     text = cli.build_parser().format_help()
-    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,graph,depth}" in text
+    assert COMMAND_CHOICES in text
     assert "check task files" in text
     assert "print the subscription to use now: runs dandelion" in " ".join(text.split())
 
 
 def test_tasks_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.chdir(tmp_path)
-    assert "{gate,run,tasks,install,sonar,watch,perf,visual,route,graph,depth}" in cli.build_parser().format_help()
+    assert COMMAND_CHOICES in cli.build_parser().format_help()
     assert_tasks_help(capsys)
     assert_unchanged_command_help(monkeypatch, capsys)
     assert_tasks_requires_a_subcommand(capsys)
@@ -133,6 +134,60 @@ def test_tasks_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: 
         "alpha/019-a.md: no front matter: line 1 must be +++\nbeta/019-b.md: no front matter: line 1 must be +++\n",
         "",
     )
+
+
+def exit_code(argv: list[str]) -> object:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    return raised.value.code
+
+
+def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.CaptureFixture[str]) -> None:
+    assert exit_code(["--help"]) == 0
+    root_help = capsys.readouterr().out
+    assert COMMAND_CHOICES in root_help
+    assert "    remote              the remote box that offloaded gates run on\n" in root_help
+    assert exit_code(["remote"]) == 2
+    assert capsys.readouterr() == (
+        "",
+        "usage: marestail remote [-h] {status} ...\nmarestail remote: error: the following arguments are required: remote_command\n",
+    )
+    assert exit_code(["remote", "--help"]) == 0
+    assert "    status    box state, uptime and estimated spend today and this month\n" in capsys.readouterr().out
+    for absent in ("status", "queue"):
+        assert exit_code([absent]) == 2
+        assert f"invalid choice: '{absent}'" in capsys.readouterr().err
+
+
+def test_remote_status_hands_the_arguments_to_the_remote_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = Recorder(7)
+    monkeypatch.setattr(remote, "status_command", fake)
+    assert cli.main(["remote", "status"]) == 7
+    assert len(fake.calls) == 1
+    (args,) = fake.calls[0]
+    assert (args.command, args.remote_command, args.handler) == ("remote", "status", cli.remote_status_command)
+
+
+def test_remote_status_without_a_config_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "remote.toml"
+    monkeypatch.setattr(remote, "CONFIG", missing)
+    assert cli.main(["remote", "status"]) == 1
+    assert capsys.readouterr() == (f"no remote configured ({missing})\n", "")
+
+
+def test_check_paths_defaults_to_the_tasks_folder() -> None:
+    assert cli._check_paths(None) == [Path("tasks")]
+    assert cli._check_paths([]) == [Path("tasks")]
+    assert cli._check_paths(["a", "b/c.md"]) == [Path("a"), Path("b/c.md")]
+
+
+def test_check_verdict_prints_each_problem_on_its_own_line(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli._check_verdict([]) == 0
+    assert capsys.readouterr() == ("", "")
+    assert cli._check_verdict(["one", "two"]) == 1
+    assert capsys.readouterr() == ("one\ntwo\n", "")
 
 
 PUBLISHED = (
@@ -890,7 +945,20 @@ def test_root_parser_help_and_subcommands() -> None:
     action = subparsers_action(parser)
     assert action.dest == "command"
     assert action.required is True
-    assert list(action.choices) == ["gate", "run", "tasks", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
+    assert list(action.choices) == [
+        "gate",
+        "run",
+        "tasks",
+        "install",
+        "sonar",
+        "watch",
+        "perf",
+        "visual",
+        "route",
+        "remote",
+        "graph",
+        "depth",
+    ]
     help_by_name = choice_help(parser)
     assert help_by_name["gate"] == "run the gates against the current repo"
     assert help_by_name["run"] == "run the role pipeline on a task"
@@ -900,6 +968,7 @@ def test_root_parser_help_and_subcommands() -> None:
     assert help_by_name["watch"] == "live TUI of every marestail pipeline on this machine"
     assert help_by_name["perf"] == "take performance samples during a perf run"
     assert help_by_name["route"] == "print the subscription to use now: runs dandelion route with the same arguments, e.g. --high"
+    assert help_by_name["remote"] == "the remote box that offloaded gates run on"
     assert help_by_name["graph"] == "print the module dependency graph"
     assert help_by_name["depth"] == "print module interface width and depth"
     assert nested_parser(parser, "route").add_help is False
@@ -1144,7 +1213,7 @@ def test_run_keeps_a_blockless_file_and_a_valid_block(tmp_path: Path) -> None:
     assert "pipeline complete" in plain.stdout
     assert plain.stderr == ""
     assert prompt.exists()
-    assert_run_layout(repo, "t", "t")
+    assert_run_layout(repo, "t", "t", plain.stdout)
     assert "# Task\n# Add one" in prompt.read_text()
     write_task(repo / "tasks" / "018-prev.md", "+++\n")
     write_task(repo / "tasks" / "019-demo.md", '+++\ndepends = ["018-prev"]\nstack = true\n+++\n# Something else\n\nCarry on.\n')
@@ -1161,7 +1230,7 @@ def test_run_keeps_a_blockless_file_and_a_valid_block(tmp_path: Path) -> None:
     assert "+++" not in body
     assert "depends =" not in body
     assert "stack" not in body
-    assert_run_layout(repo, "019-demo", "019-demo")
+    assert_run_layout(repo, "019-demo", "019-demo", demo.stdout)
     write_task(repo / "tasks" / "019-absent.md", '+++\ndepends = ["099-missing"]\nstack = false\n+++\n# Absent\n')
     absent = critic_run(repo, "019-absent.md", stub, prompt)
     assert absent.returncode == 0
@@ -1236,11 +1305,11 @@ def critic_env(stub: Path, prompt: Path, env: dict[str, str] | None) -> dict[str
     return merged
 
 
-def assert_run_layout(repo: Path, task_id: str, expected: str) -> None:
+def assert_run_layout(repo: Path, task_id: str, expected: str, stdout: str) -> None:
     folder = repo / ".marestail" / "runs" / task_id
     timeline = json.loads((folder / "timeline.json").read_text())
     assert timeline["task"] == expected
     assert (folder / "timeline.md").is_file()
-    assert not (folder / "pipeline.log").exists()
+    assert (folder / "pipeline.log").read_text() == stdout
     assert not (repo / ".marestail" / "handoffs" / task_id).exists()
     assert len(list(folder.glob("handoffs-*/01-critic.md"))) == 1

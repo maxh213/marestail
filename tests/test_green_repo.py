@@ -13,6 +13,7 @@ import sys
 import tokenize
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -49,7 +50,8 @@ DANDELION_SRC = "MARESTAIL_DANDELION_SRC"
 FIXTURE_MODEL = "claude-opus-5"
 MINIMUM_ROUTE_LINES = 12
 LINES_PER_ACCOUNT = 2
-ACCOUNT_SPREAD = "...CLAUDE_LINES"
+FIXTURE_RANK = "top"
+PROVIDERS = "providers: "
 PROVIDER_NAME = r"'([\w-]+)'"
 SOURCE_LINE = re.compile(r"^dandelion source: (\d+) route lines parse$", re.MULTILINE)
 FAST_GATES = ["py.tests", "py.crap", "py.lint", "py.deps", "py.runtime", "comments", "depth", "deadcode", "docs"]
@@ -215,7 +217,20 @@ def test_help_lists_every_subcommand() -> None:
     text = cli.build_parser().format_help()
     listed = re.search(r"\{([a-z,]+)\}", text)
     assert listed is not None
-    assert listed.group(1).split(",") == ["gate", "run", "tasks", "install", "sonar", "watch", "perf", "visual", "route", "graph", "depth"]
+    assert listed.group(1).split(",") == [
+        "gate",
+        "run",
+        "tasks",
+        "install",
+        "sonar",
+        "watch",
+        "perf",
+        "visual",
+        "route",
+        "remote",
+        "graph",
+        "depth",
+    ]
 
 
 def parse_help(parser: argparse.ArgumentParser, argv: list[str]) -> None:
@@ -283,20 +298,29 @@ def restricted_path() -> bool:
     return shutil.which("ps") is None or under_mutmut()
 
 
+def dandelion_routes() -> dict[str, dict[str, Any]]:
+    return {
+        "route": {name: {"standard": f"{FIXTURE_MODEL} high", "max": f"{FIXTURE_MODEL} max"} for name in sorted(route.BACKENDS)},
+        "high": {FIXTURE_RANK: f"{FIXTURE_MODEL} medium"},
+    }
+
+
 def dandelion_route_source() -> str:
-    accounts = "\n".join(f"  {{ id: '{name}', ...CLAUDE_LINES }}," for name in sorted(route.BACKENDS))
     providers = ", ".join(f"'{name}'" for name in sorted(route.BACKENDS))
-    return (
-        f"const CLAUDE_LINES = {{ standard: '{FIXTURE_MODEL} high', max: '{FIXTURE_MODEL} max' }}\n"
-        f"const ACCOUNTS = [\n{accounts}\n]\n"
-        f"const ROUTES = [{{ providers: [{providers}], line: '{FIXTURE_MODEL} medium' }}]\n"
-    )
+    return f"const RANKS = [\n  {{ rank: 1, name: '{FIXTURE_RANK}', {PROVIDERS}[{providers}] }},\n]\n"
+
+
+def ranked_providers(source: str) -> list[str]:
+    return re.findall(PROVIDER_NAME, source.split(PROVIDERS, 1)[1])
 
 
 @pytest.fixture
 def script_env(tmp_path: Path) -> dict[str, str]:
-    routes = tmp_path / "route.ts"
+    checkout = tmp_path / "dandelion"
+    routes = checkout / "src" / "domain" / "route.ts"
+    routes.parent.mkdir(parents=True)
     routes.write_text(dandelion_route_source())
+    (checkout / "routes.json").write_text(json.dumps(dandelion_routes()))
     return {DANDELION_SRC: str(routes)}
 
 
@@ -308,17 +332,15 @@ def test_diagnostic_script_exits_ok(name: str, script_env: dict[str, str]) -> No
     assert "ok" in last_line(completed.stdout + completed.stderr)
 
 
-def fixture_route_lines(source: str) -> int:
-    accounts = source.count(ACCOUNT_SPREAD)
-    provided = len(re.findall(PROVIDER_NAME, source.splitlines()[-1]))
-    return accounts * LINES_PER_ACCOUNT + provided
+def fixture_route_lines() -> int:
+    return len(dandelion_routes()["route"]) * LINES_PER_ACCOUNT + len(ranked_providers(dandelion_route_source()))
 
 
 def test_the_route_fixture_offers_more_lines_than_the_script_demands() -> None:
-    source = dandelion_route_source()
-    assert source.count(ACCOUNT_SPREAD) == len(route.BACKENDS)
-    assert len(re.findall(PROVIDER_NAME, source.splitlines()[-1])) == len(route.BACKENDS)
-    assert fixture_route_lines(source) >= MINIMUM_ROUTE_LINES
+    assert list(dandelion_routes()["route"]) == sorted(route.BACKENDS)
+    assert ranked_providers(dandelion_route_source()) == sorted(route.BACKENDS)
+    assert fixture_route_lines() == len(route.BACKENDS) * 3
+    assert fixture_route_lines() >= MINIMUM_ROUTE_LINES
     assert all(route.parse(f"{FIXTURE_MODEL} high {name}").backend for name in route.BACKENDS)
 
 
@@ -327,7 +349,7 @@ def test_the_route_script_parses_every_line_of_the_fixture_route_table(script_en
     completed = run_tools_script(ROUTE_SCRIPT, script_env)
     reported = SOURCE_LINE.search(completed.stdout)
     assert reported is not None
-    assert int(reported.group(1)) == fixture_route_lines(dandelion_route_source())
+    assert int(reported.group(1)) == fixture_route_lines()
 
 
 @pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
@@ -516,7 +538,7 @@ def test_unchecked_mutants_fail_the_mutation_gate(tmp_path: Path) -> None:
     folder = tmp_path / "mutants"
     folder.mkdir()
     (folder / "a.py.meta").write_text(json.dumps({"exit_code_by_key": {"pkg.fn__mutmut_1": None}}))
-    result = py_mutation.judged(py_mutation.mutant_statuses(folder, ()), "", 0.0)
+    result = py_mutation.judged(make_context(tmp_path), py_mutation.mutant_statuses(folder, ()), "", 0.0)
     assert (result.ok, result.summary, result.findings) == (False, "1 of 1 mutants not killed", ["pkg.fn__mutmut_1: not checked"])
 
 
@@ -727,3 +749,82 @@ def test_package_mutation_patterns_cover_every_module() -> None:
     assert "marestail.perf.db.*" in patterns
     assert "marestail.tui.app.*" in patterns
     assert patterns == PACKAGE_MUTANTS
+
+
+PINNED_SCRIPTS = [
+    ("test-route.py", "route ok"),
+    ("test-agent-backends.py", "agent backends ok"),
+    ("test-watch.py", "watch ok"),
+    ("test-nice.py", "nice ok"),
+    ("test-practices.py", "practices ok"),
+    ("test-muex-watchdog.py", "muex watchdog ok"),
+    ("test-ts-playwright.py", "ts playwright unit assertions OK"),
+]
+SPLIT_FUNCTIONS = [
+    "playwright_failures",
+    "playwright_spec_findings",
+    "count_tests",
+    "run_mutation",
+    "ensure_up",
+    "status_command",
+    "running_jobs",
+    "walk_beds",
+    "remote_label",
+]
+FORMER_DEAD_CODE = [("marestail/remote.py", "offloads"), ("marestail/tui/collect.py", "has_marestail")]
+SHIPPED_RULEBOOKS = ["er.md", "ex.md", "go.md", "py.md", "rb.md"]
+MAX_COMPLEXITY = 4
+CITED_GUIDANCE = re.compile(r"`(guidance/[\w/-]+\.md)`")
+USER_ROW = "| `USER` | ssh user on the remote box when `remote.toml` has no `user` key (default `max` when `USER` is unset) |"
+
+
+@pytest.mark.skipif(restricted_path(), reason="diagnostic scripts need a normal PATH")
+@pytest.mark.parametrize(("name", "line"), PINNED_SCRIPTS)
+def test_the_scripts_that_pin_the_merged_features_still_pass(name: str, line: str, script_env: dict[str, str]) -> None:
+    completed = run_tools_script(name, {**script_env, "PYTHONPATH": str(ROOT)})
+    assert (completed.returncode, last_line(completed.stdout)) == (0, line), completed.stderr
+
+
+def test_docs_match_the_code_without_new_rulebooks_in_this_repo() -> None:
+    section = readme_section()
+    assert USER_ROW in section.splitlines()
+    assert [name for name in DOCUMENTED if f"`{name}`" not in section] == []
+    assert sorted(path.name for path in (ROOT / "guidance").iterdir()) == ["cs.md", "ts.md"]
+    assert [name for name in SHIPPED_RULEBOOKS if not (ROOT / "templates" / "guidance" / name).is_file()] == []
+    cited = sorted(set(CITED_GUIDANCE.findall((ROOT / "README.md").read_text())))
+    assert "guidance/ts.md" in cited
+    assert [path for path in cited if not (ROOT / path).exists()] == []
+
+
+def blocks_of(path: Path) -> list[Any]:
+    complexity = importlib.import_module("radon.complexity")
+    found: list[Any] = complexity.cc_visit(path.read_text())
+    return [*found, *(method for block in found for method in getattr(block, "methods", []))]
+
+
+def complex_functions(names: list[str]) -> list[str]:
+    return [
+        f"{path.relative_to(ROOT)}:{block.lineno} {block.name} {block.complexity}"
+        for path in package_files()
+        for block in blocks_of(path)
+        if block.name in names and block.complexity > MAX_COMPLEXITY
+    ]
+
+
+def defines(path: Path, name: str) -> bool:
+    return any(isinstance(node, ast.FunctionDef) and node.name == name for node in ast.walk(ast.parse(path.read_text())))
+
+
+def references(name: str) -> int:
+    return sum(
+        1
+        for path in package_files()
+        for node in ast.walk(ast.parse(path.read_text()))
+        if (isinstance(node, ast.Name) and node.id == name) or (isinstance(node, ast.Attribute) and node.attr == name)
+    )
+
+
+def test_the_full_gate_passes_where_it_can_be_read_from_the_source() -> None:
+    assert complex_functions(SPLIT_FUNCTIONS) == []
+    unused = [f"{file}:{name}" for file, name in FORMER_DEAD_CODE if defines(ROOT / file, name) and references(name) == 0]
+    assert unused == []

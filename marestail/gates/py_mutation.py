@@ -57,7 +57,9 @@ def nothing_to_mutate(scope: MutationScope, patterns: list[str]) -> bool:
 
 def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Result:
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
-    outcome = remote.run_mutation(ctx, GATE, lambda on_remote: command(ctx, patterns, on_remote), ctx.python_root(), timeout=7200, pull=(mutants_dir(ctx),))
+    outcome = remote.run_mutation(
+        ctx, GATE, lambda on_remote: command(ctx, patterns, on_remote), ctx.python_root(), timeout=7200, pull=(mutants_dir(ctx),)
+    )
     code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
         return Result(GATE, False, "mutmut failed" + outcome.where, tail(output), elapsed(started))
@@ -79,10 +81,18 @@ def mutants_dir(ctx: Context) -> str:
 def judged(ctx: Context, statuses: list[Status], note: str, started: float) -> Result:
     if not statuses:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    passing = PASSING if ctx.timeouts_fail("python") else PASSING | {TIMEOUT}
+    passing = passing_statuses(ctx)
     survivors = [f"{name}: {status}" for name, status in statuses if status not in passing]
-    timed_out = sum(1 for _, status in statuses if status == TIMEOUT) if TIMEOUT in passing else 0
-    return Result(GATE, not survivors, mutation_summary(len(statuses), survivors, note, timed_out), survivors, elapsed(started))
+    summary = mutation_summary(len(statuses), survivors, note, killed_by_timeout(statuses, passing))
+    return Result(GATE, not survivors, summary, survivors, elapsed(started))
+
+
+def passing_statuses(ctx: Context) -> set[str]:
+    return PASSING if ctx.timeouts_fail("python") else PASSING | {TIMEOUT}
+
+
+def killed_by_timeout(statuses: list[Status], passing: set[str]) -> int:
+    return sum(1 for _, status in statuses if status == TIMEOUT) if TIMEOUT in passing else 0
 
 
 def mutation_summary(total: int, survivors: list[str], note: str, timed_out: int = 0) -> str:

@@ -102,7 +102,9 @@ def parses_every_line() -> None:
 def dandelion_source_lines() -> list[str]:
     source = DANDELION_ROUTES.read_text()
     routes = json.loads((DANDELION_ROUTES.parents[2] / "routes.json").read_text())
-    lines: list[str] = [f"{pair[key]} {account}" for account, pair in routes["route"].items() if account in route.BACKENDS for key in ("standard", "max")]
+    lines: list[str] = [
+        f"{pair[key]} {account}" for account, pair in routes["route"].items() if account in route.BACKENDS for key in ("standard", "max")
+    ]
     providers = {
         match.group(1): re.findall(r"'([\w-]+)'", match.group(2))
         for match in re.finditer(r"name: '([\w-]+)', providers: \[([^\]]*)\]", source)
@@ -236,14 +238,22 @@ def routes_deepseek(folder: Path) -> None:
     os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = "/srv/deepseek-claude"
     os.environ["SEEN"] = str(folder / "seen")
     (folder / "plan").write_text("0 deepseek/deepseek-v4.1-flash max claude-deepseek\n")
-    os.environ["MARESTAIL_CLAUDE"] = str(script(folder / "claude", (
-        'cat > "$SEEN"\n'
-        'printf \'{"total_cost_usd": 0, "num_turns": 1, "result": "config=%s args=%s"}\' "$CLAUDE_CONFIG_DIR" "$*"\n'
-    )))
+    os.environ["MARESTAIL_CLAUDE"] = str(
+        script(
+            folder / "claude",
+            ('cat > "$SEEN"\nprintf \'{"total_cost_usd": 0, "num_turns": 1, "result": "config=%s args=%s"}\' "$CLAUDE_CONFIG_DIR" "$*"\n'),
+        )
+    )
     previous_wait = runner.LIMIT_WAIT_SECONDS
     runner.LIMIT_WAIT_SECONDS = 0
     try:
-        state = Run(config=Config(root=folder, raw={"agent": {"backend": "kilo", "effort": "low"}}), task=folder / "t.md", model=None, retries=0, route="dandelion/route")
+        state = Run(
+            config=Config(root=folder, raw={"agent": {"backend": "kilo", "effort": "low"}}),
+            task=folder / "t.md",
+            model=None,
+            retries=0,
+            route="dandelion/route",
+        )
         invoke(state, "01-coder", "deepseek prompt")
         expect("deepseek-state", (state.agent, state.model, state.effort), ("claude", "deepseek/deepseek-v4.1-flash", "max"))
         output = (state.folder / "01-coder.json").read_text()

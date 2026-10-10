@@ -138,29 +138,30 @@ def has_marestail(child: Path) -> bool:
 
 def discover(roots: list[Path]) -> list[Path]:
     found: list[Path] = []
-    seen: set[Path] = set()
-    for root in roots:
-        walk_beds(root, 0, found, seen)
+    list(map(partial(walk_beds, depth=0, found=found, seen=set()), roots))
     return found
 
 
 def walk_beds(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
     real = real_path(path)
-    if real in seen:
-        return
+    chosen = (visit_bed, skip)[real in seen]
+    chosen(path, depth, found, seen, real)
+
+
+def visit_bed(path: Path, depth: int, found: list[Path], seen: set[Path], real: Path) -> None:
     seen.add(real)
-    if (path / ".marestail").is_dir():
-        found.append(path)
-    if depth >= MAX_DEPTH:
-        return
-    try:
-        children = sorted(p for p in path.iterdir() if p.is_dir() and not p.is_symlink())
-    except OSError:
-        return
-    for child in children:
-        if child.name in SKIP_DIRS or child.name.startswith("."):
-            continue
-        walk_beds(child, depth + 1, found, seen)
+    found.extend(filter(has_marestail, (path,)))
+    chosen = (walk_children, skip)[depth >= MAX_DEPTH]
+    chosen(path, depth, found, seen)
+
+
+def walk_children(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
+    children = sorted(filter(walkable, entries(path)))
+    list(map(partial(walk_beds, depth=depth + 1, found=found, seen=seen), children))
+
+
+def walkable(child: Path) -> bool:
+    return False not in (child.is_dir(), not child.is_symlink(), child.name not in SKIP_DIRS, not child.name.startswith("."))
 
 
 def collect_repo(root: Path) -> RepoState:
@@ -292,7 +293,7 @@ def stripped_lines(log_path: Path) -> list[str]:
 
 
 def collect_fleet(roots: list[Path]) -> Fleet:
-    return Fleet(repos=[named_repo(root, roots) for root in discover(roots)], scanned_at=time.time())
+    return Fleet(repos=list(map(partial(named_repo, roots=roots), discover(roots))), scanned_at=time.time())
 
 
 def named_repo(root: Path, roots: list[Path]) -> RepoState:
@@ -307,13 +308,14 @@ def add_live(sections: list[tuple[str, str]], live: list[str]) -> None:
 
 def display_name(bed: Path, roots: list[Path]) -> str:
     real = real_path(bed)
-    for root in roots:
-        try:
-            relative = real.relative_to(real_path(root)).as_posix()
-        except ValueError:
-            continue
-        return real.name if relative == "." else relative
-    return real.name
+    relative = next(filter(None, map(partial(relative_under, real), roots)), ".")
+    return {".": real.name}.get(relative, relative)
+
+
+def relative_under(real: Path, root: Path) -> str | None:
+    with contextlib.suppress(ValueError):
+        return real.relative_to(real_path(root)).as_posix()
+    return None
 
 
 def conversation_for(repo: RepoState) -> list[tuple[str, str]]:
@@ -379,7 +381,11 @@ def latest_log(root: Path) -> Path | None:
 
 def run_logs(runs: Path) -> list[Path]:
     found = entries(runs)
-    return [*filter(is_overnight_log, found), *filter(Path.is_file, (path / PIPELINE_LOG for path in found))]
+    return [*filter(is_overnight_log, found), *filter(Path.is_file, map(pipeline_log, found))]
+
+
+def pipeline_log(run: Path) -> Path:
+    return run / PIPELINE_LOG
 
 
 def is_overnight_log(path: Path) -> bool:
@@ -952,6 +958,7 @@ def skipped_gate(tokens: list[str], names: list[str]) -> bool:
 
 REMOTE_MARK = "☁"
 REMOTE_TOOLS = ("muex", "stryker", "mutmut", "pitest")
+ALIAS_RE = re.compile(r"HostKeyAlias=(\S+)")
 
 
 def gate_label(tokens: list[str], names: list[str]) -> str | None:
@@ -1084,19 +1091,50 @@ def token_after(tokens: list[str], index: int) -> str:
 
 
 def remote_label(tokens: list[str], names: list[str]) -> str | None:
-    alias = re.search(r"HostKeyAlias=(\S+)", " ".join(tokens))
-    host = alias.group(1) if alias else None
-    if names and names[0] == "gcloud" and "instances" in tokens and "start" in tokens:
-        return f"{REMOTE_MARK} starting {after(tokens, 'start') or 'vm'}"
-    if host is None:
-        return None
-    if names[0] == "rsync":
-        return f"{REMOTE_MARK} syncing to {host}"
     command = " ".join(tokens)
-    if names[0] == "ssh" and "busy.d" in command:
-        tool = next((tool for tool in REMOTE_TOOLS if tool in command), "gate")
-        return f"{REMOTE_MARK} {tool} on {host}"
-    return None
+    head = (*names, EMPTY)[0]
+    return first_present((vm_start_label(tokens, head), host_label(head, command, alias_host(command))))
+
+
+def alias_host(command: str) -> str | None:
+    return next(map(first_group, ALIAS_RE.finditer(command)), None)
+
+
+def first_group(matched: re.Match[str]) -> str:
+    return matched.group(1)
+
+
+def starts_vm(tokens: list[str], head: str) -> bool:
+    return False not in (head == "gcloud", "instances" in tokens, "start" in tokens)
+
+
+def started_vm(tokens: list[str]) -> str:
+    return next(filter(None, (after(tokens, "start"), "vm")))
+
+
+def vm_start_label(tokens: list[str], head: str) -> str | None:
+    return {True: f"{REMOTE_MARK} starting {started_vm(tokens)}"}.get(starts_vm(tokens, head))
+
+
+def host_label(head: str, command: str, host: str | None) -> str | None:
+    chosen = (none_of, hosted_label)[host is not None]
+    return chosen(head, command, surely(host))
+
+
+def hosted_label(head: str, command: str, host: str) -> str | None:
+    return {"rsync": f"{REMOTE_MARK} syncing to {host}", "ssh": job_label(command, host)}.get(head)
+
+
+def job_label(command: str, host: str) -> str | None:
+    return {True: f"{REMOTE_MARK} {remote_tool(command)} on {host}"}.get("busy.d" in command)
+
+
+def remote_tool(command: str) -> str:
+    return next(filter(partial(in_command, command), REMOTE_TOOLS), "gate")
+
+
+def in_command(command: str, tool: str) -> bool:
+    return tool in command
 
 
 def after(tokens: list[str], name: str) -> str | None:

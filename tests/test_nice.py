@@ -292,7 +292,7 @@ def test_nice_is_listed_with_ran_against() -> None:
 
 def test_nice_imports_only_config() -> None:
     assert imported_marestail(ROOT / "marestail" / "nice.py") == ["marestail.config"]
-    assert not (ROOT / "tools" / "test-nice.py").exists()
+    assert (ROOT / "tools" / "test-nice.py").is_file()
 
 
 def imported_marestail(path: Path) -> list[str]:

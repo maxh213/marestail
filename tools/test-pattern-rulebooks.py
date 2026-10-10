@@ -278,7 +278,7 @@ PORTED = (
     ("origin/main", "cs"),
     ("dfdb550", "er"),
     ("dfdb550", "ex"),
-    ("dfdb550", "rb"),
+    ("4148a1e", "rb"),
 )
 LATER_RUBY = re.compile(r"\bRB-(?:49|5\d|6\d|7[0-3])\b")
 RB_CITES = (
@@ -411,9 +411,13 @@ TOML = (
     "skips repos with no guidance/patterns/*.md",
 )
 TOML_ADDED = [
+    "# [run]",
+    "# nice = 19  # 0 leaves the process at the shell's priority; MARESTAIL_NICE overrides; children inherit",
     "# [design]",
     "# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md",
+    'runner = "vitest"  # or "jest" / "playwright"; then list sources = ["app", "components", "lib"]',
 ]
+TOML_REMOVED = ['runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]']
 README = (
     "<rule id> <file:line>",
     "bounces to the architect",
@@ -559,7 +563,7 @@ def check_rule_shape(language: str, rule: Rule) -> None:
 def check_files() -> None:
     names = sorted(f"{language}.md" for language in LANGUAGES)
     expect("pattern-files", sorted(path.name for path in PATTERNS.glob("*.md")), names)
-    expect("no-python-rulebook", ((PATTERNS / "py.md").exists(), (GUIDANCE / "py.md").exists()), (False, False))
+    expect("python-rulebook-without-patterns", ((PATTERNS / "py.md").exists(), (GUIDANCE / "py.md").exists()), (False, True))
 
 
 def check_canonical(language: str, text: str) -> None:
@@ -743,7 +747,7 @@ def check_architect_diff() -> None:
 
 def check_toml_diff() -> None:
     removed, added = git_diff_lines("templates/marestail.toml")
-    expect("toml-no-deletions", removed, [])
+    expect("toml-removed-only-the-runner-line", removed, TOML_REMOVED)
     expect("toml-added-block", [line.strip() for line in added if line.strip()], TOML_ADDED)
 
 
@@ -858,7 +862,7 @@ def check_ported() -> None:
     for rev, name in PORTED:
         expect_blob(rev, name)
     expect_true("rb-cited-ids", ruby_ids_known())
-    expect_true("no-rb-49", not later_ruby())
+    expect_true("rb-49-to-73-from-main", later_ruby())
 
 
 def expect_blob(rev: str, name: str) -> None:

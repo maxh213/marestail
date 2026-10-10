@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -12,19 +13,19 @@ from marestail.gates import ts_tests
 from marestail.gates.ts_tests import run_gate
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def ctx_for(root: Path, runner: str = "playwright", sources=None) -> Context:
-    raw = {"ts": {"root": ".", "runner": runner, "source": "src"}}
+def ctx_for(root: Path, runner: str = "playwright", sources: list[str] | None = None) -> Context:
+    raw: dict[str, dict[str, Any]] = {"ts": {"root": ".", "runner": runner, "source": "src"}}
     if sources is not None:
         raw["ts"]["sources"] = sources
     return Context(config=Config(root=root, raw=raw))
 
 
-def test_unknown_runner():
+def test_unknown_runner() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         result = run_gate(ctx_for(root, runner="mocha"))
@@ -33,15 +34,19 @@ def test_unknown_runner():
         expect("unknown mentions playwright", "playwright" in result.summary, True)
 
 
-def test_missing_playwright():
+def test_missing_playwright() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         result = run_gate(ctx_for(root))
         expect("missing playwright ok", result.ok, False)
-        expect("missing playwright summary", result.summary, "playwright is not installed at node_modules/.bin/playwright; add @playwright/test")
+        expect(
+            "missing playwright summary",
+            result.summary,
+            "playwright is not installed at node_modules/.bin/playwright; add @playwright/test",
+        )
 
 
-def test_missing_c8():
+def test_missing_c8() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         binary = root / "node_modules" / ".bin" / "playwright"
@@ -49,10 +54,14 @@ def test_missing_c8():
         binary.write_text("")
         result = run_gate(ctx_for(root))
         expect("missing c8 ok", result.ok, False)
-        expect("missing c8 summary", result.summary, "c8 is not installed at node_modules/.bin/c8; add c8 so playwright coverage can be collected")
+        expect(
+            "missing c8 summary",
+            result.summary,
+            "c8 is not installed at node_modules/.bin/c8; add c8 so playwright coverage can be collected",
+        )
 
 
-def test_playwright_command():
+def test_playwright_command() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         ctx = ctx_for(root, sources=["components", "lib"])
@@ -68,7 +77,7 @@ def test_playwright_command():
         expect("env", ts_tests.playwright_env(ctx), {ts_tests.PLAYWRIGHT_JSON: str(root / ".marestail" / "ts-tests.json")})
 
 
-def test_playwright_failures():
+def test_playwright_failures() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         ctx = ctx_for(root)
@@ -132,7 +141,7 @@ def test_playwright_failures():
         expect("count from json", ts_tests.count_tests("", ctx, "playwright"), "0")
 
 
-def test_playwright_invalid_json():
+def test_playwright_invalid_json() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         ctx = ctx_for(root)
@@ -146,7 +155,7 @@ def test_playwright_invalid_json():
         )
 
 
-def test_count_playwright_line():
+def test_count_playwright_line() -> None:
     expect("line count", ts_tests.count_tests("  3 passed (666ms)"), "3")
 
 

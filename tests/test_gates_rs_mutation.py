@@ -181,3 +181,23 @@ def test_verdict_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path) -> N
     report = {"outcomes": [mutant("a.rs", 9, "f", "n", "MissedMutant")]}
     passed = checked(rs_mutation.verdict(ctx, report, "", 0.0), rs_mutation.GATE)
     assert (passed.ok, passed.summary, passed.findings) == (True, "no mutants on changed lines", [])
+
+
+@pytest.mark.parametrize("section", [{}, {"mutation_timeouts": "fail"}])
+def test_rust_timeout_is_killed_without_a_phrase(tmp_path: Path, fake_run: Any, section: dict[str, Any]) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("")
+    timed_out = {
+        "scenario": {
+            "Mutant": {
+                "file": "src/lib.rs",
+                "name": "src/lib.rs:5:5: replace + with * in add",
+                "span": {"start": {"line": 5, "column": 5}},
+                "function": {"function_name": "add"},
+            }
+        },
+        "summary": "Timeout",
+    }
+    fake_run(rust, writes(tmp_path, {"outcomes": [{"scenario": "Baseline", "summary": "Success"}, timed_out]}))
+    result = checked(rs_mutation.run_gate(make_context(tmp_path, {"rust": section})), rs_mutation.GATE)
+    assert (result.gate, result.ok, result.summary, result.findings) == ("rs.mutation", True, "all 1 mutants killed", [])

@@ -78,7 +78,9 @@ def hint(mutants: list[Placed], survivors: list[str]) -> list[str]:
 
 def stryker_result(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
     pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
-    proof = execute(ctx, lambda on_remote: mutation_command(ctx, mutate, on_remote), ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, pull)
+    proof = execute(
+        ctx, lambda on_remote: mutation_command(ctx, mutate, on_remote), ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, pull
+    )
     if proof.report is None:
         return proof.failure(GATE, started)
     return verdict(ctx, proof.report, (scope.note + proof.where).strip(), started)
@@ -122,7 +124,7 @@ def mutation_command(ctx: Context, mutate: list[str], on_remote: bool = False) -
     workers = concurrency(ctx, on_remote)
     if workers:
         command += ["--concurrency", str(workers)]
-    if ctx.ts("mutation_incremental", False):
+    if ctx.ts("mutation_incremental"):
         command += ["--incremental", "--incrementalFile", INCREMENTAL]
     if mutate:
         command += ["--mutate", ",".join(mutate)]
