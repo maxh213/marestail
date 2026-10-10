@@ -7,7 +7,7 @@ from typing import Any
 
 from marestail import dotnet
 from marestail.context import NO_CHANGED_MUTANTS, Context
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
 
 GATE = "cs.mutation"
@@ -129,7 +129,7 @@ def verdict(ctx: Context, mutants: list[tuple[str, dict[str, Any]]], output: str
 def judged(kept: list[tuple[str, dict[str, Any]]], strict: bool, run_info: tuple[str, float]) -> Result:
     note, started = run_info
     findings = failures(kept, strict)
-    return Result(GATE, not findings, summary(len(findings), len(kept), note, timed_out(kept, strict)), findings, elapsed(started))
+    return Result(GATE, not findings, mutation_summary(len(findings), len(kept), note, timed_out(kept, strict)), findings, elapsed(started))
 
 
 def timed_out(kept: list[tuple[str, dict[str, Any]]], strict: bool) -> int:
@@ -146,12 +146,6 @@ def failed(mutant: dict[str, Any], strict: bool) -> bool:
 
 def placed(entry: tuple[str, dict[str, Any]]) -> str:
     return describe(*entry)
-
-
-def summary(failed: int, total: int, note: str, timed_out: int = 0) -> str:
-    text = f"{failed} of {total} mutants not killed" if failed else f"all {total} mutants killed"
-    text += f" ({timed_out} killed by timeout)" if timed_out else ""
-    return text + (f" {note}" if note else "")
 
 
 def mutation_targets(ctx: Context, files: list[str] | None) -> list[str]:

@@ -251,11 +251,6 @@ def test_command(tmp_path: Path) -> None:
     ]
 
 
-def test_summary() -> None:
-    assert cs_mutation.summary(0, 4, "") == "all 4 mutants killed"
-    assert cs_mutation.summary(2, 4, "(note)") == "2 of 4 mutants not killed (note)"
-
-
 def test_describe_defaults() -> None:
     assert cs_mutation.describe("A.cs", {"status": "Survived"}) == "A.cs:0 mutant Survived: "
 

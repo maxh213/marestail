@@ -6,7 +6,7 @@ from pathlib import Path
 
 from marestail import java, remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
 
 GATE = "java.mutation"
@@ -60,7 +60,7 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     shutil.rmtree(out, ignore_errors=True)
     outcome = remote.run_mutation(
         ctx,
-        "java.mutation",
+        GATE,
         lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)],
         ctx.java_root(),
         timeout=int(ctx.java("mutation_timeout", 7200)),
@@ -80,7 +80,7 @@ def judged(ctx: Context, mutants: list[ET.Element], note: str, started: float) -
     if not mutants:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     findings = survivors(ctx, mutants)
-    return Result(GATE, not findings, summarise(len(findings), len(mutants), note), findings, elapsed(started))
+    return Result(GATE, not findings, mutation_summary(len(findings), len(mutants), note), findings, elapsed(started))
 
 
 def viable(report: Path) -> list[ET.Element]:
@@ -89,11 +89,6 @@ def viable(report: Path) -> list[ET.Element]:
 
 def survivors(ctx: Context, mutants: list[ET.Element]) -> list[str]:
     return [describe(ctx, mutant) for mutant in mutants if mutant.get(STATUS) not in KILLED]
-
-
-def summarise(survived: int, total: int, note: str) -> str:
-    summary = f"{survived} of {total} mutants not killed" if survived else f"all {total} mutants killed"
-    return summary + (f" {note}" if note else "")
 
 
 def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool) -> list[str]:

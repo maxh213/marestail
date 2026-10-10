@@ -27,6 +27,12 @@ class Result:
         return cls(gate=gate, ok=True, summary=f"skipped: {why}")
 
 
+def mutation_summary(failing: int, total: int, note: str, timed_out: int = 0) -> str:
+    summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
+    return summary + (f" {note}" if note else "")
+
+
 def render(results: list[Result], scope: str | None = None) -> str:
     lines = [render_one(result) for result in results]
     header = [f"scope: {scope}", ""] if scope else []

@@ -8,6 +8,27 @@ from marestail.report import Result
 from tests.conftest import Clock
 
 
+@pytest.mark.parametrize(
+    ("failing", "total", "note", "timed_out", "expected"),
+    [
+        (0, 4, "", 0, "all 4 mutants killed"),
+        (0, 4, "(no base x; full run)", 0, "all 4 mutants killed (no base x; full run)"),
+        (2, 5, "", 0, "2 of 5 mutants not killed"),
+        (1, 5, "(n)", 0, "1 of 5 mutants not killed (n)"),
+        (0, 3, "", 1, "all 3 mutants killed (1 killed by timeout)"),
+        (0, 3, "(n)", 2, "all 3 mutants killed (2 killed by timeout) (n)"),
+        (1, 3, "(n)", 0, "1 of 3 mutants not killed (n)"),
+        (2, 4, "(note)", 0, "2 of 4 mutants not killed (note)"),
+    ],
+)
+def test_mutation_summary(failing: int, total: int, note: str, timed_out: int, expected: str) -> None:
+    assert report.mutation_summary(failing, total, note, timed_out) == expected
+
+
+def test_mutation_summary_counts_no_timeouts_by_default() -> None:
+    assert report.mutation_summary(0, 4, "") == "all 4 mutants killed"
+
+
 def test_elapsed_subtracts_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", Clock(1000.0, 0.25))
     started = time.time()

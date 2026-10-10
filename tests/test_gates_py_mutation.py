@@ -151,19 +151,6 @@ def test_scoped_run_filters_by_pattern(tmp_path: Path, offload: Any) -> None:
     assert fake.calls[0][:3] == [f"{tmp_path}/.venv/bin/mutmut", "run", "pkg.a.*"]
 
 
-@pytest.mark.parametrize(
-    ("total", "survivors", "note", "expected"),
-    [
-        (4, [], "", "all 4 mutants killed"),
-        (4, [], "(no base x; full run)", "all 4 mutants killed (no base x; full run)"),
-        (5, ["a", "b"], "", "2 of 5 mutants not killed"),
-        (5, ["a"], "(n)", "1 of 5 mutants not killed (n)"),
-    ],
-)
-def test_mutation_summary(total: int, survivors: list[str], note: str, expected: str) -> None:
-    assert py_mutation.mutation_summary(total, survivors, note) == expected
-
-
 def test_mutant_patterns(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"python": {"root": "src"}})
     files = ["src/pkg/mod.py", "src/tests/test_x.py", "perf/bench.py", "src/top.py"]
@@ -395,15 +382,3 @@ def test_judged_with_no_statuses_passes(tmp_path: Path) -> None:
     result = checked(py_mutation.judged(make_context(tmp_path), [], "(n)", 0.0), py_mutation.GATE)
 
     assert (result.ok, result.summary, result.findings) == (True, "no mutants on changed lines", [])
-
-
-@pytest.mark.parametrize(
-    ("survivors", "timed_out", "note", "expected"),
-    [
-        ([], 1, "", "all 3 mutants killed (1 killed by timeout)"),
-        ([], 2, "(n)", "all 3 mutants killed (2 killed by timeout) (n)"),
-        (["a"], 0, "(n)", "1 of 3 mutants not killed (n)"),
-    ],
-)
-def test_mutation_summary_counts_timeouts(survivors: list[str], timed_out: int, note: str, expected: str) -> None:
-    assert py_mutation.mutation_summary(3, survivors, note, timed_out) == expected

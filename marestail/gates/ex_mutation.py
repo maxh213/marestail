@@ -8,7 +8,7 @@ from typing import Any
 from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.elixir import project_files
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import run, tail
 
 scoped_sources = project_files
@@ -157,12 +157,6 @@ def status(mutation: dict[str, Any]) -> str:
 
 def counted(mutations: list[dict[str, Any]]) -> int:
     return sum(1 for mutation in mutations if status(mutation) != "invalid")
-
-
-def mutation_summary(failing: int, total: int, note: str, timed_out: int) -> str:
-    summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"
-    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
-    return summary + (f" {note}" if note else "")
 
 
 def mutation_timeout(ctx: Context) -> int | None:

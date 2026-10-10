@@ -47,6 +47,18 @@ PREPARE = (
 )
 BOOT_WAIT = 240
 AUTHORIZATION = "Authorization"
+JOBS = r"""
+for f in /var/lib/marestail/busy.d/*; do
+  [ -e "$f" ] || continue
+  p=$(cat "$f"); kill -0 "$p" 2>/dev/null || continue
+  args=$(tr '\0' ' ' < /proc/$p/cmdline)
+  repo=$(echo "$args" | grep -oE 'docker exec -w [^ ]+' | head -1 | awk '{print $4}')
+  tool=$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)
+  state=running; pgrep -P "$p" -x flock >/dev/null && ! pgrep -f "docker exec -w $repo" >/dev/null && state=queued
+  echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
+done
+echo "idle $(( $(date +%s) - $(stat -c %Y /var/lib/marestail/last) )) $(grep -oP '^IDLE_MIN=\K[0-9]+' /usr/local/bin/marestail-idle-check)"
+"""
 
 
 @dataclass(frozen=True)
@@ -479,20 +491,6 @@ def priced(known: list[tuple[float, float]]) -> str:
 
 def jobs_since(entries: list[dict[str, Any]], since: datetime) -> list[dict[str, Any]]:
     return [entry for entry in entries if entry.get("event") == "job" and when(entry) >= since]
-
-
-JOBS = r"""
-for f in /var/lib/marestail/busy.d/*; do
-  [ -e "$f" ] || continue
-  p=$(cat "$f"); kill -0 "$p" 2>/dev/null || continue
-  args=$(tr '\0' ' ' < /proc/$p/cmdline)
-  repo=$(echo "$args" | grep -oE 'docker exec -w [^ ]+' | head -1 | awk '{print $4}')
-  tool=$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)
-  state=running; pgrep -P "$p" -x flock >/dev/null && ! pgrep -f "docker exec -w $repo" >/dev/null && state=queued
-  echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
-done
-echo "idle $(( $(date +%s) - $(stat -c %Y /var/lib/marestail/last) )) $(grep -oP '^IDLE_MIN=\K[0-9]+' /usr/local/bin/marestail-idle-check)"
-"""
 
 
 def running_jobs(found: Settings, ip: str) -> list[str]:

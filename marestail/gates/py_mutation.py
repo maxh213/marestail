@@ -9,7 +9,7 @@ from typing import Any
 
 from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
 
 GATE = "py.mutation"
@@ -83,7 +83,7 @@ def judged(ctx: Context, statuses: list[Status], note: str, started: float) -> R
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     passing = passing_statuses(ctx)
     survivors = [f"{name}: {status}" for name, status in statuses if status not in passing]
-    summary = mutation_summary(len(statuses), survivors, note, killed_by_timeout(statuses, passing))
+    summary = mutation_summary(len(survivors), len(statuses), note, killed_by_timeout(statuses, passing))
     return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
@@ -93,12 +93,6 @@ def passing_statuses(ctx: Context) -> set[str]:
 
 def killed_by_timeout(statuses: list[Status], passing: set[str]) -> int:
     return sum(1 for _, status in statuses if status == TIMEOUT) if TIMEOUT in passing else 0
-
-
-def mutation_summary(total: int, survivors: list[str], note: str, timed_out: int = 0) -> str:
-    summary = f"{len(survivors)} of {total} mutants not killed" if survivors else f"all {total} mutants killed"
-    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
-    return summary + (f" {note}" if note else "")
 
 
 def mutant_patterns(ctx: Context, files: list[str]) -> list[str]:

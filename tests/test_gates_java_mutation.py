@@ -254,14 +254,6 @@ def test_java_timeout_is_killed_without_a_phrase(tmp_path: Path, monkeypatch: py
     assert calls[0][0][5] == "-DtargetClasses=app.App,app.App$*"
 
 
-@pytest.mark.parametrize(
-    ("survived", "note", "expected"),
-    [(0, "", "all 4 mutants killed"), (2, "", "2 of 4 mutants not killed"), (1, "(note)", "1 of 4 mutants not killed (note)")],
-)
-def test_summarise(survived: int, note: str, expected: str) -> None:
-    assert java_mutation.summarise(survived, 4, note) == expected
-
-
 def test_command_without_tests(tmp_path: Path) -> None:
     write(tmp_path / APP)
     ctx = make_context(tmp_path)
