@@ -393,12 +393,11 @@ def _fetch(found: Settings, ip: str, root: Path, path: str) -> None:
 def _execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
     flags = _env_flags(found, env)
     job = uuid.uuid4().hex
-    folder = cwd / ".marestail"
-    session = shlex.quote(str(folder / f"job-{job}"))
+    session = f"/tmp/marestail-job-{job}"
     inner = shlex.join(command)
     if timeout:
         inner = f"timeout -k 30 {int(timeout)} {inner}"
-    inner = f"mkdir -p {shlex.quote(str(folder))}; echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
+    inner = f"echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
     docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} setsid -w bash -c {shlex.quote(inner)}"
     stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
     cleanup = f"sg docker -c {shlex.quote(f'docker exec {found.container} bash -c {shlex.quote(stop)}')}"
