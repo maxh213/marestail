@@ -1222,7 +1222,8 @@ def test_discover_sorts_children_and_skips_symlinks_skip_dirs_and_dot_dirs(tmp_p
 
 
 def test_discover_skips_every_named_dir() -> None:
-    assert collect.SKIP_DIRS == {
+    skipped = collect.SKIP_DIRS
+    assert skipped == {
         ".git",
         ".marestail",
         ".next",
