@@ -2,7 +2,7 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote mutation box, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
@@ -13,6 +13,7 @@ layers =
     marestail._guidance
     marestail.prompts : marestail.audit : marestail.practices : marestail.hunks : marestail.reported
     marestail.gates
+    marestail.remote
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
     marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice
@@ -583,3 +584,38 @@ forbidden_modules =
     marestail.pipeline
     marestail.gates._serve
 allow_indirect_imports = True
+
+[importlinter:contract:remote-box-belongs-to-offloading-gates]
+name = The remote mutation box is reached only by the mutation gates that offload to it and by the CLI's remote command
+type = protected
+protected_modules =
+    marestail.remote
+allowed_importers =
+    marestail.cli
+    marestail.gates._stryker
+    marestail.gates.py_mutation
+    marestail.gates.ex_mutation
+    marestail.gates.java_mutation
+
+[importlinter:contract:remote-box-knows-no-language]
+name = The remote box runs whatever command a gate builds; it knows no language, no gate verdict and no orchestration
+type = forbidden
+source_modules =
+    marestail.remote
+forbidden_modules =
+    marestail.gates
+    marestail.report
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+    marestail.javascript
+    marestail.elixir
+    marestail.depth
+    marestail.graph
+    marestail.runner
+    marestail.pipeline
+    marestail.prompts
+    marestail.events
+    marestail.timeline

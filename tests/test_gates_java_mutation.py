@@ -53,36 +53,21 @@ def mutation(status: str, cls: str = "app.App", line: str = "5", source: str = "
     )
 
 
-class Workers:
-    def __init__(self) -> None:
-        self.calls: list[tuple[Context, str, int, bool]] = []
-
-    def __call__(self, ctx: Context, gate: str, local: int, on_remote: bool) -> int:
-        self.calls.append((ctx, gate, local, on_remote))
-        return 16 if on_remote is True else local
-
-
-@pytest.fixture(autouse=True)
-def workers(monkeypatch: pytest.MonkeyPatch) -> Workers:
-    fake = Workers()
-    monkeypatch.setattr(remote, "workers", fake)
-    return fake
-
-
 def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply: tuple[int, str] = (0, ""), where: str = "") -> list[Any]:
     calls: list[Any] = []
 
     def run_mutation(
         ctx: Context,
         gate: str,
-        build: Callable[[bool], list[str]],
+        build: Callable[[int], list[str]],
         cwd: Path,
+        workers: int,
         env: dict[str, str] | None = None,
         timeout: int | None = 7200,
         pull: tuple[str, ...] = (),
     ) -> remote.Outcome:
-        args = build(False)
-        calls.append((args, timeout, build(True), ctx))
+        args = build(workers)
+        calls.append((args, timeout, build(16), ctx))
         assert (gate, cwd, env, pull) == ("java.mutation", ctx.java_root(), None, (".marestail/pit",))
         out = Path(next(arg for arg in args if arg.startswith("-DreportsDirectory=")).split("=", 1)[1])
         if mutations is not None:
@@ -150,7 +135,7 @@ def pit(out: Path, threads: str) -> list[str]:
     ]
 
 
-def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: Workers) -> None:
+def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project(tmp_path)
     stale = write(tmp_path / ".marestail" / "pit" / "old.xml")
     calls = fake_mvn(monkeypatch, [mutation("KILLED"), mutation("TIMED_OUT"), mutation("NON_VIABLE")])
@@ -159,8 +144,6 @@ def test_all_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: Wo
     out = tmp_path / ".marestail" / "pit"
     assert calls == [(pit(out, "8"), 60, pit(out, "16"), ctx)]
     assert calls[0][3] is ctx
-    assert workers.calls == [(ctx, "java.mutation", 8, False), (ctx, "java.mutation", 8, True)]
-    assert all(seen is ctx for seen, *_ in workers.calls)
     assert not stale.exists()
 
 
@@ -254,10 +237,18 @@ def test_java_timeout_is_killed_without_a_phrase(tmp_path: Path, monkeypatch: py
     assert calls[0][0][5] == "-DtargetClasses=app.App,app.App$*"
 
 
+def test_the_gate_offers_two_threads_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(tmp_path)
+    calls = fake_mvn(monkeypatch, [mutation("KILLED")])
+    java_mutation.run_gate(make_context(tmp_path, {"java": {"mutation_scope": "all"}}))
+    out = tmp_path / ".marestail" / "pit"
+    assert [(args, remote_args) for args, _timeout, remote_args, _ctx in calls] == [(pit(out, "2"), pit(out, "16"))]
+
+
 def test_command_without_tests(tmp_path: Path) -> None:
     write(tmp_path / APP)
     ctx = make_context(tmp_path)
-    args = java_mutation.command(ctx, [tmp_path / APP, tmp_path / "elsewhere" / "X.java"], Path("/out"), False)
+    args = java_mutation.command(ctx, [tmp_path / APP, tmp_path / "elsewhere" / "X.java"], Path("/out"), 2)
     assert args == [
         "test-compile",
         "org.pitest:pitest-maven:mutationCoverage",
@@ -272,7 +263,7 @@ def test_command_without_tests(tmp_path: Path) -> None:
 def test_command_with_default_package_test(tmp_path: Path) -> None:
     write(tmp_path / "src/test/java/TopTest.java")
     write(tmp_path / "src/test/java/b/BTest.java")
-    args = java_mutation.command(make_context(tmp_path), [], Path("/out"), False)
+    args = java_mutation.command(make_context(tmp_path), [], Path("/out"), 2)
     assert args[2] == "-DtargetClasses="
     assert args[-1] == "-DtargetTests=*,b.*"
 

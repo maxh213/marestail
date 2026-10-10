@@ -49,12 +49,12 @@ class Proof:
 
 
 def execute(
-    ctx: Context, build: Callable[[bool], list[str]], temp: Path, report: Path, gate: str = "", pull: tuple[str, ...] = ()
+    ctx: Context, build: Callable[[int], list[str]], temp: Path, report: Path, gate: str = "", workers: int = 0, pull: tuple[str, ...] = ()
 ) -> Proof:
     drop_tree(temp)
     report.unlink(missing_ok=True)
     try:
-        outcome = remote.run_mutation(ctx, gate, build, ctx.ts_root(), timeout=RUN_SECONDS, pull=pull)
+        outcome = remote.run_mutation(ctx, gate, build, ctx.ts_root(), workers, timeout=RUN_SECONDS, pull=pull)
         return Proof(outcome.code, outcome.output, json.loads(report.read_text()) if report.exists() else None, outcome.where)
     finally:
         drop_tree(temp)
@@ -67,7 +67,7 @@ def command_targets(ctx: Context) -> list[str]:
 def command_proof(ctx: Context, mutate: list[str]) -> Proof:
     if MEMO not in ctx.memo:
         command = [*tool(ctx, "stryker"), "run", str(command_config(ctx, mutate))]
-        ctx.memo[MEMO] = execute(ctx, lambda on_remote: command, ctx.ts_root() / COMMAND_TEMP, ctx.work / COMMAND_REPORT)
+        ctx.memo[MEMO] = execute(ctx, lambda _workers: command, ctx.ts_root() / COMMAND_TEMP, ctx.work / COMMAND_REPORT)
     found: Proof = ctx.memo[MEMO]
     return found
 

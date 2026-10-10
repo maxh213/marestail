@@ -19,14 +19,16 @@ class Offload(FakeRun):
     def __init__(self, replies: Replies, where: str) -> None:
         super().__init__(replies)
         self.where = where
-        self.builds: list[Callable[[bool], list[str]]] = []
+        self.builds: list[Callable[[int], list[str]]] = []
+        self.workers: list[int] = []
 
     def run_mutation(
         self,
         ctx: Any,
         gate: str,
-        build: Callable[[bool], list[str]],
+        build: Callable[[int], list[str]],
         cwd: Path,
+        workers: int,
         env: dict[str, str] | None = None,
         timeout: int | None = 0,
         pull: tuple[str, ...] = (),
@@ -34,7 +36,8 @@ class Offload(FakeRun):
         if not isinstance(ctx, Context):
             raise TypeError("ctx")
         self.builds.append(build)
-        code, output = self(build(False), cwd, gate=gate, env=env, timeout=timeout, pull=pull)
+        self.workers.append(workers)
+        code, output = self(build(workers), cwd, gate=gate, env=env, timeout=timeout, pull=pull)
         return remote.Outcome(code, output, self.where)
 
 
@@ -339,22 +342,22 @@ def test_a_pass_names_where_mutmut_ran(tmp_path: Path, offload: Any, monkeypatch
     assert result.summary == summary
 
 
-def test_the_remote_command_asks_for_remote_workers(tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    asked: list[tuple[Any, str, int, bool]] = []
-
-    def workers(ctx: Any, gate: str, local: int, on_remote: bool) -> int:
-        asked.append((ctx, gate, local, on_remote))
-        return local + 10 * on_remote
-
-    monkeypatch.setattr(remote, "workers", workers)
+def test_the_gate_offers_its_local_workers_and_builds_with_the_count_it_is_given(tmp_path: Path, offload: Any) -> None:
     fake = offload([(1, "boom")])
 
-    ctx = make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 3}})
+    py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all", "mutation_workers": 3}}))
 
-    py_mutation.run_gate(ctx)
+    assert fake.workers == [3]
+    assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "3"]]
+    assert fake.builds[0](13) == [f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "13"]
 
-    assert fake.builds[0](True) == [f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "13"]
-    assert asked == [(ctx, "py.mutation", 3, False), (ctx, "py.mutation", 3, True)]
+
+def test_the_gate_offers_four_workers_by_default(tmp_path: Path, offload: Any) -> None:
+    fake = offload([(1, "boom")])
+
+    py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all"}}))
+
+    assert fake.workers == [4]
 
 
 def test_mutants_dir_is_relative_to_the_repo(tmp_path: Path) -> None:

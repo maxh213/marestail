@@ -767,7 +767,7 @@ SPLIT_FUNCTIONS = [
     "run_mutation",
     "ensure_up",
     "status_command",
-    "running_jobs",
+    "_running_jobs",
     "walk_beds",
     "remote_label",
 ]

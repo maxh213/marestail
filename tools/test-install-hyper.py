@@ -542,7 +542,7 @@ def gate_commands(raw: dict[str, object], root: Path) -> list[list[str]]:
     calls.append(ts_lint.eslint_command(ctx))
     ts_deps.run_gate(ctx)
     deadcode.ts_findings(ctx)
-    calls.append(ts_mutation.mutation_command(ctx, []))
+    calls.append(ts_mutation.mutation_command(ctx, [], ts_mutation.local_concurrency(ctx)))
     calls.append(ts_tests.vitest_command(ctx)[:5])
     calls.append(sonar.settings_property(ctx))
     return calls

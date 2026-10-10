@@ -34,22 +34,6 @@ def report(mutations: list[dict[str, Any]]) -> str:
     return "Compiling...\n" + json.dumps({"mutations": mutations}) + "\ntrailing {"
 
 
-class Workers:
-    def __init__(self) -> None:
-        self.calls: list[tuple[Context, str, int, bool]] = []
-
-    def __call__(self, ctx: Context, gate: str, local: int, on_remote: bool) -> int:
-        self.calls.append((ctx, gate, local, on_remote))
-        return 16 if on_remote is True else local
-
-
-@pytest.fixture(autouse=True)
-def workers(monkeypatch: pytest.MonkeyPatch) -> Workers:
-    fake = Workers()
-    monkeypatch.setattr(remote, "workers", fake)
-    return fake
-
-
 class FakeMutation:
     def __init__(self, code: int, output: str, where: str) -> None:
         self.reply = remote.Outcome(code, output, where)
@@ -59,13 +43,14 @@ class FakeMutation:
         self,
         ctx: Context,
         gate: str,
-        build: Callable[[bool], list[str]],
+        build: Callable[[int], list[str]],
         cwd: Path,
+        workers: int,
         env: dict[str, str] | None = None,
         timeout: int | None = 7200,
         pull: tuple[str, ...] = (),
     ) -> remote.Outcome:
-        command, remote_command = build(False), build(True)
+        command, remote_command = build(workers), build(16)
         call = {"gate": gate, "command": command, "remote_command": remote_command, "cwd": cwd, "env": env, "timeout": timeout}
         self.calls.append({"ctx": ctx, **call, "pull": pull})
         return self.reply
@@ -128,7 +113,7 @@ def test_bad_report_names_where_it_ran(tmp_path: Path, fake_run: Callable[..., F
     assert shape(result) == ("ex.mutation", False, "muex produced no report (on box, 3s)", ["lost"])
 
 
-def test_reports_survivors(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, workers: Workers) -> None:
+def test_reports_survivors(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
     fake = muex(fake_run, monkeypatch, 1, report(MUTATIONS))
     ctx = project(tmp_path)
     result = checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)
@@ -146,8 +131,6 @@ def test_reports_survivors(tmp_path: Path, fake_run: Callable[..., FakeRun], mon
         "timeout": 7200,
         "pull": (),
     }
-    assert workers.calls == [(ctx, "ex.mutation", 4, False), (ctx, "ex.mutation", 4, True)]
-    assert all(seen is ctx for seen, *_ in workers.calls)
 
 
 def test_reports_timeouts_when_the_section_says_fail(
@@ -291,11 +274,10 @@ def test_command_with_every_option(tmp_path: Path) -> None:
         "muex_filter": True,
         "muex_optimize": False,
         "muex_preset": "strict",
-        "muex_concurrency": 0,
         "muex_max_mutations": 50,
         "muex_mirror": ["lib", "test"],
     }
-    command = ex_mutation.command(make_context(tmp_path, {"elixir": settings}), ["lib/a.ex", "lib/b.ex"], False)
+    command = ex_mutation.command(make_context(tmp_path, {"elixir": settings}), ["lib/a.ex", "lib/b.ex"], 0)
     expected = ["--no-optimize", "--preset", "strict", "--max-mutations", "50", "--mirror", "lib,test", "--files", "lib/a.ex,lib/b.ex"]
     assert command == ["mix", "muex", "--format", "json", "--fail-at", "0", *expected]
 

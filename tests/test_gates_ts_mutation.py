@@ -32,14 +32,16 @@ class Offload(FakeRun):
     def __init__(self, replies: Replies, where: str) -> None:
         super().__init__(replies)
         self.where = where
-        self.builds: list[Callable[[bool], list[str]]] = []
+        self.builds: list[Callable[[int], list[str]]] = []
+        self.workers: list[int] = []
 
     def run_mutation(
         self,
         ctx: Any,
         gate: str,
-        build: Callable[[bool], list[str]],
+        build: Callable[[int], list[str]],
         cwd: Path,
+        workers: int,
         env: dict[str, str] | None = None,
         timeout: int | None = 0,
         pull: tuple[str, ...] = (),
@@ -47,7 +49,8 @@ class Offload(FakeRun):
         if not isinstance(ctx, Context):
             raise TypeError("ctx")
         self.builds.append(build)
-        code, output = self(build(False), cwd, gate=gate, env=env, timeout=timeout, pull=pull)
+        self.workers.append(workers)
+        code, output = self(build(workers), cwd, gate=gate, env=env, timeout=timeout, pull=pull)
         return remote.Outcome(code, output, self.where)
 
 
@@ -176,8 +179,8 @@ def test_survivor_summary_with_a_note(tmp_path: Path) -> None:
 def test_mutation_command(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, TS)
 
-    assert ts_mutation.mutation_command(ctx, []) == BASE
-    assert ts_mutation.mutation_command(ctx, ["a.ts", "b.ts"]) == [*BASE, "--mutate", "a.ts,b.ts"]
+    assert ts_mutation.mutation_command(ctx, [], 0) == BASE
+    assert ts_mutation.mutation_command(ctx, ["a.ts", "b.ts"], 0) == [*BASE, "--mutate", "a.ts,b.ts"]
 
 
 def test_mutation_command_uses_the_tooling_config(tmp_path: Path) -> None:
@@ -185,10 +188,10 @@ def test_mutation_command_uses_the_tooling_config(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"ts": {"root": ".", "tooling": ".marestail/tooling"}})
     stryker = str(tooling / "node_modules" / ".bin" / "stryker")
 
-    assert ts_mutation.mutation_command(ctx, []) == [stryker, *BASE[2:]]
+    assert ts_mutation.mutation_command(ctx, [], 0) == [stryker, *BASE[2:]]
     tooling.mkdir(parents=True)
     (tooling / "stryker.config.json").write_text("{}")
-    assert ts_mutation.mutation_command(ctx, []) == [stryker, "run", str(tooling / "stryker.config.json"), *BASE[3:]]
+    assert ts_mutation.mutation_command(ctx, [], 0) == [stryker, "run", str(tooling / "stryker.config.json"), *BASE[3:]]
 
 
 def test_changed_sources_drop_tests_specs_and_benchmarks(tmp_path: Path) -> None:
@@ -303,7 +306,8 @@ def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_pat
     assert (result.ok, result.summary, result.findings) == (True, "all mutants killed (proof: mutation via [hyper] test_cmd)", [])
     command = [str(tmp_path / TOOLING / "node_modules" / ".bin" / "stryker"), "run", str(config)]
     assert fake.calls == [command]
-    assert fake.builds[0](True) == command
+    assert fake.builds[0](8) == command
+    assert fake.workers == [0]
     assert fake.options == [{"cwd": tmp_path / "web", "gate": "", "env": None, "timeout": 7200, "pull": ()}]
     assert json.loads(config.read_text()) == {
         "testRunner": "command",
@@ -499,31 +503,21 @@ def test_a_report_with_no_mutants_outside_hyper_is_all_killed(tmp_path: Path, of
     assert (result.ok, result.summary, result.findings) == (True, "all mutants killed", [])
 
 
-def test_the_remote_command_asks_for_remote_concurrency(tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    asked: list[tuple[Any, str, int, bool]] = []
-
-    def workers(ctx: Any, gate: str, local: int, on_remote: bool) -> int:
-        asked.append((ctx, gate, local, on_remote))
-        return local + 10 * on_remote
-
-    monkeypatch.setattr(remote, "workers", workers)
+def test_the_gate_offers_its_local_concurrency_and_builds_with_the_count_it_is_given(tmp_path: Path, offload: Any) -> None:
     (tmp_path / "web").mkdir()
     fake = offload(stryker(tmp_path, None, []))
 
-    ctx = full_context(tmp_path)
-
-    ts_mutation.run_gate(ctx)
+    ts_mutation.run_gate(full_context(tmp_path))
 
     assert fake.calls == [BASE]
-    assert fake.builds[0](True) == [*BASE, "--concurrency", "10"]
-    assert ts_mutation.mutation_command(ctx, []) == BASE
-    assert asked == [(ctx, "ts.mutation", 0, False), (ctx, "ts.mutation", 0, True), (ctx, "ts.mutation", 0, False)]
+    assert fake.workers == [0]
+    assert fake.builds[0](10) == [*BASE, "--concurrency", "10"]
 
 
 def test_mutation_command_sets_concurrency_and_incremental(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"ts": {"root": "web", "mutation_concurrency": "3", "mutation_incremental": True}})
 
-    assert ts_mutation.mutation_command(ctx, ["a.ts"]) == [
+    assert ts_mutation.mutation_command(ctx, ["a.ts"], ts_mutation.local_concurrency(ctx)) == [
         *BASE,
         "--concurrency",
         "3",
@@ -535,9 +529,9 @@ def test_mutation_command_sets_concurrency_and_incremental(tmp_path: Path) -> No
     ]
 
 
-def test_concurrency_defaults_to_zero(tmp_path: Path) -> None:
-    assert ts_mutation.concurrency(make_context(tmp_path, TS), True) == 0
-    assert ts_mutation.concurrency(make_context(tmp_path, {"ts": {"mutation_concurrency": 5}}), False) == 5
+def test_local_concurrency_defaults_to_zero(tmp_path: Path) -> None:
+    assert ts_mutation.local_concurrency(make_context(tmp_path, TS)) == 0
+    assert ts_mutation.local_concurrency(make_context(tmp_path, {"ts": {"mutation_concurrency": 5}})) == 5
 
 
 @pytest.mark.parametrize(
@@ -619,10 +613,10 @@ def test_execute_runs_the_built_command_and_keeps_where(tmp_path: Path, offload:
     (tmp_path / "temp").mkdir()
     report = tmp_path / "report.json"
     report.write_text("{}")
-    built: list[bool] = []
+    built: list[int] = []
 
-    def build(on_remote: bool) -> list[str]:
-        built.append(on_remote)
+    def build(workers: int) -> list[str]:
+        built.append(workers)
         return ["stryker", "run"]
 
     def reply(command: list[str]) -> Reply:
@@ -632,10 +626,11 @@ def test_execute_runs_the_built_command_and_keeps_where(tmp_path: Path, offload:
 
     fake = offload(reply, " (on box, 3s)")
 
-    proof = _stryker.execute(make_context(tmp_path), build, tmp_path / "temp", report, "ts.mutation", ("report.json",))
+    proof = _stryker.execute(make_context(tmp_path), build, tmp_path / "temp", report, "ts.mutation", 6, ("report.json",))
 
     assert proof == _stryker.Proof(2, "log", {"files": {}}, " (on box, 3s)")
-    assert built == [False]
+    assert built == [6]
+    assert fake.workers == [6]
     assert fake.calls == [["stryker", "run"]]
     assert fake.options == [{"cwd": tmp_path, "gate": "ts.mutation", "env": None, "timeout": 7200, "pull": ("report.json",)}]
     assert not (tmp_path / "temp").exists()
@@ -644,10 +639,11 @@ def test_execute_runs_the_built_command_and_keeps_where(tmp_path: Path, offload:
 def test_execute_defaults_to_no_gate_and_no_pull(tmp_path: Path, offload: Any) -> None:
     fake = offload([(0, "")])
 
-    proof = _stryker.execute(make_context(tmp_path), lambda on_remote: ["s"], tmp_path / "temp", tmp_path / "r.json")
+    proof = _stryker.execute(make_context(tmp_path), lambda _workers: ["s"], tmp_path / "temp", tmp_path / "r.json")
 
     assert proof == _stryker.Proof(0, "", None, "")
     assert fake.options == [{"cwd": tmp_path, "gate": "", "env": None, "timeout": 7200, "pull": ()}]
+    assert fake.workers == [0]
 
 
 def test_proof_failure_names_where_it_ran() -> None:

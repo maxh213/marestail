@@ -1,7 +1,7 @@
 import time
+from functools import partial
 from typing import Any
 
-from marestail import remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.gates._stryker import (
     COMMAND_SUFFIXES,
@@ -78,9 +78,8 @@ def hint(mutants: list[Placed], survivors: list[str]) -> list[str]:
 
 def stryker_result(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
     pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
-    proof = execute(
-        ctx, lambda on_remote: mutation_command(ctx, mutate, on_remote), ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, pull
-    )
+    build = partial(mutation_command, ctx, mutate)
+    proof = execute(ctx, build, ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, local_concurrency(ctx), pull)
     if proof.report is None:
         return proof.failure(GATE, started)
     return verdict(ctx, proof.report, (scope.note + proof.where).strip(), started)
@@ -107,7 +106,7 @@ def survivor_result(survivors: list[str], note: str, started: float, timed_out: 
     return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
-def mutation_command(ctx: Context, mutate: list[str], on_remote: bool = False) -> list[str]:
+def mutation_command(ctx: Context, mutate: list[str], workers: int) -> list[str]:
     command = [
         *tool(ctx, "stryker"),
         "run",
@@ -121,7 +120,6 @@ def mutation_command(ctx: Context, mutate: list[str], on_remote: bool = False) -
         "--dryRunTimeoutMinutes",
         str(RUN_SECONDS // 60),
     ]
-    workers = concurrency(ctx, on_remote)
     if workers:
         command += ["--concurrency", str(workers)]
     if ctx.ts("mutation_incremental"):
@@ -131,9 +129,9 @@ def mutation_command(ctx: Context, mutate: list[str], on_remote: bool = False) -
     return command
 
 
-def concurrency(ctx: Context, on_remote: bool) -> int:
+def local_concurrency(ctx: Context) -> int:
     configured = ctx.ts("mutation_concurrency")
-    return remote.workers(ctx, GATE, int(configured) if configured else 0, on_remote)
+    return int(configured) if configured else 0
 
 
 def placed(report: dict[str, Any], ctx: Context) -> list[Placed]:

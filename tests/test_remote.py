@@ -201,13 +201,13 @@ def write_meta(folder: Path) -> None:
     (folder / "pkg.a.meta").write_text(json.dumps({"exit_code_by_key": META}))
 
 
-def build(on_remote: bool) -> list[str]:
-    return ["mutmut", "run", "--max-children", {True: "8", False: "4"}[on_remote]]
+def build(workers: int) -> list[str]:
+    return ["mutmut", "run", "--max-children", str(workers)]
 
 
 def offload(repo: Path) -> remote.Outcome:
     ctx = make_context(repo)
-    return remote.run_mutation(ctx, "py.mutation", build, repo, env={"A": "1"}, timeout=7200, pull=("mutants",))
+    return remote.run_mutation(ctx, "py.mutation", build, repo, 4, env={"A": "1"}, timeout=7200, pull=("mutants",))
 
 
 def usage_lines() -> list[dict[str, Any]]:
@@ -422,7 +422,7 @@ def test_a_drop_that_recovers_reruns_on_the_box(box: FakeBox, mutmut: FakeRun, r
 
 
 def test_run_mutation_defaults_to_two_hours_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
+    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 4) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
     (job,) = box.job_commands()
     assert "timeout -k 30 7200 mutmut" in job
     assert box.ssh_calls[-1][2:] == (21720, True)
@@ -431,7 +431,7 @@ def test_run_mutation_defaults_to_two_hours_on_the_box(box: FakeBox, mutmut: Fak
 
 def test_run_mutation_defaults_to_two_hours_locally(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
     configure(TOML.replace('gates = ["py.mutation"]', "gates = []"))
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo) == remote.Outcome(0, "local mutmut", "")
+    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 4) == remote.Outcome(0, "local mutmut", "")
     assert mutmut.options == [{"cwd": repo, "env": None, "timeout": 7200}]
 
 
@@ -454,41 +454,41 @@ def test_a_failing_job_through_the_python_gate(box: FakeBox, mutmut: FakeRun, re
 def test_a_switched_off_remote_ignores_the_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     configure()
     monkeypatch.setenv(remote.ENV, value)
-    assert remote.settings(make_context(tmp_path)) is None
+    assert remote._settings(make_context(tmp_path)) is None
 
 
 def test_settings_load_the_config_when_remote_is_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     configure()
     monkeypatch.setenv(remote.ENV, "1")
-    assert remote.settings(make_context(tmp_path)) == box_settings(key=home / ".ssh" / "google_compute_engine")
+    assert remote._settings(make_context(tmp_path)) == box_settings(key=home / ".ssh" / "google_compute_engine")
 
 
 def test_a_repo_can_switch_remote_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     configure()
     monkeypatch.delenv(remote.ENV)
-    assert remote.settings(make_context(tmp_path, {"remote": {"enabled": False}})) is None
-    assert remote.settings(make_context(tmp_path, {"remote": {"enabled": 0}})) is not None
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": False}})) is None
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": 0}})) is not None
 
 
 def test_load_without_a_config_is_none() -> None:
-    assert remote.load() is None
+    assert remote._load() is None
 
 
 def test_load_needs_a_remote_section() -> None:
     configure('[other]\ninstance = "b"\n')
     with pytest.raises(KeyError, match="instance"):
-        remote.load()
+        remote._load()
 
 
 def test_load_honours_enabled_false() -> None:
     configure(TOML.replace("enabled = true", "enabled = false"))
-    assert remote.load() is None
+    assert remote._load() is None
 
 
 def test_load_fills_defaults(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     configure('[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\n')
     monkeypatch.setenv("USER", "alice")
-    assert remote.load() == remote.Settings(
+    assert remote._load() == remote.Settings(
         instance="b",
         project="p",
         zone="z",
@@ -501,7 +501,7 @@ def test_load_fills_defaults(monkeypatch: pytest.MonkeyPatch, home: Path) -> Non
         key=home / ".ssh" / "google_compute_engine",
     )
     monkeypatch.delenv("USER")
-    loaded = remote.load()
+    loaded = remote._load()
     assert loaded is not None
     assert loaded.user == "max"
 
@@ -512,7 +512,7 @@ def test_load_converts_values(home: Path, monkeypatch: pytest.MonkeyPatch) -> No
         '[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\ncontainer = "c"\nkey = "~/k"\n'
         'workers = { g = "3" }\nenv = { A = 1 }\nusd_per_hour = 2\nuser = "bob"\nUSER = "carol"\n'
     )
-    loaded = remote.load()
+    loaded = remote._load()
     assert loaded is not None
     assert (loaded.container, loaded.key, loaded.workers, loaded.env, loaded.usd_per_hour) == ("c", home / "k", {"g": 3}, {"A": "1"}, 2.0)
     assert loaded.user == "bob"
@@ -522,44 +522,36 @@ def test_load_converts_values(home: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_the_gates_variable_overrides_the_config(monkeypatch: pytest.MonkeyPatch) -> None:
     configure()
     monkeypatch.setenv(remote.GATES, "ts.mutation,ex.mutation")
-    loaded = remote.load()
+    loaded = remote._load()
     assert loaded is not None
     assert loaded.gates == ("ts.mutation", "ex.mutation")
     monkeypatch.setenv(remote.GATES, "")
-    assert remote.offloaded_gates({"gates": ["a"]}) == ("a",)
+    assert remote._offloaded_gates({"gates": ["a"]}) == ("a",)
 
 
-@pytest.mark.parametrize(
-    ("gate", "on_remote", "expected"),
-    [("py.mutation", True, 8), ("py.mutation", False, 3), ("ts.mutation", True, 3)],
-)
-def test_workers_use_the_box_count_only_on_the_box(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str, on_remote: bool, expected: int
-) -> None:
-    configure(TOML.replace('gates = ["py.mutation"]', 'gates = ["py.mutation", "ts.mutation"]').replace("= 8 }", "= 8, x = 1 }"))
-    monkeypatch.delenv(remote.ENV)
-    assert remote.workers(make_context(tmp_path), gate, 3, on_remote) == expected
+def test_a_box_without_a_count_for_the_gate_keeps_the_local_workers(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    configure(TOML.replace('workers = { "py.mutation" = 8 }', 'workers = { "ts.mutation" = 8 }'))
+    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 3).where == f" (on {INSTANCE}, 0s)"
+    (job,) = box.job_commands()
+    assert "mutmut run --max-children 3;" in job
+    assert mutmut.calls == []
 
 
-def test_workers_without_settings_are_local(tmp_path: Path) -> None:
-    assert remote.workers(make_context(tmp_path), "py.mutation", 3, True) == 3
-
-
-def test_workers_skip_a_gate_that_is_not_offloaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    configure()
-    monkeypatch.delenv(remote.ENV)
-    assert remote.workers(make_context(tmp_path), "x.mutation", 3, True) == 3
+def test_a_local_run_builds_with_the_local_workers(box: FakeBox, mutmut: FakeRun, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(remote.ENV, "off")
+    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 3) == remote.Outcome(0, "local mutmut", "")
+    assert mutmut.calls == [["mutmut", "run", "--max-children", "3"]]
 
 
 @pytest.mark.parametrize(("code", "output", "expected"), [(255, "", True), (255, " \n", True), (255, "x", False), (254, "", False)])
 def test_dropped_means_255_and_no_output(code: int, output: str, expected: bool) -> None:
-    assert remote.dropped(code, output) is expected
+    assert remote._dropped(code, output) is expected
 
 
 def test_local_with_a_timeout_uses_the_shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeRun([(2, "out")])
     monkeypatch.setattr(remote, "run", fake)
-    assert remote.local(["a"], tmp_path, {"E": "1"}, 60, " where") == remote.Outcome(2, "out", " where")
+    assert remote._local(["a"], tmp_path, {"E": "1"}, 60, " where") == remote.Outcome(2, "out", " where")
     assert fake.options == [{"cwd": tmp_path, "env": {"E": "1"}, "timeout": 60}]
 
 
@@ -592,7 +584,7 @@ def fake_subprocess(monkeypatch: pytest.MonkeyPatch) -> Callable[[Completed | Ba
 def test_local_without_a_timeout_runs_unbounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_subprocess: Any) -> None:
     monkeypatch.setenv("KEEP", "yes")
     fake = fake_subprocess(Completed(returncode=3, stdout="a\x1b[31mb\r\n", stderr="c"))
-    assert remote.local(["a", "b"], tmp_path, {"E": "1"}, None, "") == remote.Outcome(3, "ab\nc", "")
+    assert remote._local(["a", "b"], tmp_path, {"E": "1"}, None, "") == remote.Outcome(3, "ab\nc", "")
     ((command, options),) = fake.calls
     assert command == ["a", "b"]
     assert options["env"]["KEEP"] == "yes"
@@ -608,7 +600,7 @@ def test_local_without_a_timeout_runs_unbounded(tmp_path: Path, monkeypatch: pyt
 def test_unbounded_without_env_keeps_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_subprocess: Any) -> None:
     monkeypatch.setenv("KEEP", "yes")
     fake = fake_subprocess(Completed(returncode=0, stdout="", stderr=""))
-    assert remote.unbounded(["a"], tmp_path, None) == (0, "")
+    assert remote._unbounded(["a"], tmp_path, None) == (0, "")
     assert fake.calls[0][1]["env"]["KEEP"] == "yes"
 
 
@@ -666,7 +658,7 @@ def options(home: Path) -> list[str]:
 
 
 def test_ssh_options_pin_the_host_key_and_batch_mode(home: Path) -> None:
-    assert remote.ssh_options(box_settings()) == options(home)
+    assert remote._ssh_options(box_settings()) == options(home)
 
 
 def test_ssh_runs_the_command_on_the_box(home: Path, fake_subprocess: Any) -> None:
@@ -746,7 +738,7 @@ def test_push_syncs_the_repo_and_the_toolchains(tmp_path: Path, home: Path, reco
     monkeypatch.setenv("PATH", str(node / "bin"))
     root = tmp_path / "my repo"
     uv_venv(home, root)
-    assert remote.push(box_settings(), IP, root, "ts.mutation") == ""
+    assert remote._push(box_settings(), IP, root, "ts.mutation") == ""
     assert recorder.ssh_calls == [(IP, f"mkdir -p '{root}'", 30, False), (IP, f"mkdir -p {node}", 30, False)]
     assert recorder.rsync_calls == [[*ALL_EXCLUDES, f"{root}/", f"max@{IP}:{root}/"], [f"{node}/", f"max@{IP}:{node}/"]]
 
@@ -754,20 +746,20 @@ def test_push_syncs_the_repo_and_the_toolchains(tmp_path: Path, home: Path, reco
 def test_push_keeps_the_venv_for_python(tmp_path: Path, home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")
     store = uv_venv(home, tmp_path)
-    assert remote.push(box_settings(), IP, tmp_path, "py.tests") == ""
+    assert remote._push(box_settings(), IP, tmp_path, "py.tests") == ""
     assert recorder.rsync_calls == [[*PY_EXCLUDES, f"{tmp_path}/", f"max@{IP}:{tmp_path}/"], [f"{store}/", f"max@{IP}:{store}/"]]
 
 
 def test_push_without_a_gate_excludes_the_venv(tmp_path: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")
-    assert remote.push(box_settings(), IP, tmp_path, "") == ""
+    assert remote._push(box_settings(), IP, tmp_path, "") == ""
     assert recorder.rsync_calls == [[*ALL_EXCLUDES, f"{tmp_path}/", f"max@{IP}:{tmp_path}/"]]
 
 
 @pytest.mark.parametrize(("sync", "problem"), [((1, "a\nb\n"), "b"), ((7, ""), "rsync exit 7")])
 def test_push_reports_a_failed_sync(tmp_path: Path, recorder: Recorder, sync: Reply, problem: str) -> None:
     recorder.sync = sync
-    assert remote.push(box_settings(), IP, tmp_path, "py.mutation") == problem
+    assert remote._push(box_settings(), IP, tmp_path, "py.mutation") == problem
     assert len(recorder.rsync_calls) == 1
     assert len(recorder.ssh_calls) == 1
 
@@ -781,18 +773,18 @@ def test_toolchains_list_nvm_bins_on_path_once(home: Path, tmp_path: Path, monke
     missing = home / ".nvm" / "versions" / "node" / "v18" / "bin"
     entries = [v22 / "bin", v20 / "sbin", other, missing, v20 / "bin", v22 / "bin"]
     monkeypatch.setenv("PATH", ":".join(map(str, entries)))
-    assert remote.toolchains() == [v22, v20]
-    assert remote.toolchains(tmp_path) == [v22, v20]
+    assert remote._toolchains() == [v22, v20]
+    assert remote._toolchains(tmp_path) == [v22, v20]
 
 
 def test_toolchains_without_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PATH")
-    assert remote.toolchains() == []
+    assert remote._toolchains() == []
 
 
 @pytest.mark.parametrize(("path", "trailing"), [("mutants", "/"), ("reports/mutation/mutation.json", "")])
 def test_fetch_pulls_a_folder_or_a_file(tmp_path: Path, recorder: Recorder, path: str, trailing: str) -> None:
-    remote.fetch(box_settings(), IP, tmp_path, path)
+    remote._fetch(box_settings(), IP, tmp_path, path)
     target = tmp_path / path
     assert recorder.rsync_calls == [[f"max@{IP}:{target}{trailing}", f"{target}{trailing}"]]
     assert target.parent.is_dir()
@@ -806,7 +798,7 @@ def job_id(monkeypatch: pytest.MonkeyPatch) -> str:
 
 def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch, job_id: str) -> None:
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    remote.execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100)
+    remote._execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100)
     inner = (
         "mkdir -p '/repo/a b/.marestail'; echo $$ > '/repo/a b/.marestail/job-abc'; " + remote.PREPARE + "; "
         "timeout -k 30 100 mutmut run 'x y'; code=$?; rm -f '/repo/a b/.marestail/job-abc'; exit $code"
@@ -828,7 +820,7 @@ def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder,
 
 
 def test_execute_without_a_timeout_runs_unbounded(recorder: Recorder, job_id: str) -> None:
-    remote.execute(box_settings(), IP, ["mutmut"], Path("/repo"), None, None)
+    remote._execute(box_settings(), IP, ["mutmut"], Path("/repo"), None, None)
     ((_ip, script, timeout, tty),) = recorder.ssh_calls
     assert (timeout, tty) == (None, True)
     assert "timeout -k" not in script
@@ -838,16 +830,16 @@ def test_execute_without_a_timeout_runs_unbounded(recorder: Recorder, job_id: st
 def test_env_flags_let_the_box_and_the_caller_override(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "/bin")
     found = box_settings(env={"TERM": "xterm", "A": "1"})
-    assert remote.env_flags(found, {"A": "2", "B": "x y"}) == (
+    assert remote._env_flags(found, {"A": "2", "B": "x y"}) == (
         f"-e PATH=/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=xterm -e NO_COLOR=1 -e A=2 -e 'B=x y'"
     )
     monkeypatch.delenv("PATH")
-    assert remote.env_flags(box_settings(), None).startswith("-e PATH= -e HOME=")
+    assert remote._env_flags(box_settings(), None).startswith("-e PATH= -e HOME=")
 
 
 def test_record_appends_a_stamped_line() -> None:
-    remote.record({"event": "x", "n": 1})
-    remote.record({"event": "y"})
+    remote._record({"event": "x", "n": 1})
+    remote._record({"event": "y"})
     lines = usage_lines()
     assert [list(line) for line in lines] == [["ts", "event", "n"], ["ts", "event"]]
     assert [without_stamp(line) for line in lines] == [{"event": "x", "n": 1}, {"event": "y"}]
@@ -855,15 +847,15 @@ def test_record_appends_a_stamped_line() -> None:
 
 def test_record_job_returns_the_elapsed_seconds(repo: Path, clock: FakeTime) -> None:
     clock.now = 1000.0 + 36000.6
-    job = remote.Job(make_context(repo), "py.mutation", build, repo, None, None, ())
-    assert remote.record_job(box_settings(), job, 1000.0, "ok") == pytest.approx(36000.6)
+    job = remote._Job(make_context(repo), "py.mutation", build, repo, 4, None, None, ())
+    assert remote._record_job(box_settings(), job, 1000.0, "ok") == pytest.approx(36000.6)
     assert without_stamp(usage_lines()[0]) == job_line(repo, "ok", 36001, 12.0)
 
 
 def test_wait_for_stop_gives_up_after_sixty_polls(monkeypatch: pytest.MonkeyPatch, clock: FakeTime) -> None:
     calls: list[str] = []
     monkeypatch.setattr(remote, "describe", lambda found: [*noted(calls, found.instance), ("STOPPING", "")][-1])
-    assert remote.wait_for_stop(box_settings()) == ("STOPPING", "")
+    assert remote._wait_for_stop(box_settings()) == ("STOPPING", "")
     assert calls == [INSTANCE] * 61
     assert clock.slept == [5] * 60
 
@@ -887,7 +879,7 @@ def test_ensure_up_returns_the_address_once_ssh_answers(box: FakeBox, clock: Fak
 
 @pytest.mark.parametrize(("text", "expected"), [("a\nb\n", "b"), ("  \n", "fallback"), ("", "fallback")])
 def test_last_line(text: str, expected: str) -> None:
-    assert remote.last_line(text, "fallback") == expected
+    assert remote._last_line(text, "fallback") == expected
 
 
 class StatusBox:
@@ -1091,12 +1083,12 @@ def test_uptime_without_a_token_is_unknown(fake_subprocess: Any, monkeypatch: py
 
 def test_uptime_sums_every_point_of_every_series() -> None:
     data = {"timeSeries": [{"points": [{"value": {"doubleValue": 1.5}}]}, {}, {"points": [{"value": {"doubleValue": 2}}]}]}
-    assert remote.total_uptime(data) == 3.5
-    assert isinstance(remote.total_uptime({}), float)
+    assert remote._total_uptime(data) == 3.5
+    assert isinstance(remote._total_uptime({}), float)
 
 
 def test_uptime_url_aligns_at_least_a_minute() -> None:
-    url = remote.uptime_url(PROJECT, INSTANCE, FIXED_NOW - timedelta(seconds=30), FIXED_NOW)
+    url = remote._uptime_url(PROJECT, INSTANCE, FIXED_NOW - timedelta(seconds=30), FIXED_NOW)
     assert urllib.parse.parse_qs(url.partition("?")[2])["aggregation.alignmentPeriod"] == ["60s"]
 
 
@@ -1110,14 +1102,14 @@ def test_billed_is_unknown_if_any_instance_is_unknown(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(remote, "uptime_seconds", uptime)
     entries = [{"instance": "old-box"}]
-    assert remote.billed(box_settings(), entries, FIXED_NOW, FIXED_NOW) == "unknown"
+    assert remote._billed(box_settings(), entries, FIXED_NOW, FIXED_NOW) == "unknown"
     assert asked == [f"{PROJECT}/old-box", f"{PROJECT}/{INSTANCE}"]
 
 
 def test_billed_adds_hours_and_dollars(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote, "uptime_seconds", lambda _project, instance, _since, _until: 360000.0 if instance == INSTANCE else 1800.0)
     entries = [{"instance": "old-box", "usd_per_hour": 2}]
-    assert remote.billed(box_settings(), entries, FIXED_NOW, FIXED_NOW) == "100.50h = $121.00"
+    assert remote._billed(box_settings(), entries, FIXED_NOW, FIXED_NOW) == "100.50h = $121.00"
 
 
 def test_instances_keep_the_order_and_the_configured_rate() -> None:
@@ -1128,23 +1120,23 @@ def test_instances_keep_the_order_and_the_configured_rate() -> None:
         {"instance": "c"},
         {"instance": ""},
     ]
-    assert list(remote.instances(box_settings(), entries).items()) == [("b", 0.5), (INSTANCE, 1.2), ("c", 1.2)]
+    assert list(remote._instances(box_settings(), entries).items()) == [("b", 0.5), (INSTANCE, 1.2), ("c", 1.2)]
 
 
 def test_when_reads_naive_stamps_as_utc() -> None:
-    assert remote.when({"ts": "2026-01-02T03:04:05"}) == datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
-    aware = remote.when({"ts": "2026-01-02T03:04:05+02:00"})
+    assert remote._when({"ts": "2026-01-02T03:04:05"}) == datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    aware = remote._when({"ts": "2026-01-02T03:04:05+02:00"})
     assert aware.utcoffset() == timedelta(hours=2)
 
 
 def test_usage_without_a_file_is_empty() -> None:
-    assert remote.usage() == []
+    assert remote._usage() == []
 
 
 def test_usage_skips_blank_lines() -> None:
     remote.USAGE.parent.mkdir(parents=True, exist_ok=True)
     remote.USAGE.write_text('{"a": 1}\n  \n{"b": 2}\n')
-    assert remote.usage() == [{"a": 1}, {"b": 2}]
+    assert remote._usage() == [{"a": 1}, {"b": 2}]
 
 
 def jobs_box(monkeypatch: pytest.MonkeyPatch, reply: Reply) -> list[tuple[str, str, int | None]]:
@@ -1161,32 +1153,32 @@ def jobs_box(monkeypatch: pytest.MonkeyPatch, reply: Reply) -> list[tuple[str, s
 
 def test_running_jobs_list_running_and_queued_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = jobs_box(monkeypatch, (0, "/r/web stryker 01:02 running\nnoise\nfoo 1 2\n/r/api mutmut 3:04 queued\nidle 1 1\n"))
-    assert remote.running_jobs(box_settings(), IP) == ["running: stryker for web, 01:02", "running: mutmut for api, 3:04 (queued)"]
+    assert remote._running_jobs(box_settings(), IP) == ["running: stryker for web, 01:02", "running: mutmut for api, 3:04 (queued)"]
     assert calls == [(IP, remote.JOBS, 30)]
 
 
 def test_running_jobs_fail_quietly(monkeypatch: pytest.MonkeyPatch) -> None:
     jobs_box(monkeypatch, (255, "/r/web stryker 01:02 running"))
-    assert remote.running_jobs(box_settings(), IP) == []
+    assert remote._running_jobs(box_settings(), IP) == []
 
 
 def test_running_jobs_without_jobs_or_idle_line(monkeypatch: pytest.MonkeyPatch) -> None:
     jobs_box(monkeypatch, (0, "idle 1\n"))
-    assert remote.running_jobs(box_settings(), IP) == []
+    assert remote._running_jobs(box_settings(), IP) == []
 
 
 def test_running_jobs_use_the_last_idle_line(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote, "datetime", FixedDatetime)
     jobs_box(monkeypatch, (0, "idle 60 1\nidle 1200 15\n"))
-    assert remote.running_jobs(box_settings(), IP) == [remote.idle_line(1200, 15)]
+    assert remote._running_jobs(box_settings(), IP) == [remote._idle_line(1200, 15)]
 
 
 def test_idle_line_says_when_the_box_powers_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote, "datetime", FixedDatetime)
     off = datetime(2026, 10, 10, 12, 47, tzinfo=UTC).astimezone()
-    assert remote.idle_line(120, 15) == f"no jobs: idle for 2 min, powers itself off after 15 idle min (about {off:%H:%M})"
+    assert remote._idle_line(120, 15) == f"no jobs: idle for 2 min, powers itself off after 15 idle min (about {off:%H:%M})"
     now = datetime(2026, 10, 10, 12, 34, tzinfo=UTC).astimezone()
-    assert remote.idle_line(3000, 15) == f"no jobs: idle for 50 min, powers itself off after 15 idle min (about {now:%H:%M})"
+    assert remote._idle_line(3000, 15) == f"no jobs: idle for 50 min, powers itself off after 15 idle min (about {now:%H:%M})"
 
 
 def test_prepare_installs_node_modules_only_when_the_lock_changes() -> None:

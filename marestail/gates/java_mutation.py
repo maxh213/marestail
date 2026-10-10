@@ -61,8 +61,9 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
     outcome = remote.run_mutation(
         ctx,
         GATE,
-        lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)],
+        lambda workers: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, workers)],
         ctx.java_root(),
+        ctx.java("mutation_threads", 2),
         timeout=int(ctx.java("mutation_timeout", 7200)),
         pull=(str(out.relative_to(ctx.root)),),
     )
@@ -91,7 +92,7 @@ def survivors(ctx: Context, mutants: list[ET.Element]) -> list[str]:
     return [describe(ctx, mutant) for mutant in mutants if mutant.get(STATUS) not in KILLED]
 
 
-def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool) -> list[str]:
+def command(ctx: Context, targets: list[Path], out: Path, workers: int) -> list[str]:
     classes = target_classes(ctx, targets)
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [
@@ -101,7 +102,7 @@ def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool) -> li
         "-DoutputFormats=XML",
         "-DtimestampedReports=false",
         f"-DreportsDirectory={out}",
-        f"-Dthreads={remote.workers(ctx, GATE, ctx.java('mutation_threads', 2), on_remote)}",
+        f"-Dthreads={workers}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
 

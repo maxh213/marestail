@@ -80,8 +80,9 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
     outcome = remote.run_mutation(
         ctx,
         GATE,
-        lambda on_remote: guarded(ctx, command(ctx, files, on_remote)),
+        lambda workers: guarded(ctx, command(ctx, files, workers)),
         root,
+        ctx.elixir("muex_concurrency", 4),
         env={"MIX_ENV": "test"},
         timeout=mutation_timeout(ctx),
     )
@@ -171,10 +172,10 @@ def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
     return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
 
 
-def command(ctx: Context, files: list[str], on_remote: bool) -> list[str]:
+def command(ctx: Context, files: list[str], workers: int) -> list[str]:
     parts = ["mix", "muex", "--format", "json", "--fail-at", "0", *switches(ctx)]
     parts += option("--preset", ctx.elixir("muex_preset"))
-    parts += option("--concurrency", remote.workers(ctx, GATE, ctx.elixir("muex_concurrency", 4), on_remote))
+    parts += option("--concurrency", workers)
     parts += option("--max-mutations", ctx.elixir("muex_max_mutations"))
     parts += mirror_option(ctx.elixir("muex_mirror"))
     if files:

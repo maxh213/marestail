@@ -58,7 +58,13 @@ def nothing_to_mutate(scope: MutationScope, patterns: list[str]) -> bool:
 def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Result:
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
     outcome = remote.run_mutation(
-        ctx, GATE, lambda on_remote: command(ctx, patterns, on_remote), ctx.python_root(), timeout=7200, pull=(mutants_dir(ctx),)
+        ctx,
+        GATE,
+        lambda workers: command(ctx, patterns, workers),
+        ctx.python_root(),
+        ctx.python("mutation_workers", 4),
+        timeout=7200,
+        pull=(mutants_dir(ctx),),
     )
     code, output = outcome.code, outcome.output
     if code != 0 and "mutants" not in output.lower():
@@ -69,8 +75,7 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
     return judged(ctx, ctx.on_changed_lines(statuses, MutantLines(ctx).where), (note + outcome.where).strip(), started)
 
 
-def command(ctx: Context, patterns: list[str], on_remote: bool) -> list[str]:
-    workers = remote.workers(ctx, GATE, ctx.python("mutation_workers", 4), on_remote)
+def command(ctx: Context, patterns: list[str], workers: int) -> list[str]:
     return [ctx.python_bin("mutmut"), "run", *patterns, "--max-children", str(workers)]
 
 
