@@ -1390,7 +1390,8 @@ def check_contracts() -> None:
     parts = [part.strip() for part in layer.split(":")]
     block = text.split("[importlinter:contract:foundations-import-nothing-above]", 1)[1]
     names = block.split("forbidden_modules", 1)[0].split()
-    assert ("marestail.status" in parts) == ("marestail.status" in names)
+    assert "marestail.status" in parts
+    assert "marestail.status" in names
 
 
 def check_readme() -> None:
