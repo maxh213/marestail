@@ -1,10 +1,12 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
 from marestail import config as config_module
+from marestail import remote
 from marestail.config import Config
 from marestail.perf import db as perf_db
 from marestail.perf import hygiene, settings, trees
@@ -29,11 +31,11 @@ def run_command(script: str, tree_name: str, samples: int, db: bool) -> int:
         if database is None:
             return fail(problem, 2)
     stamp = hygiene.fingerprint(config.root, bench)
-    dropped = drop_stale(config, bench, stamp)
+    dropped = drop_stale(config, bench, stamp, remote.perf_target(config))
     if dropped:
         sys.stderr.write(
-            f"dropped {dropped} earlier measurements of {bench} taken before it or a shared file under perf/ changed; "
-            "take its samples again on every tree\n"
+            f"dropped {dropped} earlier measurements of {bench} taken before it or a shared file under perf/ changed, "
+            "or taken on another machine; take its samples again on every tree\n"
         )
     for sample in range(1, samples + 1):
         problem = take_sample(config, bench, tree, sample, (database, stamp))
@@ -42,23 +44,30 @@ def run_command(script: str, tree_name: str, samples: int, db: bool) -> int:
     return 0
 
 
-def drop_stale(config: Config, bench: str, stamp: str) -> int:
+def drop_stale(config: Config, bench: str, stamp: str, where: str | None = None) -> int:
     path = trees.samples_file(config)
     if not path.exists():
         return 0
     lines = path.read_text().splitlines()
-    kept = [line for line in lines if not stale(line, bench, stamp)]
+    kept = [line for line in lines if not stale(line, bench, stamp, where)]
     if len(kept) != len(lines):
         path.write_text("".join(line + "\n" for line in kept))
     return len(lines) - len(kept)
 
 
-def stale(line: str, bench: str, stamp: str) -> bool:
+def stale(line: str, bench: str, stamp: str, where: str | None = None) -> bool:
+    """A sample is stale when the bench changed, or when it was taken on a different machine than samples are taken on now."""
     try:
         record = json.loads(line)
     except json.JSONDecodeError:
         return False
-    return isinstance(record, dict) and record.get("script") == bench and record.get("fingerprint") != stamp
+    if not isinstance(record, dict) or record.get("script") != bench:
+        return False
+    if record.get("fingerprint") != stamp:
+        return True
+    if where is None or record.get("db"):
+        return False
+    return record.get("where", socket.gethostname()) != where
 
 
 def fail(message: str, code: int) -> int:
@@ -91,23 +100,34 @@ def take_sample(config: Config, bench: str, tree: trees.Tree, sample: int, harne
         except perf_db.DatabaseError as error:
             return f"{label}: {error}"
         env |= database_env
-    try:
-        completed = subprocess.run(
-            [str(config.root / bench)], cwd=tree.path, env={**os.environ, **env}, capture_output=True, text=True, timeout=timeout, check=False
-        )
-    except subprocess.TimeoutExpired:
-        return f"{label} timed out after {timeout}s"
-    except OSError as error:
-        return f"{label} could not start: {error}"
-    records, passthrough = parse_output(completed.stdout)
+    where = socket.gethostname()
+    outcome = remote.run_sample(config, bench, tree.path, env, timeout) if database is None else None
+    if outcome is not None:
+        code, stdout, stderr = outcome.code, outcome.output, ""
+        where = remote.perf_target(config)
+        label += outcome.where
+    else:
+        try:
+            completed = subprocess.run(
+                [str(config.root / bench)], cwd=tree.path, env={**os.environ, **env}, capture_output=True, text=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            return f"{label} timed out after {timeout}s"
+        except OSError as error:
+            return f"{label} could not start: {error}"
+        code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
+    records, passthrough = parse_output(stdout)
     for line in passthrough:
         print(line)
-    sys.stderr.write(completed.stderr)
-    if completed.returncode != 0:
-        return f"{label} exited {completed.returncode}"
+    sys.stderr.write(stderr)
+    if code != 0:
+        return f"{label} exited {code}"
     if not records:
         return f"{label} printed no JSON measurement"
-    base = {"tree": tree.name, "sha": tree.sha, "script": bench, "fingerprint": stamp, "sample": sample, "db": database is not None, "reset_ms": reset_ms}
+    base = {
+        "tree": tree.name, "sha": tree.sha, "script": bench, "fingerprint": stamp, "sample": sample, "db": database is not None,
+        "reset_ms": reset_ms, "where": where,
+    }
     with trees.samples_file(config).open("a") as handle:
         handle.writelines(json.dumps({**base, **record}) + "\n" for record in records)
     return ""

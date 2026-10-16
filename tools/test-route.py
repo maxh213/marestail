@@ -59,6 +59,7 @@ def parses_every_line():
         "grok-4.6 grok": ("grok", "grok-4.6", None, {}),
         "grok-4.6 xhigh grok": ("grok", "grok-4.6", "xhigh", {}),
         "kimi-k3-max cursor": ("cursor", "kimi-k3-max", None, {}),
+        "x-ai/grok-4.7 xhigh hermes": ("hermes", "x-ai/grok-4.7", "xhigh", {}),
     }
     for line, wanted in cases.items():
         expect(f"parse {line}", parsed(line), wanted)
@@ -166,7 +167,10 @@ def reroutes(folder: Path):
         expect("claude-model-effort", "--model claude-opus-5 --effort high" in output, True)
         expect("claude-work-env", agent_env(state)["CLAUDE_CONFIG_DIR"], "/srv/work-claude")
         invoke(state, "02-cleaner", "no stamp here")
-        expect("cursor-state", (state.agent, state.model, state.effort, agent_env(state)), ("cursor", "kimi-k3-max", None, {}))
+        cursor_env = agent_env(state)
+        expect("cursor-state", (state.agent, state.model, state.effort, set(cursor_env)), ("cursor", "kimi-k3-max", None, {"BASH_ENV", "PATH"}))
+        expect("cursor-offload", cursor_env["BASH_ENV"].endswith("/marestail/offload.bash"), True)
+        expect("cursor-shims", cursor_env["PATH"].split(":")[0].endswith("/marestail/shims"), True)
         expect("route-calls", (folder / "calls").read_text(), "route\nroute\nroute\nroute\n")
     finally:
         runner.LIMIT_WAIT_SECONDS = previous_wait

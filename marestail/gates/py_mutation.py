@@ -54,7 +54,10 @@ def mutant_patterns(ctx: Context, files: list[str]) -> list[str]:
 
 def module_name(root: Path, file: Path) -> str:
     relative = file.resolve().relative_to(root.resolve())
-    return ".".join(relative.with_suffix("").parts)
+    name = ".".join(relative.with_suffix("").parts)
+    if name.startswith("src."):
+        return name[len("src.") :]
+    return name
 
 
 def surviving(ctx: Context, patterns: list[str]) -> tuple[int, list[str], int]:

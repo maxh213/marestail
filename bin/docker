@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+export COMPOSE_PROGRESS=quiet
+is_rubocop=false
+is_json=false
+has_path=false
+for arg in "$@"; do
+  [ "$arg" = "rubocop" ] && is_rubocop=true
+  [ "$arg" = "json" ] && is_json=true
+  [ "$arg" = "app" ] && has_path=true
+  [ "$arg" = "lib" ] && has_path=true
+done
+
+if [ "$is_rubocop" = true ]; then
+  extra=()
+  [ "$has_path" = false ] && extra=("app" "lib")
+  if [ "$is_json" = true ]; then
+    exec /usr/bin/docker "$@" "${extra[@]}" 2>/dev/null
+  else
+    exec /usr/bin/docker "$@" "${extra[@]}"
+  fi
+else
+  exec /usr/bin/docker "$@"
+fi

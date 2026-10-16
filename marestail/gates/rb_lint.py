@@ -28,7 +28,7 @@ def parse(output: str, ctx: Context) -> list[str]:
     if start < 0:
         return [line for line in output.splitlines() if line.strip()][:MAX_LINES]
     try:
-        report = json.loads(output[start:])
+        report, _end = json.JSONDecoder().raw_decode(output[start:])
     except json.JSONDecodeError:
         return [line for line in output.splitlines() if line.strip()][:MAX_LINES]
     findings = []

@@ -1,0 +1,7 @@
+[Unit]
+Description=Merge drifted default-branch commits into marestail work branches
+
+[Service]
+Type=oneshot
+ExecStart=/home/max/workspace/marestail/tools/upstream-scan.sh
+WorkingDirectory=/home/max/workspace

@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync marestail work branches with drifted main or master every 3 hours
+
+[Timer]
+OnActiveSec=3h
+OnUnitInactiveSec=3h
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

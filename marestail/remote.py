@@ -2,7 +2,9 @@ import fcntl
 import json
 import os
 import shlex
+import socket
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -14,6 +16,7 @@ from pathlib import Path
 
 import tomllib
 
+from marestail.config import Config
 from marestail.context import Context
 from marestail.shell import clean, run
 
@@ -24,12 +27,22 @@ ENV = "MARESTAIL_REMOTE"
 GATES = "MARESTAIL_REMOTE_GATES"
 BUSY = "/var/lib/marestail/busy.d"
 JOB_LOCK = "/var/lib/marestail/job.lock"
+SHIMS = Path(__file__).resolve().parent / "shims"
+LOCAL = "MARESTAIL_MUTATION_LOCAL"
+PERF = "perf"
+PERF_TREES = ".marestail-perf"
 EXCLUDES = ("/.git/", "/.marestail/", ".stryker-tmp/", ".elixir_ls/", "node_modules/", ".next/", "_build/", ".venv/", "cover/", "erl_crash.dump", "target/")
 PREPARE = (
     'if [ -f package-lock.json ]; then '
     'lock=$(sha256sum package-lock.json | cut -c1-16); '
     'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
     'npm ci --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+    'fi; '
+    'elif [ -f pnpm-lock.yaml ]; then '
+    'lock=$(sha256sum pnpm-lock.yaml | cut -c1-16); '
+    'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
+    'want=$(node -p "(require(\'./package.json\').packageManager || \'pnpm@latest\').split(\'@\')[1]"); '
+    'npx --yes "pnpm@$want" install --frozen-lockfile --reporter=silent >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
     'fi; fi'
 )
 BOOT_WAIT = 240
@@ -57,9 +70,13 @@ class Outcome:
 
 
 def settings(ctx: Context) -> Settings | None:
+    return settings_for(ctx.config)
+
+
+def settings_for(config: Config) -> Settings | None:
     if os.environ.get(ENV, "").lower() in {"0", "off", "false", "no"}:
         return None
-    if ctx.config.get("remote", "enabled", True) is False:
+    if config.get("remote", "enabled", True) is False:
         return None
     return load()
 
@@ -88,7 +105,8 @@ def workers(ctx: Context, gate: str, local: int, on_remote: bool) -> int:
     found = settings(ctx)
     if not on_remote or found is None or gate not in found.gates:
         return local
-    return found.workers.get(gate, local)
+    available = found.workers.get(gate, local)
+    return min(local, available) if local else available
 
 
 def offloads(ctx: Context, gate: str) -> bool:
@@ -104,37 +122,86 @@ def run_mutation(
     env: dict[str, str] | None = None,
     timeout: int | None = 7200,
     pull: tuple[str, ...] = (),
+    local_fallback: bool = True,
 ) -> Outcome:
     found = settings(ctx)
     if found is None or gate not in found.gates:
         return local(build(False), cwd, env, timeout, "")
     ip, problem = ensure_up(found)
     if ip is None:
+        if not local_fallback:
+            return Outcome(1, problem, f" (remote unavailable: {problem}; not run locally)")
         return local(build(False), cwd, env, timeout, f" (remote unavailable: {problem}; ran locally)")
     started = time.time()
     problem = push(found, ip, ctx.root, gate)
     if problem:
+        if not local_fallback:
+            return Outcome(1, problem, f" (remote sync failed: {problem}; not run locally)")
         return local(build(False), cwd, env, timeout, f" (remote sync failed: {problem}; ran locally)")
     code, output = execute(found, ip, build(True), cwd, env, timeout)
     if dropped(code, output):
         ip, problem = ensure_up(found)
         if ip is None:
-            record_job(found, gate, ctx, started, "dropped")
+            record_job(found, gate, ctx.root, started, "dropped")
             return Outcome(code, output, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
         code, output = execute(found, ip, build(True), cwd, env, timeout)
         if dropped(code, output):
-            record_job(found, gate, ctx, started, "dropped")
+            record_job(found, gate, ctx.root, started, "dropped")
             return Outcome(code, output, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
     for path in pull:
         fetch(found, ip, ctx.root, path)
-    seconds = record_job(found, gate, ctx, started, "ok" if code == 0 else f"exit {code}")
+    seconds = record_job(found, gate, ctx.root, started, "ok" if code == 0 else f"exit {code}")
     return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
 
 
-def record_job(found: Settings, gate: str, ctx: Context, started: float, result: str) -> float:
+def perf_target(config: Config) -> str:
+    """Where perf samples are taken now: the box when [remote] gates lists perf, else this machine."""
+    found = settings_for(config)
+    return found.instance if found is not None and PERF in found.gates else socket.gethostname()
+
+
+_pushed: set[tuple[str, Path]] = set()
+_unavailable: set[str] = set()
+
+
+def forget_pushes() -> None:
+    """Call before a round of samples: the repo is copied again on the next one, since the tree may have changed."""
+    _pushed.clear()
+
+
+def run_sample(config: Config, bench: str, tree: Path, env: dict[str, str], timeout: int) -> Outcome | None:
+    """Run one perf bench on the box, in a copy of the tree; None means take it on this machine."""
+    found = settings_for(config)
+    if found is None or PERF not in found.gates:
+        return None
+    ip, problem = ensure_up(found)
+    if ip is None:
+        if found.instance not in _unavailable:
+            _unavailable.add(found.instance)
+            print(f"   perf: {found.instance} unavailable ({problem}); sampling on this machine")
+        return None
+    started = time.time()
+    root = config.root.resolve()
+    remote_tree = root if tree.resolve() == root else root.parent / PERF_TREES / tree.name
+    copies = [(root, root)] + ([(tree.resolve(), remote_tree)] if remote_tree != root else [])
+    for source, target in copies:
+        if (ip, target) in _pushed:
+            continue
+        problem = push(found, ip, source, PERF, target)
+        if problem:
+            print(f"   perf: copying {source} to {found.instance} failed ({problem}); sampling on this machine")
+            return None
+        _pushed.add((ip, target))
+    passed = {**env, "MARESTAIL_PERF_TREE_PATH": str(remote_tree)}
+    code, output = execute(found, ip, [str(root / bench)], remote_tree, passed, timeout)
+    seconds = record_job(found, PERF, root, started, "ok" if code == 0 else f"exit {code}")
+    return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
+
+
+def record_job(found: Settings, gate: str, root: Path, started: float, result: str) -> float:
     seconds = time.time() - started
     record({
-        "event": "job", "instance": found.instance, "gate": gate, "repo": str(ctx.root), "result": result,
+        "event": "job", "instance": found.instance, "gate": gate, "repo": str(root), "result": result,
         "seconds": round(seconds), "usd_per_hour": found.usd_per_hour, "usd": round(seconds / 3600 * found.usd_per_hour, 3),
     })
     return seconds
@@ -145,6 +212,7 @@ def dropped(code: int, output: str) -> bool:
 
 
 def local(command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None, where: str) -> Outcome:
+    env = {**(env or {}), LOCAL: "1"}
     code, output = run(command, cwd=cwd, env=env, timeout=timeout) if timeout else unbounded(command, cwd, env)
     return Outcome(code, output, where)
 
@@ -234,11 +302,12 @@ def rsync(found: Settings, args: list[str]) -> tuple[int, str]:
     return completed.returncode, completed.stderr
 
 
-def push(found: Settings, ip: str, root: Path, gate: str = "") -> str:
-    ssh(found, ip, f"mkdir -p {shlex.quote(str(root))}", timeout=30)
-    keep = {".venv/"} if gate.startswith("py.") else set()
+def push(found: Settings, ip: str, root: Path, gate: str = "", target: Path | None = None) -> str:
+    target = target or root
+    ssh(found, ip, f"mkdir -p {shlex.quote(str(target))}", timeout=30)
+    keep = {".venv/"} if gate.startswith("py.") or gate == PERF else set()
     excludes = [f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep]
-    code, error = rsync(found, [*excludes, f"{root}/", f"{found.user}@{ip}:{root}/"])
+    code, error = rsync(found, [*excludes, f"{root}/", f"{found.user}@{ip}:{target}/"])
     if code != 0:
         return error.strip().splitlines()[-1] if error.strip() else f"rsync exit {code}"
     for toolchain in toolchains(root if keep else None):
@@ -268,7 +337,7 @@ def fetch(found: Settings, ip: str, root: Path, path: str) -> None:
 
 
 def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
-    passed = {"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home()), "LANG": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1", **found.env, **(env or {})}
+    passed = {"PATH": without_shims(os.environ.get("PATH", "")), "HOME": str(Path.home()), "LANG": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1", LOCAL: "1", **found.env, **(env or {})}
     flags = " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
     job = uuid.uuid4().hex
     session = f"/tmp/marestail-job-{job}"
@@ -288,10 +357,79 @@ def execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[s
     return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None, tty=True)
 
 
+def without_shims(path: str) -> str:
+    return ":".join(part for part in path.split(":") if part != str(SHIMS))
+
+
 def record(entry: dict) -> None:
     USAGE.parent.mkdir(parents=True, exist_ok=True)
     with USAGE.open("a") as handle:
         handle.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **entry}) + "\n")
+
+
+def mutation_gate(argv: list[str]) -> str | None:
+    names = [Path(word).name for word in argv]
+    if any("pitest" in word for word in argv):
+        return "java.mutation"
+    if "muex" in names:
+        return "ex.mutation"
+    if "mutmut" in names:
+        return "py.mutation"
+    if "dotnet" in names or "dotnet-stryker" in names:
+        return None
+    if "stryker" in names:
+        return "ts.mutation"
+    return None
+
+
+def offload_command(argv: list[str]) -> int:
+    if argv[:1] == ["--"]:
+        argv = argv[1:]
+    if not argv:
+        print("usage: marestail offload -- <mutation command>", file=sys.stderr)
+        return 2
+    gate = mutation_gate(argv)
+    if gate is None:
+        return _exec(argv)
+    from marestail.config import load
+    from marestail.context import build
+
+    ctx = build(load(Path.cwd()), False)
+    found = settings(ctx)
+    if found is None or gate not in found.gates:
+        return _exec(argv)
+    outcome = run_mutation(
+        ctx, gate, lambda on_remote: _remote_argv(gate, argv, ctx, on_remote), Path.cwd(),
+        timeout=7200, pull=_pull(ctx, gate), local_fallback=False,
+    )
+    sys.stdout.write(outcome.output)
+    if outcome.output and not outcome.output.endswith("\n"):
+        sys.stdout.write("\n")
+    if outcome.where:
+        print(outcome.where.strip(), file=sys.stderr)
+    return outcome.code
+
+
+def _remote_argv(gate: str, argv: list[str], ctx: Context, on_remote: bool) -> list[str]:
+    if not on_remote or gate != "ts.mutation" or "--concurrency" in argv:
+        return argv
+    count = workers(ctx, gate, 0, True)
+    return [*argv, "--concurrency", str(count)] if count else argv
+
+
+def _pull(ctx: Context, gate: str) -> tuple[str, ...]:
+    if gate != "ts.mutation":
+        return ()
+    paths = ("reports/mutation/mutation.json", "reports/stryker-incremental.json")
+    return tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in paths)
+
+
+def _exec(argv: list[str]) -> int:
+    try:
+        return subprocess.run(argv, env={**os.environ, LOCAL: "1"}).returncode
+    except FileNotFoundError:
+        print(f"{argv[0]}: not found", file=sys.stderr)
+        return 127
 
 
 def status_command(_args) -> int:

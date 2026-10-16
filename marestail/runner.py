@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -21,8 +22,9 @@ from marestail.perf import samples as perf_samples
 from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
 from marestail.pipeline import Judge, Step, Worker, find, names, window
+from marestail import remote
 from marestail.report import render
-from marestail.shell import run
+from marestail.shell import clean, run
 
 PASS = "PASS"
 BOUNCE = "BOUNCE"
@@ -30,6 +32,8 @@ CONFIG_CHANGE = "## Config change"
 LIMIT_PATTERN = re.compile(r"rate.?limit|usage limit|session limit|resets \d|overloaded|capacity|too many requests|\b529\b|quota", re.IGNORECASE)
 LIMIT_WAIT_SECONDS = int(os.environ.get("MARESTAIL_LIMIT_WAIT_SECONDS", "600"))
 LIMIT_WAITS = int(os.environ.get("MARESTAIL_LIMIT_WAITS", "12"))
+AGENT_TIMEOUT = 8 * 3600
+TIMEOUT_CODE = 124
 GROK_ENV = {
     "GROK_MEMORY": "0",
     "GROK_ASK_USER_QUESTION": "0",
@@ -41,7 +45,7 @@ GROK_LIMIT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 GROK_APPROVE_LOCK = re.compile(
-    r"always-approve|always approve|bypassPermissions|yolo.{0,40}(disabled|locked|forbidden)|disable_bypass",
+    r"(?<!-)always-approve|always approve|bypassPermissions|yolo.{0,40}(disabled|locked|forbidden)|disable_bypass",
     re.I,
 )
 WORKER_REPEAT_LIMIT = 3
@@ -396,9 +400,11 @@ def fill_samples(state: Run, session: perf_trees.Session) -> None:
     if not benches:
         return
     policy = perf_settings.policy(config)
+    remote.forget_pushes()
+    where = remote.perf_target(config)
     stamps = {bench: perf_hygiene.fingerprint(config.root, bench) for bench in benches}
     for bench, stamp in stamps.items():
-        dropped = perf_samples.drop_stale(config, bench, stamp)
+        dropped = perf_samples.drop_stale(config, bench, stamp, where)
         if dropped:
             print(f"   dropped {dropped} stale {bench} samples")
     records = perf_review.load_records(config)
@@ -418,7 +424,7 @@ def fill_samples(state: Run, session: perf_trees.Session) -> None:
                 if database is None:
                     print(f"   fill_samples: {problem}")
                     continue
-            print(f"   filling {bench} on {tree.name}: {missing} sample(s)")
+            print(f"   filling {bench} on {tree.name}: {missing} sample(s) on {where}")
             start = max(have, default=0)
             for number in range(start + 1, start + 1 + missing):
                 problem = perf_samples.take_sample(config, bench, tree, number, (database, stamps[bench]))
@@ -686,6 +692,9 @@ def invoke(state: Run, label: str, prompt: str) -> None:
         started = time.time()
         code, output = run_backend(state, backend, prompt, prompt_file)
         (state.folder / f"{label}.json").write_text(output)
+        if timed_out(code, output):
+            print(f"   {label}: killed after {AGENT_TIMEOUT // 3600} h without finishing")
+            return
         if backend == "grok" and grok_always_approve_locked(code, output):
             print(f"   {label}: grok always-approve is locked; cannot run unattended")
             return
@@ -717,7 +726,8 @@ def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tup
         return kilo_run(state, prompt)
     if backend == "kimi":
         return kimi_run(state, prompt_file)
-    return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=4 * 3600, env=agent_env(state))
+    code, out, err = agent_process(agent_command(state), state.config.root, {**os.environ, **agent_env(state)}, prompt)
+    return code, clean(out + err)
 
 
 def outcome_readers(backend: str):
@@ -769,16 +779,56 @@ def effort_name(state: Run) -> str:
 
 
 def agent_env(state: Run) -> dict[str, str]:
+    """What every agent backend runs under: the mutation shims first on PATH (any shell), the bash wrapper, the account."""
+    env = {
+        "BASH_ENV": str(Path(__file__).resolve().parent / "offload.bash"),
+        "PATH": f"{remote.SHIMS}:{os.environ.get('PATH', '')}",
+        **state.account_env,
+    }
     if resolve_agent(state) == "claude":
-        return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", **state.account_env}
-    return dict(state.account_env)
+        env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
+    return env
+
+
+def agent_process(command: list[str], cwd: Path, env: dict[str, str], stdin: str, timeout: int | None = None) -> tuple[int, str, str]:
+    """Run an agent in its own process group, so a timeout or an interrupt takes its children with it."""
+    limit = timeout or AGENT_TIMEOUT
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    except FileNotFoundError as error:
+        return 127, "", f"{command[0]}: not found ({error})"
+    try:
+        out, err = process.communicate(stdin, timeout=limit)
+    except subprocess.TimeoutExpired:
+        kill_group(process)
+        return TIMEOUT_CODE, "", f"{command[0]}: timed out after {limit}s"
+    except BaseException:
+        kill_group(process)
+        raise
+    return process.returncode, out, err
+
+
+def kill_group(process: subprocess.Popen) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+    with contextlib.suppress(Exception):
+        process.communicate(timeout=30)
 
 
 def agent_command(state: Run) -> list[str]:
     backend = resolve_agent(state)
     if backend == "agy":
         binary = os.environ.get("MARESTAIL_AGY", "agy")
-        command = [binary, "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "4h"]
+        command = [binary, "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", f"{AGENT_TIMEOUT // 3600}h"]
         if state.model:
             command += ["--model", state.model]
         if state.effort:
@@ -797,6 +847,14 @@ def agent_command(state: Run) -> list[str]:
         if state.model:
             command += ["--model", state.model]
         return command
+    if backend == "hermes":
+        binary = os.environ.get("MARESTAIL_HERMES", "hermes")
+        command = [binary, "chat", "--oneshot", "--yolo", "--accept-hooks", "--quiet", "--query-file", "-"]
+        if state.model:
+            command += ["--model", state.model]
+        if state.effort:
+            command += ["--reasoning", state.effort]
+        return command
     if backend == "kilo":
         return kilo_command(state)
     command = [os.environ.get("MARESTAIL_CLAUDE", "claude"), "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
@@ -808,29 +866,9 @@ def agent_command(state: Run) -> list[str]:
 
 
 def grok_run(state: Run, prompt_file: Path) -> tuple[int, str]:
-    from marestail.shell import clean
-
     command = grok_command(state, prompt_file)
-    merged = {**os.environ, **GROK_ENV}
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=state.config.root,
-            env=merged,
-            input="",
-            capture_output=True,
-            text=True,
-            timeout=4 * 3600,
-            check=False,
-        )
-    except FileNotFoundError as error:
-        return 127, f"{command[0]}: not found ({error})"
-    except subprocess.TimeoutExpired:
-        return 124, f"{' '.join(command)}: timed out after {4 * 3600}s"
-    text = completed.stdout
-    if completed.returncode != 0 and not (completed.stdout or "").strip():
-        text = completed.stderr
-    return completed.returncode, clean(text)
+    code, out, err = agent_process(command, state.config.root, {**os.environ, **GROK_ENV, **agent_env(state)}, "")
+    return code, clean(out if code == 0 or out.strip() else err)
 
 
 def grok_command(state: Run, prompt_file: Path) -> list[str]:
@@ -880,28 +918,9 @@ def kilo_variant(state: Run) -> str | None:
 
 
 def kilo_run(state: Run, prompt: str) -> tuple[int, str]:
-    from marestail.shell import clean
-
     command = kilo_command(state)
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=state.config.root,
-            env=os.environ,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=4 * 3600,
-            check=False,
-        )
-    except FileNotFoundError as error:
-        return 127, f"{command[0]}: not found ({error})"
-    except subprocess.TimeoutExpired:
-        return 124, f"{' '.join(command)}: timed out after {4 * 3600}s"
-    text = completed.stdout
-    if completed.returncode != 0 and not (completed.stdout or "").strip():
-        text = completed.stderr
-    return completed.returncode, clean(text)
+    code, out, err = agent_process(command, state.config.root, {**os.environ, **agent_env(state)}, prompt)
+    return code, clean(out if code == 0 or out.strip() else err)
 
 
 def kilo_events(output: str) -> list[dict]:
@@ -988,28 +1007,9 @@ def kimi_command(state: Run, prompt_file: Path) -> list[str]:
 
 
 def kimi_run(state: Run, prompt_file: Path) -> tuple[int, str]:
-    from marestail.shell import clean
-
     command = kimi_command(state, prompt_file)
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=state.config.root,
-            env=os.environ,
-            input="",
-            capture_output=True,
-            text=True,
-            timeout=4 * 3600,
-            check=False,
-        )
-    except FileNotFoundError as error:
-        return 127, f"{command[0]}: not found ({error})"
-    except subprocess.TimeoutExpired:
-        return 124, f"{command[0]}: timed out after {4 * 3600}s"
-    text = completed.stdout
-    if completed.returncode != 0:
-        text = (text + "\n" + completed.stderr).strip()
-    return completed.returncode, clean(text)
+    code, out, err = agent_process(command, state.config.root, {**os.environ, **agent_env(state)}, "")
+    return code, clean(out if code == 0 else (out + "\n" + err).strip())
 
 
 def kimi_events(output: str) -> list[dict]:
@@ -1141,11 +1141,15 @@ def grok_summary(output: str) -> str:
 
 
 def grok_always_approve_locked(code: int, output: str) -> bool:
-    if code == 0:
+    if code == 0 or timed_out(code, output):
         return False
     data = grok_parse_json(output)
     blob = output if data is None else str(data.get("message") or output)
     return bool(GROK_APPROVE_LOCK.search(blob))
+
+
+def timed_out(code: int, output: str) -> bool:
+    return code == TIMEOUT_CODE and "timed out after" in output
 
 
 def rate_limited(code: int, output: str) -> bool:

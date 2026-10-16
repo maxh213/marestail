@@ -7,11 +7,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marestail.config import Config
 from marestail.runner import (
+    AGENT_TIMEOUT,
     KILO_DEFAULT_MODEL,
     KILO_DEFAULT_VARIANT,
     Run,
     agent_command,
     agent_label,
+    grok_always_approve_locked,
     grok_command,
     kilo_command,
     kilo_events,
@@ -25,6 +27,7 @@ from marestail.runner import (
     parse_verdict,
     resolve_agent,
     stamped,
+    timed_out,
 )
 
 ROOT = Path("/tmp/marestail-agent-test")
@@ -59,12 +62,17 @@ def snapshot_existing():
     expect(
         "agy",
         agent_command(state("agy")),
-        ["agy", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "4h", "--model", "mymodel"],
+        ["agy", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", f"{AGENT_TIMEOUT // 3600}h", "--model", "mymodel"],
     )
     expect(
         "cursor",
         agent_command(state("cursor")),
         ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "mymodel"],
+    )
+    expect(
+        "hermes",
+        agent_command(state("hermes", effort="xhigh")),
+        ["hermes", "chat", "--oneshot", "--yolo", "--accept-hooks", "--quiet", "--query-file", "-", "--model", "mymodel", "--reasoning", "xhigh"],
     )
     expect(
         "grok",
@@ -110,7 +118,7 @@ def kimi_backend():
 
 
 def env_overrides():
-    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT", "MARESTAIL_KIMI"]
+    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT", "MARESTAIL_KIMI", "MARESTAIL_HERMES"]
     previous = {key: os.environ.get(key) for key in keys}
     try:
         os.environ["MARESTAIL_AGENT"] = "kilo"
@@ -135,6 +143,8 @@ def env_overrides():
             raise SystemExit(f"kilo-variant-env: {kilo!r}")
         os.environ["MARESTAIL_KIMI"] = "/opt/kimi"
         expect("kimi-binary", kimi_command(state("kimi"), PROMPT)[0], "/opt/kimi")
+        os.environ["MARESTAIL_HERMES"] = "/opt/hermes"
+        expect("hermes-binary", agent_command(state("hermes"))[0], "/opt/hermes")
         os.environ["MARESTAIL_AGENT"] = "kimi"
         expect("env-agent-kimi", resolve_agent(state(None, model=None)), "kimi")
     finally:
@@ -228,6 +238,20 @@ def kimi_output():
     expect("kimi-not-limited-nonquota-error", kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'), False)
 
 
+def grok_lock():
+    timeout = "grok --prompt-file p.md --output-format json --always-approve --no-plan --trust --model grok-4.7: timed out after 28800s"
+    expect("grok-timeout-is-not-a-lock", grok_always_approve_locked(124, timeout), False)
+    expect("grok-timeout-short-message", grok_always_approve_locked(124, "grok: timed out after 28800s"), False)
+    expect("grok-flag-echo-is-not-a-lock", grok_always_approve_locked(1, "grok --always-approve --trust: exited 1 with no output"), False)
+    expect("grok-lock-json", grok_always_approve_locked(1, '{"type":"error","message":"always-approve mode is locked by your organization"}'), True)
+    expect("grok-lock-prose", grok_always_approve_locked(1, "Error: always approve is disabled for this account"), True)
+    expect("grok-lock-yolo", grok_always_approve_locked(1, "yolo mode has been disabled by policy"), True)
+    expect("grok-clean-exit-mentions-flag", grok_always_approve_locked(0, "ran with always-approve"), False)
+    expect("timed-out", timed_out(124, "claude: timed out after 28800s"), True)
+    expect("timed-out-other-124", timed_out(124, "some tool returned 124"), False)
+    expect("timed-out-other-code", timed_out(1, "x: timed out after 10s"), False)
+
+
 def verdict_parse():
     report = Path("/tmp/marestail-verdict-test.md")
     report.write_text("Here is my judgement.\n\nVERDICT: BOUNCE specifier\n1. fix it\n")
@@ -247,5 +271,6 @@ if __name__ == "__main__":
     labels()
     kilo_output()
     kimi_output()
+    grok_lock()
     verdict_parse()
     print("agent backends ok")

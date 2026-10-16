@@ -39,8 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False)
     remote_parser = commands.add_parser("remote", help="the remote box that offloaded gates run on")
     remote_parser.add_subparsers(dest="remote_command", required=True).add_parser("status", help="box state, uptime and estimated spend today and this month").set_defaults(handler=remote_status_command)
+    offload = commands.add_parser("offload", help="run a mutation command on the spot box instead of this machine")
+    offload.add_argument("argv", nargs=argparse.REMAINDER)
+    offload.set_defaults(handler=offload_command)
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
+    push = commands.add_parser("push", help="push HEAD to a remote branch of the same name, never a different main or master")
+    push.add_argument("--dry-run", action="store_true", help="print the refspec and do not push")
+    push.set_defaults(handler=push_command)
+    upstream = commands.add_parser("upstream", help="merge drifted default-branch commits into this work branch and queue tasks")
+    upstream.set_defaults(handler=upstream_sync_command)
+    upstream.add_subparsers(dest="upstream_command").add_parser("drain", help="print queued upstream tasks and clear that list when idle").set_defaults(handler=upstream_drain_command)
     return parser
 
 
@@ -141,6 +150,12 @@ def remote_status_command(args: argparse.Namespace) -> int:
     return remote.status_command(args)
 
 
+def offload_command(args: argparse.Namespace) -> int:
+    from marestail import remote
+
+    return remote.offload_command(args.argv)
+
+
 def gate_command(args: argparse.Namespace) -> int:
     if args.hook:
         return hook_command(args)
@@ -169,12 +184,30 @@ def run_gates_with_context(tier: str, scope_changed: bool, only: set[str] | None
     if hard:
         focused |= hook_focus(config)
     ctx = context_module.build(config, scope_changed, focused, hard)
+    skipped = skip_list(config)
     results = []
     for gate in gates_module.select(tier, only):
         if gate.section and config.section(gate.section) is None:
             continue
+        if gate.name in skipped:
+            results.append(Result.skipped(gate.name, SKIP_REASON))
+            continue
         results.append(run_one(gate, ctx))
     return results, ctx
+
+
+SKIP_REASON = "listed in [gates] skip in marestail.toml"
+
+
+def skip_list(config: config_module.Config) -> set[str]:
+    names = config.get("gates", "skip", [])
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise SystemExit('[gates] skip must be a list of gate names, for example skip = ["ts.mutation"]')
+    known = {gate.name for gate in gates_module.registry()}
+    unknown = sorted(set(names) - known)
+    if unknown:
+        raise SystemExit(f"[gates] skip names gates that do not exist: {', '.join(unknown)}; known gates: {', '.join(sorted(known))}")
+    return set(names)
 
 
 def resolve_focus(config: config_module.Config, focus: set[str]) -> set[str]:
@@ -383,6 +416,26 @@ def install_command(args: argparse.Namespace) -> int:
     from marestail.install import install
 
     install(Path(args.target).resolve(), gitignore_generated=args.gitignore_generated)
+    return 0
+
+
+def push_command(args: argparse.Namespace) -> int:
+    from marestail.publish import push_current
+
+    return push_current(Path.cwd(), dry_run=args.dry_run)
+
+
+def upstream_sync_command(args: argparse.Namespace) -> int:
+    from marestail.upstream import sync
+
+    return sync(Path.cwd())
+
+
+def upstream_drain_command(args: argparse.Namespace) -> int:
+    from marestail.upstream import claim
+
+    for path in claim(Path.cwd()):
+        print(path)
     return 0
 
 
