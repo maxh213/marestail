@@ -1362,6 +1362,19 @@ def test_deepseek_home(monkeypatch: Any, tmp_path: Path) -> None:
     assert collect.claude_homes()[2] == Path("/opt/ds")
 
 
+def test_ollama_home(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", raising=False)
+    assert collect.ollama_home() == tmp_path / ".claude-ollama"
+    monkeypatch.setenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "")
+    assert collect.ollama_home() == tmp_path / ".claude-ollama"
+    monkeypatch.setenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "~/ol")
+    assert collect.ollama_home() == tmp_path / "ol"
+    monkeypatch.setenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "/opt/ol")
+    assert collect.ollama_home() == Path("/opt/ol")
+    assert collect.claude_homes()[3] == Path("/opt/ol")
+
+
 ALIAS = ["-o", "HostKeyAlias=box"]
 JOB = "echo $$ > /var/lib/marestail/busy.d/ab; flock /var/lib/marestail/job.lock sg docker -c 'docker exec mt npx stryker run'"
 

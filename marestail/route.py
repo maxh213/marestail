@@ -13,6 +13,7 @@ BACKENDS = {
     "claude": backends.CLAUDE,
     "claude-work": backends.CLAUDE,
     "claude-deepseek": backends.CLAUDE,
+    "claude-ollama": backends.CLAUDE,
     "agy": backends.AGY,
     "kimi": backends.KIMI,
     "grok": backends.GROK,
@@ -112,6 +113,7 @@ def parse(line: str) -> Choice:
 ACCOUNT_HOMES = {
     "claude-work": ("CLAUDE_CONFIG_DIR", "DANDELION_CLAUDE_WORK_CONFIG_DIR", "~/.claude-work"),
     "claude-deepseek": ("CLAUDE_CONFIG_DIR", "DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/.claude-deepseek"),
+    "claude-ollama": ("CLAUDE_CONFIG_DIR", "DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "~/.claude-ollama"),
     "codex-animus": ("CODEX_HOME", "DANDELION_CODEX_ANIMUS_HOME", "~/.codex-animus"),
 }
 

@@ -153,6 +153,13 @@ def test_parse_claude_work(monkeypatch: pytest.MonkeyPatch) -> None:
     assert route.parse("m high claude-work") == Choice("m high claude-work", "claude", "m", "high", {"CLAUDE_CONFIG_DIR": "/cfg/work"})
 
 
+def test_parse_claude_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "/cfg/ollama")
+    assert route.parse("glm-5.3-flash max claude-ollama") == Choice(
+        "glm-5.3-flash max claude-ollama", "claude", "glm-5.3-flash", "max", {"CLAUDE_CONFIG_DIR": "/cfg/ollama"}
+    )
+
+
 def test_parse_codex_animus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DANDELION_CODEX_ANIMUS_HOME", "/cfg/animus")
     assert route.parse("gpt-6-astra xhigh codex-animus") == Choice(
@@ -167,7 +174,7 @@ def test_parse_codex_animus(monkeypatch: pytest.MonkeyPatch) -> None:
         ("a b c claude", "dandelion route printed 'a b c claude'; expected `<model> [effort] <provider>`"),
         (
             "gpt high gemini",
-            "dandelion route picked 'gemini', which marestail has no backend for; it knows claude, claude-work, claude-deepseek, agy, kimi, grok, cursor, junie, hermes, codex, codex-animus",
+            "dandelion route picked 'gemini', which marestail has no backend for; it knows claude, claude-work, claude-deepseek, claude-ollama, agy, kimi, grok, cursor, junie, hermes, codex, codex-animus",
         ),
     ],
 )
@@ -185,6 +192,8 @@ def test_account_env_default_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.delenv("DANDELION_CODEX_ANIMUS_HOME", raising=False)
     assert route.account_env("codex-animus") == {"CODEX_HOME": str(tmp_path / ".codex-animus")}
     assert route.account_env("codex") == {}
+    monkeypatch.delenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", raising=False)
+    assert route.account_env("claude-ollama") == {"CLAUDE_CONFIG_DIR": str(tmp_path / ".claude-ollama")}
 
 
 def test_account_env_empty_setting_uses_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

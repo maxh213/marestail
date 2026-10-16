@@ -60,12 +60,14 @@ def parses_every_line() -> None:
     work = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-work").expanduser())}
     deepseek = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-deepseek").expanduser())}
     animus = {"CODEX_HOME": str(Path("~/.codex-animus").expanduser())}
+    ollama = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-ollama").expanduser())}
     flash = "deepseek/deepseek-v4.1-flash max claude-deepseek"
     cases = {
         "claude-opus-5 high claude": ("claude", "claude-opus-5", "high", {}),
         "claude-opus-5 max claude-work": ("claude", "claude-opus-5", "max", work),
         "claude-fable-5-1 max claude-work": ("claude", "claude-fable-5-1", "max", work),
         flash: ("claude", "deepseek/deepseek-v4.1-flash", "max", deepseek),
+        "glm-5.3-flash max claude-ollama": ("claude", "glm-5.3-flash", "max", ollama),
         "gemini-3.1-pro-high medium agy": ("agy", "gemini-3.1-pro-high", "medium", {}),
         "gemini-3.8-flash-high high agy": ("agy", "gemini-3.8-flash-high", "high", {}),
         "gemini-3.8-flash high junie": ("junie", "gemini-3.8-flash", "high", {}),
@@ -90,6 +92,9 @@ def parses_every_line() -> None:
     os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = ""
     expect("deepseek-dir-empty", parsed(flash)[3], deepseek)
     del os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"]
+    os.environ["DANDELION_CLAUDE_OLLAMA_CONFIG_DIR"] = "/srv/ollama-claude"
+    expect("ollama-dir-env", parsed("glm-5.3-flash max claude-ollama")[3], {"CLAUDE_CONFIG_DIR": "/srv/ollama-claude"})
+    del os.environ["DANDELION_CLAUDE_OLLAMA_CONFIG_DIR"]
     expect_exit("one-word", lambda: route.parse("claude"), "expected")
     expect_exit("four-words", lambda: route.parse("a b c claude"), "expected")
     expect_exit("unknown-account", lambda: route.parse("gpt-6 high gemini"), "no backend for")

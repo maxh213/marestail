@@ -49,6 +49,8 @@ MODEL_FLAGS = frozenset({"--model", "-m"})
 EMPTY = ""
 DEEPSEEK_CONFIG_ENV = "DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"
 DEEPSEEK_HOME_DEFAULT = "~/.claude-deepseek"
+OLLAMA_CONFIG_ENV = "DANDELION_CLAUDE_OLLAMA_CONFIG_DIR"
+OLLAMA_HOME_DEFAULT = "~/.claude-ollama"
 PIPELINE_LOG = "pipeline.log"
 MAX_DEPTH = 4
 SKIP_DIRS = {
@@ -583,6 +585,10 @@ def deepseek_home() -> Path:
     return home_from(DEEPSEEK_CONFIG_ENV, DEEPSEEK_HOME_DEFAULT)
 
 
+def ollama_home() -> Path:
+    return home_from(OLLAMA_CONFIG_ENV, OLLAMA_HOME_DEFAULT)
+
+
 def home_from(env: str, default: str) -> Path:
     return Path(next(filter(None, (os.environ.get(env), default)))).expanduser()
 
@@ -592,7 +598,7 @@ def configured_home(home: Path | None) -> list[Path]:
 
 
 def claude_homes() -> list[Path]:
-    return [Path.home() / CLAUDE_HOME, work_home(), deepseek_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
+    return [Path.home() / CLAUDE_HOME, work_home(), deepseek_home(), ollama_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
