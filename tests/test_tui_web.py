@@ -1,21 +1,27 @@
+import importlib
 import json
 import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from marestail.tui import web, web_render, web_sources
 from marestail.tui.model import Fleet, Process, RepoState, Step, Worker
-from marestail.tui.web_sources import Dandelion, Dash, Host
+
+web = cast(Any, importlib.import_module("marestail.tui.web"))
+web_render = cast(Any, importlib.import_module("marestail.tui.web_render"))
+web_sources = cast(Any, importlib.import_module("marestail.tui.web_sources"))
+Dandelion = web_sources.Dandelion
+Dash = web_sources.Dash
+Host = web_sources.Host
 
 NOW = 1_800_000_000.0
 CLOCK = datetime.fromtimestamp(NOW, UTC)
 
 
-def make_dash(tmp_path: Path, runs_script: Path | None = None) -> Dash:
+def make_dash(tmp_path: Path, runs_script: Path | None = None) -> Any:
     return Dash(root=tmp_path, every=60, runs_script=runs_script or tmp_path / "missing.py", cache=tmp_path / "cache" / "dandelion.json")
 
 
@@ -35,6 +41,11 @@ def step(label: str, status: str = "done", verdict: str | None = None) -> Step:
 
 def repo(name: str, root: Path, alive: bool = False, **extra: Any) -> RepoState:
     return RepoState(name=name, root=root, branch="main", head="abc", task=extra.pop("task", None), log_path=None, alive=alive, **extra)
+
+
+def remember(sink: list[Any], item: Any, result: Any) -> Any:
+    sink.append(item)
+    return result
 
 
 class StopLoopError(Exception):
@@ -69,7 +80,7 @@ def test_settle_records_why_a_probe_failed(out: subprocess.CompletedProcess[str]
 
 def test_probe_once_runs_dandelion_json_and_remembers_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list[list[str]] = []
-    monkeypatch.setattr(web_sources.subprocess, "run", lambda command, **_: seen.append(command) or completed(0, '{"route": "r"}'))
+    monkeypatch.setattr(web_sources.subprocess, "run", lambda command, **_: remember(seen, command, completed(0, '{"route": "r"}')))
     dash = make_dash(tmp_path)
     web_sources.probe_once(dash)
     assert seen == [["dandelion", "--json"]]
@@ -92,7 +103,7 @@ def test_probe_once_keeps_going_when_dandelion_is_missing(monkeypatch: pytest.Mo
 
 
 def test_probe_forever_sleeps_the_interval_between_probes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    probes: list[Dash] = []
+    probes: list[Any] = []
     monkeypatch.setattr(web_sources, "probe_once", probes.append)
     sleep = stop_after(2)
     dash = make_dash(tmp_path)
@@ -429,7 +440,7 @@ class Started:
         self.calls.append((status, headers))
 
 
-def call(app: web.App, path: str, query: str = "", method: str = "GET") -> tuple[str, dict[str, str], bytes]:
+def call(app: Any, path: str, query: str = "", method: str = "GET") -> tuple[str, dict[str, str], bytes]:
     started = Started()
     body = b"".join(app({"REQUEST_METHOD": method, "PATH_INFO": path, "QUERY_STRING": query}, started))
     status, headers = started.calls[0]
@@ -465,7 +476,9 @@ def test_app_serves_the_page_json_and_head(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_app_task_route(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        web_sources, "task_view", lambda dash, repo_name, task: seen.append((repo_name, task)) or ({"task": task} if task == "t" else None)
+        web_sources,
+        "task_view",
+        lambda dash, repo_name, task: remember(seen, (repo_name, task), {"task": task} if task == "t" else None),
     )
     app = web.application(make_dash(tmp_path))
     assert call(app, "/task", "repo=r&task=t")[0:3:2] == ("200 OK", b'{"task": "t"}')
@@ -481,7 +494,7 @@ def test_quiet_handler_drops_request_logs() -> None:
 
 def test_start_probes_recalls_then_starts_both_threads(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     started: list[Any] = []
-    recalled: list[Dash] = []
+    recalled: list[Any] = []
 
     class FakeThread:
         def __init__(self, target: Any, args: tuple[Any, ...], daemon: bool) -> None:
@@ -514,11 +527,11 @@ class FakeServer:
 
 def test_run_serves_until_stopped_with_the_default_runs_script(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     made: list[Any] = []
-    dashes: list[Dash] = []
+    dashes: list[Any] = []
     monkeypatch.setattr(
         web,
         "make_server",
-        lambda host, port, app, server_class, handler_class: made.append((host, port, server_class, handler_class)) or FakeServer(made),
+        lambda host, port, app, server_class, handler_class: remember(made, (host, port, server_class, handler_class), FakeServer(made)),
     )
     monkeypatch.setattr(web, "start_probes", dashes.append)
     assert web.run(tmp_path, "0.0.0.0", 1234, 30.0, None) == 0
@@ -533,6 +546,6 @@ def test_run_serves_until_stopped_with_the_default_runs_script(monkeypatch: pyte
 def test_the_runs_script_runs_with_this_python(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list[list[str]] = []
     script = runs_script(tmp_path, [])
-    monkeypatch.setattr(web_sources.subprocess, "run", lambda command, **_: seen.append(command) or completed(0, "[]"))
+    monkeypatch.setattr(web_sources.subprocess, "run", lambda command, **_: remember(seen, command, completed(0, "[]")))
     web_sources.runs_table(make_dash(tmp_path, script))
     assert seen == [[sys.executable, str(script), "--json", "--all", "--root", str(tmp_path)]]
