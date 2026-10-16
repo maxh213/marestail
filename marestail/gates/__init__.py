@@ -86,6 +86,8 @@ GATE_SPECS: tuple[tuple[str, str, str | None, str], ...] = (
     ("visual", QA, "visual", "visual"),
 )
 RUN_GATE = "run_gate"
+SKIP_REASON = "listed in [gates] skip in marestail.toml"
+SKIP_SHAPE = '[gates] skip must be a list of gate names, for example skip = ["ts.mutation"]'
 
 
 def registry() -> list[Gate]:
@@ -128,8 +130,35 @@ def run_gates_with_context(
 ) -> tuple[list[Result], Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
     config = config_module.load(Path.cwd())
+    skipped = skip_list(config)
     ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard, hyper)
-    return [run_one(gate, ctx) for gate in configured_gates(config, tier, only)], ctx
+    return [run_or_skip(gate, ctx, skipped) for gate in configured_gates(config, tier, only)], ctx
+
+
+def skip_list(config: config_module.Config) -> set[str]:
+    names = config.get("gates", "skip", [])
+    if not is_name_list(names):
+        raise SystemExit(SKIP_SHAPE)
+    unknown = sorted(set(names) - known_names())
+    if unknown:
+        raise SystemExit(
+            f"[gates] skip names gates that do not exist: {', '.join(unknown)}; known gates: {', '.join(sorted(known_names()))}"
+        )
+    return set(names)
+
+
+def is_name_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(name, str) for name in value)
+
+
+def known_names() -> set[str]:
+    return {spec[0] for spec in GATE_SPECS}
+
+
+def run_or_skip(gate: Gate, ctx: Context, skipped: set[str]) -> Result:
+    if gate.name in skipped:
+        return Result.skipped(gate.name, SKIP_REASON)
+    return run_one(gate, ctx)
 
 
 def gate_focus(config: config_module.Config, focus: set[str], hard: bool) -> set[str]:

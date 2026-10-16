@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from marestail import config as config_module
 from marestail import gates
 from marestail.context import Context
 from marestail.gates import Gate
@@ -120,6 +121,71 @@ def test_run_gates_with_context_runs_gates_with_ctx(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(gates, "configured_gates", lambda *args: [Gate("g", "fast", None, noop)])
     _, ctx = gates.run_gates_with_context("fast", False, None)
     assert seen == [ctx]
+
+
+def test_run_gates_with_context_skips_listed_gates_without_running_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "marestail.toml").write_text('[python]\n[gates]\nskip = ["py.mutation"]\n')
+    monkeypatch.chdir(tmp_path)
+    ran: list[str] = []
+
+    def run_one(gate: Gate, _ctx: object) -> Result:
+        ran.append(gate.name)
+        return Result(gate.name, True, "ok", [], 0.0)
+
+    monkeypatch.setattr(gates, "run_one", run_one)
+    monkeypatch.setattr(
+        gates, "configured_gates", lambda *args: [Gate("py.tests", "fast", None, noop), Gate("py.mutation", "full", None, noop)]
+    )
+    results, _ = gates.run_gates_with_context("full", False, None)
+    assert ran == ["py.tests"]
+    assert results == [
+        Result("py.tests", True, "ok", [], 0.0),
+        Result("py.mutation", True, "skipped: listed in [gates] skip in marestail.toml"),
+    ]
+
+
+def config_with(raw: dict[str, object], tmp_path: Path) -> config_module.Config:
+    return config_module.Config(root=tmp_path, raw=raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({}, set()),
+        ({"gates": {}}, set()),
+        ({"gates": {"skip": []}}, set()),
+        ({"gates": {"skip": ["ts.mutation"]}}, {"ts.mutation"}),
+        ({"gates": {"skip": ["ts.mutation", "sonar", "ts.mutation"]}}, {"ts.mutation", "sonar"}),
+    ],
+)
+def test_skip_list(raw: dict[str, object], expected: set[str], tmp_path: Path) -> None:
+    assert gates.skip_list(config_with(raw, tmp_path)) == expected
+
+
+@pytest.mark.parametrize("skip", ["ts.mutation", [1], ["ts.mutation", None], {"ts.mutation": True}])
+def test_skip_list_refuses_anything_but_a_list_of_names(skip: object, tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as raised:
+        gates.skip_list(config_with({"gates": {"skip": skip}}, tmp_path))
+    assert str(raised.value) == '[gates] skip must be a list of gate names, for example skip = ["ts.mutation"]'
+
+
+def test_skip_list_refuses_names_that_are_not_gates(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as raised:
+        gates.skip_list(config_with({"gates": {"skip": ["ts.mutations", "sonar", "a.b"]}}, tmp_path))
+    message = str(raised.value)
+    assert message.startswith("[gates] skip names gates that do not exist: a.b, ts.mutations; known gates: comments, cs.crap, ")
+    assert message.endswith(", ts.tests, visual")
+    assert ", sonar, " in message
+
+
+def test_known_names_are_every_registered_gate() -> None:
+    assert gates.known_names() == {gate.name for gate in gates.registry()}
+
+
+def test_run_or_skip_runs_a_gate_that_is_not_listed(tmp_path: Path) -> None:
+    gate = Gate("x", "fast", None, lambda _ctx: Result("x", False, "bad", ["f"], 0.5))
+    assert gates.run_or_skip(gate, make_context(tmp_path), {"y"}).summary.startswith("bad")
+    assert gates.run_or_skip(gate, make_context(tmp_path), {"x"}) == Result("x", True, "skipped: listed in [gates] skip in marestail.toml")
 
 
 def test_run_one_passes_the_context(tmp_path: Path) -> None:
