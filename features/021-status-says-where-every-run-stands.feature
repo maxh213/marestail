@@ -35,8 +35,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   `step-start`, `step-end`, `wait` and `run-end`. A torn line, a blank line,
   a later version, an unknown event name, and a `proposal` (020 writes it;
   it is not in that set) are skipped. A skipped line does not move `since`.
-  The latest run is the last `run-start` and every kept line after it;
-  earlier runs are ignored. A file with no valid `run-start` counts as no
+  A kept line does, including a `wait`. The latest run is the last
+  `run-start` and every kept line after it. Earlier runs are ignored.
+  A file with no valid `run-start` counts as no
   file and the task falls through to the legacy rules.
 
   | latest run | state |
@@ -119,16 +120,19 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   when both are empty. The only wording change from the script is the state
   `never-started`. For events-era runs it is: `running`: `in <step>`, `starting` before the first
   step-start, or `waiting for a rate limit until <until>` when the latest
-  event is a `wait`; `dead` mid-step: `mid <step>`, where the latest
-  step-start has no step-end; `dead` between steps: `after <step>
+  kept event is a `wait`. That rate-limit sentence is only for `running`.
+  A `dead` run whose latest kept line is a `wait` does not use it; `since`
+  is still that wait's `at`, and the text stays the dead text. `dead`
+  mid-step: `mid <step>`, where the latest step-start has no step-end,
+  including when a `wait` follows it; `dead` between steps: `after <step>
   (<outcome>)` from the latest step-end; `dead` with no step: `before the
   first step`; `dead` from a run-end `interrupted`: `interrupted` plus ` in
   <step>` when the run has a step id (that id, such as `03-coder`, not
   `stopped_at`, which is the role), otherwise `interrupted`; `stopped`: `at
   <stopped_at>` plus `: <reason>` when there is one; `stopped` from a result
   `failed`: `failed at <stopped_at>` plus `: <reason>` when there is one;
-  `complete`: `<N> steps`, the
-  count of step-end lines in the run; `abandoned`: the marker's first line.
+  `complete`: `<N> steps`, the count of step-end lines in the latest run,
+  not in earlier runs in the same file; `abandoned`: the marker's first line.
 
   `--all` also shows `complete`, `abandoned` and `leftover`. `--queued` adds
   the tasks section only when at least one task is queued: a blank line,
@@ -142,7 +146,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   else the path, matches, and the first worktree scanned that holds the file
   is the one reported. Two clones of one origin match on that URL. A
   `git worktree add` of a repo with no origin does not: the main tree's
-  common dir is `.git` and the linked tree's is an absolute path.
+  common dir is `.git` and the linked tree's is an absolute path. A
+  directory is a repo only when it holds `.marestail/`, so `tasks/*.md` in
+  a clone with no `.marestail/` are not scanned.
 
   `--json` prints `{"v": 1, "runs": [...], "queued": [...]}` with
   `json.dumps(..., indent=2)` and nothing else. `runs` is sorted by `repo`
@@ -167,8 +173,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   | events | absolute path of events.jsonl | null |
   | log | absolute path of `runs/<task>/pipeline.log` when it exists, else null | same |
 
-  For `abandoned`, `since` is the marker's mtime as UTC
-  `YYYY-MM-DDTHH:MM:SSZ`, in both eras. The marker changes `state`, `since`
+  For `abandoned`, `since` is the marker file's mtime as UTC
+  `YYYY-MM-DDTHH:MM:SSZ`, in both eras. It is not the log mtime and not the
+  `runs/<task>` directory mtime. The marker changes `state`, `since`
   and `reason` only. An events-era `pid`, `result` and `stopped_at` stay as
   the latest run left them, and legacy `stopped_at` is always null.
 
@@ -226,7 +233,8 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   run-end is `stopped`, exit 1, stopped_at `critic`, reason `not approved` at
   `2026-10-16T10:20:00.000Z`; `008-fresh`, an empty run folder with mtime
   2026-10-16 10:50; `007-done`, an events-era complete run of two steps whose
-  run-end head is `ddd444` at `2026-10-16T10:00:00.000Z`; `006-given-up`, an
+  run-start pid is 6666 and whose run-end head is `ddd444` at
+  `2026-10-16T10:00:00.000Z`; `006-given-up`, an
   events-era stopped run whose run-start is at `2026-10-16T08:00:00.000Z`
   with pid 7777 and whose run-end has result `stopped`, stopped_at `coder`
   and reason `coder used all 1 attempts`, plus an `abandoned` marker with
@@ -313,6 +321,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And a run whose only step-start is step `03-coder` and role `writer`, with no step-end, and whose run-start pid is this run, is `running` with text `in 03-coder`, JSON `step` `03-coder` and JSON `role` `writer`, not `coder`
     And a running run with no step-start yet says `starting`
     And a running run whose latest event is a `wait` with until `2026-10-16T12:30:00.000Z` says `waiting for a rate limit until 2026-10-16T12:30:00.000Z`
+    And a run with a run-start whose pid is not this run, a step-start `03-coder`, and a `wait` at `2026-10-16T11:45:00.000Z` with until `2026-10-16T12:30:00.000Z` as the latest kept line, is `dead` with text `mid 03-coder` and `since` `2026-10-16T11:45:00.000Z`, not the rate-limit sentence
     And a run-end with result `failed`, stopped_at `coder` and reason `gate failed` reads `stopped` with text `failed at coder: gate failed`, JSON `result` `failed`, JSON `stopped_at` `coder` and JSON `reason` `gate failed`
     And a second run-end, the same except reason is null, reads `stopped` with text `failed at coder`, JSON `result` `failed` and JSON `reason` null
     And a run whose events are step-start `03-coder` role `coder`, then run-end result `interrupted`, stopped_at `coder`, reason `SIGINT`, reads `dead` with text `interrupted in 03-coder`, step `03-coder`, role `coder`, stopped_at `coder`, result `interrupted`, and reason null
@@ -323,10 +332,10 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And the same file reads `dead` when the pid is absent from `/proc`, when the cmdline is `sleep 100`, when the cmdline is a `run` of another task, when the cwd is another repo, and when the `/proc` read raises `OSError`
 
   Scenario: the latest run is the last run-start, and invalid lines are skipped
-    Given an events file holding a complete first run and then a run-start with one step-start and no run-end, and no live process
-    Then the state is `dead`, and the first run's events change nothing
-    Given the reverse order, a dead first run and a complete second run
-    Then the state is `complete`
+    Given an events file whose first run is complete, with one step-end and run-end head `ddd444`, and whose second run is a run-start with `start_commit` `aaa111`, one step-start `03-coder` and no run-end, and no live process
+    Then the state is `dead`, the text is `mid 03-coder`, the JSON `head` is `aaa111`, and the first run's head `ddd444` and its step-end change nothing
+    Given the reverse: the first run is a run-start and one step-end with head `fff000` and no run-end, and the second run is a run-start, two step-ends, and a run-end with result `complete` and head `eee555`
+    Then the state is `complete`, the text is `2 steps`, the JSON `head` is `eee555`, and the first run's head `fff000` and its one step-end are ignored
     Given a file whose lines are a torn JSON fragment, a blank line, a `"v": 2` line, an unknown event name, and a valid run
     Then the state comes from the valid lines alone, and `since` is the `at` of the latest kept line
     Given a run-start, then a step-end `01-specifier` outcome `done` at `2026-10-16T11:00:00.000Z` as the last kept line, then `{"v": 1, "at": "2026-10-16T11:40:00.000Z", "event": "proposal", "pid": 1, "step": "01-specifier", "path": ".marestail/handoffs/t/02-proposal.md", "files": ["marestail.toml"]}`, and no live process
@@ -342,6 +351,8 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     Then the state is `dead` and the marker is ignored
     Given an events-era complete run beside such a newer marker
     Then the state stays `complete`
+    Given an events-era run whose only kept line is a run-start at `2026-10-16T08:00:00.000Z` with pid 3333, no run-end, and pid 3333 is this run, beside a marker with mtime 2026-10-16 09:00
+    Then the state stays `running` and `since` stays `2026-10-16T08:00:00.000Z`, not the marker mtime
 
   Scenario Outline: a run with no events file is read from pipeline.log and the handoff folders
     Given a repo whose task `<task>` has the log or files <fixture>
@@ -370,10 +381,15 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       | t17 | `03-coder.prompt.md`, a non-empty json, and an untracked live handoff `03-coder.md` | dead | after 03-coder wrote its handoff, then nothing (no pipeline.log) | 03-coder | coder |
       | t18 | `03-coder.prompt.md` and a non-empty json, no handoff | dead | after 03-coder finished, then nothing (no pipeline.log) | null | null |
       | t19 | every live handoff tracked by git, no run folder | leftover | handoff copies from git or a checkout, no run folder | null | null |
-      | t20 | an `abandoned` marker beside a mid-step `03-coder` log, no fresh handoffs | abandoned | the marker's first line | 03-coder | coder |
+      | t20 | an `abandoned` marker mtime 2026-10-16 09:00 UTC beside a mid-step `03-coder` log mtime 2026-10-16 08:00 UTC, `runs/<task>` left at 2026-10-16 12:00 UTC, no fresh handoffs | abandoned | the marker's first line | 03-coder | coder |
       | t21 | a log mid step `03-coder` and a `handoffs-aborted-*` archive, no fresh handoffs | abandoned | aborted archive, nothing since | 03-coder | coder |
       | t22 | one `handoffs-aborted-*` archive and no live handoffs, no log | complete | archived | null | null |
       | t23 | a mid-step `03-coder` log, an `abandoned` marker, and an untracked live `03-coder.md`, no archive | dead | mid 03-coder (its handoff was written, the runner never logged it) | 03-coder | coder |
+
+  Scenario: a legacy abandoned marker's since is the marker file's mtime
+    Given the t20 fixture: a mid-step `03-coder` log touched to 2026-10-16 08:00 UTC, an `abandoned` marker touched to 2026-10-16 09:00 UTC, `runs/<task>` left at 2026-10-16 12:00 UTC, and no fresh handoffs
+    Then the state is `abandoned`, the text is the marker's first line, and the JSON `since` is `2026-10-16T09:00:00Z`
+    And that `since` is not the log mtime `2026-10-16T08:00:00Z` and not the directory mtime `2026-10-16T12:00:00Z`
 
   Scenario: a legacy log that ends complete or stopped fills result, reason and step
     Given the t1 fixture, a log with 4 `==` steps whose last `==` label is `04-qa`, then `pipeline complete`, and no archive
@@ -456,18 +472,20 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And the table Branch cell is `(detached)`
 
   Scenario: --queued lists task files that never ran, once per clone
-    Given two clones `w1` and `w2` of one origin, so both `git config --get remote.origin.url` values match, `w1` scanned first
+    Given a parent `clones/` that is not the fleet fixture and is not itself a repo
+    And `clones/w1` and `clones/w2` are two clones of one origin, so both `git config --get remote.origin.url` values match, and each holds a `.marestail/` directory
+    And names sort `w1` before `w2`, so `w1` is scanned first
     And `w1/tasks/012-next.md` and `w2/tasks/012-next.md` both exist and neither clone has a task folder for `012-next`
-    And `w1/tasks/013-done.md` exists and `w2` has a run folder for `013-done`
+    And `w1/tasks/013-done.md` exists and `w2` has `.marestail/runs/013-done/`
     And `w1/tasks/README.md` and `w1/tasks/03-coder.md` exist
-    When I run `marestail status --queued fleet`
+    When I run `marestail status --queued clones`
     Then the runs table is followed by a blank line, `Tasks in tasks/ that never ran:`, a blank line, and:
       """
       | Repo | Task     |
       |------|----------|
       | w1   | 012-next |
       """
-    And `013-done`, `README.md` and `03-coder.md` do not appear
+    And the queued table does not list `013-done`, `README` or `03-coder`
     And the JSON queued entry is `{"repo": <w1 absolute>, "task": "012-next", "path": <w1/tasks/012-next.md absolute>}`
 
   Scenario: --json prints every run with a fixed key order
@@ -500,7 +518,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And that pipeline.log is `== qa (04-qa) attempt 1` then `pipeline complete`, and the record stays `running` with step `03-coder` and `since` `2026-10-16T11:58:00.000Z`, not the log's `complete` or `04-qa`
     And `009-paused` has `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved` and `pid` 5555
     And `010-killed` has `state` `dead`, `branch` `feature`, `pid` 999999 and `reason` null
-    And `007-done` has `head` `ddd444`, `result` `complete`, `exit_code` 0 and its run-start pid
+    And `007-done` has `head` `ddd444`, `result` `complete`, `exit_code` 0 and `pid` 6666
     And `003-later` has `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the `runs/003-later` directory mtime, not the log mtime `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
     And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z` (the max, after `runs/004-old` was touched to the log's stamp), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
     And `008-fresh` has `step` null, `role` null and `since` `2026-10-16T10:50:00Z`
