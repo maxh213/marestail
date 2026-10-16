@@ -63,6 +63,10 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   waiting ... retrying`, `pipeline complete`, `pipeline stopped at` and
   `stopping for a human`; otherwise the per-step files `NN-role.prompt.md` and
   `NN-role.json`, the live handoffs and the archived `handoffs-*/` folders.
+  `classify` reads that log only when an `==` line has raised `steps` above
+  0. A log that is only `pipeline stopped at 04-coder` is `never-started`,
+  text `no handoffs, no steps, no log`, JSON `step` null, `role` null and
+  `result` null. It is not `stopped`.
   `leftover` means every live handoff is tracked by git or byte-identical to
   an archived file of the same name. `abandoned` means the
   `runs/<task>/abandoned` marker or a `handoffs-abandoned-*` or
@@ -418,6 +422,21 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     When I run `marestail status gamma`
     Then `019-cut` is `running` with text `in 03-coder`, JSON `step` `03-coder`, JSON `role` `coder` and JSON `pid` 50
     And `020-halted` stays `stopped` with text `at 04-coder, runner asked for a human`, JSON `step` `03-coder` and JSON `role` `coder`
+
+  Scenario: a log with no == line is never-started, and a live pipeline promotes that row to starting
+    Given a repo `epsilon` on branch `main` with no events files, and not the gamma repo
+    And task `021-bare-stop` has a pipeline.log that is only the line `pipeline stopped at 04-coder`, with no `==` line, log mtime 2026-10-16 11:00 UTC
+    And after that log is written, `runs/021-bare-stop` is touched to 2026-10-16 11:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
+    And task `017-mid` has a pipeline.log `== coder (03-coder) attempt 1` and no finished line, log mtime 2026-10-16 10:00 UTC
+    And after that log is written, `runs/017-mid` is touched to 2026-10-16 10:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
+    When I run `marestail status epsilon` with no live process
+    Then `021-bare-stop` is `never-started` with text `no handoffs, no steps, no log`
+    And its JSON `step` is null, its JSON `role` is null and its JSON `result` is null
+    And it is not `stopped`, and the text is not `at 04-coder, runner asked for a human`
+    And `017-mid` is `dead` with text `mid 03-coder`
+    When one unattributed process is alive in `epsilon`, pid 91, cmdline `python3 -u /opt/marestail/marestail/cli.py run tasks/other.md`, cwd `epsilon`
+    Then `021-bare-stop` is `running` with text `starting`, JSON `step` null, JSON `role` null, JSON `result` null and JSON `pid` 91
+    And `017-mid` stays `dead` with text `mid 03-coder`
 
   Scenario: a finished legacy step promotes to in that step, with step and role null
     Given a repo `delta` on branch `main` with no events files and one task `018-done-step`
