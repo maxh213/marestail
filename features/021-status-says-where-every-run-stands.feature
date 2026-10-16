@@ -77,13 +77,13 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   run in the same repo. The current step is the log's latest `==` label that
   has no matching `finished in` line. It is empty when that step already
   finished, even though `last_step` is still that step id, and it is empty
-  when there is no log. The promoted text is `in <step>` only when the current
-  step is set, and `starting` when it is empty. That is not the script's
-  `current_step or last_step` (lines 363-365): a finished `03-coder` stays
-  `last_step` `03-coder`, and the text is `starting`, not `in 03-coder`.
-  While `running`, the JSON `step` is that current step, or null when it is
-  empty, and `role` is null when `step` is null. The JSON `pid` is the lowest
-  such pid.
+  when there is no log. The promoted text is the script's lines 363-365:
+  `in {current_step or last_step}` when either is set, and `starting` when
+  both are empty. A finished `03-coder` therefore has text `in 03-coder`.
+  `008-fresh` has both fields empty and has text `starting`. While
+  `running`, the JSON `step` is the current step when it is set, otherwise
+  null: it does not fall back to `last_step`, so that finished row's `step`
+  and `role` are null. The JSON `pid` is the lowest such pid.
 
   For a `dead` run, `last -x -F shutdown` runs once per invocation, and only
   when at least one run is dead. A shutdown at or up to 3600 seconds after the
@@ -104,8 +104,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   `never-started` keeps that spelling in the table.
 
   `Where it stands` for legacy runs is the script's `detail`, unchanged,
-  except the one row promotion rewrites, whose text is the current-step rule
-  above. For events-era runs it is: `running`: `in <step>`, `starting` before the first
+  including a promoted row: `in {current_step or last_step}`, or `starting`
+  when both are empty. The only wording change from the script is the state
+  `never-started`. For events-era runs it is: `running`: `in <step>`, `starting` before the first
   step-start, or `waiting for a rate limit until <until>` when the latest
   event is a `wait`; `dead` mid-step: `mid <step>`, where the latest
   step-start has no step-end; `dead` between steps: `after <step>
@@ -345,6 +346,14 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       | t21 | a log mid step and a `handoffs-aborted-*` archive, no fresh handoffs | abandoned | aborted archive, nothing since |
       | t22 | one `handoffs-aborted-*` archive and no live handoffs, no log | complete | archived |
 
+  Scenario: a legacy log that ends complete or stopped fills result and reason
+    Given the t1 fixture, a log with 4 `==` steps then `pipeline complete` and no archive
+    Then the JSON `result` is `complete` and the JSON `reason` is null
+    Given the t3 fixture, a log ending `pipeline stopped at 03-coder` and a line `stopping for a human`
+    Then the JSON `result` is `stopped` and the JSON `reason` is `worker repeated the same problems 3x`
+    Given the t4 fixture, a log ending `pipeline stopped at 03-coder` without that line
+    Then the JSON `result` is `stopped` and the JSON `reason` is `runner asked for a human`
+
   Scenario: an unattributed pipeline promotes only the newest legacy dead or never-started row
     Given the fleet fixture
     And a live process in alpha, pid 77, cmdline `python3 -u /opt/marestail/marestail/cli.py run tasks/other.md`, cwd alpha
@@ -354,21 +363,22 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: a newer legacy stopped row does not block promotion of an older mid-step
     Given a repo `gamma` on branch `main` with no events files
-    And task `020-halted` has a pipeline.log ending `pipeline stopped at 04-coder` with no `stopping for a human` line, mtime 2026-10-16 11:00 UTC
-    And task `019-cut` has a pipeline.log `== coder (03-coder) attempt 1` and no finished line, mtime 2026-10-16 10:00 UTC
+    And task `020-halted` has a pipeline.log ending `pipeline stopped at 04-coder` with no `stopping for a human` line, log mtime 2026-10-16 11:00 UTC
+    And after that log is written, `runs/020-halted` is touched to 2026-10-16 11:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
+    And task `019-cut` has a pipeline.log `== coder (03-coder) attempt 1` and no finished line, log mtime 2026-10-16 10:00 UTC
+    And after that log is written, `runs/019-cut` is touched to 2026-10-16 10:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
     And the live processes in `gamma` are pid 80 and pid 50, both cmdline `python3 -u /opt/marestail/marestail/cli.py run tasks/other.md`, cwd `gamma`, neither an events-era run's pid
     When I run `marestail status gamma`
     Then `019-cut` is `running` with text `in 03-coder`, JSON `step` `03-coder`, JSON `role` `coder` and JSON `pid` 50
     And `020-halted` stays `stopped` with text `at 04-coder, runner asked for a human`
 
-  Scenario: a finished legacy step promotes to starting, not in that step
+  Scenario: a finished legacy step promotes to in that step, with step and role null
     Given a repo `delta` on branch `main` with no events files and one task `018-done-step`
     And its pipeline.log is exactly `== coder (03-coder) attempt 1` then `   03-coder finished in 2.0 min: ok`
     And one live process in `delta`, pid 61, cmdline `python3 -u /opt/marestail/marestail/cli.py run tasks/other.md`, cwd `delta`
     When I run `marestail status delta`
-    Then `018-done-step` is `running` with text `starting`
+    Then `018-done-step` is `running` with text `in 03-coder`
     And its JSON `step` is null, its JSON `role` is null and its JSON `pid` is 61
-    And the text is not `in 03-coder`
 
   Scenario: an events-era running pid does not promote a legacy row
     Given the fleet fixture, whose only live process is the 011-live shim at pid 4242
@@ -392,13 +402,20 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     When I run `marestail status fleet`
     Then the repos found are `alpha` and `team/gamma`, and nothing under `node_modules`, `.hidden`, `tmp`, `link` or `team/deep`
     When I run `marestail status fleet fleet/team`
-    Then `gamma` is listed once
+    Then `team/gamma` is listed once, and its Repo cell is `team/gamma`, the path relative to the first PATH `fleet`, not `gamma`
     When I run `marestail status fleet/alpha`
     Then the Repo column is `alpha`
     When I run `marestail status` from a folder inside `fleet/alpha`, with no PATH
     Then the one PATH is `fleet/alpha` and the Repo column is `alpha`
     When I run `marestail status fleet/no-such`
     Then the exit code is 2, stdout is empty, and stderr is `marestail status: not a directory: fleet/no-such`
+
+  Scenario: a legacy run in a directory that is not a git repo has a null branch
+    Given a directory `loose` that is not a git repository and holds only `.marestail/runs/014-plain/`
+    When I run `marestail status loose`
+    Then the row is `never-started` with text `no handoffs, no steps, no log`
+    And the JSON `branch` is null
+    And the table Branch cell is `(detached)`
 
   Scenario: --queued lists task files that never ran, once per clone
     Given two worktrees `w1` and `w2` of one clone, `w1` scanned first
