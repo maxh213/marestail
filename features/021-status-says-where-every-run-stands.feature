@@ -83,7 +83,13 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   `008-fresh` has both fields empty and has text `starting`. While
   `running`, the JSON `step` is the current step when it is set, otherwise
   null: it does not fall back to `last_step`, so that finished row's `step`
-  and `role` are null. The JSON `pid` is the lowest such pid.
+  and `role` are null. While the row is not `running`, JSON `step` is
+  `last_step` (the newest fresh handoff, else the log's last `==` label) and
+  `role` is the text after the first `-`. A complete log whose last `==`
+  label is `04-qa` has `step` `04-qa` and `role` `qa`. A dead log whose
+  finished step is `03-coder` has `step` `03-coder` and `role` `coder`. A
+  prompt file with no log and no handoff leaves both null. The JSON `pid` is
+  the lowest such pid.
 
   For a `dead` run, `last -x -F shutdown` runs once per invocation, and only
   when at least one run is dead. A shutdown at or up to 3600 seconds after the
@@ -155,7 +161,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   | log | absolute path of `runs/<task>/pipeline.log` when it exists, else null | same |
 
   For `abandoned`, `since` is the marker's mtime as UTC
-  `YYYY-MM-DDTHH:MM:SSZ`, in both eras.
+  `YYYY-MM-DDTHH:MM:SSZ`, in both eras. The marker changes `state`, `since`
+  and `reason` only. An events-era `pid`, `result` and `stopped_at` stay as
+  the latest run left them, and legacy `stopped_at` is always null.
 
   `marestail abandon` takes `REPO/TASK`, split on the last `/`. `REPO` is a
   path, absolute or relative to the current directory, that must hold
@@ -204,8 +212,10 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   `2026-10-16T10:20:00.000Z`; `008-fresh`, an empty run folder with mtime
   2026-10-16 10:50; `007-done`, an events-era complete run of two steps whose
   run-end head is `ddd444` at `2026-10-16T10:00:00.000Z`; `006-given-up`, an
-  events-era stopped run whose run-start is at `2026-10-16T08:00:00.000Z`,
-  plus an `abandoned` marker with mtime 2026-10-16 09:00 whose first line is
+  events-era stopped run whose run-start is at `2026-10-16T08:00:00.000Z`
+  with pid 7777 and whose run-end has result `stopped`, stopped_at `coder`
+  and reason `coder used all 1 attempts`, plus an `abandoned` marker with
+  mtime 2026-10-16 09:00 whose first line is
   `abandoned 2026-10-16 09:00: superseded by 007-done`; and
   `.marestail/handoffs/005-restored/01-specifier.md`, tracked by git, with no
   run folder. `beta/` (branch `main`) holds two legacy runs and no events
@@ -226,6 +236,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: the default table lists unfinished runs, ordered by state, then newest first
     Given the fleet fixture
+    And `last -x -F shutdown` prints nothing
     When I run `marestail status fleet`
     Then the exit code is 0
     And stdout is exactly:
@@ -247,6 +258,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: --all adds complete, abandoned and leftover rows after the rest
     Given the fleet fixture
+    And `last -x -F shutdown` prints nothing
     When I run `marestail status --all fleet`
     Then the exit code is 0, and stdout is exactly:
       """
@@ -320,39 +332,42 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     Given a repo whose task `<task>` has the log or files <fixture>
     When I run `marestail status`
     Then the row is `<state>` with the text `<text>`
+    And the JSON `step` is `<step>` and the JSON `role` is `<role>`
 
     Examples:
-      | task | fixture | state | text |
-      | t1 | a log with 4 `==` steps then `pipeline complete`, no archive | complete | 4 steps |
-      | t2 | the same plus one `handoffs-*` archive | complete | 4 steps, archived |
-      | t3 | a log ending `pipeline stopped at 03-coder` and a line `stopping for a human` | stopped | at 03-coder, worker repeated the same problems 3x |
-      | t4 | a log ending `pipeline stopped at 03-coder` without that line | stopped | at 03-coder, runner asked for a human |
-      | t5 | a log whose last step is not done and holds `rate limited; waiting 1 min before retrying 03-coder` | dead | in the rate-limit wait before 03-coder |
-      | t6 | a log whose last step `03-coder` is not done | dead | mid 03-coder |
-      | t7 | the same plus a live handoff `03-coder.md` | dead | mid 03-coder (its handoff was written, the runner never logged it) |
-      | t8 | a log whose last step `03-perf` is done and whose last line is `filling perf samples` | dead | after 03-perf, in perf sampling |
-      | t9 | a log whose last step `03-coder` is done with a `verdict PASS` line | dead | after 03-coder finished (verdict PASS) |
-      | t10 | the same without a verdict line | dead | after 03-coder finished |
-      | t11 | one `handoffs-*` archive and no live handoffs, no log | complete | archived |
-      | t12 | the same plus a byte-identical live copy of the archived handoff | complete | archived, leftover copies in handoffs/ |
-      | t13 | a run folder and nothing else | never-started | no handoffs, no steps, no log |
-      | t14 | only a live handoff `02-critic.md`, no run folder, untracked | dead | after 02-critic wrote its handoff (no pipeline.log) |
-      | t15 | `03-coder.prompt.md` and no json | dead | mid 03-coder: prompt written, no result (no pipeline.log) |
-      | t16 | `03-coder.prompt.md` and a 0-byte `03-coder.json` | dead | after 03-coder returned nothing, 0-byte result (no pipeline.log) |
-      | t17 | `03-coder.prompt.md`, a non-empty json, and the live handoff `03-coder.md` | dead | after 03-coder wrote its handoff, then nothing (no pipeline.log) |
-      | t18 | `03-coder.prompt.md` and a non-empty json, no handoff | dead | after 03-coder finished, then nothing (no pipeline.log) |
-      | t19 | every live handoff tracked by git, no run folder | leftover | handoff copies from git or a checkout, no run folder |
-      | t20 | an `abandoned` marker beside a dead legacy run | abandoned | the marker's first line |
-      | t21 | a log mid step and a `handoffs-aborted-*` archive, no fresh handoffs | abandoned | aborted archive, nothing since |
-      | t22 | one `handoffs-aborted-*` archive and no live handoffs, no log | complete | archived |
+      | task | fixture | state | text | step | role |
+      | t1 | a log with 4 `==` steps whose last label is `04-qa`, then `pipeline complete`, no archive | complete | 4 steps | 04-qa | qa |
+      | t2 | the t1 log plus one `handoffs-*` archive | complete | 4 steps, archived | 04-qa | qa |
+      | t3 | a log with `== coder (03-coder) attempt 1`, then `pipeline stopped at 03-coder`, and a line `stopping for a human` | stopped | at 03-coder, worker repeated the same problems 3x | 03-coder | coder |
+      | t4 | a log with `== coder (03-coder) attempt 1`, then `pipeline stopped at 03-coder`, without that line | stopped | at 03-coder, runner asked for a human | 03-coder | coder |
+      | t5 | a log whose last `==` label is `03-coder`, that step is not done, and which holds `rate limited; waiting 1 min before retrying 03-coder` | dead | in the rate-limit wait before 03-coder | 03-coder | coder |
+      | t6 | a log whose last step `03-coder` is not done | dead | mid 03-coder | 03-coder | coder |
+      | t7 | the same plus a live handoff `03-coder.md` | dead | mid 03-coder (its handoff was written, the runner never logged it) | 03-coder | coder |
+      | t8 | a log whose last step `03-perf` is done and whose last line is `filling perf samples` | dead | after 03-perf, in perf sampling | 03-perf | perf |
+      | t9 | a log whose last step `03-coder` is done with a `verdict PASS` line | dead | after 03-coder finished (verdict PASS) | 03-coder | coder |
+      | t10 | the same without a verdict line | dead | after 03-coder finished | 03-coder | coder |
+      | t11 | one `handoffs-*` archive and no live handoffs, no log | complete | archived | null | null |
+      | t12 | the same plus a byte-identical live copy of the archived handoff | complete | archived, leftover copies in handoffs/ | null | null |
+      | t13 | a run folder and nothing else | never-started | no handoffs, no steps, no log | null | null |
+      | t14 | only a live handoff `02-critic.md`, no run folder, untracked | dead | after 02-critic wrote its handoff (no pipeline.log) | 02-critic | critic |
+      | t15 | `03-coder.prompt.md` and no json | dead | mid 03-coder: prompt written, no result (no pipeline.log) | null | null |
+      | t16 | `03-coder.prompt.md` and a 0-byte `03-coder.json` | dead | after 03-coder returned nothing, 0-byte result (no pipeline.log) | null | null |
+      | t17 | `03-coder.prompt.md`, a non-empty json, and an untracked live handoff `03-coder.md` | dead | after 03-coder wrote its handoff, then nothing (no pipeline.log) | 03-coder | coder |
+      | t18 | `03-coder.prompt.md` and a non-empty json, no handoff | dead | after 03-coder finished, then nothing (no pipeline.log) | null | null |
+      | t19 | every live handoff tracked by git, no run folder | leftover | handoff copies from git or a checkout, no run folder | null | null |
+      | t20 | an `abandoned` marker beside a mid-step `03-coder` log, no fresh handoffs | abandoned | the marker's first line | 03-coder | coder |
+      | t21 | a log mid step `03-coder` and a `handoffs-aborted-*` archive, no fresh handoffs | abandoned | aborted archive, nothing since | 03-coder | coder |
+      | t22 | one `handoffs-aborted-*` archive and no live handoffs, no log | complete | archived | null | null |
 
-  Scenario: a legacy log that ends complete or stopped fills result and reason
-    Given the t1 fixture, a log with 4 `==` steps then `pipeline complete` and no archive
-    Then the JSON `result` is `complete` and the JSON `reason` is null
-    Given the t3 fixture, a log ending `pipeline stopped at 03-coder` and a line `stopping for a human`
-    Then the JSON `result` is `stopped` and the JSON `reason` is `worker repeated the same problems 3x`
-    Given the t4 fixture, a log ending `pipeline stopped at 03-coder` without that line
-    Then the JSON `result` is `stopped` and the JSON `reason` is `runner asked for a human`
+  Scenario: a legacy log that ends complete or stopped fills result, reason and step
+    Given the t1 fixture, a log with 4 `==` steps whose last `==` label is `04-qa`, then `pipeline complete`, and no archive
+    Then the JSON `result` is `complete`, the JSON `reason` is null, the JSON `step` is `04-qa` and the JSON `role` is `qa`
+    Given the t3 fixture, a log with `== coder (03-coder) attempt 1`, then `pipeline stopped at 03-coder`, and a line `stopping for a human`
+    Then the JSON `result` is `stopped`, the JSON `reason` is `worker repeated the same problems 3x`, the JSON `stopped_at` is null, the JSON `step` is `03-coder` and the JSON `role` is `coder`
+    Given the t4 fixture, a log with `== coder (03-coder) attempt 1`, then `pipeline stopped at 03-coder`, without that line
+    Then the JSON `result` is `stopped`, the JSON `reason` is `runner asked for a human`, the JSON `stopped_at` is null, the JSON `step` is `03-coder` and the JSON `role` is `coder`
+    Given the t10 fixture, a log whose last step `03-coder` is done with no verdict line, and no live process
+    Then the row is `dead` with text `after 03-coder finished`, the JSON `step` is `03-coder` and the JSON `role` is `coder`
 
   Scenario: an unattributed pipeline promotes only the newest legacy dead or never-started row
     Given the fleet fixture
@@ -434,6 +449,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: --json prints every run with a fixed key order
     Given the fleet fixture
+    And `last -x -F shutdown` prints nothing
     When I run `marestail status --json fleet`
     Then the exit code is 0, and stdout parses as `{"v": 1, "runs": [...], "queued": []}` and nothing else is printed
     And `runs` has all 9 records although `--all` was not given, sorted by repo then task
@@ -459,12 +475,13 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       }
       """
     And `009-paused` has `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved` and `pid` 5555
+    And `010-killed` has `state` `dead`, `pid` 999999 and `reason` null
     And `007-done` has `head` `ddd444`, `result` `complete`, `exit_code` 0 and its run-start pid
-    And `003-later` has `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the `runs/003-later` directory mtime, not the log mtime `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `events` null and `log` its pipeline.log's absolute path
-    And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z` (the max, after `runs/004-old` was touched to the log's stamp), `head` null, `pid` null, `result` null, `events` null and `log` its pipeline.log's absolute path
+    And `003-later` has `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the `runs/003-later` directory mtime, not the log mtime `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
+    And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z` (the max, after `runs/004-old` was touched to the log's stamp), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
     And `008-fresh` has `step` null, `role` null and `since` `2026-10-16T10:50:00Z`
     And `005-restored` has `since` null and `state` `leftover`
-    And `006-given-up` has `since` `2026-10-16T09:00:00Z` and `reason` `superseded by 007-done`
+    And `006-given-up` has `state` `abandoned`, `since` `2026-10-16T09:00:00Z`, `reason` `superseded by 007-done`, `result` `stopped`, `stopped_at` `coder` and `pid` 7777
     When I run `marestail status --queued fleet`
     Then stdout is byte for byte the default table, and it contains no `Tasks in tasks/` line
     When I run `marestail status --json --queued fleet`
