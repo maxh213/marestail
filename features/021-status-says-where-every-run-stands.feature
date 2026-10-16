@@ -128,7 +128,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   | key | events era | legacy |
   | step | `step` of the latest step-start or step-end, else null | the script's last_step (its current_step when running), null when empty |
   | role | `role` of that same event, else null | the text after the first `-` in step, null when step is null |
-  | since | `at` of the latest kept line, copied as written | the last activity as UTC `YYYY-MM-DDTHH:MM:SSZ`, null when none |
+  | since | `at` of the latest kept line, copied as written | the max of the fresh handoff mtimes, the `pipeline.log` mtime, each archive directory mtime and the `runs/<task>` directory mtime, as UTC `YYYY-MM-DDTHH:MM:SSZ`; null when that max is 0 |
   | branch | `branch` of run-start | `git branch --show-current`, null when empty or git fails |
   | head | `head` of run-end, else of the latest step-end, else `start_commit` | null |
   | pid | the latest run-start pid, whatever the state | when running, the lowest unattributed pipeline pid in the repo; else null |
@@ -193,10 +193,21 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   plus an `abandoned` marker with mtime 2026-10-16 09:00 whose first line is
   `abandoned 2026-10-16 09:00: superseded by 007-done`; and
   `.marestail/handoffs/005-restored/01-specifier.md`, tracked by git, with no
-  run folder. `beta/` (branch `main`) holds `004-old`, a legacy run whose
-  `pipeline.log` (mtime 2026-10-15 08:00) ends mid step:
+  run folder. `beta/` (branch `main`) holds two legacy runs and no events
+  file. A legacy last activity is the max of the fresh handoff mtimes, the
+  `pipeline.log` mtime, each archive directory mtime and the `runs/<task>`
+  directory mtime; the directory is touched after the log is written, because
+  writing the log leaves the directory at fixture-build time. `004-old`:
+  write `pipeline.log`, set that file's mtime to 2026-10-15 08:00 UTC, then
+  touch `runs/004-old` to the same stamp. The log ends mid step —
   `== specifier (01-specifier) attempt 1`, `   01-specifier finished in 2.0
-  min: ok`, `== coder (02-coder) attempt 1`.
+  min: ok`, `== coder (02-coder) attempt 1` — and that max is 2026-10-15
+  08:00. `003-later`: `== specifier (01-specifier) attempt 1`,
+  `   01-specifier finished in 2.0 min: ok`, `== qa (04-qa) attempt 1`, log
+  mtime 2026-10-16 09:30 UTC, then touch `runs/003-later` to 2026-10-16 11:30
+  UTC. No fresh handoffs and no archives, so the max is the directory: Last
+  activity `10-16 11:30 (30m ago)`, `since` `2026-10-16T11:30:00Z`, text
+  `mid 04-qa`. A clock that reads only the log shows 09:30 and is wrong.
 
   Scenario: the default table lists unfinished runs, ordered by state, then newest first
     Given the fleet fixture
@@ -204,11 +215,12 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     Then the exit code is 0
     And stdout is exactly:
       """
-      marestail runs: 8 known, 1 running, 5 shown, 3 complete/abandoned/leftover hidden (use --all)
+      marestail runs: 9 known, 1 running, 6 shown, 3 complete/abandoned/leftover hidden (use --all)
 
       | Repo  | Task       | State         | Where it stands               | Last activity         | Branch |
       |-------|------------|---------------|-------------------------------|-----------------------|--------|
       | alpha | 011-live   | running       | in 03-coder                   | 10-16 11:58 (2m ago)  | main   |
+      | beta  | 003-later  | dead          | mid 04-qa                     | 10-16 11:30 (30m ago) | main   |
       | alpha | 010-killed | dead          | mid 02-critic                 | 10-16 11:10 (50m ago) | main   |
       | beta  | 004-old    | dead          | mid 02-coder                  | 10-15 08:00 (28h ago) | main   |
       | alpha | 009-paused | stopped       | at critic: not approved       | 10-16 10:20 (1h ago)  | main   |
@@ -221,11 +233,12 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     When I run `marestail status --all fleet`
     Then the exit code is 0, and stdout is exactly:
       """
-      marestail runs: 8 known, 1 running, 8 shown
+      marestail runs: 9 known, 1 running, 9 shown
 
       | Repo  | Task         | State         | Where it stands                                      | Last activity         | Branch |
       |-------|--------------|---------------|------------------------------------------------------|-----------------------|--------|
       | alpha | 011-live     | running       | in 03-coder                                          | 10-16 11:58 (2m ago)  | main   |
+      | beta  | 003-later    | dead          | mid 04-qa                                            | 10-16 11:30 (30m ago) | main   |
       | alpha | 010-killed   | dead          | mid 02-critic                                        | 10-16 11:10 (50m ago) | main   |
       | beta  | 004-old      | dead          | mid 02-coder                                         | 10-15 08:00 (28h ago) | main   |
       | alpha | 009-paused   | stopped       | at critic: not approved                              | 10-16 10:20 (1h ago)  | main   |
@@ -378,7 +391,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     Given the fleet fixture
     When I run `marestail status --json fleet`
     Then the exit code is 0, and stdout parses as `{"v": 1, "runs": [...], "queued": []}` and nothing else is printed
-    And `runs` has all 8 records although `--all` was not given, sorted by repo then task
+    And `runs` has all 9 records although `--all` was not given, sorted by repo then task
     And every record has exactly the keys `repo`, `task`, `state`, `step`, `role`, `since`, `branch`, `head`, `pid`, `result`, `exit_code`, `stopped_at`, `reason`, `events`, `log`, in that order
     And the `011-live` record is:
       """
@@ -402,7 +415,8 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       """
     And `009-paused` has `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved` and `pid` 5555
     And `007-done` has `head` `ddd444`, `result` `complete`, `exit_code` 0 and its run-start pid
-    And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z`, `head` null, `pid` null, `result` null, `events` null and `log` its pipeline.log's absolute path
+    And `003-later` has `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the `runs/003-later` directory mtime, not the log mtime `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `events` null and `log` its pipeline.log's absolute path
+    And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z` (the max, after `runs/004-old` was touched to the log's stamp), `head` null, `pid` null, `result` null, `events` null and `log` its pipeline.log's absolute path
     And `008-fresh` has `step` null, `role` null and `since` `2026-10-16T10:50:00Z`
     And `005-restored` has `since` null and `state` `leftover`
     And `006-given-up` has `since` `2026-10-16T09:00:00Z` and `reason` `superseded by 007-done`
@@ -465,7 +479,8 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And `status` and `abandon` parse `[--json] [--all] [--queued] [PATH ...]` and `TARGET [TARGET ...] [--reason TEXT]`, each handler importing `marestail.status` inside the function as `run_command` imports the runner
     And `status --help` and `abandon --help` exit 0
     And `marestail queue` is still an invalid choice
-    And `tests/test_cli.py` `test_help_lists_commands_in_order`, `tests/test_green_repo.py` `test_help_lists_every_subcommand` and `tests/test_events.py` `test_existing_commands_keep_text` are the assertions that gain `status,abandon` after `watch`
+    And `tests/test_cli.py` `test_help_lists_commands_in_order`, `tests/test_green_repo.py` `test_help_lists_every_subcommand`, `tests/test_events.py` `test_existing_commands_keep_text` and `tests/test_cli.py` `test_root_parser_help_and_subcommands` are the assertions that gain `status` and `abandon` after `watch`
+    And in `test_root_parser_help_and_subcommands`, `list(action.choices)` is `gate`, `run`, `tasks`, `install`, `sonar`, `watch`, `status`, `abandon`, `dash`, `perf`, `visual`, `route`, `remote`, `graph`, `depth`, and the other `help_by_name` lines stay as they are
     And `test_help_lists_remote_and_status_and_queue_stay_absent` drops `status` from the absent list and keeps only `queue` absent
 
   Scenario: the module stays at the foundations layer and nothing else moves
@@ -475,5 +490,5 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And the README gains a `## Status` section after `## Watch` with the two command lines, the seven states with a one-line meaning each, the scan rule, the `"v": 1` JSON shape with its keys, and what `abandon` moves and writes and how to undo it
     And no new environment variable appears
     And no file under `marestail/tui/` or `.marestail/phases/` changes, and `marestail run` and `marestail watch` behave as before
-    And every existing test behaves as before except `test_help_lists_commands_in_order`, `test_help_lists_every_subcommand` and `test_existing_commands_keep_text`, which gain `status,abandon` after `watch`, and `test_help_lists_remote_and_status_and_queue_stay_absent`, which keeps only `queue` absent
+    And every existing test behaves as before except `test_help_lists_commands_in_order`, `test_help_lists_every_subcommand`, `test_existing_commands_keep_text` and `test_root_parser_help_and_subcommands`, which gain `status` and `abandon` after `watch` (the last of those in its `list(action.choices)`, leaving its other `help_by_name` lines as they are), and `test_help_lists_remote_and_status_and_queue_stay_absent`, which keeps only `queue` absent
     And `tests/test_status.py` and the `tests/test_cli.py` additions are in-process and hermetic: run folders under `tmp_path`, the process list stubbed with `monkeypatch`, `git` and `last` stubbed with the `fake_run` fixture or run only in tmp git repos, `time.time` and `time.strftime` patched where a test asserts ages or stamps, and no real process started or signalled

@@ -25,23 +25,35 @@ Two repos under `/tmp/qa-021/fleet`. Each repo is `git init -b main` with the li
 - `runs/006-given-up/events.jsonl` — run-start at `2026-10-16T08:00:00.000Z` pid 7777, then run-end result `stopped`, stopped_at `coder`, reason `coder used all 1 attempts`; plus `runs/006-given-up/abandoned` whose bytes are `abandoned 2026-10-16 09:00: superseded by 007-done\nMove the handoffs-abandoned-* folder back to .marestail/handoffs/<task>/ and delete this file to revive it.\n`, mtime set to `2026-10-16 09:00 UTC`.
 - `handoffs/005-restored/01-specifier.md` — any text, committed and tracked, with no `runs/005-restored/`.
 
-`beta/` holds `.marestail/runs/004-old/pipeline.log`, mtime `2026-10-15 08:00 UTC`, containing exactly:
+`beta/` holds two legacy runs and no events file. Legacy last activity is the max of the fresh handoff mtimes, the `pipeline.log` mtime, each archive directory mtime and the `runs/<task>` directory mtime. Touch the run directory after the log is written: writing the log leaves the directory at build time.
+
+`runs/004-old/pipeline.log`, containing exactly:
 ```
 == specifier (01-specifier) attempt 1
    01-specifier finished in 2.0 min: ok
 == coder (02-coder) attempt 1
 ```
+Set that file's mtime to `2026-10-15 08:00 UTC`, then `touch -d '2026-10-15 08:00 UTC' runs/004-old`. The max is that stamp.
+
+`runs/003-later/pipeline.log`, containing exactly:
+```
+== specifier (01-specifier) attempt 1
+   01-specifier finished in 2.0 min: ok
+== qa (04-qa) attempt 1
+```
+Set that file's mtime to `2026-10-16 09:30 UTC`, then `touch -d '2026-10-16 11:30 UTC' runs/003-later`. No fresh handoffs and no archives, so the max is the directory: Last activity `10-16 11:30` and `since` `2026-10-16T11:30:00Z`, not the log's 09:30. The text is `mid 04-qa`.
 
 ## Procedure
 
 1. `help ok`. `bin/marestail --help` exits 0 and contains `{gate,run,tasks,install,sonar,watch,status,abandon,dash,perf,visual,route,remote,graph,depth}`. `status --help` and `abandon --help` each exit 0; the status one mentions `--json`, `--all`, `--queued` and `PATH`; the abandon one mentions `TARGET` and `--reason`. `bin/marestail queue` exits 2 with `invalid choice: 'queue'` on stderr.
 
-2. `table ok`. `bin/marestail status /tmp/qa-021/fleet` exits 0, stderr empty, and stdout is the header `marestail runs: 8 known, 1 running, 5 shown, 3 complete/abandoned/leftover hidden (use --all)`, a blank line, and this table, with only the age parentheticals free to differ as described at the top:
+2. `table ok`. `bin/marestail status /tmp/qa-021/fleet` exits 0, stderr empty, and stdout is the header `marestail runs: 9 known, 1 running, 6 shown, 3 complete/abandoned/leftover hidden (use --all)`, a blank line, and this table, with only the age parentheticals free to differ as described at the top. `003-later` is `10-16 11:30`, the run directory, not the log's `10-16 09:30`. `004-old` is `10-15 08:00`, the stamp both the log and `runs/004-old` were touched to.
 
    ```
    | Repo  | Task       | State         | Where it stands               | Last activity         | Branch |
    |-------|------------|---------------|-------------------------------|-----------------------|--------|
    | alpha | 011-live   | running       | in 03-coder                   | 10-16 11:58 (2m ago)  | main   |
+   | beta  | 003-later  | dead          | mid 04-qa                     | 10-16 11:30 (30m ago) | main   |
    | alpha | 010-killed | dead          | mid 02-critic                 | 10-16 11:10 (50m ago) | main   |
    | beta  | 004-old    | dead          | mid 02-coder                  | 10-15 08:00 (28h ago) | main   |
    | alpha | 009-paused | stopped       | at critic: not approved       | 10-16 10:20 (1h ago)  | main   |
@@ -50,12 +62,13 @@ Two repos under `/tmp/qa-021/fleet`. Each repo is `git init -b main` with the li
 
    No row contains `; machine shut down` (no real shutdown sits within an hour of those fixture times). `bin/marestail status /tmp/qa-021/fleet/no-such` exits 2, stdout empty, stderr exactly `marestail status: not a directory: /tmp/qa-021/fleet/no-such\n`. In an empty folder, `bin/marestail status .` prints `marestail runs: 0 known, 0 running, 0 shown`, a blank line and `(nothing to show)`, exit 0.
 
-3. `all ok`. `--all` prints the header `marestail runs: 8 known, 1 running, 8 shown` with no hidden note, then this table. At the UI only the age parentheticals may differ, as at the top. This sample is the 12:00 UTC rendering: last activity is width 21, its separator is `|-----------------------|`, and `009-paused` is `10-16 10:20 (1h ago)`.
+3. `all ok`. `--all` prints the header `marestail runs: 9 known, 1 running, 9 shown` with no hidden note, then this table. At the UI only the age parentheticals may differ, as at the top. This sample is the 12:00 UTC rendering: last activity is width 21, its separator is `|-----------------------|`, `009-paused` is `10-16 10:20 (1h ago)`, and `003-later` is `10-16 11:30 (30m ago)`.
 
    ```
    | Repo  | Task         | State         | Where it stands                                      | Last activity         | Branch |
    |-------|--------------|---------------|------------------------------------------------------|-----------------------|--------|
    | alpha | 011-live     | running       | in 03-coder                                          | 10-16 11:58 (2m ago)  | main   |
+   | beta  | 003-later    | dead          | mid 04-qa                                            | 10-16 11:30 (30m ago) | main   |
    | alpha | 010-killed   | dead          | mid 02-critic                                        | 10-16 11:10 (50m ago) | main   |
    | beta  | 004-old      | dead          | mid 02-coder                                         | 10-15 08:00 (28h ago) | main   |
    | alpha | 009-paused   | stopped       | at critic: not approved                              | 10-16 10:20 (1h ago)  | main   |
@@ -65,7 +78,7 @@ Two repos under `/tmp/qa-021/fleet`. Each repo is `git init -b main` with the li
    | alpha | 005-restored | leftover      | handoff copies from git or a checkout, no run folder | ?                     | main   |
    ```
 
-4. `json ok`. `--json` exits 0 and stdout parses as one object with keys `v`, `runs`, `queued`; `v` is 1 and `queued` is `[]` without the flag. `runs` has all 8 records, sorted by repo then task, and each has exactly the keys `repo`, `task`, `state`, `step`, `role`, `since`, `branch`, `head`, `pid`, `result`, `exit_code`, `stopped_at`, `reason`, `events`, `log` in that order. The `011-live` record: `repo` the absolute alpha path, `state` `running`, `step` `03-coder`, `role` `coder`, `since` `2026-10-16T11:58:00.000Z`, `branch` `main`, `head` `bbb222`, `pid` the shim's pid, `result`/`exit_code`/`stopped_at`/`reason` null, `events` the absolute events.jsonl path, `log` null. `009-paused`: `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved`, `pid` 5555, `head` `ccc333`. `007-done`: `head` `ddd444`, `result` `complete`, `exit_code` 0, `pid` 6666. `004-old`: `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z`, `head` null, `pid` null, `result` null, `events` null, `log` the absolute pipeline.log path. `008-fresh`: `step` null, `role` null, `since` `2026-10-16T10:50:00Z`. `005-restored`: `state` `leftover`, `since` null. `006-given-up`: `since` `2026-10-16T09:00:00Z`, `reason` `superseded by 007-done`. `bin/marestail status --json --queued /tmp/qa-021/fleet` still has `queued` `[]`: the fleet has no `tasks/*.md`. The non-empty queued entry is step 7 only.
+4. `json ok`. `--json` exits 0 and stdout parses as one object with keys `v`, `runs`, `queued`; `v` is 1 and `queued` is `[]` without the flag. `runs` has all 9 records, sorted by repo then task, and each has exactly the keys `repo`, `task`, `state`, `step`, `role`, `since`, `branch`, `head`, `pid`, `result`, `exit_code`, `stopped_at`, `reason`, `events`, `log` in that order. The `011-live` record: `repo` the absolute alpha path, `state` `running`, `step` `03-coder`, `role` `coder`, `since` `2026-10-16T11:58:00.000Z`, `branch` `main`, `head` `bbb222`, `pid` the shim's pid, `result`/`exit_code`/`stopped_at`/`reason` null, `events` the absolute events.jsonl path, `log` null. `009-paused`: `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved`, `pid` 5555, `head` `ccc333`. `007-done`: `head` `ddd444`, `result` `complete`, `exit_code` 0, `pid` 6666. `003-later`: `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the directory, not `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `events` null, `log` the absolute pipeline.log path. `004-old`: `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z`, `head` null, `pid` null, `result` null, `events` null, `log` the absolute pipeline.log path. `008-fresh`: `step` null, `role` null, `since` `2026-10-16T10:50:00Z`. `005-restored`: `state` `leftover`, `since` null. `006-given-up`: `since` `2026-10-16T09:00:00Z`, `reason` `superseded by 007-done`. `bin/marestail status --json --queued /tmp/qa-021/fleet` still has `queued` `[]`: the fleet has no `tasks/*.md`. The non-empty queued entry is step 7 only.
 
 5. `pid ok`. Write a fifth events run for a new task `012-dead` whose run-start pid is, in turn: a `sleep 100` process's pid; the pid of a shim started as `... cli.py run tasks/other.md` in alpha; the pid of a shim started for `012-dead` but with cwd `/tmp`; and a pid no process holds. Every time, `status` shows `012-dead` `dead`. While that `other.md` shim is up in alpha, legacy `008-fresh` reads `running` with text `starting`, `010-killed` stays `dead` with `mid 02-critic`, and `011-live` stays `running` with `in 03-coder`, even though both of those are newer than `008-fresh`. Stop the `other.md` shim. Separately, in a scratch repo with no events files: task `020-halted` has a log ending `pipeline stopped at 04-coder` and no `stopping for a human` line, and task `019-cut` has a log `== coder (03-coder) attempt 1` with no finished line and an older mtime. With two live `cli.py run tasks/other.md` processes in that repo, `019-cut` reads `running` with text `in 03-coder` (not `mid 03-coder`) and JSON `pid` the lower of the two pids, and `020-halted` stays `stopped` with `at 04-coder, runner asked for a human`. While the 011-live shim is the only live process, `008-fresh` stays `never-started`. After that shim is killed, `011-live` reads `dead` with `mid 03-coder`.
 
@@ -83,4 +96,4 @@ Two repos under `/tmp/qa-021/fleet`. Each repo is `git init -b main` with the li
 
 12. `untouched ok`. This task's commits change no file under `marestail/tui/` or `.marestail/phases/`, and `.marestail/phases/sources/marestail-runs.py` is still on disk, unmodified. `marestail run`, `marestail watch`, `marestail tasks check` and `marestail gate --tier fast` behave as before. The README has a `## Status` section between `## Watch` and `## Dashboard` naming both command lines, the seven states, the scan rule, the `"v": 1` JSON shape and what `abandon` moves and writes and how to undo it; no new `MARESTAIL_` variable appears. `.importlinter` lists `marestail.status` on the layer line that holds `marestail.timeline : marestail.ran_against` and in `foundations-import-nothing-above`.
 
-13. `pytest ok`. `.venv/bin/pytest tests/test_status.py tests/test_cli.py tests/test_green_repo.py::test_help_lists_every_subcommand tests/test_events.py::test_existing_commands_keep_text -q --tb=line` exits 0. Those two help tests, plus `test_help_lists_commands_in_order`, expect `status,abandon` after `watch`. `test_help_lists_remote_and_status_and_queue_stay_absent` keeps only `queue` absent. The status tests are in-process and hermetic: fixtures under `tmp_path`, the process list stubbed with `monkeypatch`, `git` and `last` stubbed through `fake_run` or run only in tmp repos, `time.time` and `time.strftime` patched where ages or stamps are asserted, and no real process started or signalled.
+13. `pytest ok`. `.venv/bin/pytest tests/test_status.py tests/test_cli.py tests/test_green_repo.py::test_help_lists_every_subcommand tests/test_events.py::test_existing_commands_keep_text -q --tb=line` exits 0. `test_help_lists_every_subcommand`, `test_existing_commands_keep_text` and `test_help_lists_commands_in_order` expect `status,abandon` after `watch`. `test_root_parser_help_and_subcommands` expects `list(action.choices)` to be `gate`, `run`, `tasks`, `install`, `sonar`, `watch`, `status`, `abandon`, `dash`, `perf`, `visual`, `route`, `remote`, `graph`, `depth`; its other `help_by_name` lines stay as they are. `test_help_lists_remote_and_status_and_queue_stay_absent` keeps only `queue` absent. The status tests are in-process and hermetic: fixtures under `tmp_path`, the process list stubbed with `monkeypatch`, `git` and `last` stubbed through `fake_run` or run only in tmp repos, `time.time` and `time.strftime` patched where ages or stamps are asserted, and no real process started or signalled.
