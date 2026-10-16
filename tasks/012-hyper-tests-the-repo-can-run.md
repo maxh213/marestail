@@ -1,3 +1,7 @@
++++
+depends = ["011-install-scope-hyper-commits-nothing"]
+stack = true
++++
 # 012 — under hyper scope, the tests are ones the repository can already run, and mutation proves they bite
 
 After this task, a reviewer who has never heard of marestail can run the tests in a hyper-scoped pull request with what is already in the repository. And marestail can still prove those tests mean something, even when the repository has no test runner and no coverage tool.

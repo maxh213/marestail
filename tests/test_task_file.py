@@ -338,7 +338,7 @@ def test_check_orders_lines_by_path(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_docs_and_import_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     assert_documented()
     assert_imports()
-    assert_tasks_untouched()
+    assert_tasks_well_formed()
     assert_install_copies_the_readme(tmp_path, monkeypatch, capsys)
 
 
@@ -390,16 +390,17 @@ def assert_imports() -> None:
     assert imported_modules(checkout_root(Path(__file__)) / "marestail" / "task_file.py") == {"tomllib", "pathlib", "dataclasses"}
 
 
-def assert_tasks_untouched() -> None:
+def assert_tasks_well_formed() -> None:
     tasks = checkout_root(Path(__file__)) / "tasks"
     assert "## Dependencies" not in (tasks / "README.md").read_text()
-    assert (tasks / "018-runs-stay-nice.md").read_text().startswith("# 018 — runs stay nice")
-    assert (tasks / "019-tasks-say-what-they-depend-on.md").read_text().startswith("# 019 — task files say what they depend on")
-    assert opening_fences(tasks) == []
+    assert task_file.read(tasks / "018-runs-stay-nice.md").body.startswith("# 018 — runs stay nice")
+    assert task_file.read(tasks / "019-tasks-say-what-they-depend-on.md").body.startswith("# 019 — task files say what they depend on")
+    assert task_file.check([tasks]) == []
+    assert without_front_matter(tasks) == []
 
 
-def opening_fences(folder: Path) -> list[str]:
-    return [path.name for path in sorted(folder.glob("*.md")) if path.read_text().splitlines()[0] == "+++"]
+def without_front_matter(folder: Path) -> list[str]:
+    return [path.name for path in sorted(folder.glob("0*.md")) if not task_file.read(path).has_front_matter]
 
 
 def assert_install_copies_the_readme(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

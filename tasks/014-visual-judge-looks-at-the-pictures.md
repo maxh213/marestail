@@ -1,3 +1,7 @@
++++
+depends = ["013-visual-capture-and-geometry-gate"]
+stack = true
++++
 # 014 — a judge looks at the before and after pictures and says whether the fix is visible
 
 After this task, a run that was meant to change what a user sees cannot finish until a judge that can read images has looked at the real page before and after, and agreed that the symptom in the task is gone.

@@ -1,3 +1,7 @@
++++
+depends = ["004-hard-scope-install-skips-agent-docs"]
+stack = true
++++
 # 005 — a run that was not checked against the running app does not end as "pipeline complete"
 
 After this task, someone reading the last line of a `marestail run` knows whether QA exercised the real app. Today they cannot. On otwarteklatki/next-boilerplate#537 the QA step wrote in its handoff "Live CARE careconf.eu/donate was not opened… A human should still do steps 1 and 3", built a fake page instead, and the run printed `pipeline complete` and exited 0. The change was merged. On the real page it rendered a 425px widget 1408px wide over the page text.

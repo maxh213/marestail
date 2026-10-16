@@ -1,3 +1,7 @@
++++
+depends = ["018-runs-stay-nice"]
+stack = true
++++
 # 019 — task files say what they depend on: `+++` front matter and `marestail tasks check`
 
 After this task, a task file can open with a short TOML block that names the tasks it depends on and whether it runs on its dependency's branch, and `marestail tasks check` tells you, one line per problem, whether a folder of task files is well-formed before anything runs:

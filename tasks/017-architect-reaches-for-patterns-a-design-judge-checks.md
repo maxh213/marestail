@@ -1,3 +1,7 @@
++++
+depends = ["016-commit-labels-name-the-backend"]
+stack = true
++++
 # 017 — the architect reaches for a design pattern when the code calls for one, and a design judge checks it
 
 After this task, when the code a task touched has a real use for a pattern, the architect introduces it: for example, the same `switch` on a kind in three places becomes a discriminated union, or repeated construction becomes a factory function. It uses the form that is idiomatic in that language and cites the rule it applied. A new `design` judge runs straight after the architect. It bounces back to the architect when a pattern was added without its trigger being there, or when a clear trigger in the touched code was missed.

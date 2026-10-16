@@ -1,3 +1,7 @@
++++
+depends = ["003-pipeline-timeline"]
+stack = true
++++
 # 004 — a hard-scoped install leaves CLAUDE.md and AGENTS.md alone
 
 After this task, a developer who hard-scopes marestail to one file in a shared repo can run `marestail install --scope hard .` and open a pull request that adds no marestail text to `CLAUDE.md` and creates no `AGENTS.md`. Hard scope means only the focus paths are gated, and the expectation that goes with it is that the rest of the team is not running marestail. A "Gate" section telling every agent in the repo to run `marestail gate` until it passes is wrong for them: they have no marestail, and the gate does not cover their files.

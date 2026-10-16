@@ -1,3 +1,7 @@
++++
+depends = ["017-architect-reaches-for-patterns-a-design-judge-checks"]
+stack = true
++++
 # 018 — runs stay nice: `marestail run` yields the machine to you again
 
 After this task, `marestail run` drops itself to nice 19 with idle I/O and an OOM score of 500 before it starts any agent, so a fleet of pipelines gives the CPU and disk to the person at the keyboard and is first in line if the kernel runs out of memory. Every agent CLI, gate and hook the run spawns inherits it. Today green runs at the shell's priority: nothing in `marestail/` calls `setpriority`, `ionice` or `oom_score_adj`.

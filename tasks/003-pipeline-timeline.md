@@ -1,3 +1,7 @@
++++
+depends = ["002-hermes-backend"]
+stack = true
++++
 # 003 — a durable per-step timeline: how long each role took and what it did
 
 After this task, every `marestail run` writes `.marestail/runs/<task>/timeline.md` and `.marestail/runs/<task>/timeline.json` that a stranger can read after the process is gone and answer: which role ran, which attempt, how long the gate took, how long the agent took, which model, the verdict, the commits, and a one-line what-was-done. `marestail watch` and the existing stdout lines (`== role (NN-role) attempt N`, `finished in X.Y min: …`, `verdict PASS`) stay exactly as they are; this is an extra artefact, not a rewrite of the live log.

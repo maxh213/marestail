@@ -1,3 +1,7 @@
++++
+depends = ["005-qa-says-what-it-ran-against"]
+stack = true
++++
 # 006 — marestail starts the target's app, so QA has something real to run against
 
 After this task, a target repo can say once, in `marestail.toml`, how to start its app, and the `qa` gate runs with that app up. Today marestail never starts anything: the `qa` gate runs `[qa] cmd` and reads the exit code. On next-boilerplate the command was `npx playwright test`, nothing was listening, `playwright.config.*` is frozen so QA could not add a `webServer`, and QA wrote "No local app or CMS is running, so I'll add a Playwright e2e that serves a harness". Task 005 makes that outcome visible. This task makes the honest outcome reachable.

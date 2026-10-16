@@ -1,3 +1,7 @@
++++
+depends = ["019-tasks-say-what-they-depend-on", "020-runs-write-events"]
+stack = false
++++
 # 021 — `marestail status` says where every run stands, and `marestail abandon` gives one up
 
 After this task, `marestail status` prints one table of every marestail run under the current directory: running, dead (killed mid-step, usually by a shutdown), stopped for a human, never started, complete, abandoned, or a leftover copy of old handoffs. `marestail status --json` prints the same facts for a program to read, and `marestail abandon <repo>/<task>` gives up on a run without deleting anything. Today this lives outside marestail, in the marestail-runs skill's script. A scheduler that runs marestail on several machines needs it as a command with a fixed JSON shape, and 022's `marestail queue` decides whether a dependency is done through the same code.

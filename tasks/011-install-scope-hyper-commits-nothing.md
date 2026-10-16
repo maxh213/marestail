@@ -1,3 +1,7 @@
++++
+depends = ["010-hyper-blast-judge"]
+stack = true
++++
 # 011 — `marestail install --scope hyper` leaves nothing of marestail in the target's history
 
 After this task, a developer can install marestail into a shared repository, run a hyper-scoped fix, and open a pull request that contains the fix and its tests and nothing else. No `marestail.toml`, no Sonar properties, no guidance, no tool configs, no lockfile, no `.gitignore` block, no agent docs.

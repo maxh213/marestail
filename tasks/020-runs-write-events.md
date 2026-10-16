@@ -1,3 +1,7 @@
++++
+depends = ["019-tasks-say-what-they-depend-on"]
+stack = true
++++
 # 020 — runs write events: one line at every step boundary in `.marestail/runs/<task>/events.jsonl`
 
 After this task, every `marestail run` appends one JSON line to `.marestail/runs/<task>/events.jsonl` when it starts, when each worker or judge attempt starts and ends, when it waits out a rate limit, when it records a frozen-file proposal, and when it ends. A script can then say where a run stands, which commit each step left, why it stopped and whether it is still going, without parsing stdout or guessing from handoff file names. A scheduler that runs marestail on several machines needs exactly this; so does `marestail status` (021) and `marestail queue` (022), which are built on it.

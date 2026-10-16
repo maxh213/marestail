@@ -1,3 +1,7 @@
++++
+depends = ["009-run-scope-hyper-reduced-pipeline"]
+stack = true
++++
 # 010 — under hyper scope, a judge rejects any change the fix did not need
 
 After this task, a hyper run cannot hand back a diff that reaches past the code the fix touches. A judge reads every hunk against the task and bounces when the change wanders.

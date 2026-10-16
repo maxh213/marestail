@@ -1,3 +1,7 @@
++++
+depends = ["015-reproduce-the-bug-first"]
+stack = true
++++
 # 016 — commit labels name the backend: `[cursor/auto high]`, not `[auto high]`
 
 After this task, a run whose model string does not already identify its origin stamps commits `[<backend>/<model> <effort>]`, so a cursor run on the auto model stamps `[cursor/auto high]` and a routed cursor session on K3 stamps `[cursor/kimi-k3-max]` instead of the bare `[kimi-k3-max]`. Labels that already name their origin stay byte-identical.

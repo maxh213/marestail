@@ -1,3 +1,7 @@
++++
+depends = ["006-marestail-starts-the-app-for-qa"]
+stack = true
++++
 # 007 — `marestail gate --scope hyper` gates only the lines that changed
 
 After this task, a developer who changes one line in a legacy file can run `marestail gate --scope hyper` and be judged on that line alone. Pre-existing comments, lint findings, dead code, Sonar issues and unkilled mutants elsewhere in the file are not their problem.

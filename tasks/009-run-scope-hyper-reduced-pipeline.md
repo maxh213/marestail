@@ -1,3 +1,7 @@
++++
+depends = ["008-hyper-crap-no-worse-than-base"]
+stack = true
++++
 # 009 — `marestail run --scope hyper` runs a short pipeline: the smallest fix, and the code it touches left a little better
 
 After this task, a developer can hand marestail a bug and get back the smallest change that fixes it, with tests. The code the fix touches is left a little better than it was found, and the code around it is left alone.

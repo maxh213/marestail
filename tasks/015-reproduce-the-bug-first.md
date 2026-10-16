@@ -1,3 +1,7 @@
++++
+depends = ["014-visual-judge-looks-at-the-pictures"]
+stack = true
++++
 # 015 — for a bug, marestail looks at the real thing before anyone writes a spec
 
 After this task, a bug task cannot be specified from its description alone. The run starts by capturing the symptom on the project's real app, and the specifier and the critic have to square the task's stated cause with what was captured.

@@ -1,3 +1,7 @@
++++
+depends = ["012-hyper-tests-the-repo-can-run"]
+stack = true
++++
 # 013 — marestail photographs the real page before and after a change, and fails when the layout moved
 
 After this task, a run that changes how something looks is checked against the project's running app at the base commit and at HEAD. marestail takes the pictures and the measurements itself. A change that pushes an element out of its column, makes the page scroll sideways or lays one thing over another fails without anyone having to look.

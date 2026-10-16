@@ -1,3 +1,6 @@
++++
+depends = []
++++
 # Bring marestail itself through its own gate
 
 This is a refactor: nothing about marestail's behaviour may change. Every subcommand (`gate`, `run`, `install`, `sonar`, `route`, `watch`, `perf`), every flag, every gate name and verdict format, every prompt sent to a worker, the freeze rules, the handoff and run-log layout under `.marestail/`, and the wording of every log line stay exactly as they are. The existing scripts under `tools/test-*.py` must keep passing when run directly with `python3`, exactly as they do today.

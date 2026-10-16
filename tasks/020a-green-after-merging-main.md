@@ -1,3 +1,7 @@
++++
+depends = ["020-runs-write-events"]
+stack = true
++++
 # 020a — the merge of main is green
 
 This task changes no behaviour. On 2026-10-09 `origin/main` was merged into this branch by hand as commit `4a566ae`, bringing the 21 commits main gained after this rewrite branched (`4829521..f71c4e4`): the remote mutation box (`marestail/remote.py` and the offload in `ts.mutation`, `ex.mutation`, `py.mutation`, `java.mutation`), mutant timeouts counted as kills unless `[<lang>] mutation_timeouts = "fail"`, the muex watchdog, the Playwright runner for `ts.tests` with c8 coverage, the `claude-deepseek` account, the Python guidance rulebook, nice, the `pipeline.log` tee, deeper bed discovery with display names in `watch`, and the ☁ marks for gates running on the box. The merge kept this branch's shapes and folded main's behaviour into them; the code that came from main is a copy, not yet through this repo's gate.

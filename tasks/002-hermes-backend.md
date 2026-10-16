@@ -1,3 +1,7 @@
++++
+depends = ["001-junie-backend"]
+stack = true
++++
 # 002 — a hermes backend, so `dandelion route` can send a session to Hermes Agent
 
 After this task, `marestail run tasks/x.md --agent hermes` runs every role on Nous Research's Hermes Agent CLI, and a `--model dandelion/route` run whose `dandelion route` prints `x-ai/grok-4.6 xhigh hermes` runs that session on hermes, stamped `[x-ai/grok-4.6 xhigh]`, instead of stopping with "dandelion route picked 'hermes', which marestail has no backend for". Hermes runs on a Nous Portal subscription, so this adds one more pool of credits the fleet can drain.

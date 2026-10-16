@@ -1,3 +1,7 @@
++++
+depends = ["007-gate-scope-hyper-changed-lines-only"]
+stack = true
++++
 # 008 — under hyper scope, a fix inside a complex legacy function passes CRAP without a rewrite
 
 After this task, a developer who fixes a line inside a function that was already too complex can pass `marestail gate --scope hyper`, as long as they did not make the function worse.

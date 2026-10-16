@@ -1,3 +1,7 @@
++++
+depends = ["000-green-the-repo"]
+stack = true
++++
 # 001 — a junie backend, so `dandelion route` can send a session to Junie
 
 After this task, `marestail run tasks/x.md --agent junie` runs every role on the JetBrains Junie CLI, and a `--model dandelion/route` run whose `dandelion route` prints `gemini-3.8-flash high junie` runs that session on junie, stamped `[gemini-3.8-flash high]`, instead of stopping with "dandelion route picked 'junie', which marestail has no backend for". Junie is a subscription with its own credit balance, so this adds one more pool of quota the fleet can drain.
