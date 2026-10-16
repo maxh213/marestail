@@ -17,6 +17,7 @@ from marestail import cli, depth, graph, install, nice, remote, route, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
+from marestail import status as status_module
 from marestail.config import Config
 from marestail.context import Context
 from marestail.gates import Gate, visual
@@ -27,7 +28,7 @@ from tests.conftest import make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
-COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,dash,perf,visual,route,remote,graph,depth}"
+COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,status,abandon,dash,perf,visual,route,remote,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -154,9 +155,43 @@ def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.Captu
     )
     assert exit_code(["remote", "--help"]) == 0
     assert "    status    box state, uptime and estimated spend today and this month\n" in capsys.readouterr().out
-    for absent in ("status", "queue"):
-        assert exit_code([absent]) == 2
-        assert f"invalid choice: '{absent}'" in capsys.readouterr().err
+    assert exit_code(["queue"]) == 2
+    assert "invalid choice: 'queue'" in capsys.readouterr().err
+
+
+def test_status_and_abandon_join_the_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    text = Path("marestail/cli.py").read_text()
+    assert "\n    from marestail.status import show\n" in text
+    assert "\n    from marestail.status import abandon\n" in text
+    assert "\nfrom marestail.status import" not in text
+    seen: dict[str, Any] = {}
+
+    def fake_show(paths: list[Path], as_json: bool, show_all: bool, queued: bool) -> int:
+        seen["show"] = (paths, as_json, show_all, queued)
+        return 0
+
+    def fake_abandon(targets: list[str], reason: str) -> int:
+        seen["abandon"] = (targets, reason)
+        return 3
+
+    monkeypatch.setattr(status_module, "show", fake_show)
+    monkeypatch.setattr(status_module, "abandon", fake_abandon)
+    assert cli.main(["status", "--json", "--all", "--queued", "fleet", "other"]) == 0
+    assert seen["show"] == ([Path("fleet"), Path("other")], True, True, True)
+    assert cli.main(["abandon", "a/b", "c/d", "--reason", "later"]) == 3
+    assert seen["abandon"] == (["a/b", "c/d"], "later")
+    assert exit_code(["status", "--help"]) == 0
+    capsys.readouterr()
+    assert exit_code(["abandon", "--help"]) == 0
+    abandon_help = capsys.readouterr().out
+    assert "TARGET" in abandon_help
+    assert "--reason" in abandon_help
+    assert exit_code(["queue"]) == 2
+    assert "invalid choice: 'queue'" in capsys.readouterr().err
+    root_help = cli.build_parser().format_help()
+    assert COMMAND_CHOICES in root_help
+    assert "where every marestail run under a directory stands" in root_help
+    assert "give up on a run without deleting it" in root_help
 
 
 def test_remote_status_hands_the_arguments_to_the_remote_module(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -975,6 +1010,8 @@ def test_root_parser_help_and_subcommands() -> None:
         "install",
         "sonar",
         "watch",
+        "status",
+        "abandon",
         "dash",
         "perf",
         "visual",
