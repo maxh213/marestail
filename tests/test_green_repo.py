@@ -224,6 +224,7 @@ def test_help_lists_every_subcommand() -> None:
         "install",
         "sonar",
         "watch",
+        "dash",
         "perf",
         "visual",
         "route",
@@ -246,6 +247,7 @@ def parse_help(parser: argparse.ArgumentParser, argv: list[str]) -> None:
         (["sonar"], ["up", "down", "setup"]),
         (["perf"], ["run", "db"]),
         (["watch"], ["--refresh", "--all"]),
+        (["dash"], ["--root", "--host", "--port", "--dandelion-every", "--runs-script"]),
     ],
 )
 def test_subcommand_help_lists_its_flags_in_order(argv: list[str], flags: list[str], capsys: pytest.CaptureFixture[str]) -> None:

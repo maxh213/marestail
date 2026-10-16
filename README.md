@@ -160,6 +160,20 @@ A reviewer of the pull request sees only the fix and its tests. They will not se
 
 `marestail watch [paths...]` opens a live curses TUI of every repo with a running marestail pipeline — beds whose `.marestail` directory has a live worker process (`--all` shows every bed, running or not). With no paths it reads `~/workspace` when that exists, else the current directory, and walks nested project folders (so `hermes/doin_it` is a bed, not only the top-level checkouts). `marestail run` appends `.marestail/runs/<task>/pipeline.log` as well as printing; watch tails that, or the newest `overnight-*.log`, so a run started without `overnight.sh` still shows its role. Each repo is a bed, and the active worker's row carries its role, elapsed time and a scrolling one-line tail of its latest output, so you can see what the fleet is doing without opening a single log. Between agent sessions the row shows what the runner itself is doing — the gate in progress, or its latest log line such as perf sample filling — falling back to `between steps` only when nothing is happening. While a claude worker runs, its bed grows up to three dim lines tailed live from the agent's session transcript — its latest thinking, text and tool calls — so progress is visible between step finishes. Enter on a worker opens its full conversation: the prompt it was sent, the handoff it wrote, the result it returned. Arrows or j/k move, Enter opens, q quits. Stdlib curses only, nothing to install. The panels are a registry built to be extended — module graph and coverage views are planned.
 
+## Dashboard
+
+`marestail dash` serves the same picture as a web page: the host strip (CPU per core sampled every 2 s, memory as htop counts it, swap and disk), dandelion's `--json` (every provider's windows, both routes, re-probed in the background every `--dandelion-every` seconds, 600 by default, and kept in `~/.cache/marestail/dash-dandelion.json` so a restart shows the last probe at once), every `marestail watch --all` bed with its running role, recent steps and output tail, and the run table from the marestail-runs script (`--runs-script`, by default `~/.claude/skills/marestail-runs/scripts/runs.py`; without it the table is empty). The page refreshes itself every 30 s; the switches above each section hide idle beds, finished runs and providers without usage windows, and remember the choice in the browser. A task name in the run table opens the task file, the latest step of its `pipeline.log` and its newest handoff.
+
+It listens on `--host 127.0.0.1` and `--port 8787` and has no login, so publish it through a proxy that adds one; it only reads, and the task view refuses any repo outside `--root` (default `~/workspace`). `GET /json` returns dandelion's last probe and the run table, and `GET /task?repo=<repo>&task=<task>` returns one task view as JSON. The code lives in `marestail/tui/web.py`, `marestail/tui/web_sources.py` and `marestail/tui/web_render.py`. To keep it running, a systemd unit such as:
+
+```ini
+[Service]
+User=you
+Environment=PATH=/path/to/marestail/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/path/to/marestail/bin/marestail dash
+Restart=on-failure
+```
+
 ## Pipeline
 
 | Step | Kind | Gate | hyper | Does |

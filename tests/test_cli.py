@@ -27,7 +27,7 @@ from tests.conftest import make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
-COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,perf,visual,route,remote,graph,depth}"
+COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,dash,perf,visual,route,remote,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -227,7 +227,7 @@ def assert_tasks_help(capsys: pytest.CaptureFixture[str]) -> None:
 
 def assert_unchanged_command_help(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     assert "--tier" in help_text(capsys, "gate")
-    for name in ("watch", "perf", "visual", "install", "sonar", "graph", "depth"):
+    for name in ("watch", "dash", "perf", "visual", "install", "sonar", "graph", "depth"):
         help_text(capsys, name)
     assert_route_needs_dandelion(monkeypatch, capsys)
 
@@ -348,6 +348,29 @@ def test_watch_command_defaults_to_workspace(monkeypatch: pytest.MonkeyPatch, tm
     (tmp_path / "workspace").mkdir()
     assert cli.main(["watch"]) == 4
     assert fake.calls == [([tmp_path / "workspace"], 2.0, False)]
+
+
+def fake_web(monkeypatch: pytest.MonkeyPatch) -> Recorder:
+    fake = Recorder(5)
+    web = types.ModuleType(cli.TUI_WEB)
+    vars(web)["run"] = fake
+    monkeypatch.setitem(sys.modules, cli.TUI_WEB, web)
+    return fake
+
+
+def test_dash_command_passes_every_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = fake_web(monkeypatch)
+    args = ["dash", "--root", "/r", "--host", "0.0.0.0", "--port", "9000", "--dandelion-every", "60", "--runs-script", "/s/runs.py"]
+    assert cli.main(args) == 5
+    assert fake.calls == [(Path("/r"), "0.0.0.0", 9000, 60.0, Path("/s/runs.py"))]
+
+
+def test_dash_command_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fake = fake_web(monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "workspace").mkdir()
+    assert cli.main(["dash"]) == 5
+    assert fake.calls == [(tmp_path / "workspace", "127.0.0.1", 8787, 600.0, None)]
 
 
 def test_default_watch_roots_fall_back_to_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -952,6 +975,7 @@ def test_root_parser_help_and_subcommands() -> None:
         "install",
         "sonar",
         "watch",
+        "dash",
         "perf",
         "visual",
         "route",

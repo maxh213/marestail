@@ -39,6 +39,7 @@ END_TURN = "end_turn"
 STORE_TRUE = "store_true"
 TREE = "--tree"
 TUI_APP = "marestail.tui.app"
+TUI_WEB = "marestail.tui.web"
 SCOPE_CHOICES = ("all", "changed", "hard", "hyper")
 TIER_CHOICES = ("fast", "sonar", "full", "qa", "all")
 AGENT_CHOICES = tuple(dict.fromkeys([*route_module.BACKENDS.values(), backends.KILO]))
@@ -69,6 +70,11 @@ HELP_INSTALL_SCOPE = (
 HELP_REFRESH = "seconds between redraws"
 HELP_WATCH_ALL = "show every repo with a .marestail directory, not just those with a running pipeline"
 HELP_WATCH_PATHS = "directories to scan for repos with a .marestail directory"
+HELP_DASH_ROOT = "directory to scan for repos and runs (default ~/workspace, else the current directory)"
+HELP_DASH_HOST = "address to listen on (default 127.0.0.1; put a proxy in front to publish it)"
+HELP_DASH_PORT = "port to listen on"
+HELP_DASH_EVERY = "seconds between dandelion --json probes"
+HELP_DASH_RUNS = "the marestail-runs script that lists every run (default ~/.claude/skills/marestail-runs/scripts/runs.py)"
 HELP_AUTO = "skip the approval pause after the critic"
 HELP_PERF_DB = "reset the tree's performance database before every sample"
 HELP_WAIT = "block until the build finishes instead of detaching"
@@ -98,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
+    add_dash(commands.add_parser("dash", help="the watch fleet, dandelion, the run table and host load as a web page"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
     add_visual(commands.add_parser("visual", help="photograph and measure the page at the base commit and at HEAD"))
     commands.add_parser(
@@ -246,6 +253,15 @@ def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refresh", type=float, default=2.0, help=HELP_REFRESH)
     parser.add_argument("--all", action=STORE_TRUE, help=HELP_WATCH_ALL)
     parser.set_defaults(handler=watch_command)
+
+
+def add_dash(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--root", help=HELP_DASH_ROOT)
+    parser.add_argument("--host", default="127.0.0.1", help=HELP_DASH_HOST)
+    parser.add_argument("--port", type=int, default=8787, help=HELP_DASH_PORT)
+    parser.add_argument("--dandelion-every", type=float, default=600.0, help=HELP_DASH_EVERY)
+    parser.add_argument("--runs-script", help=HELP_DASH_RUNS)
+    parser.set_defaults(handler=dash_command)
 
 
 def remote_status_command(args: argparse.Namespace) -> int:
@@ -479,6 +495,13 @@ def run_command(args: argparse.Namespace) -> int:
 def watch_command(args: argparse.Namespace) -> int:
     paths = args.paths or default_watch_roots()
     code: int = importlib.import_module(TUI_APP).run([Path(p) for p in paths], args.refresh, args.all)
+    return code
+
+
+def dash_command(args: argparse.Namespace) -> int:
+    root = Path(args.root) if args.root else default_watch_roots()[0]
+    runs_script = Path(args.runs_script) if args.runs_script else None
+    code: int = importlib.import_module(TUI_WEB).run(root, args.host, args.port, args.dandelion_every, runs_script)
     return code
 
 
