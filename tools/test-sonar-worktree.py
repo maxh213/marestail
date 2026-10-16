@@ -13,7 +13,7 @@ from marestail.gates.sonar import git_mounts, scanner_command
 CREDS = {"url": "http://127.0.0.1:9000", "token": "test-token"}
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
@@ -41,6 +41,10 @@ if __name__ == "__main__":
         expect("worktree-mounts-common-dir-read-only", git_mounts(context(worktree)), ["-v", f"{main / '.git'}:{main / '.git'}:ro"])
         expect("not-a-repo-mounts-nothing", git_mounts(context(plain)), [])
         command = scanner_command(context(worktree), CREDS, "k")
-        expect("mount-before-image", command.index(f"{main / '.git'}:{main / '.git'}:ro") < command.index("sonarsource/sonar-scanner-cli"), True)
+        expect(
+            "mount-before-image",
+            command.index(f"{main / '.git'}:{main / '.git'}:ro") < command.index("sonarsource/sonar-scanner-cli"),
+            True,
+        )
         expect("project-still-mounted", f"{worktree}:{worktree}" in command, True)
     print("sonar worktree ok")

@@ -7,19 +7,20 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import freeze, runner
+from marestail import freeze, runner, worktree
 from marestail.config import Config
 from marestail.perf import db as perf_db
-from marestail.perf import hygiene
+from marestail.perf import hygiene, results, samples, settings, table
 from marestail.perf import image as perf_image
-from marestail.perf import results, samples, settings, table
 from marestail.perf import review as perf_review
 from marestail.perf import trees as perf_trees
-from marestail.pipeline import find, names
+from marestail.pipeline import Judge, find, names
 from marestail.runner import Run, run_judge, run_step
 
 CLI = Path(__file__).resolve().parent.parent / "marestail" / "cli.py"
@@ -34,12 +35,12 @@ TABLE_WITH_ROW = "# Performance\n\n| Task | Commit | Date | Rows |\n|---|---|---
 ALL_TREES = ("baseline", "head", "pre-marestail")
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: Any, wanted: Any) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def git(root, *args):
+def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
@@ -63,8 +64,14 @@ def new_repo(tmp: str, readme_first: bool = False) -> Path:
     return root
 
 
-def state(root: Path, raw=None, retries: int = 1) -> Run:
-    return Run(config=Config(root=root, raw=raw or {"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=retries, agent="claude")
+def state(root: Path, raw: dict[str, Any] | None = None, retries: int = 1) -> Run:
+    return Run(
+        config=Config(root=root, raw=raw or {"git": {"base": "main"}}),
+        task=root / "tasks" / "t.md",
+        model=None,
+        retries=retries,
+        agent="claude",
+    )
 
 
 def worktree_count(root: Path) -> int:
@@ -77,7 +84,7 @@ def commit_change(root: Path, content: str) -> None:
 
 
 def verdict_file(prompt: str) -> Path:
-    return Path(re.search(r"Write your verdict to (\S+) and", prompt).group(1))
+    return Path(cast(re.Match[str], re.search(r"Write your verdict to (\S+) and", prompt)).group(1))
 
 
 def write_script(root: Path, name: str, body: str, executable: bool = True) -> None:
@@ -120,13 +127,13 @@ def sampling_judge(verdict: str) -> str:
 
 
 @contextlib.contextmanager
-def quiet():
+def quiet() -> Iterator[None]:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         yield
 
 
 @contextlib.contextmanager
-def agent_stub(folder: Path, body: str):
+def agent_stub(folder: Path, body: str) -> Iterator[None]:
     stub = folder / "stub-agent"
     stub.write_text(body)
     stub.chmod(0o755)
@@ -141,11 +148,11 @@ def agent_stub(folder: Path, body: str):
             if previous[key] is None:
                 os.environ.pop(key, None)
             else:
-                os.environ[key] = previous[key]
+                os.environ[key] = cast(str, previous[key])
 
 
 @contextlib.contextmanager
-def env_var(key: str, value: str | None):
+def env_var(key: str, value: str | None) -> Iterator[None]:
     previous = os.environ.get(key)
     if value is None:
         os.environ.pop(key, None)
@@ -161,63 +168,102 @@ def env_var(key: str, value: str | None):
 
 
 @contextlib.contextmanager
-def replaced_invoke(replacement):
+def replaced_invoke(replacement: Callable[[Run, str, str], None]) -> Iterator[None]:
     original = runner.invoke
-    runner.invoke = replacement
+    runner.invoke = cast(Any, replacement)
     try:
         yield
     finally:
         runner.invoke = original
 
 
-def measurement(baseline, head, better="lower", target="add_one", metric="p50", pre=None, unit="ms", values=1000, interval=None, control=None):
+def measurement(
+    baseline: float | None,
+    head: float | None,
+    better: str = "lower",
+    target: str = "add_one",
+    metric: str = "p50",
+    pre: float | None = None,
+    unit: str = "ms",
+    values: int = 1000,
+    interval: tuple[float, float] | None = None,
+    control: float | None = None,
+) -> results.Measurement:
     return results.Measurement(target, metric, unit, better, pre, baseline, head, 10, "perf/bench_t", values, interval, control)
 
 
-def pooled(tree, values, target="t", script="perf/bench_t"):
-    return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": False, "reset_ms": None, "target": target, "unit": "ms", "better": "lower", "values": values}
+def pooled(tree: str, values: list[float], target: str = "t", script: str = "perf/bench_t") -> dict[str, Any]:
+    return {
+        "tree": tree,
+        "sha": "x",
+        "script": script,
+        "sample": 1,
+        "db": False,
+        "reset_ms": None,
+        "target": target,
+        "unit": "ms",
+        "better": "lower",
+        "values": values,
+    }
 
 
-def record(tree, target="t", value=1.0, script="perf/bench_t", db=False, unit="ms"):
-    return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": db, "reset_ms": None, "target": target, "unit": unit, "better": "lower", "value": value}
+def record(
+    tree: str, target: str = "t", value: float = 1.0, script: str = "perf/bench_t", db: bool = False, unit: str = "ms"
+) -> dict[str, Any]:
+    return {
+        "tree": tree,
+        "sha": "x",
+        "script": script,
+        "sample": 1,
+        "db": db,
+        "reset_ms": None,
+        "target": target,
+        "unit": unit,
+        "better": "lower",
+        "value": value,
+    }
 
 
-def absent(tree, target="t", script="perf/bench_t"):
+def absent(tree: str, target: str = "t", script: str = "perf/bench_t") -> dict[str, Any]:
     return {"tree": tree, "sha": "x", "script": script, "sample": 1, "db": False, "reset_ms": None, "target": target, "absent": True}
 
 
-def pipeline_order():
-    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
-    perf = find("perf")
+def pipeline_order() -> None:
+    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"])
+    perf = cast(Judge, find("perf"))
     expect("perf-bounce-to", perf.bounce_to, "coder")
     expect("perf-writes", perf.writes, ("perf/**",))
 
 
-def freeze_paths():
+def freeze_paths() -> None:
     config = Config(root=Path("/tmp"), raw={})
     touched = ["perf/bench_x.py", "PERFORMANCE.md", "src/app.py"]
     expect("coder-frozen", freeze.frozen_paths(config, "coder", touched), ["perf/bench_x.py", "PERFORMANCE.md"])
     expect("cleaner-frozen", freeze.frozen_paths(config, "cleaner", touched), ["perf/bench_x.py", "PERFORMANCE.md"])
 
 
-def pinned_bounce_keeps_only_writes():
+def pinned_bounce_keeps_only_writes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         verdict = "VERDICT: BOUNCE specifier\n1. add_one is twice as slow; batch it in src.py:1\n"
         with agent_stub(Path(tmp), sampling_judge(verdict)), quiet():
-            outcome, target, _ = run_judge(state(root), find("perf"))
+            outcome, target, _ = run_judge(state(root), cast(Judge, find("perf")))
         expect("pinned-verdict", (outcome, target), ("BOUNCE", None))
         expect("pinned-subject", git(root, "log", "-1", "--format=%s").endswith("perf verdict: BOUNCE"), True)
         expect("verdict-commit-files", git(root, "show", "--name-only", "--format=", "HEAD"), "perf/bench_x.py")
         expect("bench-executable", git(root, "ls-files", "-s", "perf/bench_x.py").split()[0], "100755")
-        expect("scratch-not-committed", [(root / "perf" / "_probe_timing.py").exists(), (root / "perf" / "__pycache__").exists()], [False, False])
+        expect(
+            "scratch-not-committed",
+            [(root / "perf" / "_probe_timing.py").exists(), (root / "perf" / "__pycache__").exists()],
+            [False, False],
+        )
         expect("src-restored", (root / "src.py").read_text(), "original\n")
         expect("stray-removed", (root / "stray.txt").exists(), False)
         expect("table-not-written-on-bounce", (root / "PERFORMANCE.md").exists(), False)
         expect("tree-clean", git(root, "status", "--porcelain"), "")
 
 
-def disabled_skip():
+def disabled_skip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         before = git(root, "rev-parse", "HEAD")
@@ -229,7 +275,7 @@ def disabled_skip():
         expect("disabled-no-commit", git(root, "rev-parse", "HEAD"), before)
 
 
-def start_commit_recorded_once():
+def start_commit_recorded_once() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         config = state(root).config
@@ -237,14 +283,14 @@ def start_commit_recorded_once():
         perf_trees.record_start(config, "t")
         commit_change(root, "changed\n")
         perf_trees.record_start(config, "t")
-        expect("start-kept", perf_trees.start_commit(config, "t"), (first, ""))
-        perf_trees.start_file(config, "t").unlink()
-        sha, note = perf_trees.start_commit(config, "t")
+        expect("start-kept", worktree.start_commit(config, "t"), (first, ""))
+        worktree.start_file(config, "t").unlink()
+        sha, note = worktree.start_commit(config, "t")
         expect("start-fallback-sha", sha, git(root, "merge-base", "main", "HEAD"))
         expect("start-fallback-note", "git merge-base main HEAD" in note, True)
 
 
-def start_commit_archived():
+def start_commit_archived() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         run_state = state(root)
@@ -252,11 +298,11 @@ def start_commit_archived():
         run_state.handoffs.mkdir(parents=True)
         (run_state.handoffs / "01-coder.md").write_text("done\n")
         runner.archive_handoffs(run_state)
-        expect("start-moved", perf_trees.start_file(run_state.config, "t").exists(), False)
+        expect("start-moved", worktree.start_file(run_state.config, "t").exists(), False)
         expect("start-archived", len(list(run_state.folder.glob("handoffs-*/start-commit"))), 1)
 
 
-def pre_marestail_commit():
+def pre_marestail_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, readme_first=True)
         config = state(root).config
@@ -269,7 +315,7 @@ def pre_marestail_commit():
         expect("pre-root-commit", perf_trees.pre_marestail_commit(state(root).config), (None, perf_trees.NO_PRE_MARESTAIL))
 
 
-def trees_during_attempt():
+def trees_during_attempt() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, readme_first=True)
         run_state = state(root)
@@ -278,9 +324,9 @@ def trees_during_attempt():
         readme = git(root, "rev-list", "--max-parents=0", "HEAD")
         commit_change(root, "changed\n")
         head = git(root, "rev-parse", "HEAD")
-        seen = {}
+        seen: dict[str, Any] = {}
 
-        def inspecting(current, label, prompt):
+        def inspecting(current: Run, label: str, prompt: str) -> None:
             data = json.loads(perf_trees.trees_file(current.config).read_text())
             seen["trees"] = {tree["tree"]: tree["sha"] for tree in data["trees"]}
             seen["paths"] = [Path(tree["path"]) for tree in data["trees"] if tree["tree"] != "head"]
@@ -289,7 +335,7 @@ def trees_during_attempt():
             verdict_file(prompt).write_text("VERDICT: PASS\n")
 
         with replaced_invoke(inspecting), quiet():
-            run_judge(run_state, find("perf"))
+            run_judge(run_state, cast(Judge, find("perf")))
         expect("trees-listed", seen["trees"], {"baseline": start, "head": head, "pre-marestail": readme})
         expect("trees-checked-out", seen["checked_out"], [start, readme])
         expect("trees-prompt", "# Trees\n- baseline: " + start in seen["prompt"], True)
@@ -299,29 +345,26 @@ def trees_during_attempt():
         expect("empty-pass-writes-no-table", (root / "PERFORMANCE.md").exists(), False)
 
 
-def trees_removed_when_invoke_raises():
+def trees_removed_when_invoke_raises() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, readme_first=True)
         run_state = state(root)
-        seen = {}
+        seen: dict[str, Any] = {}
 
-        def raising(current, label, prompt):
+        def raising(current: Run, label: str, prompt: str) -> None:
             data = json.loads(perf_trees.trees_file(current.config).read_text())
             seen["paths"] = [Path(tree["path"]) for tree in data["trees"] if tree["tree"] != "head"]
             raise RuntimeError("agent crashed")
 
-        with replaced_invoke(raising), quiet():
-            try:
-                run_judge(run_state, find("perf"))
-            except RuntimeError:
-                pass
+        with replaced_invoke(raising), quiet(), contextlib.suppress(RuntimeError):
+            run_judge(run_state, cast(Judge, find("perf")))
         expect("raise-trees-seen", len(seen["paths"]), 2)
         expect("raise-trees-removed", [path.exists() for path in seen["paths"]], [False, False])
         expect("raise-trees-pruned", worktree_count(root), 1)
         expect("raise-trees-file-removed", perf_trees.trees_file(run_state.config).exists(), False)
 
 
-def perf_run_exit_codes():
+def perf_run_exit_codes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         (root / "marestail.toml").write_text('[git]\nbase = "main"\n\n[perf]\nsample_timeout = 1\n')
@@ -345,7 +388,7 @@ def perf_run_exit_codes():
         expect("run-ok-recorded", len(perf_trees.samples_file(Config(root=root, raw={})).read_text().splitlines()), 3)
 
 
-def perf_run_records():
+def perf_run_records() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         write_script(
@@ -359,40 +402,58 @@ def perf_run_records():
             expect("records-exit", samples.run_command("perf/bench_mixed.py", "head", 1, False), 0)
         lines = [json.loads(line) for line in perf_trees.samples_file(config).read_text().splitlines()]
         stamp = hygiene.fingerprint(root, "perf/bench_mixed.py")
-        base = {"tree": "head", "sha": sha, "script": "perf/bench_mixed.py", "fingerprint": stamp, "sample": 1, "db": False, "reset_ms": None}
-        expect("records", lines, [base | {"target": "a", "unit": "ms", "better": "lower", "value": 2.5}, base | {"target": "b", "absent": True}])
+        base = {
+            "tree": "head",
+            "sha": sha,
+            "script": "perf/bench_mixed.py",
+            "fingerprint": stamp,
+            "sample": 1,
+            "db": False,
+            "reset_ms": None,
+        }
+        expect(
+            "records",
+            lines,
+            [base | {"target": "a", "unit": "ms", "better": "lower", "value": 2.5}, base | {"target": "b", "absent": True}],
+        )
 
 
-def percentiles():
+def percentiles() -> None:
     expect("percentiles", results.percentiles([float(value) for value in range(20, 0, -1)]), (10.5, 19.0))
     expect("percentiles-single", results.percentiles([4.0]), (4.0, 4.0))
 
 
-def validation_errors():
+def validation_errors() -> None:
     trees = ["baseline", "head"]
 
-    def problems(records, benches=("perf/bench_t",)):
+    def problems(records: list[dict[str, Any]], benches: tuple[str, ...] = ("perf/bench_t",)) -> list[str]:
         return results.compile_records(records, trees, list(benches), results.Policy(min_runs=2))[1]
 
-    def has(name, found, fragment):
+    def has(name: str, found: list[str], fragment: str) -> None:
         expect(name, any(fragment in problem for problem in found), True)
 
     valid = [record("baseline"), record("baseline"), record("head"), record("head")]
     expect("valid", problems(valid), [])
-    has("unit", problems(valid + [record("head", unit="s")]), "`t` reports more than one unit: ms, s")
-    has("both", problems(valid + [absent("head")]), "`t` has both values and absent on the head tree")
+    has("unit", problems([*valid, record("head", unit="s")]), "`t` reports more than one unit: ms, s")
+    has("both", problems([*valid, absent("head")]), "`t` has both values and absent on the head tree")
     other = [record("baseline", target="o"), record("baseline", target="o"), record("head", target="o"), record("head", target="o")]
     has("unmeasured", problems(valid[:2] + other), "`t` was not measured on the head tree")
     has("min-runs", problems(valid[1:]), "`t` has 1 samples on the baseline tree; min_runs is 2")
-    has("db", problems([record("baseline", db=True), record("baseline", db=True), record("head"), record("head")]), "`perf/bench_t` was run with --db on some trees and without it on others")
+    has(
+        "db",
+        problems([record("baseline", db=True), record("baseline", db=True), record("head"), record("head")]),
+        "`perf/bench_t` was run with --db on some trees and without it on others",
+    )
     has("bench", problems(valid, ("perf/bench_t", "perf/bench_u")), "`perf/bench_u` has no samples on the baseline tree")
     has("both-null", problems([absent("baseline"), absent("head")]), "`t` is absent on both the baseline and head trees")
-    measured, _ = results.compile_records(valid + [absent("pre-marestail")], ["baseline", "head", "pre-marestail"], ["perf/bench_t"], results.Policy(min_runs=2))
+    measured, _ = results.compile_records(
+        [*valid, absent("pre-marestail")], ["baseline", "head", "pre-marestail"], ["perf/bench_t"], results.Policy(min_runs=2)
+    )
     expect("pre-null", [item.pre_marestail for item in measured], [None, None])
 
 
-def classification():
-    def status(item, threshold=10):
+def classification() -> None:
+    def status(item: results.Measurement, threshold: float = 10) -> tuple[str, float | None]:
         found = results.classify(item, results.Policy(threshold_percent=threshold))
         return found.status, found.change
 
@@ -407,10 +468,14 @@ def classification():
     expect("zero-baseline", status(measurement(0, 5)), ("degraded", 100.0))
 
 
-def audits():
+def audits() -> None:
     degraded = results.classify(measurement(10, 20), POLICY)
     benches = ["perf/bench_t"]
-    expect("audit-unflagged", results.audit([degraded], [], "VERDICT: PASS\n", "PASS", benches), ["`add_one` is degraded (+100.0% p50) but the verdict does not name it"])
+    expect(
+        "audit-unflagged",
+        results.audit([degraded], [], "VERDICT: PASS\n", "PASS", benches),
+        ["`add_one` is degraded (+100.0% p50) but the verdict does not name it"],
+    )
     expect("audit-flagged", results.audit([degraded], [], "VERDICT: PASS\n- add_one: +100% p50, accepted\n", "PASS", benches), [])
     expect(
         "audit-missing-column",
@@ -422,11 +487,13 @@ def audits():
     expect("audit-empty-with-benches", len(results.audit([], [], "VERDICT: PASS\n", "PASS", benches)), 1)
 
 
-def snapshot(task, classified, pre_commit=None, rows="—", commit="abc1234"):
+def snapshot(
+    task: str, classified: list[results.Classified], pre_commit: str | None = None, rows: str = "—", commit: str = "abc1234"
+) -> table.Snapshot:
     return table.Snapshot(task, commit, "2026-09-13", rows, pre_commit, classified)
 
 
-def table_writes():
+def table_writes() -> None:
     template = table.TEMPLATE.read_text()
     prefix = template[: template.index("| Task |")]
     p50 = results.classify(measurement(10, 20, pre=8), POLICY)
@@ -466,7 +533,7 @@ def table_writes():
     expect("table-prose-after", kept.endswith("\n\nTrailing prose.\n"), True)
 
 
-def rows_cell():
+def rows_cell() -> None:
     config = Config(root=Path("/tmp"), raw={"perf": {"db": {"rows": 1000}}})
     previous = os.environ.pop("MARESTAIL_PERF_DB_ROWS", None)
     try:
@@ -477,14 +544,18 @@ def rows_cell():
             os.environ["MARESTAIL_PERF_DB_ROWS"] = previous
 
 
-def rejected_verdict_retried_with_feedback():
+def rejected_verdict_retried_with_feedback() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, readme_first=True)
         run_state = state(root, retries=5)
-        prompts_seen = []
-        plan = [(2, "VERDICT: PASS\n"), (10, "VERDICT: PASS\n"), (10, "VERDICT: PASS\n## Degradations\n- add_one: +100% p50, accepted: Adds one\n")]
+        prompts_seen: list[str] = []
+        plan = [
+            (2, "VERDICT: PASS\n"),
+            (10, "VERDICT: PASS\n"),
+            (10, "VERDICT: PASS\n## Degradations\n- add_one: +100% p50, accepted: Adds one\n"),
+        ]
 
-        def judging(current, label, prompt):
+        def judging(current: Run, label: str, prompt: str) -> None:
             count, verdict = plan[len(prompts_seen)]
             prompts_seen.append(prompt)
             write_script(root, "bench_x.py", BENCH.split("\n", 2)[2])
@@ -494,20 +565,28 @@ def rejected_verdict_retried_with_feedback():
             verdict_file(prompt).write_text(verdict)
 
         with replaced_invoke(judging), quiet():
-            outcome = run_judge(run_state, find("perf"))
+            outcome = run_judge(run_state, cast(Judge, find("perf")))
         expect("retry-outcome", outcome[0], "PASS")
         expect("retry-attempts", len(prompts_seen), 3)
         expect("retry-first-clean", "# Why your verdict was rejected" in prompts_seen[0], False)
         expect("retry-min-runs", "`add_one` has 2 samples on the baseline tree; min_runs is 10" in prompts_seen[1], True)
         expect("retry-unflagged", "`add_one` is degraded (+100.0% p50) but the verdict does not name it" in prompts_seen[2], True)
-        expect("retry-commit-files", sorted(git(root, "show", "--name-only", "--format=", "HEAD").splitlines()), ["PERFORMANCE.md", "perf/bench_x.py"])
+        expect(
+            "retry-commit-files",
+            sorted(git(root, "show", "--name-only", "--format=", "HEAD").splitlines()),
+            ["PERFORMANCE.md", "perf/bench_x.py"],
+        )
         rows = table.load(root).rows
         expect("retry-table-rows", [row["Task"] for row in rows], ["pre-marestail", "t"])
         expect("retry-table-cell", rows[1]["add_one p50"], "20ms (+100.0%) ⚠")
-        expect("retry-summary", run_state.perf_changes.splitlines()[:3], ["## Performance changes", "- degraded +100.0% `add_one p50`", "- degraded +100.0% `add_one p95`"])
+        expect(
+            "retry-summary",
+            run_state.perf_changes.splitlines()[:3],
+            ["## Performance changes", "- degraded +100.0% `add_one p50`", "- degraded +100.0% `add_one p95`"],
+        )
 
 
-def image_detection():
+def image_detection() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         expect("image-default", perf_image.resolve(root, None), ("postgres:18", "default"))
@@ -524,7 +603,7 @@ def image_detection():
     expect("helper-image-plain", perf_image.helper_image("postgres:16"), "postgres:16")
 
 
-def row_count():
+def row_count() -> None:
     plain = Config(root=Path("/tmp"), raw={})
     configured = Config(root=Path("/tmp"), raw={"perf": {"db": {"rows": 10000000}}})
     with env_var(settings.ROWS_ENV, None):
@@ -546,14 +625,16 @@ def row_count():
             expect("rows-env-invalid", str(error), "[perf.db] rows must be a whole number ≥ 0, got -1")
 
 
-def golden_names():
+def golden_names() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "perf").mkdir()
         tree = perf_trees.Tree("head", "abc123", root)
 
-        def name(rows):
-            return perf_db.golden_name(perf_db.build_database(Config(root=root, raw={}), {"migrate": "true"}, rows, "test", "postgres:16", "test"), tree)
+        def name(rows: int) -> str:
+            return perf_db.golden_name(
+                perf_db.build_database(Config(root=root, raw={}), {"migrate": "true"}, rows, "test", "postgres:16", "test"), tree
+            )
 
         (root / "perf" / "seed.sql").write_text("insert into a select 1;\n")
         expect("golden-rows-differ", name(10000000) != name(50000000), True)
@@ -564,7 +645,7 @@ def golden_names():
         expect("golden-name-shape", re.fullmatch(r"golden_[0-9a-f]{16}", empty) is not None, True)
 
 
-def disk_estimate():
+def disk_estimate() -> None:
     prior = [{"rows": 50000000, "bytes": 12500000000}]
     expect("disk-estimate", perf_db.estimate_bytes(prior, 10000000, 50), 3000000000)
     expect("disk-no-prior", perf_db.estimate_bytes([], 10000000, 50), 50 * 1024**3)
@@ -579,7 +660,7 @@ def disk_estimate():
     )
 
 
-def install_template_and_gitignore():
+def install_template_and_gitignore() -> None:
     from marestail.install import install
 
     with tempfile.TemporaryDirectory() as tmp, env_var("GROK_HOME", str(Path(tmp) / "grok")), quiet():
@@ -599,7 +680,7 @@ def install_template_and_gitignore():
         expect("install-generated-ignores", ["PERFORMANCE.md" in generated_ignores, "perf/" in generated_ignores], [True, True])
 
 
-def gates_skip_benchmarks():
+def gates_skip_benchmarks() -> None:
     from marestail import depth, dotnet, java, rust
     from marestail.context import Context
     from marestail.gates import comments, deadcode, docs, py_crap, py_lint, py_mutation, py_runtime, sonar, ts_lint, ts_mutation
@@ -619,11 +700,19 @@ def gates_skip_benchmarks():
         expect("rust-skip", [rust.skipped(ctx, root / "perf" / "bench.rs"), rust.skipped(ctx, root / "src" / "lib.rs")], [True, False])
         expect("java-skip", [java.skipped(ctx, root / "perf" / "Bench.java"), java.skipped(ctx, root / "src" / "App.java")], [True, False])
         expect("depth-skip", [depth.skipped(bench, root), depth.skipped(app, root)], [True, False])
-        expect("dotnet-skip", [dotnet.generated(ctx, root / "perf" / "Bench.cs"), dotnet.generated(ctx, root / "src" / "App.cs")], [True, False])
+        expect(
+            "dotnet-skip",
+            [dotnet.generated(ctx, root / "perf" / "Bench.cs"), dotnet.generated(ctx, root / "src" / "App.cs")],
+            [True, False],
+        )
         expect("vulture-exclude", "perf/*" in deadcode.PYTHON_EXCLUDES, True)
         expect("radon-exclude", "perf/*" in py_crap.radon_command(ctx)[4].split(","), True)
-        expect("ruff-exclude-at-root", py_lint.benchmark_exclusion(ctx), ["--extend-exclude", "perf/**"])
-        expect("ruff-no-exclude-nested", py_lint.benchmark_exclusion(nested), [])
+        expect(
+            "ruff-exclude-at-root",
+            py_lint.path_exclusions(ctx),
+            ["--extend-exclude", "perf/**", "--extend-exclude", "qa/**", "--extend-exclude", "features/**"],
+        )
+        expect("ruff-no-exclude-nested", py_lint.path_exclusions(nested), [])
         expect("eslint-exclude-at-root", ts_lint.eslint_command(ctx)[3:5], ["--ignore-pattern", "perf/"])
         expect("eslint-no-exclude-nested", "--ignore-pattern" in ts_lint.eslint_command(nested), False)
         expect("sonar-dotnet-exclude", "perf/**" in sonar.DOTNET_EXCLUSIONS, True)
@@ -635,10 +724,10 @@ def gates_skip_benchmarks():
         )
         expect("py-lint-changed", py_lint.changed_python(changed), ["src/app.py"])
         expect("py-mutation-changed", py_mutation.mutant_patterns(changed, ["perf/bench_x.py", "src/app.py"]), ["src.app.*"])
-        expect("ts-mutation-changed", ts_mutation.changed_sources(changed, ["perf/bench.ts", "src/app.ts"]), ["src/app.ts"])
+        expect("ts-mutation-changed", ts_mutation.mutation_targets(changed, ["perf/bench.ts", "src/app.ts"]), ["src/app.ts"])
 
 
-def sonar_scanner_excludes_benchmarks():
+def sonar_scanner_excludes_benchmarks() -> None:
     from marestail.context import Context
     from marestail.gates import sonar
 
@@ -647,14 +736,16 @@ def sonar_scanner_excludes_benchmarks():
         root = Path(tmp)
         ctx = Context(config=Config(root=root, raw={}))
         expect("sonar-no-properties", sonar.scanner_exclusions(ctx), "perf/**")
-        (root / "sonar-project.properties").write_text("sonar.projectKey=x\n# sonar.exclusions=ignored/**\nsonar.exclusions=**/node_modules/**, \\\n  **/dist/**\n")
+        (root / "sonar-project.properties").write_text(
+            "sonar.projectKey=x\n# sonar.exclusions=ignored/**\nsonar.exclusions=**/node_modules/**, \\\n  **/dist/**\n"
+        )
         expect("sonar-merged", sonar.scanner_exclusions(ctx), "**/node_modules/**,**/dist/**,perf/**")
         expect("sonar-flag", "-Dsonar.exclusions=**/node_modules/**,**/dist/**,perf/**" in sonar.scanner_command(ctx, creds, "x"), True)
         (root / "sonar-project.properties").write_text("sonar.exclusions : perf/**,**/tmp/**\n")
         expect("sonar-no-duplicate", sonar.scanner_exclusions(ctx), "perf/**,**/tmp/**")
 
 
-def csharp_bench_guard():
+def csharp_bench_guard() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         config = Config(root=root, raw={})
@@ -662,17 +753,19 @@ def csharp_bench_guard():
         (root / "perf" / "Bench.cs").write_text("class Bench {}\n")
         expect("csharp-no-root-project", perf_review.csharp_problems(config), [])
         (root / "Api").mkdir()
-        (root / "Api" / "Api.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        (root / "Api" / "Api.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk" />\n')
         expect("csharp-nested-project", perf_review.csharp_problems(config), [])
-        (root / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        (root / "App.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk" />\n')
         expect(
             "csharp-root-project",
             perf_review.csharp_problems(config),
-            ["`perf/Bench.cs` would compile into App.csproj, because an SDK project at the repo root includes every .cs file below it; write this bench in another language"],
+            [
+                "`perf/Bench.cs` would compile into App.csproj, because an SDK project at the repo root includes every .cs file below it; write this bench in another language"
+            ],
         )
 
 
-def fingerprints_follow_the_harness():
+def fingerprints_follow_the_harness() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "perf").mkdir()
@@ -699,7 +792,7 @@ def fingerprints_follow_the_harness():
         expect("fingerprint-follows-referenced-underscore-file", hygiene.fingerprint(root, "perf/bench_a.py") != with_helper, True)
 
 
-def stale_samples_dropped_and_rejected():
+def stale_samples_dropped_and_rejected() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         (root / "perf").mkdir()
@@ -714,7 +807,9 @@ def stale_samples_dropped_and_rejected():
         expect(
             "stale-problem",
             results.stale_problems(old, current),
-            ["`perf/bench_lib.py` has samples taken before it or a shared file under perf/ last changed (3 on head); take its samples again on every tree"],
+            [
+                "`perf/bench_lib.py` has samples taken before it or a shared file under perf/ last changed (3 on head); take its samples again on every tree"
+            ],
         )
         errors = io.StringIO()
         with contextlib.chdir(root), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
@@ -725,7 +820,7 @@ def stale_samples_dropped_and_rejected():
         expect("stale-fresh-accepted", results.stale_problems(fresh, current), [])
 
 
-def scratch_discarded():
+def scratch_discarded() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "perf").mkdir()
@@ -737,21 +832,41 @@ def scratch_discarded():
         (root / "perf" / "_scratch" / "notes.txt").write_text("timings\n")
         (root / "perf" / "__pycache__").mkdir()
         (root / "perf" / "__pycache__" / "_helper.cpython-314.pyc").write_bytes(b"\0")
-        expect("scratch-removed", hygiene.discard_scratch(root), ["perf/__pycache__/_helper.cpython-314.pyc", "perf/_probe_timing.py", "perf/_scratch/notes.txt"])
-        expect("scratch-kept", sorted(path.relative_to(root).as_posix() for path in (root / "perf").rglob("*")), ["perf/__init__.py", "perf/_helper.py", "perf/bench_a.py"])
+        expect(
+            "scratch-removed",
+            hygiene.discard_scratch(root),
+            ["perf/__pycache__/_helper.cpython-314.pyc", "perf/_probe_timing.py", "perf/_scratch/notes.txt"],
+        )
+        expect(
+            "scratch-kept",
+            sorted(path.relative_to(root).as_posix() for path in (root / "perf").rglob("*")),
+            ["perf/__init__.py", "perf/_helper.py", "perf/bench_a.py"],
+        )
 
 
-def pooled_values():
-    expect("parse-values", samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]}'), {"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]})
+def pooled_values() -> None:
+    expect(
+        "parse-values",
+        samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]}'),
+        {"target": "a", "unit": "ms", "better": "lower", "values": [1, 2.5]},
+    )
     for bad in ("[]", '[1, "x"]', "[true]", '"many"'):
-        expect(f"parse-values-invalid-{bad}", samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": ' + bad + "}"), None)
+        expect(
+            f"parse-values-invalid-{bad}",
+            samples.measurement('{"target": "a", "unit": "ms", "better": "lower", "values": ' + bad + "}"),
+            None,
+        )
     policy = results.Policy(min_runs=2, values_per_sample=3, p95_min_values=6)
     trees = ["baseline", "head"]
     records = [pooled("baseline", [1, 2, 3]), pooled("baseline", [4, 5, 6]), pooled("head", [2, 3, 4]), pooled("head", [5, 6, 7])]
     measured, problems = results.compile_records(records, trees, ["perf/bench_t"], policy)
     expect("pooled-problems", problems, [])
-    expect("pooled-stats", [(item.metric, item.baseline, item.head, item.runs, item.values) for item in measured], [("p50", 3.5, 4.5, 2, 6), ("p95", 6, 7, 2, 6)])
-    short = records[:3] + [pooled("head", [5, 6])]
+    expect(
+        "pooled-stats",
+        [(item.metric, item.baseline, item.head, item.runs, item.values) for item in measured],
+        [("p50", 3.5, 4.5, 2, 6), ("p95", 6, 7, 2, 6)],
+    )
+    short = [*records[:3], pooled("head", [5, 6])]
     expect(
         "pooled-short",
         results.compile_records(short, trees, ["perf/bench_t"], policy)[1],
@@ -763,7 +878,7 @@ def pooled_values():
     expect("thin-p95", (thin.status, table.task_cell(thin)), ("thin", "1ms (n=2)"))
 
 
-def noise_aware_classification():
+def noise_aware_classification() -> None:
     import random
 
     rng = random.Random(7)
@@ -772,8 +887,13 @@ def noise_aware_classification():
     slower = [12 + rng.random() for _ in range(400)]
     policy = results.Policy(min_runs=2, min_change=())
 
-    def compiled(head):
-        records = [pooled("baseline", baseline[:200]), pooled("baseline", baseline[200:]), pooled("head", head[:200]), pooled("head", head[200:])]
+    def compiled(head: list[float]) -> tuple[list[results.Measurement], list[str]]:
+        records = [
+            pooled("baseline", baseline[:200]),
+            pooled("baseline", baseline[200:]),
+            pooled("head", head[:200]),
+            pooled("head", head[200:]),
+        ]
         measured, problems = results.compile_records(records, ["baseline", "head"], ["perf/bench_t"], policy)
         expect("noise-problems", problems, [])
         return measured, [results.classify(item, policy).status for item in measured]
@@ -791,16 +911,26 @@ def noise_aware_classification():
     expect("control-quiet", results.classify(measurement(100, 118, interval=(15.0, 20.0), control=101), POLICY).status, "degraded")
 
 
-def policy_settings():
+def policy_settings() -> None:
     expect("policy-defaults", settings.policy(Config(root=Path("/tmp"), raw={})), results.Policy())
-    raw = {"perf": {"threshold_percent": 5, "min_runs": 3, "values_per_sample": 250, "p95_min_values": 500, "min_change": {"ms": 2, "rows": 10}, "bootstrap": 100, "control": True}}
+    raw = {
+        "perf": {
+            "threshold_percent": 5,
+            "min_runs": 3,
+            "values_per_sample": 250,
+            "p95_min_values": 500,
+            "min_change": {"ms": 2, "rows": 10},
+            "bootstrap": 100,
+            "control": True,
+        }
+    }
     configured = Config(root=Path("/tmp"), raw=raw)
     expect("policy-configured", settings.policy(configured), results.Policy(3, 250, 500, 5.0, (("ms", 2.0), ("rows", 10.0)), 100))
     expect("control-on", settings.control(configured), True)
     expect("control-off", settings.control(Config(root=Path("/tmp"), raw={})), False)
 
 
-def control_tree():
+def control_tree() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         config = Config(root=root, raw={"git": {"base": "main"}, "perf": {"control": True}})

@@ -1,0 +1,731 @@
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from marestail import dotnet
+from marestail.gates import sonar
+from marestail.sonar.client import Client
+from tests.conftest import checked, make_context, reject_none, untimed
+
+CREDS = {"url": "http://sonar:9000", "token": "tok"}
+KEY = "proj"
+
+
+def test_failed_analysis_tail_length() -> None:
+    lines = "\n".join(f"line {n}" for n in range(20))
+    assert sonar.analysis_tail(lines) == [f"line {n}" for n in range(5, 20)]
+
+
+def test_coverage_and_duplication_scores() -> None:
+    assert sonar.coverage_score({}) == 100.0
+    assert sonar.coverage_score({sonar.COVERAGE: 50.0}) == 50.0
+    assert sonar.duplication_score({}) == 0.0
+    assert sonar.duplication_score({sonar.DUPLICATION: 0.5}) == 0.5
+
+
+def test_after_colon_uses_the_first_colon() -> None:
+    assert sonar.after_colon("a:b:c") == "b:c"
+    assert sonar.after_colon("plain") == "plain"
+    assert sonar.after_colon(":tail") == "tail"
+
+
+Responder = Callable[[str, dict[str, Any]], dict[str, Any]]
+
+
+class FakeClient:
+    def __init__(self, respond: Responder) -> None:
+        self.respond = respond
+        self.gets: list[tuple[str, dict[str, Any]]] = []
+        self.posts: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, path: str, **params: Any) -> dict[str, Any]:
+        if any(value is None for value in params.values()):
+            raise TypeError("param")
+        self.gets.append((path, params))
+        return self.respond(path, params)
+
+    def post(self, path: str, **params: Any) -> dict[str, Any]:
+        self.posts.append((path, params))
+        return {}
+
+
+def healthy(path: str, params: dict[str, Any]) -> dict[str, Any]:
+    replies: dict[str, dict[str, Any]] = {
+        "api/ce/task": {"task": {"status": "SUCCESS"}},
+        "api/qualitygates/project_status": {"projectStatus": {"status": "OK"}},
+        "api/measures/component": {"component": {"measures": [{"metric": "coverage", "value": "100"}]}},
+    }
+    return replies.get(path, {})
+
+
+def languages(distribution: str | None, coverage: bool) -> Responder:
+    measures = [{"metric": "coverage", "value": "100"}] if coverage else []
+    measures += [] if distribution is None else [{"metric": "ncloc_language_distribution", "value": distribution}]
+
+    def respond(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        if params.get("metricKeys") == "coverage,ncloc_language_distribution":
+            return {"component": {"measures": measures}}
+        return healthy(path, params)
+
+    return respond
+
+
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    slept: list[float] = []
+    monkeypatch.setattr("marestail.gates.sonar.time.sleep", slept.append)
+    return slept
+
+
+def install_client(monkeypatch: pytest.MonkeyPatch, respond: Responder) -> list[FakeClient]:
+    made: list[FakeClient] = []
+
+    def factory(url: str, token: str) -> FakeClient:
+        made.append(FakeClient(respond))
+        assert (url, token) == ("http://sonar:9000", "tok")
+        return made[-1]
+
+    monkeypatch.setattr(sonar, "credentials", lambda: dict(CREDS))
+    monkeypatch.setattr(sonar, "Client", factory)
+    return made
+
+
+def scanner(root: Path, code: int = 0, task: str = "ceTaskId=T1\n") -> Callable[[list[str]], tuple[int, str]]:
+    def reply(command: list[str]) -> tuple[int, str]:
+        if command[0] == "git":
+            return 1, ""
+        (root / ".marestail" / "scannerwork").mkdir(parents=True, exist_ok=True)
+        (root / ".marestail" / "scannerwork" / "report-task.txt").write_text(task)
+        return code, "scan out\nscan end"
+
+    return reply
+
+
+def test_not_set_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sonar, "credentials", lambda: None)
+    result = untimed(sonar.run_gate(make_context(tmp_path)), sonar.GATE)
+    assert (result.gate, result.ok, result.summary, result.findings, result.seconds) == (
+        "sonar",
+        False,
+        "not set up",
+        ["run: marestail sonar setup"],
+        0.0,
+    )
+
+
+def test_scanner_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    install_client(monkeypatch, healthy)
+    fake = fake_run(sonar, scanner(tmp_path, code=2))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "scanner failed", ["scan out", "scan end"])
+    assert fake.calls[1][0] == "docker"
+    assert f"-Dsonar.projectKey={KEY}" in fake.calls[1]
+    assert fake.options[1] == {"cwd": tmp_path, "timeout": 1800}
+
+
+def test_missing_task_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    install_client(monkeypatch, healthy)
+    fake_run(sonar, scanner(tmp_path, task="other=1\n"))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
+    task_file = tmp_path / ".marestail" / "scannerwork" / "report-task.txt"
+    assert (result.ok, result.summary) == (False, "analysis did not complete")
+    assert result.findings == [f"no ceTaskId in {task_file}", "scan out", "scan end"]
+
+
+def test_clean_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any, sleeps: list[float]) -> None:
+    made = install_client(monkeypatch, healthy)
+    fake_run(sonar, scanner(tmp_path))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "sonar clean", [])
+    assert made[0].gets[0] == ("api/ce/task", {"id": "T1"})
+    assert sleeps == []
+
+
+def test_scoped_summary_names_the_global_quality_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    install_client(monkeypatch, healthy)
+    fake_run(sonar, scanner(tmp_path))
+    ctx = make_context(tmp_path, {"sonar": {"project_key": KEY}}, scope_changed=True, changed={"a.py"}, changed_lines_map={"a.py": {1, 2}})
+    result = checked(sonar.run_gate(ctx), sonar.GATE)
+    assert result.summary == "sonar clean in scope (global quality gate OK; scope: changed (1 files, 2 lines))"
+
+
+def test_language_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    install_client(monkeypatch, languages("py=10", coverage=False))
+    fake_run(sonar, scanner(tmp_path))
+    raw = {"sonar": {"project_key": KEY}, "erlang": {}, "rust": {"root": "crate"}, "java": {}}
+    result = checked(sonar.run_gate(make_context(tmp_path, raw)), sonar.GATE)
+    assert result.findings == [
+        ".:1 SonarQube received no Erlang lines (languages: py=10); run: marestail sonar setup",
+        "marestail.toml:1 SonarQube imported no erlang coverage; run er.tests first so .marestail/eunit.coverdata exists",
+        "crate:1 SonarQube received no Rust lines (languages: py=10); put the crate's src in sonar.sources",
+        "sonar-project.properties:1 SonarQube imported no rust coverage; run rs.tests first and set sonar.rust.lcov.reportPaths=.marestail/rs-lcov.info",
+        ".:1 SonarQube received no Java lines (languages: py=10); put the sources in sonar.sources",
+        "marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists",
+    ]
+    assert (result.ok, result.summary) == (False, "6 sonar findings")
+
+
+def test_languages_present(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"erlang": {}, "rust": {}, "java": {}})
+    client: Any = FakeClient(languages("erlang=1;java=2;rust=3", coverage=True))
+    assert sonar.language_findings(ctx, client, KEY) == []
+    assert client.gets == [("api/measures/component", {"component": KEY, "metricKeys": "coverage,ncloc_language_distribution"})] * 3
+
+
+def test_dotnet_language_check(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"dotnet": {"root": "app"}})
+    (tmp_path / "app").mkdir()
+    client: Any = FakeClient(languages("", coverage=True))
+    assert sonar.language_findings(ctx, client, KEY) == ["app:1 SonarQube received no C# lines (languages: none)"]
+    client = FakeClient(languages(None, coverage=False))
+    assert sonar.language_findings(ctx, client, KEY) == [
+        "app:1 SonarQube received no C# lines (languages: none)",
+        "marestail.toml:1 SonarQube imported no coverage; run cs.tests first so its OpenCover report exists",
+    ]
+    empty: Any = FakeClient(lambda path, params: {})
+    assert sonar.language_findings(ctx, empty, KEY)[0].startswith("app:1")
+
+
+def test_dotnet_run_uses_its_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install_client(monkeypatch, languages("cs=5", coverage=True))
+    scans: list[tuple[Any, ...]] = []
+
+    def fake_scan(ctx: Any, creds: dict[str, str], key: str) -> tuple[int, str]:
+        scans.append((creds, key))
+        report = tmp_path / ".sonarqube" / "out" / ".sonar"
+        report.mkdir(parents=True)
+        (report / "report-task.txt").write_text("ceTaskId=D1\n")
+        return 0, ""
+
+    monkeypatch.setattr(sonar, "dotnet_scan", reject_none(fake_scan))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}, "dotnet": {}})), sonar.GATE)
+    assert (result.ok, result.summary) == (True, "sonar clean")
+    assert scans == [(CREDS, KEY)]
+
+
+def test_scanner_command(tmp_path: Path, fake_run: Any) -> None:
+    fake = fake_run(sonar, [(0, "")])
+    root = str(tmp_path)
+    assert sonar.scanner_command(make_context(tmp_path), CREDS, KEY) == [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-u",
+        f"{os.getuid()}:{os.getgid()}",
+        "-e",
+        "SONAR_HOST_URL=http://sonar:9000",
+        "-e",
+        "SONAR_TOKEN=tok",
+        "-e",
+        f"SONAR_USER_HOME={root}/.marestail/sonar-cache",
+        "-v",
+        f"{root}:{root}",
+        "-w",
+        root,
+        "sonarsource/sonar-scanner-cli",
+        "-Dsonar.projectKey=proj",
+        f"-Dsonar.projectBaseDir={root}",
+        f"-Dsonar.working.directory={root}/.marestail/scannerwork",
+        "-Dsonar.exclusions=perf/**",
+    ]
+    assert fake.calls == [["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]]
+    assert fake.options == [{"cwd": tmp_path}]
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        ((1, "/elsewhere/.git\n"), []),
+        ((0, "\n"), []),
+        ((0, "junk\n/{root}/.git\n"), []),
+        ((0, "/shared/main/.git\n"), ["-v", "/shared/main/.git:/shared/main/.git:ro"]),
+    ],
+)
+def test_git_mounts(tmp_path: Path, fake_run: Any, reply: tuple[int, str], expected: list[str]) -> None:
+    fake_run(sonar, [(reply[0], reply[1].replace("/{root}", str(tmp_path)))])
+    assert sonar.git_mounts(make_context(tmp_path)) == expected
+
+
+def test_java_properties(tmp_path: Path) -> None:
+    assert sonar.java_properties(make_context(tmp_path)) == []
+    ctx = make_context(tmp_path, {"java": {"root": "svc", "build_dir": "out"}})
+    assert sonar.java_properties(ctx) == [
+        f"-Dsonar.java.binaries={tmp_path}/svc/out/classes",
+        f"-Dsonar.coverage.jacoco.xmlReportPaths={tmp_path}/.marestail/java-jacoco.xml",
+    ]
+    (tmp_path / "sonar-project.properties").write_text("sonar.java.binaries=x\n")
+    assert sonar.java_properties(ctx) == [f"-Dsonar.coverage.jacoco.xmlReportPaths={tmp_path}/.marestail/java-jacoco.xml"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", "perf/**"),
+        ("sonar.projectKey=x\n", "perf/**"),
+        ("sonar.exclusions=a/**, ,b/**\nsonar.exclusions=c/**\n", "a/**,b/**,perf/**"),
+        ("sonar.exclusions=perf/**,x\n", "perf/**,x"),
+    ],
+)
+def test_scanner_exclusions(tmp_path: Path, text: str, expected: str) -> None:
+    (tmp_path / "sonar-project.properties").write_text(text)
+    assert sonar.scanner_exclusions(make_context(tmp_path)) == expected
+
+
+def test_tooling_properties_drive_settings_and_exclusions(tmp_path: Path) -> None:
+    folder = tmp_path / ".marestail" / "tooling"
+    folder.mkdir(parents=True)
+    (tmp_path / "sonar-project.properties").write_text("sonar.exclusions=b/**\n")
+    ctx = make_context(tmp_path, {"ts": {"tooling": ".marestail/tooling"}})
+
+    assert sonar.settings_property(ctx) == []
+    assert sonar.scanner_exclusions(ctx) == "b/**,perf/**"
+    (folder / "sonar-project.properties").write_text("sonar.exclusions=a/**\n")
+    assert sonar.settings_property(ctx) == [f"-Dproject.settings={folder / 'sonar-project.properties'}"]
+    assert sonar.scanner_exclusions(ctx) == "a/**,perf/**"
+    assert f"-Dproject.settings={folder / 'sonar-project.properties'}" in sonar.scanner_properties(ctx, "k")
+
+
+def test_settings_property_is_empty_without_tooling(tmp_path: Path) -> None:
+    (tmp_path / "sonar-project.properties").write_text("")
+    assert sonar.settings_property(make_context(tmp_path)) == []
+
+
+def declared_exclusions(text: str) -> list[str]:
+    prefix = "sonar.exclusions="
+    line = next(line for line in text.splitlines() if line.startswith(prefix))
+    return [pattern.strip() for pattern in line[len(prefix) :].split(",")]
+
+
+def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
+    root = Path(__file__).resolve().parent.parent
+    declared = declared_exclusions((root / "sonar-project.properties").read_text())
+    assert "perf/**" in declared
+    assert sonar.scanner_exclusions(make_context(root)).split(",") == declared
+
+
+def test_properties_parsing() -> None:
+    text = "# c=1\n! bang=2\n\n=novalue\na = 1\nb: two=2\nc=x:y\nlong=one,\\\n  two\nplain\n"
+    assert sonar.properties(text) == [("a", "1"), ("b", "two=2"), ("c", "x:y"), ("long", "one,  two")]
+
+
+def test_dotnet_refuses_properties_file(tmp_path: Path) -> None:
+    (tmp_path / "sonar-project.properties").write_text("")
+    assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (1, sonar.PROPERTIES_CONFLICT)
+
+
+def test_dotnet_project_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (None, None, "set [dotnet] project")))
+    assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (1, "set [dotnet] project")
+
+
+def dotnet_calls(monkeypatch: pytest.MonkeyPatch, replies: list[tuple[int, str]]) -> list[tuple[list[str], dict[str, Any]]]:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    pending = list(replies)
+
+    def fake(ctx: Any, args: list[str], **options: Any) -> tuple[int, str]:
+        calls.append((args, options))
+        return pending.pop(0)
+
+    monkeypatch.setattr(dotnet, "dotnet", reject_none(fake))
+    return calls
+
+
+def test_dotnet_tool_install_reports_a_missing_sdk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    dotnet_calls(monkeypatch, [(127, "tool broke")])
+    code, note = sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY)
+    assert code == 127
+    assert note.startswith("dotnet unavailable: ")
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"), [("tool broke", "tool broke"), ("Unable to find image x", "docker image missing: docker pull ")]
+)
+def test_dotnet_tool_install_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str, expected: str) -> None:
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    calls = dotnet_calls(monkeypatch, [(3, output)])
+    code, note = sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY)
+    assert (code, note.startswith(expected)) == (3, True)
+    tools = tmp_path / ".marestail" / "dotnet-tools"
+    assert calls == [
+        (
+            ["tool", "install", "dotnet-sonarscanner", "--version", "11.3.0", "--tool-path", str(tools)],
+            {"cwd": tmp_path, "network": True},
+        )
+    ]
+
+
+def test_dotnet_scan_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    calls = dotnet_calls(monkeypatch, [(0, "installed"), (0, "scanned")])
+    (tmp_path / "One.sln").write_text("")
+    ctx = make_context(tmp_path, {"sonar": {"project_name": "Nice"}})
+    (tmp_path / ".marestail").mkdir()
+    assert sonar.dotnet_scan(ctx, CREDS, KEY) == (0, "scanned")
+    work = tmp_path / ".marestail"
+    assert calls[1] == (
+        [str(work / "sonar-dotnet.sh")],
+        {"cwd": tmp_path, "timeout": 1800, "network": True, "extra": {"SONAR_TOKEN": "tok"}, "program": "sh"},
+    )
+    assert (work / "sonar-dotnet.sh").read_text() == "\n".join(
+        [
+            "set -e",
+            f'export PATH="$PATH:{work}/dotnet-tools"',
+            f'cd "{tmp_path}" && rm -rf .sonarqube',
+            f'dotnet-sonarscanner begin /k:"proj" /n:"Nice" /s:"{work}/sonar-dotnet.xml" /d:sonar.host.url="http://sonar:9000" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{tmp_path}"',
+            f'dotnet build "{tmp_path}/One.sln" -t:Rebuild --nologo',
+            'dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"',
+            "",
+        ]
+    )
+
+
+def test_dotnet_scan_builds_project_when_solutions_are_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    calls = dotnet_calls(monkeypatch, [(0, "scanned")])
+    (tmp_path / ".marestail" / "dotnet-tools" / "dotnet-sonarscanner").mkdir(parents=True)
+    (tmp_path / "A.sln").write_text("")
+    (tmp_path / "B.sln").write_text("")
+    assert sonar.dotnet_scan(make_context(tmp_path), CREDS, KEY) == (0, "scanned")
+    script = (tmp_path / ".marestail" / "sonar-dotnet.sh").read_text()
+    assert f'dotnet build "{product}" -t:Rebuild' in script
+    assert '/n:"proj"' in script
+    assert len(calls) == 1
+
+
+def test_write_settings_minimal(tmp_path: Path) -> None:
+    (tmp_path / ".marestail").mkdir()
+    path = sonar.write_settings(make_context(tmp_path))
+    work = tmp_path / ".marestail"
+    assert path == work / "sonar-dotnet.xml"
+    assert path.read_text() == "\n".join(
+        [
+            '<?xml version="1.0" encoding="utf-8" ?>',
+            '<SonarQubeAnalysisProperties xmlns="http://www.sonarsource.com/msbuild/integration/2015/1">',
+            f'  <Property Name="sonar.exclusions">{",".join(sonar.DOTNET_EXCLUSIONS)}</Property>',
+            f'  <Property Name="sonar.cs.opencover.reportsPaths">{work}/cs-tests/**/coverage.opencover.xml</Property>',
+            '  <Property Name="sonar.scm.disabled">true</Property>',
+            '  <Property Name="sonar.sourceEncoding">UTF-8</Property>',
+            "</SonarQubeAnalysisProperties>",
+            "",
+        ]
+    )
+
+
+def test_write_settings_full(tmp_path: Path) -> None:
+    (tmp_path / ".marestail").mkdir()
+    (tmp_path / "app").mkdir()
+    raw = {
+        "sonar": {"exclusions": ["gen/**"]},
+        "dotnet": {"root": "app", "coverage_exclude": ["/Migrations/", "Program.cs"]},
+        "ts": {},
+        "python": {},
+    }
+    text = sonar.write_settings(make_context(tmp_path, raw)).read_text()
+    work = tmp_path / ".marestail"
+    assert f'<Property Name="sonar.exclusions">{",".join(sonar.DOTNET_EXCLUSIONS)},gen/**</Property>' in text
+    assert '<Property Name="sonar.coverage.exclusions">app/Migrations,app/Program.cs</Property>' in text
+    assert text.endswith(
+        f'  <Property Name="sonar.javascript.lcov.reportPaths">{work}/ts-coverage/lcov.info</Property>\n'
+        f'  <Property Name="sonar.python.coverage.reportPaths">{work}/py-coverage.xml</Property>\n'
+        "</SonarQubeAnalysisProperties>\n"
+    )
+
+
+def test_coverage_exclusions_at_root(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"dotnet": {"coverage_exclude": "Program.cs"}})
+    assert sonar.coverage_exclusions(ctx) == "Program.cs"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected", "slept"),
+    [
+        (["SUCCESS"], None, []),
+        (["PENDING", "IN_PROGRESS", "FAILED"], "analysis FAILED", [5, 5]),
+        (["CANCELED"], "analysis CANCELED", []),
+        (["PENDING"] * 3, "analysis timed out", [5, 5, 5]),
+    ],
+)
+def test_wait_for_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sleeps: list[float], statuses: list[str], expected: str | None, slept: list[float]
+) -> None:
+    monkeypatch.setattr(sonar, "POLL_LIMIT", 3)
+    task_file = tmp_path / "report-task.txt"
+    task_file.write_text("projectKey=p\nceTaskId=abc=1\nnoise\n")
+    pending = list(statuses)
+    client: Any = FakeClient(lambda path, params: {"task": {"status": pending.pop(0)}})
+    assert sonar.wait_for_analysis(client, task_file) == expected
+    assert sleeps == slept
+    assert client.gets[0] == ("api/ce/task", {"id": "abc=1"})
+
+
+def test_wait_without_report(tmp_path: Path) -> None:
+    client: Any = FakeClient(healthy)
+    assert sonar.wait_for_analysis(client, tmp_path / "gone.txt") == f"no ceTaskId in {tmp_path / 'gone.txt'}"
+
+
+def collect_responder(path: str, params: dict[str, Any]) -> dict[str, Any]:
+    replies: dict[str, dict[str, Any]] = {
+        "api/qualitygates/project_status": {"projectStatus": {"status": "ERROR"}},
+        "api/hotspots/search": {"hotspots": [{"component": "p:src/a.py", "message": "look"}]},
+        "api/measures/component": {
+            "component": {"measures": [{"metric": "coverage"}, {"metric": "duplicated_lines_density", "value": "1.25"}]}
+        },
+        "api/measures/component_tree": {
+            "components": [
+                {"key": "p:src/a.py", "measures": [{"metric": "duplicated_lines_density", "value": "2"}]},
+                {"path": "src/a.py", "measures": []},
+                {"path": "src/b.py", "measures": [{"metric": "duplicated_lines_density", "value": "4"}]},
+            ]
+        },
+    }
+    if path == "api/issues/search":
+        return {
+            "issues": [
+                {"key": "I1", "component": "p:src/a.py", "rule": "r1", "issueStatus": "ACCEPTED", "severity": "MAJOR", "message": "m"}
+            ]
+        }
+    return replies[path]
+
+
+def test_collect_unscoped() -> None:
+    client: Any = FakeClient(collect_responder)
+    findings, status = sonar.collect(make_context(Path("/tmp")), client, KEY)
+    assert status == "ERROR"
+    assert findings == [
+        "src/a.py:0 r1 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties",
+        "quality gate ERROR",
+        "src/a.py:0 MAJOR r1: m",
+        "src/a.py:0 hotspot: look",
+        "sonar coverage 0.0% (need 100)",
+        "sonar duplication 1.2% (need 0)",
+    ]
+    assert client.posts == [("api/issues/do_transition", {"issue": "I1", "transition": "reopen"})]
+    assert ("api/issues/search", {"componentKeys": KEY, "issueStatuses": "ACCEPTED,FALSE_POSITIVE", "ps": 500}) in client.gets
+    assert ("api/issues/search", {"componentKeys": KEY, "resolved": "false", "ps": 500}) in client.gets
+    assert ("api/hotspots/search", {"project": KEY, "status": "TO_REVIEW", "ps": 500}) in client.gets
+    assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage,duplicated_lines_density"})
+
+
+def test_collect_scoped() -> None:
+    client: Any = FakeClient(collect_responder)
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/b.py"})
+    findings, status = sonar.collect(ctx, client, KEY)
+    assert (findings, status) == (["src/b.py:1 sonar duplication 4.0% (need 0)"], "ERROR")
+    assert client.posts == []
+    assert client.gets[-1] == (
+        "api/measures/component_tree",
+        {"component": KEY, "metricKeys": "duplicated_lines_density", "qualifiers": "FIL", "ps": 500},
+    )
+
+
+def test_collect_scoped_keeps_the_findings_on_a_changed_file() -> None:
+    client: Any = FakeClient(collect_responder)
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
+    findings, status = sonar.collect(ctx, client, KEY)
+    assert status == "ERROR"
+    assert findings == [
+        "src/a.py:0 r1 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties",
+        "src/a.py:0 MAJOR r1: m",
+        "src/a.py:0 hotspot: look",
+        "src/a.py:1 sonar duplication 2.0% (need 0)",
+    ]
+    assert client.posts == [("api/issues/do_transition", {"issue": "I1", "transition": "reopen"})]
+
+
+def test_scoped_duplication_uses_key_when_path_missing() -> None:
+    client: Any = FakeClient(collect_responder)
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
+    assert sonar.scoped_duplication(ctx, client, KEY) == ["src/a.py:1 sonar duplication 2.0% (need 0)"]
+
+
+def test_scoped_duplication_without_components() -> None:
+    client: Any = FakeClient(lambda path, params: {})
+    ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/a.py"})
+    assert sonar.scoped_duplication(ctx, client, KEY) == []
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, []),
+        ({"coverage": 100.0, "duplicated_lines_density": 0.0}, []),
+        ({"coverage": 99.96}, ["sonar coverage 100.0% (need 100)"]),
+        ({"duplicated_lines_density": 0.5}, ["sonar duplication 0.5% (need 0)"]),
+    ],
+)
+def test_measure_findings(values: dict[str, float], expected: list[str]) -> None:
+    assert sonar.measure_findings(values) == expected
+
+
+def test_analyse_keeps_collect_and_language_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx = make_context(tmp_path, {"sonar": {"project_key": KEY}})
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
+    monkeypatch.setattr(sonar, "collect", lambda *args: (["from-collect"], "OK"))
+    monkeypatch.setattr(sonar, "language_findings", lambda *args: ["from-lang"])
+    result = sonar.analyse(ctx, CREDS, 0.0)
+    assert result.findings == ["from-collect", "from-lang"]
+
+
+def test_summarize_scoped(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, changed={"a"}, changed_lines_map={"a": {1, 2}})
+    assert (
+        sonar.summarize(ctx, ["x"], "ERROR") == "1 sonar findings in scope (global quality gate ERROR; scope: changed (1 files, 2 lines))"
+    )
+    assert sonar.summarize(make_context(tmp_path), [], "ERROR") == "sonar clean"
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [("a=b", 1), ("a:b", 1), ("ab", -1), ("a=b:c", 1), (":x", 0), ("=x", 0), ("a=b=c", 1), ("a:b:c", 1)],
+)
+def test_separator_index(line: str, expected: int) -> None:
+    assert sonar.separator_index(line) == expected
+
+
+def test_gate_status_sends_the_project_key() -> None:
+    client = FakeClient(healthy)
+    assert sonar.gate_status(cast(Client, client), KEY) == "OK"
+    assert client.gets == [("api/qualitygates/project_status", {"projectKey": KEY})]
+
+
+def test_component_measures_defaults_missing_component() -> None:
+    assert sonar.component_measures({}) == []
+    assert sonar.component_measures({"component": {"measures": [{"metric": "coverage"}]}}) == [{"metric": "coverage"}]
+
+
+def test_metric_text_reads_the_value_and_defaults_to_empty() -> None:
+    assert sonar.metric_text({"metric": "coverage", "value": "84.5"}) == "84.5"
+    assert sonar.metric_text({"metric": "coverage"}) == sonar.EMPTY
+
+
+def test_section_list_defaults_missing_exclusions(tmp_path: Path) -> None:
+    assert sonar.section_list(make_context(tmp_path), "exclusions") == []
+
+
+def test_scoped_duplication_reports_a_fraction(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, changed={"src/a.py"})
+
+    def respond(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "components": [
+                {"path": "src/a.py", "measures": [{"metric": "duplicated_lines_density", "value": "0.5"}]},
+                {"path": "src/b.py", "measures": [{"metric": "duplicated_lines_density", "value": "2.0"}]},
+            ]
+        }
+
+    assert sonar.scoped_duplication(ctx, cast(Client, FakeClient(respond)), KEY) == ["src/a.py:1 sonar duplication 0.5% (need 0)"]
+
+
+def test_issue_and_component_paths() -> None:
+    assert sonar.issue_path({"component": "proj:src/A.cs"}) == "src/A.cs"
+    assert sonar.issue_path({"component": "proj:src:A.cs"}) == "src:A.cs"
+    assert sonar.issue_path({}) == ""
+    assert sonar.component_path({"path": "src/A.cs"}) == "src/A.cs"
+    assert sonar.component_path({"key": "proj:src/B.cs"}) == "src/B.cs"
+    assert sonar.component_path({"key": "proj:src:B.cs"}) == "src:B.cs"
+    assert sonar.component_path({}) == ""
+    assert sonar.after_colon("proj:src:A.cs") == "src:A.cs"
+    assert sonar.after_colon("leaf") == "leaf"
+    assert sonar.mapping_list({}, "issues") == []
+    assert sonar.mapping_list({"issues": [{"k": 1}]}, "issues") == [{"k": 1}]
+    assert sonar.line_of({"line": 7}) == 7
+    assert sonar.line_of({}) == 0
+    client: Any = FakeClient(lambda path, params: {})
+    issue = {"key": "I1", "component": "p:a.py", "rule": "r1", "issueStatus": "ACCEPTED", "line": 7}
+    assert sonar.reopen(client, issue).startswith("a.py:7 ")
+
+
+HYPER_ISSUES: dict[str, Any] = {
+    "accepted": [
+        {"key": "A1", "component": "proj:app/legacy.py", "line": 6, "rule": "python:S3", "issueStatus": "ACCEPTED"},
+        {"key": "A2", "component": "proj:app/legacy.py", "line": 9, "rule": "python:S4", "issueStatus": "FALSE_POSITIVE"},
+    ],
+    "open": [
+        {"component": "proj:app/legacy.py", "line": 2, "severity": "MAJOR", "rule": "python:S1481", "message": "old"},
+        {"component": "proj:app/legacy.py", "line": 6, "severity": "MAJOR", "rule": "python:S1481", "message": "new"},
+        {"component": "proj:app/legacy.py", "severity": "MINOR", "rule": "python:S1451", "message": "Add a header"},
+    ],
+    "hotspots": [
+        {"component": "proj:app/legacy.py", "line": 1, "message": "check import"},
+        {"component": "proj:app/legacy.py", "line": 9, "message": "old hotspot"},
+    ],
+}
+
+
+def hyper_responder(issues: dict[str, Any], measures: list[dict[str, Any]] | None = None) -> Responder:
+    def respond(path: str, params: dict[str, Any]) -> dict[str, Any]:
+        replies: dict[str, dict[str, Any]] = {
+            "api/qualitygates/project_status": {"projectStatus": {"status": "ERROR"}},
+            "api/hotspots/search": {"hotspots": issues["hotspots"]},
+            "api/measures/component": {"component": {"measures": measures or []}},
+            "api/measures/component_tree": {
+                "components": [{"path": "app/legacy.py", "measures": [{"metric": "duplicated_lines_density", "value": "12.0"}]}]
+            },
+        }
+        if path == "api/issues/search":
+            return {"issues": issues["accepted"] if "issueStatuses" in params else issues["open"]}
+        return replies[path]
+
+    return respond
+
+
+def hyper_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, respond: Responder, raw: dict[str, Any]
+) -> tuple[Any, list[FakeClient]]:
+    made = install_client(monkeypatch, respond)
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
+    ctx = make_context(
+        tmp_path,
+        {"sonar": {"project_key": KEY}, **raw},
+        scope_changed=True,
+        hyper=True,
+        changed={"app/legacy.py"},
+        changed_lines_map={"app/legacy.py": {1, 6}},
+    )
+    return sonar.run_gate(ctx), made
+
+
+def test_hyper_filters_issues_by_line_and_skips_duplication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, made = hyper_analysis(tmp_path, monkeypatch, hyper_responder(HYPER_ISSUES), {})
+    assert made[0].posts == [("api/issues/do_transition", {"issue": "A1", "transition": "reopen"})]
+    assert result.findings == [
+        "app/legacy.py:6 python:S3 was marked ACCEPTED in Sonar instead of fixed; reopened. Fix the code, or a human adds an ignore rule to sonar-project.properties",
+        "app/legacy.py:6 MAJOR python:S1481: new",
+        "app/legacy.py:1 hotspot: check import",
+    ]
+    assert result.summary == (
+        "3 sonar findings in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; "
+        "1 file-level findings not gated under hyper; duplication not gated under hyper)"
+    )
+    assert all("component_tree" not in path for path, _ in made[0].gets)
+
+
+def test_hyper_clean_sonar_still_says_duplication_is_not_gated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_analysis(tmp_path, monkeypatch, hyper_responder({"accepted": [], "open": [], "hotspots": []}), {})
+    assert (result.ok, result.findings) == (True, [])
+    assert result.summary == (
+        "sonar clean in scope (global quality gate ERROR; scope: hyper: 2 changed lines in 1 files; duplication not gated under hyper)"
+    )
+
+
+def test_hyper_language_diagnostics_still_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    empty: dict[str, Any] = {"accepted": [], "open": [], "hotspots": []}
+    respond = hyper_responder(empty, [{"metric": "ncloc_language_distribution", "value": "java=40;py=12"}])
+    result, _ = hyper_analysis(tmp_path, monkeypatch, respond, {"java": {}})
+    assert (result.ok, result.findings) == (
+        False,
+        ["marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists"],
+    )
+    assert "file-level" not in result.summary

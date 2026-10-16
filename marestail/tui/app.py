@@ -1,15 +1,32 @@
+import contextlib
 import curses
 import locale
 import time
+from functools import partial
+from itertools import repeat, starmap
 from pathlib import Path
+from typing import Any, TypeGuard
 
-from .collect import REMOTE_MARK, collect_fleet
+from .collect import REMOTE_MARK, collect_fleet, first_text
+from .model import Fleet, RepoState
 from .panels import PANELS, ConversationPanel, Panel, Rect, WatchState, draw_box, put, selected_repo, worker_rows
-from .theme import GLYPH_FLOURISH, ROUND, init_theme, vine
+from .theme import GLYPH_FLOURISH, ROUND, full_vine, init_theme
 
 MIN_W = 70
 MIN_H = 20
 TICK_MS = 125
+SESSION_TICKS = 10000
+REPOS_ATTR = "repos"
+EMPTY = ""
+KEY_LABEL = " key "
+BACK_ACTION = "back"
+COLLECT_PREFIX = "collect failed: "
+ERROR_WIDTH = 60
+TIME_FMT = "%H:%M:%S"
+FLEET_HINT = "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
+DETAIL_HINT = "j/k scroll · PgUp/PgDn · q back"
+DETAIL_FOLLOW = " ⇊"
+HEADER = " M A R E S T A I L "
 LEGEND = [
     ("⚘", "running: worker, gate, or runner work"),
     ("✿", "step done"),
@@ -20,6 +37,35 @@ LEGEND = [
     ("⚒", "agent tool call"),
     ("⇊", "conversation following, tail -f style"),
 ]
+IDLE_KEYS = frozenset({-1, curses.KEY_RESIZE, ord("?")})
+
+
+class Caught:
+    def __init__(self) -> None:
+        self.error: BaseException | None = None
+
+    def __enter__(self) -> "Caught":
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: object) -> bool:
+        self.error = exc
+        return isinstance(exc, Exception)
+
+
+def skip(*_args: object, **_kwargs: object) -> Any:
+    return None
+
+
+def surely(value: Any) -> Any:
+    return value
+
+
+def is_code(value: int | None) -> TypeGuard[int]:
+    return value is not None
+
+
+def instantiate(panel_cls: type[Panel]) -> Panel:
+    return panel_cls()
 
 
 def run(roots: list[Path], refresh: float = 2.0, show_all: bool = False) -> int:
@@ -30,116 +76,264 @@ def run(roots: list[Path], refresh: float = 2.0, show_all: bool = False) -> int:
 def _main(stdscr: curses.window, roots: list[Path], refresh: float, show_all: bool) -> int:
     hide_cursor()
     stdscr.timeout(TICK_MS)
-    state = WatchState(fleet=None, theme=init_theme(), tick=0)
-    panels = [panel_cls() for panel_cls in PANELS]
-    active = 0
-    detail: ConversationPanel | None = None
-    legend = False
-    collected = 0.0
-    while True:
+    return run_session(WatchSession(roots, refresh, show_all), stdscr)
+
+
+def run_session(session: "WatchSession", stdscr: curses.window) -> int:
+    return next(filter(is_code, map(session.tick, repeat(stdscr, SESSION_TICKS))), 0)
+
+
+class WatchSession:
+    def __init__(self, roots: list[Path], refresh: float, show_all: bool) -> None:
+        self.roots = roots
+        self.refresh = refresh
+        self.show_all = show_all
+        self.state = WatchState(fleet=None, theme=init_theme(), tick=0)
+        self.panels = list(map(instantiate, PANELS))
+        self.active = 0
+        self.detail: ConversationPanel | None = None
+        self.legend = False
+        self.collected = 0.0
+
+    def tick(self, stdscr: curses.window) -> int | None:
+        self.maybe_refresh()
+        draw(stdscr, self.panels[self.active], self.detail, self.state, self.legend)
+        return self.handle_key(stdscr.getch())
+
+    def maybe_refresh(self) -> None:
         now = time.monotonic()
-        if now - collected >= refresh:
-            refresh_fleet(roots, state, show_all)
-            if detail is not None:
-                detail.sync(state.fleet)
-            collected = now
-        draw(stdscr, panels[active], detail, state, legend)
-        key = stdscr.getch()
-        if key == -1:
-            state.tick += 1
-            continue
-        if key == curses.KEY_RESIZE:
-            continue
-        if key == ord("?"):
-            legend = not legend
-            continue
-        if detail is not None:
-            if detail.on_key(key, state) == "back":
-                detail = None
-            continue
-        if key == ord("\t"):
-            active = (active + 1) % len(panels)
-            continue
-        if key == ord("r"):
-            collected = 0.0
-            continue
-        action = panels[active].on_key(key, state)
-        if action == "quit":
-            return 0
-        if action == "open":
-            repo = selected_repo(state)
-            if repo is not None:
-                detail = ConversationPanel(repo)
+        chosen = (skip, WatchSession.refresh_now)[now - self.collected >= self.refresh]
+        chosen(self, now)
+
+    def refresh_now(self, now: float) -> None:
+        refresh_fleet(self.roots, self.state, self.show_all)
+        chosen = (skip, WatchSession.sync_detail)[self.detail is not None]
+        chosen(self)
+        self.collected = now
+
+    def sync_detail(self) -> None:
+        surely(self.detail).sync(self.state.fleet)
+
+    def handle_key(self, key: int) -> int | None:
+        chosen: Any = next(filter(None, (idle_handler(key), detail_handler(self.detail), WatchSession.handle_nav)))
+        result: int | None = chosen(self, key)
+        return result
+
+    def handle_idle(self, key: int) -> int | None:
+        action: Any = IDLE_ACTIONS.get(key, skip)
+        action(self)
+        return None
+
+    def bump_tick(self) -> None:
+        self.state.tick += 1
+
+    def toggle_legend(self) -> None:
+        self.legend = not self.legend
+
+    def handle_nav(self, key: int) -> int | None:
+        chosen = NAV_ACTIONS.get(key, WatchSession.handle_panel)
+        return chosen(self, key)
+
+    def cycle_panel(self, _key: int) -> None:
+        self.active = (self.active + 1) % len(self.panels)
+
+    def request_refresh(self, _key: int) -> None:
+        self.collected = 0.0
+
+    def handle_detail(self, key: int) -> int | None:
+        chosen = (skip, WatchSession.close_detail)[detail_backs(self.detail, key, self.state)]
+        chosen(self)
+        return None
+
+    def close_detail(self) -> None:
+        self.detail = None
+
+    def handle_panel(self, key: int) -> int | None:
+        chosen: Any = PANEL_ACTIONS.get(surely(self.panels[self.active].on_key(key, self.state)), skip)
+        result: int | None = chosen(self)
+        return result
+
+    def quit_watch(self) -> int:
+        return 0
+
+    def open_from_panel(self) -> None:
+        self.open_detail()
+
+    def open_detail(self) -> None:
+        open_repo(self, selected_repo(self.state))
+
+
+def idle_handler(key: int) -> object:
+    return {True: WatchSession.handle_idle}.get(key in IDLE_KEYS)
+
+
+def detail_handler(detail: ConversationPanel | None) -> object:
+    return {True: WatchSession.handle_detail}.get(detail is not None)
+
+
+def detail_backs(detail: ConversationPanel | None, key: int, state: WatchState) -> bool:
+    return False not in (detail is not None, key_action(detail, key, state) == BACK_ACTION)
+
+
+def key_action(detail: ConversationPanel | None, key: int, state: WatchState) -> str | None:
+    action: Any = getattr(detail, "on_key", skip)
+    result: str | None = action(key, state)
+    return result
+
+
+def open_repo(session: WatchSession, repo: RepoState | None) -> None:
+    chosen = (skip, set_detail)[repo is not None]
+    chosen(session, surely(repo))
+
+
+def set_detail(session: WatchSession, repo: RepoState) -> None:
+    session.detail = ConversationPanel(repo)
 
 
 def hide_cursor() -> None:
-    try:
+    with contextlib.suppress(curses.error):
         curses.curs_set(0)
-    except curses.error:
-        pass
 
 
 def refresh_fleet(roots: list[Path], state: WatchState, show_all: bool) -> None:
-    try:
-        fleet = collect_fleet(roots)
-        if not show_all:
-            fleet.repos = [repo for repo in fleet.repos if repo.alive]
-        state.fleet = fleet
-        state.error = None
-    except Exception as error:
-        state.error = f"collect failed: {error}"[:60]
+    apply_fleet(state, collected_fleet(roots, show_all))
     state.selected = max(0, min(state.selected, max(0, len(worker_rows(state.fleet)) - 1)))
+
+
+def collected_fleet(roots: list[Path], show_all: bool) -> tuple[Fleet | None, str | None]:
+    box = Caught()
+    with box:
+        return filtered_fleet(collect_fleet(roots), show_all), None
+    return None, f"{COLLECT_PREFIX}{box.error}"[:ERROR_WIDTH]
+
+
+def apply_fleet(state: WatchState, result: tuple[Fleet | None, str | None]) -> None:
+    fleet, error = result
+    chosen = (set_fleet, skip)[fleet is None]
+    chosen(state, fleet)
+    state.error = error
+
+
+def set_fleet(state: WatchState, fleet: Fleet | None) -> None:
+    state.fleet = fleet
+
+
+def keep_all_repos(_fleet: Fleet) -> None:
+    return None
+
+
+def repo_alive(repo: RepoState) -> bool:
+    return repo.alive
+
+
+def keep_alive_repos(fleet: Fleet) -> None:
+    fleet.repos = list(filter(repo_alive, fleet.repos))
+
+
+FILTERS = {True: keep_all_repos, False: keep_alive_repos}
+
+
+def filtered_fleet(fleet: Fleet, show_all: bool) -> Fleet:
+    FILTERS[show_all](fleet)
+    return fleet
 
 
 def draw(stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
-    if width < MIN_W or height < MIN_H:
-        notice = f"resize to at least {MIN_W}x{MIN_H}"
-        put(stdscr, height // 2, max(0, (width - len(notice)) // 2), notice, state.theme.heading)
-    else:
-        draw_header(stdscr, width, state)
-        draw_footer(stdscr, height, width, detail, state)
-        target = detail if detail is not None else panel
-        target.render(stdscr, Rect(2, 0, height - 3, width), True, state)
-        if legend:
-            draw_legend(stdscr, height, width, state)
+    draw_body(stdscr, panel, detail, state, legend, height, width)
     stdscr.noutrefresh()
     curses.doupdate()
 
 
+def draw_body(
+    stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool, height: int, width: int
+) -> None:
+    chosen = (draw_frame, draw_too_small)[True in (width < MIN_W, height < MIN_H)]
+    chosen(stdscr, panel, detail, state, legend, height, width)
+
+
+def draw_too_small(
+    stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool, height: int, width: int
+) -> None:
+    notice = f"resize to at least {MIN_W}x{MIN_H}"
+    put(stdscr, height // 2, max(0, (width - len(notice)) // 2), notice, state.theme.heading)
+
+
+def draw_frame(
+    stdscr: curses.window, panel: Panel, detail: ConversationPanel | None, state: WatchState, legend: bool, height: int, width: int
+) -> None:
+    draw_header(stdscr, width, state)
+    draw_footer(stdscr, height, width, detail, state)
+    shown: Panel = (panel, surely(detail))[detail is not None]
+    shown.render(stdscr, Rect(2, 0, height - 3, width), True, state)
+    chosen = (skip, draw_legend)[legend]
+    chosen(stdscr, height, width, state)
+
+
+def legend_row(item: tuple[str, str]) -> str:
+    glyph, meaning = item
+    return f" {glyph}  {meaning}"
+
+
+def legend_put(win: curses.window, rect: Rect, state: WatchState, index: int, row: str) -> None:
+    put(win, rect.y + 1 + index, rect.x + 1, row, state.theme.secondary)
+
+
 def draw_legend(win: curses.window, height: int, width: int, state: WatchState) -> None:
-    rows = [f" {glyph}  {meaning}" for glyph, meaning in LEGEND]
-    inner = max(len(row) for row in rows + [" key "])
+    rows = list(map(legend_row, LEGEND))
+    inner = max(map(len, [*rows, KEY_LABEL]))
     rect = Rect(max(1, (height - len(rows) - 2) // 2), max(0, (width - inner - 2) // 2), len(rows) + 2, inner + 2)
     draw_box(win, rect, ROUND, state.theme.border_focus)
-    put(win, rect.y, rect.x + 2, " key ", state.theme.heading)
-    for i, row in enumerate(rows):
-        put(win, rect.y + 1 + i, rect.x + 1, row, state.theme.secondary)
+    put(win, rect.y, rect.x + 2, KEY_LABEL, state.theme.heading)
+    list(starmap(partial(legend_put, win, rect, state), enumerate(rows)))
 
 
 def draw_header(win: curses.window, width: int, state: WatchState) -> None:
-    put(win, 0, 0, f" {GLYPH_FLOURISH} M A R E S T A I L {GLYPH_FLOURISH}", state.theme.heading)
+    put(win, 0, 0, f" {GLYPH_FLOURISH}{HEADER}{GLYPH_FLOURISH}", state.theme.heading)
     status = status_text(state)
     put(win, 0, width - len(status), status, state.theme.secondary)
-    put(win, 1, 0, vine(width), state.theme.border)
+    put(win, 1, 0, full_vine(width), state.theme.border)
 
 
 def status_text(state: WatchState) -> str:
-    fleet = state.fleet
-    beds = len(fleet.repos) if fleet is not None else 0
-    remote = sum(1 for repo in fleet.repos if (repo.gate_activity or "").startswith(REMOTE_MARK)) if fleet is not None else 0
-    on_vm = f"{REMOTE_MARK} {remote} on vm · " if remote else ""
-    return f"{on_vm}{beds} beds · {len(worker_rows(fleet))} workers · {time.strftime('%H:%M:%S')} "
+    repos: list[RepoState] = getattr(state.fleet, REPOS_ATTR, [])
+    return f"{on_vm(repos)}{len(repos)} beds · {len(worker_rows(state.fleet))} workers · {time.strftime(TIME_FMT)} "
+
+
+def on_vm(repos: list[RepoState]) -> str:
+    remote = len(list(filter(on_remote, repos)))
+    return {0: EMPTY}.get(remote, f"{REMOTE_MARK} {remote} on vm · ")
+
+
+def on_remote(repo: RepoState) -> bool:
+    return first_text(repo.gate_activity).startswith(REMOTE_MARK)
 
 
 def draw_footer(win: curses.window, height: int, width: int, detail: ConversationPanel | None, state: WatchState) -> None:
-    if detail is not None:
-        hints = "j/k scroll · PgUp/PgDn · q back"
-        if detail.follow:
-            hints += " ⇊"
-    else:
-        hints = "↑↓ select · enter open · tab panel · r refresh · ? key · q quit"
-    put(win, height - 1, 1, hints, state.theme.secondary)
-    if state.error:
-        put(win, height - 1, width - len(state.error) - 1, state.error, state.theme.bounced)
+    put(win, height - 1, 1, footer_hints(detail), state.theme.secondary)
+    chosen = (skip, put_error)[bool(state.error)]
+    chosen(win, height, width, state)
+
+
+def put_error(win: curses.window, height: int, width: int, state: WatchState) -> None:
+    error = surely(state.error)
+    put(win, height - 1, width - len(error) - 1, error, state.theme.bounced)
+
+
+def fleet_hints(_detail: ConversationPanel | None) -> str:
+    return FLEET_HINT
+
+
+def detail_hints(detail: ConversationPanel) -> str:
+    return DETAIL_HINT + ("", DETAIL_FOLLOW)[detail.follow]
+
+
+def footer_hints(detail: ConversationPanel | None) -> str:
+    chosen = (fleet_hints, detail_hints)[detail is not None]
+    return chosen(surely(detail))
+
+
+IDLE_ACTIONS = {-1: WatchSession.bump_tick, ord("?"): WatchSession.toggle_legend}
+NAV_ACTIONS = {ord("\t"): WatchSession.cycle_panel, ord("r"): WatchSession.request_refresh}
+PANEL_ACTIONS = {"quit": WatchSession.quit_watch, "open": WatchSession.open_from_panel}

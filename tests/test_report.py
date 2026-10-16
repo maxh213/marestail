@@ -1,0 +1,103 @@
+import json
+import time
+
+import pytest
+
+from marestail import report
+from marestail.report import Result
+from tests.conftest import Clock
+
+
+@pytest.mark.parametrize(
+    ("failing", "total", "note", "timed_out", "expected"),
+    [
+        (0, 4, "", 0, "all 4 mutants killed"),
+        (0, 4, "(no base x; full run)", 0, "all 4 mutants killed (no base x; full run)"),
+        (2, 5, "", 0, "2 of 5 mutants not killed"),
+        (1, 5, "(n)", 0, "1 of 5 mutants not killed (n)"),
+        (0, 3, "", 1, "all 3 mutants killed (1 killed by timeout)"),
+        (0, 3, "(n)", 2, "all 3 mutants killed (2 killed by timeout) (n)"),
+        (1, 3, "(n)", 0, "1 of 3 mutants not killed (n)"),
+        (2, 4, "(note)", 0, "2 of 4 mutants not killed (note)"),
+    ],
+)
+def test_mutation_summary(failing: int, total: int, note: str, timed_out: int, expected: str) -> None:
+    assert report.mutation_summary(failing, total, note, timed_out) == expected
+
+
+def test_mutation_summary_counts_no_timeouts_by_default() -> None:
+    assert report.mutation_summary(0, 4, "") == "all 4 mutants killed"
+
+
+def test_elapsed_subtracts_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "time", Clock(1000.0, 0.25))
+    started = time.time()
+    assert report.elapsed(started) == 0.25
+
+
+def test_skipped() -> None:
+    assert Result.skipped("py.tests", "no python") == Result("py.tests", True, "skipped: no python", [], 0.0)
+
+
+def test_capped_keeps_sixty() -> None:
+    findings = [str(n) for n in range(61)]
+    kept = report.capped(findings)
+    assert len(kept) == 60
+    assert kept[-1] == "59"
+    assert kept[0] == "0"
+
+
+def test_render_one_passing() -> None:
+    result = Result("py.lint", True, "clean", ["a", "b"], 1.26)
+    assert report.render_one(result) == "[ok  ] py.lint        clean  (1.3s)\n       a\n       b"
+
+
+def test_render_one_truncates_findings() -> None:
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(42)], 0.0)
+    lines = report.render_one(result).splitlines()
+    assert lines[0] == "[FAIL] docs           bad  (0.0s)"
+    assert (len(lines), lines[40], lines[41]) == (42, "       f39", "       ... 2 more")
+
+
+def test_render_one_exactly_max_findings() -> None:
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(40)], 0.0)
+    assert report.render_one(result).splitlines()[-1] == "       f39"
+
+
+def test_render_one_hides_a_single_extra_finding() -> None:
+    result = Result("docs", False, "bad", [f"f{n}" for n in range(41)], 0.0)
+    assert report.render_one(result).splitlines()[-1] == "       ... 1 more"
+
+
+def test_render_passed_without_scope() -> None:
+    assert report.render([Result("a", True, "fine", [], 0.0)]) == "[ok  ] a              fine  (0.0s)\n\nGATE PASSED"
+
+
+def test_render_failed_with_scope() -> None:
+    results = [Result("a", False, "x", [], 0.0), Result("b", True, "y", [], 0.0), Result("c", False, "z", [], 0.0)]
+    text = report.render(results, "changed")
+    assert text.splitlines()[:2] == ["scope: changed", ""]
+    assert text.splitlines()[-2:] == ["", "GATE FAILED: a, c"]
+
+
+def test_render_empty() -> None:
+    assert report.render([], "") == "\nGATE PASSED"
+
+
+def test_verdict() -> None:
+    assert report.verdict([Result("a", True, "", [], 0.0)]) == "GATE PASSED"
+    assert report.verdict([Result("a", False, "", [], 0.0), Result("b", False, "", [], 0.0)]) == "GATE FAILED: a, b"
+
+
+def test_to_json() -> None:
+    text = report.to_json([Result("a", False, "s", ["f"], 2.5)], "changed", {"z", "b"})
+    assert json.loads(text) == {
+        "scope": "changed",
+        "focus": ["b", "z"],
+        "results": [{"gate": "a", "ok": False, "summary": "s", "findings": ["f"], "seconds": 2.5}],
+    }
+    assert text.startswith('{\n  "scope": "changed",\n  "focus": [\n    "b",')
+
+
+def test_to_json_defaults() -> None:
+    assert report.to_json([]) == '{\n  "scope": "all",\n  "focus": [],\n  "results": []\n}'

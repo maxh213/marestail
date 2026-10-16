@@ -1,3 +1,4 @@
+import contextlib
 import curses
 from dataclasses import dataclass
 
@@ -9,7 +10,12 @@ GLYPH_PASSED = "✔"
 GLYPH_IDLE = "○"
 GLYPH_SECTION = "◆"
 
-JUDGE_ROLES = frozenset({"critic", "practices", "perf", "hardener"})
+JUDGE_ROLES = frozenset({"critic", "design", "practices", "perf", "hardener", "visual"})
+STATUS_RUNNING = "running"
+VERDICT_BOUNCE = "BOUNCE"
+VERDICT_PASS = "PASS"
+MISSING = ""
+VERDICT_GLYPHS = {VERDICT_BOUNCE: GLYPH_BOUNCED, VERDICT_PASS: GLYPH_PASSED}
 
 PAIR_HEADING = 1
 PAIR_WORKER = 2
@@ -18,6 +24,9 @@ PAIR_SECONDARY = 4
 PAIR_SELECTED = 5
 PAIR_BORDER = 6
 PAIR_BOUNCED = 7
+
+RICH_PALETTE = (178, 70, 141, 108, 65, 167, 96)
+VINE_SEGMENT = "─∙❧"
 
 
 @dataclass(frozen=True)
@@ -68,30 +77,22 @@ def mono_theme() -> Theme:
 
 
 def default_bg() -> int:
-    try:
+    with contextlib.suppress(curses.error):
         curses.use_default_colors()
         return -1
-    except curses.error:
-        return curses.COLOR_BLACK
+    return curses.COLOR_BLACK
 
 
 def color_theme() -> Theme:
     bg = default_bg()
-    rich = curses.COLORS >= 256
-    amber = 178 if rich else curses.COLOR_YELLOW
-    fern = 70 if rich else curses.COLOR_GREEN
-    heather = 141 if rich else curses.COLOR_MAGENTA
-    sage = 108 if rich else curses.COLOR_WHITE
-    moss = 65 if rich else curses.COLOR_GREEN
-    ember = 167 if rich else curses.COLOR_RED
-    plum = 96 if rich else curses.COLOR_MAGENTA
-    curses.init_pair(PAIR_HEADING, amber, bg)
-    curses.init_pair(PAIR_WORKER, fern, bg)
-    curses.init_pair(PAIR_JUDGE, heather, bg)
-    curses.init_pair(PAIR_SECONDARY, sage, bg)
-    curses.init_pair(PAIR_SELECTED, curses.COLOR_WHITE, plum)
-    curses.init_pair(PAIR_BORDER, moss, bg)
-    curses.init_pair(PAIR_BOUNCED, ember, bg)
+    palette = color_palette(curses.COLORS >= 256)
+    curses.init_pair(PAIR_HEADING, palette[0], bg)
+    curses.init_pair(PAIR_WORKER, palette[1], bg)
+    curses.init_pair(PAIR_JUDGE, palette[2], bg)
+    curses.init_pair(PAIR_SECONDARY, palette[3], bg)
+    curses.init_pair(PAIR_SELECTED, curses.COLOR_WHITE, palette[6])
+    curses.init_pair(PAIR_BORDER, palette[4], bg)
+    curses.init_pair(PAIR_BOUNCED, palette[5], bg)
     return Theme(
         heading=curses.color_pair(PAIR_HEADING) | curses.A_BOLD,
         worker=curses.color_pair(PAIR_WORKER),
@@ -108,44 +109,76 @@ def color_theme() -> Theme:
     )
 
 
+def basic_palette() -> tuple[int, int, int, int, int, int, int]:
+    return (
+        curses.COLOR_YELLOW,
+        curses.COLOR_GREEN,
+        curses.COLOR_MAGENTA,
+        curses.COLOR_WHITE,
+        curses.COLOR_GREEN,
+        curses.COLOR_RED,
+        curses.COLOR_MAGENTA,
+    )
+
+
+def color_palette(rich: bool) -> tuple[int, int, int, int, int, int, int]:
+    chosen = (basic_palette, rich_palette)[rich]
+    return chosen()
+
+
+def rich_palette() -> tuple[int, int, int, int, int, int, int]:
+    return RICH_PALETTE
+
+
 def init_theme() -> Theme:
     curses.start_color()
-    if not curses.has_colors():
-        return mono_theme()
-    try:
+    chosen = (try_color, mono_theme)[not curses.has_colors()]
+    return chosen()
+
+
+def try_color() -> Theme:
+    with contextlib.suppress(curses.error):
         return color_theme()
-    except curses.error:
-        return mono_theme()
+    return mono_theme()
+
+
+def running_glyph(_verdict: str | None) -> str:
+    return GLYPH_RUNNING
+
+
+def named_or_missing(verdict: str | None) -> str:
+    return (MISSING, str(verdict))[verdict is not None]
+
+
+def verdict_glyph(verdict: str | None) -> str:
+    return VERDICT_GLYPHS.get(named_or_missing(verdict), GLYPH_DONE)
 
 
 def step_glyph(status: str, verdict: str | None) -> str:
-    if status == "running":
-        return GLYPH_RUNNING
-    if verdict == "BOUNCE":
-        return GLYPH_BOUNCED
-    if verdict == "PASS":
-        return GLYPH_PASSED
-    return GLYPH_DONE
+    chosen = (verdict_glyph, running_glyph)[status == STATUS_RUNNING]
+    return chosen(verdict)
 
 
-def step_attr(theme: Theme, status: str, verdict: str | None) -> int:
-    if status == "running":
-        return theme.worker
-    if verdict == "BOUNCE":
-        return theme.bounced
-    if verdict == "PASS":
-        return theme.passed
-    return theme.done
-
-
-def role_attr(theme: Theme, role: str) -> int:
-    if role in JUDGE_ROLES:
-        return theme.judge
+def running_attr(theme: Theme, _verdict: str | None) -> int:
     return theme.worker
 
 
-def vine(width: int) -> str:
-    segment = "─∙❧"
-    if width <= 0:
-        return ""
-    return (segment * (width // len(segment) + 1))[:width]
+def verdict_attr(theme: Theme, verdict: str | None) -> int:
+    return {VERDICT_BOUNCE: theme.bounced, VERDICT_PASS: theme.passed}.get(named_or_missing(verdict), theme.done)
+
+
+def step_attr(theme: Theme, status: str, verdict: str | None) -> int:
+    chosen = (verdict_attr, running_attr)[status == STATUS_RUNNING]
+    return chosen(theme, verdict)
+
+
+def role_attr(theme: Theme, role: str) -> int:
+    return (theme.worker, theme.judge)[role in JUDGE_ROLES]
+
+
+def vine_char(index: int) -> str:
+    return VINE_SEGMENT[index % len(VINE_SEGMENT)]
+
+
+def full_vine(width: int) -> str:
+    return "".join(map(vine_char, range(width)))

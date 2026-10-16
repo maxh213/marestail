@@ -1,7 +1,17 @@
 import json
+import time
 from dataclasses import asdict, dataclass, field
 
 MAX_FINDINGS_SHOWN = 40
+FINDING_CAP = 60
+
+
+def elapsed(started: float) -> float:
+    return time.time() - started
+
+
+def capped(findings: list[str]) -> list[str]:
+    return findings[:FINDING_CAP]
 
 
 @dataclass
@@ -17,12 +27,21 @@ class Result:
         return cls(gate=gate, ok=True, summary=f"skipped: {why}")
 
 
+def mutation_summary(failing: int, total: int, note: str, timed_out: int = 0) -> str:
+    summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
+    return summary + (f" {note}" if note else "")
+
+
 def render(results: list[Result], scope: str | None = None) -> str:
     lines = [render_one(result) for result in results]
-    failed = [result.gate for result in results if not result.ok]
-    verdict = "GATE PASSED" if not failed else "GATE FAILED: " + ", ".join(failed)
     header = [f"scope: {scope}", ""] if scope else []
-    return "\n".join([*header, *lines, "", verdict])
+    return "\n".join([*header, *lines, "", verdict(results)])
+
+
+def verdict(results: list[Result]) -> str:
+    failed = [result.gate for result in results if not result.ok]
+    return "GATE PASSED" if not failed else "GATE FAILED: " + ", ".join(failed)
 
 
 def render_one(result: Result) -> str:

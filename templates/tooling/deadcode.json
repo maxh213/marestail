@@ -1,0 +1,4 @@
+{
+  "entry": @ENTRY@,
+  "project": @SOURCES@
+}

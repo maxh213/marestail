@@ -1,13 +1,28 @@
 import json
 import time
+from dataclasses import replace
+from functools import partial
+from pathlib import Path
+from typing import Any
 
 from marestail import remote
-from marestail.context import Context
-from marestail.gates.ex_lint import scoped_sources
-from marestail.report import Result
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
+from marestail.elixir import project_files
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import run, tail
 
+scoped_sources = project_files
+GATE = "ex.mutation"
 PASSING = {"killed", "invalid", "equivalent"}
+DISABLED_TIMEOUTS = {"0", "none", "false", "off"}
+MUEX_DEPENDENCY = 'add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'
+EX = ".ex"
+EXS = ".exs"
+ELIXIR_SUFFIXES = (EX, EXS)
+MUTATIONS_KEY = "mutations"
+MUTATOR_KEY = "mutator"
+DOT = "."
+TIMEOUT = "timeout"
 RUN_LIMIT = 300
 WATCHDOG = r"""
 limit=$1; poll=$2; shift 2
@@ -45,43 +60,109 @@ wait "$main"
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.elixir_root()
-    scope = ctx.mutation_files("elixir", root, (".ex", ".exs"))
+    scope = ctx.mutation_files("elixir", root, ELIXIR_SUFFIXES)
     if scope.mode == "error":
-        return Result("ex.mutation", False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
     files = scoped_sources(ctx, root, scope.files or [])
-    if scope.mode != "full" and not files:
-        return Result.skipped("ex.mutation", "no changed elixir sources")
-    code, output = run(["mix", "help", "muex"], cwd=root, timeout=120)
+    if nothing_changed(scope, files):
+        return Result.skipped(GATE, "no changed elixir sources")
+    return with_muex(ctx, root, scope, files, started)
+
+
+def nothing_changed(scope: MutationScope, files: list[str]) -> bool:
+    return scope.mode != "full" and not files
+
+
+def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], started: float) -> Result:
+    missing = muex_missing(root)
+    if missing:
+        return Result(GATE, False, *missing, elapsed(started))
+    outcome = remote.run_mutation(
+        ctx,
+        GATE,
+        lambda workers: guarded(ctx, command(ctx, files, workers)),
+        root,
+        ctx.elixir("muex_concurrency", 4),
+        env={"MIX_ENV": "test"},
+        timeout=mutation_timeout(ctx),
+    )
+    report = read_report(outcome.output)
+    if isinstance(report, str):
+        return Result(GATE, False, report + outcome.where, tail(outcome.output), elapsed(started))
+    return report_result(ctx, located(scope, outcome.where), mutation_list(report), outcome.output, started)
+
+
+def located(scope: MutationScope, where: str) -> MutationScope:
+    return scope if not where else replace(scope, note=(scope.note + where).strip())
+
+
+def mutation_list(report: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        found = report[MUTATIONS_KEY]
+    except KeyError:
+        return []
+    return list(found)
+
+
+def muex_missing(root: Path) -> tuple[str, list[str]] | None:
+    code, _ = run(["mix", "help", "muex"], cwd=root, timeout=120)
     if code == 127:
-        return Result("ex.mutation", False, "mix not available", ["mix is not installed: install Elixir"], time.time() - started)
+        return "mix not available", ["mix is not installed: install Elixir"]
     if code != 0:
-        return Result("ex.mutation", False, "muex is not installed", ['add {:muex, "~> 0.11", only: [:dev, :test], runtime: false} to mix.exs and run mix deps.get'], time.time() - started)
-    outcome = remote.run_mutation(ctx, "ex.mutation", lambda on_remote: guarded(ctx, command(ctx, files, on_remote)), root, env={"MIX_ENV": "test"}, timeout=mutation_timeout(ctx))
-    output = outcome.output
+        return "muex is not installed", [MUEX_DEPENDENCY]
+    return None
+
+
+def read_report(output: str) -> dict[str, Any] | str:
     start = output.find("{")
     if start < 0:
-        return Result("ex.mutation", False, "muex produced no report" + outcome.where, tail(output), time.time() - started)
+        return "muex produced no report"
     try:
         report, _ = json.JSONDecoder().raw_decode(output[start:])
     except json.JSONDecodeError:
-        return Result("ex.mutation", False, "muex report unreadable" + outcome.where, tail(output), time.time() - started)
-    mutations = report.get("mutations", [])
+        return "muex report unreadable"
+    return dict(report)
+
+
+def report_result(ctx: Context, scope: MutationScope, mutations: list[dict[str, Any]], output: str, started: float) -> Result:
     if not mutations:
-        return Result("ex.mutation", False, "no mutants were generated" + outcome.where, tail(output), time.time() - started)
-    passing = PASSING if ctx.timeouts_fail("elixir") else PASSING | {"timeout"}
-    timed_out = sum(1 for m in mutations if m.get("status", "").lower() == "timeout")
-    findings = [describe(ctx, m) for m in mutations if m.get("status", "").lower() not in passing]
-    counted = sum(1 for m in mutations if m.get("status", "").lower() != "invalid")
-    summary = f"{len(findings)} of {counted} mutants not killed" if findings else f"all {counted} mutants killed"
-    summary += f" ({timed_out} killed by timeout)" if timed_out and not ctx.timeouts_fail("elixir") else ""
-    summary += f" {scope.note}" if scope.note else ""
-    summary += outcome.where
-    return Result("ex.mutation", not findings, summary, findings, time.time() - started)
+        return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
+    mutations = ctx.on_changed_lines(mutations, partial(describe, ctx))
+    if not mutations:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    return judged(ctx, scope.note, mutations, started)
+
+
+def judged(ctx: Context, note: str, mutations: list[dict[str, Any]], started: float) -> Result:
+    passing = passing_statuses(ctx)
+    findings = failures(ctx, mutations, passing)
+    summary = mutation_summary(len(findings), counted(mutations), note, timed_out(mutations, passing))
+    return Result(GATE, not findings, summary, findings, elapsed(started))
+
+
+def passing_statuses(ctx: Context) -> set[str]:
+    return PASSING if ctx.timeouts_fail("elixir") else PASSING | {TIMEOUT}
+
+
+def timed_out(mutations: list[dict[str, Any]], passing: set[str]) -> int:
+    return sum(1 for mutation in mutations if status(mutation) == TIMEOUT) if TIMEOUT in passing else 0
+
+
+def failures(ctx: Context, mutations: list[dict[str, Any]], passing: set[str]) -> list[str]:
+    return [describe(ctx, mutation) for mutation in mutations if status(mutation) not in passing]
+
+
+def status(mutation: dict[str, Any]) -> str:
+    return str(mutation.get("status", "").lower())
+
+
+def counted(mutations: list[dict[str, Any]]) -> int:
+    return sum(1 for mutation in mutations if status(mutation) != "invalid")
 
 
 def mutation_timeout(ctx: Context) -> int | None:
     value = ctx.elixir("mutation_timeout", 7200)
-    if not value or str(value).lower() in {"0", "none", "false", "off"}:
+    if not value or str(value).lower() in DISABLED_TIMEOUTS:
         return None
     return int(value)
 
@@ -91,36 +172,54 @@ def guarded(ctx: Context, parts: list[str], poll: int = 15) -> list[str]:
     return ["bash", "-c", WATCHDOG, "muex-watchdog", str(limit), str(poll), *parts]
 
 
-def command(ctx: Context, files: list[str], on_remote: bool = False) -> list[str]:
-    parts = ["mix", "muex", "--format", "json", "--fail-at", "0"]
-    if not ctx.elixir("muex_filter", False):
-        parts.append("--no-filter")
-    if not ctx.elixir("muex_optimize", True):
-        parts.append("--no-optimize")
-    preset = ctx.elixir("muex_preset")
-    if preset:
-        parts += ["--preset", str(preset)]
-    concurrency = remote.workers(ctx, "ex.mutation", ctx.elixir("muex_concurrency", 4), on_remote)
-    if concurrency:
-        parts += ["--concurrency", str(concurrency)]
-    max_mutations = ctx.elixir("muex_max_mutations")
-    if max_mutations:
-        parts += ["--max-mutations", str(max_mutations)]
-    mirror = ctx.elixir("muex_mirror")
-    if mirror:
-        dirs = mirror if isinstance(mirror, list) else [mirror]
-        parts += ["--mirror", ",".join(str(dir) for dir in dirs)]
+def command(ctx: Context, files: list[str], workers: int) -> list[str]:
+    parts = ["mix", "muex", "--format", "json", "--fail-at", "0", *switches(ctx)]
+    parts += option("--preset", ctx.elixir("muex_preset"))
+    parts += option("--concurrency", workers)
+    parts += option("--max-mutations", ctx.elixir("muex_max_mutations"))
+    parts += mirror_option(ctx.elixir("muex_mirror"))
     if files:
         parts += ["--files", ",".join(files)]
     return parts
 
 
-def describe(ctx: Context, mutation: dict) -> str:
+def switches(ctx: Context) -> list[str]:
+    flags = []
+    if flag_off(ctx.elixir("muex_filter", False)):
+        flags.append("--no-filter")
+    if flag_off(ctx.elixir("muex_optimize")):
+        flags.append("--no-optimize")
+    return flags
+
+
+def flag_off(value: object) -> bool:
+    return value is False
+
+
+def option(flag: str, value: Any) -> list[str]:
+    return [flag, str(value)] if value else []
+
+
+def mirror_option(mirror: Any) -> list[str]:
+    if not mirror:
+        return []
+    dirs = mirror if isinstance(mirror, list) else [mirror]
+    return ["--mirror", ",".join(str(folder) for folder in dirs)]
+
+
+def describe(ctx: Context, mutation: dict[str, Any]) -> str:
     location = mutation.get("location", {})
     file = ctx.elixir_root().joinpath(location.get("file", "?")).resolve()
+    mutator = mutator_name(str(mutation.get(MUTATOR_KEY, "")))
+    return f"{label(ctx, file)}:{location.get('line', 0)} {mutator} {mutation.get('status')}: {str(mutation.get('description', ''))[:80]}"
+
+
+def mutator_name(text: str) -> str:
+    return text[text.rfind(DOT) + 1 :]
+
+
+def label(ctx: Context, file: Path) -> str:
     try:
-        label = str(file.relative_to(ctx.root))
+        return str(file.relative_to(ctx.root))
     except ValueError:
-        label = str(file)
-    mutator = str(mutation.get("mutator", "")).rsplit(".", 1)[-1]
-    return f"{label}:{location.get('line', 0)} {mutator} {mutation.get('status')}: {str(mutation.get('description', ''))[:80]}"
+        return str(file)

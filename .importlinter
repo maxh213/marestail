@@ -1,0 +1,621 @@
+[importlinter]
+root_package = marestail
+
+[importlinter:contract:layers]
+name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote mutation box, depth/graph, language adapters, context, then shell
+type = layers
+layers =
+    marestail.tui
+    marestail.cli
+    marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
+    marestail._hyper
+    marestail._install | marestail._tooling
+    marestail._guidance
+    marestail.prompts : marestail.audit : marestail.practices : marestail.hunks : marestail.reported
+    marestail.gates
+    marestail.remote
+    marestail.depth : marestail.graph
+    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice
+    marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events
+    marestail.shell
+
+[importlinter:contract:gates-do-not-reach-up]
+name = Gates never import the runner, the CLI, the prompts or the pipeline
+type = forbidden
+source_modules =
+    marestail.gates
+forbidden_modules =
+    marestail.hunks
+    marestail.reported
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.timeline
+    marestail.ran_against
+
+[importlinter:contract:foundations-import-nothing-above]
+name = Context, report, shell, config and changes import nothing above them
+type = forbidden
+source_modules =
+    marestail.context
+    marestail.report
+    marestail.shell
+    marestail.config
+    marestail.changes
+    marestail._location
+    marestail.task_file
+    marestail.events
+    marestail.pipeline
+    marestail.freeze
+    marestail.sonar.client
+    marestail.timeline
+    marestail.ran_against
+    marestail.worktree
+forbidden_modules =
+    marestail.hunks
+    marestail.gates
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.tui
+    marestail.perf
+    marestail.route
+    marestail.graph
+    marestail.depth
+    marestail.audit
+    marestail.practices
+    marestail.freeze
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+    marestail.javascript
+    marestail.elixir
+    marestail.sonar.setup
+    marestail.backends
+
+[importlinter:contract:language-adapters-stay-below-gates]
+name = Language adapters never import gates, the runner, the CLI or perf
+type = forbidden
+source_modules =
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+    marestail.javascript
+    marestail.elixir
+forbidden_modules =
+    marestail.hunks
+    marestail.gates
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.tui
+    marestail.perf
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.graph
+    marestail.depth
+    marestail.timeline
+    marestail.ran_against
+
+[importlinter:contract:protect-gate-internals]
+name = Gate helpers are private to gates
+type = protected
+protected_modules =
+    marestail.gates._cycles
+    marestail.gates._crap
+    marestail.gates._hyper_crap
+    marestail.gates._coverage
+    marestail.gates._serve
+    marestail.gates._stryker
+allowed_importers =
+    marestail.gates
+
+[importlinter:contract:crap-belongs-to-crap-gates]
+name = CRAP scoring and the hyper no-worse-than-base rules are private to the CRAP gates
+type = protected
+protected_modules =
+    marestail.gates._crap
+    marestail.gates._hyper_crap
+allowed_importers =
+    marestail.gates._hyper_crap
+    marestail.gates.py_crap
+    marestail.gates.ts_crap
+    marestail.gates.rb_crap
+    marestail.gates.rs_crap
+    marestail.gates.cs_crap
+    marestail.gates.java_crap
+    marestail.gates.ex_crap
+    marestail.gates.er_crap
+
+[importlinter:contract:hyper-crap-above-crap]
+name = Hyper CRAP builds on CRAP scoring, never the other way
+type = forbidden
+source_modules =
+    marestail.gates._crap
+forbidden_modules =
+    marestail.gates._hyper_crap
+
+[importlinter:contract:stryker-belongs-to-ts-mutation-and-crap]
+name = Running Stryker and reading its report are private to the TS mutation and CRAP gates, which share one run under the hyper test_cmd
+type = protected
+protected_modules =
+    marestail.gates._stryker
+allowed_importers =
+    marestail.gates.ts_mutation
+    marestail.gates.ts_crap
+
+[importlinter:contract:gates-are-independent]
+name = Gates never import one another; work two gates share lives in a private gate helper
+type = independence
+modules =
+    marestail.gates.comments
+    marestail.gates.cs_crap
+    marestail.gates.cs_deps
+    marestail.gates.cs_lint
+    marestail.gates.cs_mutation
+    marestail.gates.cs_tests
+    marestail.gates.deadcode
+    marestail.gates.depth
+    marestail.gates.docs
+    marestail.gates.er_crap
+    marestail.gates.er_deps
+    marestail.gates.er_lint
+    marestail.gates.er_mutation
+    marestail.gates.er_tests
+    marestail.gates.ex_crap
+    marestail.gates.ex_deps
+    marestail.gates.ex_lint
+    marestail.gates.ex_mutation
+    marestail.gates.ex_tests
+    marestail.gates.java_crap
+    marestail.gates.java_deps
+    marestail.gates.java_lint
+    marestail.gates.java_mutation
+    marestail.gates.java_tests
+    marestail.gates.py_crap
+    marestail.gates.py_deps
+    marestail.gates.py_lint
+    marestail.gates.py_mutation
+    marestail.gates.py_runtime
+    marestail.gates.py_tests
+    marestail.gates.qa
+    marestail.gates.rb_crap
+    marestail.gates.rb_deps
+    marestail.gates.rb_lint
+    marestail.gates.rb_mutation
+    marestail.gates.rb_tests
+    marestail.gates.rs_crap
+    marestail.gates.rs_deps
+    marestail.gates.rs_lint
+    marestail.gates.rs_mutation
+    marestail.gates.rs_tests
+    marestail.gates.sonar
+    marestail.gates.ts_crap
+    marestail.gates.ts_deps
+    marestail.gates.ts_lint
+    marestail.gates.ts_mutation
+    marestail.gates.ts_tests
+    marestail.gates.visual
+
+[importlinter:contract:serve-belongs-to-qa]
+name = The app lifecycle is private to the two gates that start the target's app: qa and visual
+type = protected
+protected_modules =
+    marestail.gates._serve
+allowed_importers =
+    marestail.gates.qa
+    marestail.gates.visual
+
+[importlinter:contract:visual-has-one-entry-point]
+name = The visual gate is reached only through marestail.gates.visual; its spec, capture, judge, judge prompt, reported capture and records are private
+type = protected
+protected_modules =
+    marestail.gates.visual._model
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates.visual._pictures
+    marestail.gates.visual._reported
+allowed_importers =
+    marestail.gates.visual
+
+[importlinter:contract:visual-records-are-plain-data]
+name = The visual records import nothing from marestail
+type = forbidden
+source_modules =
+    marestail.gates.visual._model
+forbidden_modules =
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+    marestail.config
+
+[importlinter:contract:visual-judge-is-pure]
+name = Judging geometry reads records only, never the config, git, the app or the browser
+type = forbidden
+source_modules =
+    marestail.gates.visual._judge
+forbidden_modules =
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+    marestail.config
+
+[importlinter:contract:visual-spec-starts-nothing]
+name = Reading the visual block and section starts no process and never judges
+type = forbidden
+source_modules =
+    marestail.gates.visual._spec
+forbidden_modules =
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+
+[importlinter:contract:visual-judge-prompt-reads-files-only]
+name = The visual judge's prompt section reads the block and the captured records only; it never captures, judges geometry or starts the app
+type = forbidden
+source_modules =
+    marestail.gates.visual._pictures
+forbidden_modules =
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates._serve
+    marestail.worktree
+    marestail.shell
+
+[importlinter:contract:visual-capture-never-judges]
+name = Capturing writes pictures and geometry and never decides what a finding is
+type = forbidden
+source_modules =
+    marestail.gates.visual._capture
+forbidden_modules =
+    marestail.gates.visual._judge
+    marestail.gates.visual._pictures
+
+[importlinter:contract:worktree-belongs-to-baselines]
+name = Detached baseline worktrees and the task's start commit are used only by the perf trees and the visual gate
+type = protected
+protected_modules =
+    marestail.worktree
+allowed_importers =
+    marestail.perf.trees
+    marestail.gates.visual
+
+[importlinter:contract:protect-location-internals]
+name = Reading a path:line out of finding text is private to the context's changed-line filter
+type = protected
+protected_modules =
+    marestail._location
+allowed_importers =
+    marestail.context
+
+[importlinter:contract:protect-install-internals]
+name = Install helpers are private to install
+type = protected
+protected_modules =
+    marestail._install
+allowed_importers =
+    marestail.install
+    marestail._hyper
+
+[importlinter:contract:protect-guidance-copy]
+name = Choosing and copying a target's language rulebooks is private to the classic install; hyper may import it only to ask whether C# is present
+type = protected
+protected_modules =
+    marestail._guidance
+allowed_importers =
+    marestail._install
+    marestail._hyper
+
+[importlinter:contract:guidance-reads-the-tree-only]
+name = Language rulebook copying reads the target tree and the templates, never install, config, orchestration or the practices file list
+type = forbidden
+source_modules =
+    marestail._guidance
+forbidden_modules =
+    marestail._install
+    marestail._hyper
+    marestail.install
+    marestail.config
+    marestail.context
+    marestail.practices
+    marestail.pipeline
+    marestail.runner
+    marestail.gates
+    marestail.prompts
+    marestail._tooling
+
+[importlinter:contract:hyper-install-belongs-to-install]
+name = The hyper install flow is started only by install
+type = protected
+protected_modules =
+    marestail._hyper
+allowed_importers =
+    marestail.install
+
+[importlinter:contract:tooling-renderer-belongs-to-hyper]
+name = Rendering the out-of-tree TS tooling folder is asked for only by the hyper install
+type = protected
+protected_modules =
+    marestail._tooling
+allowed_importers =
+    marestail._hyper
+
+[importlinter:contract:tooling-renderer-knows-no-install]
+name = The tooling renderer reads the ts settings and templates only, never install, config, context or gates
+type = forbidden
+source_modules =
+    marestail._tooling
+forbidden_modules =
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail.config
+    marestail.context
+    marestail.gates
+    marestail.javascript
+
+[importlinter:contract:backends-do-not-reach-up]
+name = Backends do not import higher layers
+type = forbidden
+source_modules =
+    marestail.backends
+forbidden_modules =
+    marestail.hunks
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.graph
+    marestail.depth
+    marestail.gates
+    marestail.timeline
+    marestail.ran_against
+
+[importlinter:contract:timeline-stays-below-runner]
+name = Timeline artefacts do not import orchestration or agents
+type = forbidden
+source_modules =
+    marestail.timeline
+forbidden_modules =
+    marestail.hunks
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.freeze
+
+[importlinter:contract:events-stays-below-runner]
+name = Events writer does not import orchestration or agents
+type = forbidden
+source_modules =
+    marestail.events
+forbidden_modules =
+    marestail.hunks
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.freeze
+
+[importlinter:contract:ran-against-stays-below-runner]
+name = Ran-against domain does not import orchestration, agents or TUI
+type = forbidden
+source_modules =
+    marestail.ran_against
+forbidden_modules =
+    marestail.hunks
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar.setup
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.freeze
+    marestail.timeline
+
+[importlinter:contract:pipeline-belongs-to-orchestration]
+name = The role list and how a scope reshapes it are known only to the runner and the prompt builder
+type = protected
+protected_modules =
+    marestail.pipeline
+allowed_importers =
+    marestail.runner
+    marestail.prompts
+
+[importlinter:contract:nice-belongs-to-a-run]
+name = The run's priority, I/O class and OOM score are set only by the runner
+type = protected
+protected_modules =
+    marestail.nice
+allowed_importers =
+    marestail.runner
+
+[importlinter:contract:hunk-check-belongs-to-runner]
+name = The hyper hunk check and the blast review are asked for only by the runner
+type = protected
+protected_modules =
+    marestail.hunks
+allowed_importers =
+    marestail.runner
+
+[importlinter:contract:hunk-check-reads-only-git-and-freeze]
+name = The hunk check reads git and the file classes, never orchestration, prompts or gates
+type = forbidden
+source_modules =
+    marestail.hunks
+forbidden_modules =
+    marestail.runner
+    marestail.cli
+    marestail.prompts
+    marestail.pipeline
+    marestail.tui
+    marestail.perf
+    marestail.install
+    marestail._install
+    marestail._hyper
+    marestail._tooling
+    marestail.route
+    marestail.audit
+    marestail.practices
+    marestail.sonar
+    marestail.backends
+    marestail.gates
+    marestail.graph
+    marestail.depth
+    marestail.timeline
+    marestail.ran_against
+    marestail.context
+
+[importlinter:contract:visual-gate-parts-never-see-the-reported-bug]
+name = The visual gate's spec, capture, judge and judge prompt know nothing of the reported bug; the reported capture sits on top of them
+type = forbidden
+source_modules =
+    marestail.gates.visual._model
+    marestail.gates.visual._spec
+    marestail.gates.visual._capture
+    marestail.gates.visual._judge
+    marestail.gates.visual._pictures
+forbidden_modules =
+    marestail.gates.visual._reported
+
+[importlinter:contract:reported-bug-has-one-caller]
+name = Reproducing a bug first is the runner's step; nothing else reaches the reported-bug module
+type = protected
+protected_modules =
+    marestail.reported
+allowed_importers =
+    marestail.runner
+
+[importlinter:contract:reported-bug-does-no-io-of-its-own]
+name = The reported-bug module decides when to reproduce and what the spec roles are told; capturing lives in the visual gate and agents in the backends
+type = forbidden
+source_modules =
+    marestail.reported
+forbidden_modules =
+    marestail.shell
+    marestail.worktree
+    marestail.backends
+    marestail.prompts
+    marestail.pipeline
+    marestail.gates._serve
+allow_indirect_imports = True
+
+[importlinter:contract:remote-box-belongs-to-offloading-gates]
+name = The remote mutation box is reached only by the mutation gates that offload to it and by the CLI's remote command
+type = protected
+protected_modules =
+    marestail.remote
+allowed_importers =
+    marestail.cli
+    marestail.gates._stryker
+    marestail.gates.py_mutation
+    marestail.gates.ex_mutation
+    marestail.gates.java_mutation
+
+[importlinter:contract:remote-box-knows-no-language]
+name = The remote box runs whatever command a gate builds; it knows no language, no gate verdict and no orchestration
+type = forbidden
+source_modules =
+    marestail.remote
+forbidden_modules =
+    marestail.gates
+    marestail.report
+    marestail.dotnet
+    marestail.erlang
+    marestail.java
+    marestail.ruby
+    marestail.rust
+    marestail.javascript
+    marestail.elixir
+    marestail.depth
+    marestail.graph
+    marestail.runner
+    marestail.pipeline
+    marestail.prompts
+    marestail.events
+    marestail.timeline

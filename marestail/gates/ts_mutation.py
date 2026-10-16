@@ -1,98 +1,162 @@
-import json
-import shutil
 import time
-from pathlib import Path
+from functools import partial
+from typing import Any
 
-from marestail import remote
-from marestail.context import Context
-from marestail.perf.scope import is_benchmark
-from marestail.report import Result
-from marestail.shell import tail
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
+from marestail.gates._stryker import (
+    COMMAND_SUFFIXES,
+    KILLED,
+    RUN_SECONDS,
+    TS_SUFFIXES,
+    Placed,
+    Proof,
+    all_mutants,
+    command_proof,
+    execute,
+)
+from marestail.gates._stryker import mutation_targets as mutation_targets
+from marestail.javascript import config_flag, tool
+from marestail.report import Result, elapsed
 
 REPORT = "reports/mutation/mutation.json"
 INCREMENTAL = "reports/stryker-incremental.json"
 TEMP_DIR = ".stryker-tmp"
-TIMEOUT = 7200
 BAD = {"Survived", "NoCoverage", "RuntimeError"}
+TIMED_OUT = "Timeout"
+GATE = "ts.mutation"
+PROOF = "(proof: mutation via [hyper] test_cmd)"
+HINT = (
+    "hint: no mutant was killed; a test that loads code with vm must pass process into the sandbox, "
+    "or no assertion depends on the changed lines"
+)
+EMPTY = ""
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    scope = ctx.mutation_files("ts", ctx.ts_root(), (".ts", ".tsx"))
+    scope = ctx.mutation_files("ts", ctx.ts_root(), suffixes(ctx))
     if scope.mode == "error":
-        return Result("ts.mutation", False, scope.note, [], time.time() - started)
-    mutate = changed_sources(ctx, scope.files or [])
+        return Result(GATE, False, scope.note, [], elapsed(started))
+    return mutated(ctx, scope, started)
+
+
+def mutated(ctx: Context, scope: MutationScope, started: float) -> Result:
+    mutate = mutation_targets(ctx, scope.files or [])
     if scope.mode != "full" and not mutate:
-        return Result.skipped("ts.mutation", "no changed typescript sources")
-    incremental = bool(ctx.ts("mutation_incremental", False))
-    temp = ctx.ts_root() / TEMP_DIR
-    report = ctx.ts_root() / REPORT
-    shutil.rmtree(temp, ignore_errors=True)
-    report.unlink(missing_ok=True)
-    try:
-        pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
-        outcome = remote.run_mutation(ctx, "ts.mutation", lambda on_remote: mutation_command(mutate, concurrency(ctx, on_remote), incremental), ctx.ts_root(), timeout=TIMEOUT, pull=pull)
-        if not report.exists():
-            return Result("ts.mutation", False, f"stryker produced no report (exit {outcome.code}){outcome.where}", tail(outcome.output), time.time() - started)
-        data = json.loads(report.read_text())
-        survivors = surviving(data, ctx)
-        timed_out = [m for m in in_scope(data, ctx) if m[1]["status"] == "Timeout"]
-    finally:
-        shutil.rmtree(temp, ignore_errors=True)
-    if ctx.timeouts_fail("ts"):
-        survivors += [finding(name, mutant) for name, mutant in timed_out]
+        return Result.skipped(GATE, "no changed typescript sources")
+    return mutation_run(ctx, scope, mutate, started)
+
+
+def mutation_run(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
+    if ctx.test_cmd:
+        return proven(ctx, command_proof(ctx, mutate), started)
+    return stryker_result(ctx, scope, mutate, started)
+
+
+def suffixes(ctx: Context) -> tuple[str, ...]:
+    return COMMAND_SUFFIXES if ctx.test_cmd else TS_SUFFIXES
+
+
+def proven(ctx: Context, proof: Proof, started: float) -> Result:
+    if proof.failed:
+        return proof.failure(GATE, started)
+    return proof_verdict(ctx, placed(proof.report or {}, ctx), started)
+
+
+def proof_verdict(ctx: Context, mutants: list[Placed], started: float) -> Result:
+    if not mutants:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    result = judged(ctx, mutants, PROOF, started)
+    result.findings = hint(mutants, result.findings) + result.findings
+    return result
+
+
+def hint(mutants: list[Placed], survivors: list[str]) -> list[str]:
+    killed = any(mutant["status"] == KILLED for _, mutant in mutants)
+    return [HINT] if survivors and not killed else []
+
+
+def stryker_result(ctx: Context, scope: MutationScope, mutate: list[str], started: float) -> Result:
+    pull = tuple(str((ctx.ts_root() / path).relative_to(ctx.root)) for path in (REPORT, INCREMENTAL))
+    build = partial(mutation_command, ctx, mutate)
+    proof = execute(ctx, build, ctx.ts_root() / TEMP_DIR, ctx.ts_root() / REPORT, GATE, local_concurrency(ctx), pull)
+    if proof.report is None:
+        return proof.failure(GATE, started)
+    return verdict(ctx, proof.report, (scope.note + proof.where).strip(), started)
+
+
+def verdict(ctx: Context, report: dict[str, Any], note: str, started: float) -> Result:
+    mutants = placed(report, ctx)
+    if ctx.hyper and not mutants:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    return judged(ctx, mutants, note, started)
+
+
+def judged(ctx: Context, mutants: list[Placed], note: str, started: float) -> Result:
+    strict = ctx.timeouts_fail("ts")
+    survivors = survivors_of(mutants, strict)
+    timed_out = 0 if strict else sum(1 for _, mutant in mutants if mutant["status"] == TIMED_OUT)
+    return survivor_result(survivors, note, started, timed_out)
+
+
+def survivor_result(survivors: list[str], note: str, started: float, timed_out: int = 0) -> Result:
     summary = f"{len(survivors)} surviving mutants" if survivors else "all mutants killed"
-    summary += f" ({len(timed_out)} killed by timeout)" if timed_out and not ctx.timeouts_fail("ts") else ""
-    summary += f" {scope.note}" if scope.note else ""
-    summary += outcome.where
-    return Result("ts.mutation", not survivors, summary, survivors, time.time() - started)
+    summary += f" ({timed_out} killed by timeout)" if timed_out else ""
+    summary += f" {note}" if note else ""
+    return Result(GATE, not survivors, summary, survivors, elapsed(started))
 
 
-def concurrency(ctx: Context, on_remote: bool) -> int | None:
-    configured = ctx.ts("mutation_concurrency")
-    return remote.workers(ctx, "ts.mutation", int(configured) if configured else 0, on_remote) or None
-
-
-def mutation_command(mutate: list[str], concurrency: int | None = None, incremental: bool = False) -> list[str]:
-    command = ["npx", "stryker", "run", "--reporters", "json,progress", "--tempDirName", TEMP_DIR, "--cleanTempDir", "always"]
-    command += ["--dryRunTimeoutMinutes", str(TIMEOUT // 60)]
-    if concurrency:
-        command += ["--concurrency", str(concurrency)]
-    if incremental:
+def mutation_command(ctx: Context, mutate: list[str], workers: int) -> list[str]:
+    command = [
+        *tool(ctx, "stryker"),
+        "run",
+        *config_flag(ctx, "stryker.config.json"),
+        "--reporters",
+        "json,progress",
+        "--tempDirName",
+        TEMP_DIR,
+        "--cleanTempDir",
+        "always",
+        "--dryRunTimeoutMinutes",
+        str(RUN_SECONDS // 60),
+    ]
+    if workers:
+        command += ["--concurrency", str(workers)]
+    if ctx.ts("mutation_incremental"):
         command += ["--incremental", "--incrementalFile", INCREMENTAL]
     if mutate:
         command += ["--mutate", ",".join(mutate)]
     return command
 
 
-def changed_sources(ctx: Context, files: list[str]) -> list[str]:
-    root = ctx.ts_root().relative_to(ctx.root)
-    return [str(Path(file).relative_to(root)) for file in files if ".test." not in file and ".spec." not in file and not is_benchmark(file)]
+def local_concurrency(ctx: Context) -> int:
+    configured = ctx.ts("mutation_concurrency")
+    return int(configured) if configured else 0
 
 
-def surviving(report: dict, ctx: Context) -> list[str]:
-    return [finding(name, mutant) for name, mutant in in_scope(report, ctx) if mutant["status"] in BAD]
+def placed(report: dict[str, Any], ctx: Context) -> list[Placed]:
+    found = [(name, mutant) for name, mutant in all_mutants(report, ctx) if ctx.in_scope(name)]
+    return ctx.on_changed_lines(found, where)
 
 
-def in_scope(report: dict, ctx: Context) -> list[tuple[str, dict]]:
-    found = []
-    for file, data in report.get("files", {}).items():
-        name = relative(file, ctx)
-        if ctx.in_scope(name):
-            found += [(name, mutant) for mutant in data.get("mutants", [])]
-    return found
+def where(entry: Placed) -> str:
+    return f"{entry[0]}:{entry[1]['location']['start']['line']}"
 
 
-def finding(name: str, mutant: dict) -> str:
+def survivors_of(mutants: list[Placed], strict: bool = False) -> list[str]:
+    return [survivor(name, mutant) for name, mutant in mutants if failed(mutant, strict)]
+
+
+def failed(mutant: dict[str, Any], strict: bool) -> bool:
+    return mutant["status"] in BAD or (strict and mutant["status"] == TIMED_OUT)
+
+
+def replacement_text(mutant: dict[str, Any]) -> str:
+    if "replacement" not in mutant:
+        return EMPTY
+    return str(mutant["replacement"])[:60]
+
+
+def survivor(name: str, mutant: dict[str, Any]) -> str:
     line = mutant["location"]["start"]["line"]
-    return f"{name}:{line} {mutant['mutatorName']} {mutant['status']}: {str(mutant.get('replacement', ''))[:60]}"
-
-
-def relative(path: str, ctx: Context) -> str:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = ctx.ts_root() / path
-    try:
-        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
-    except ValueError:
-        return path
+    return f"{name}:{line} {mutant['mutatorName']} {mutant['status']}: {replacement_text(mutant)}"

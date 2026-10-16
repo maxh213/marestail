@@ -1,67 +1,111 @@
 import json
 import re
 import time
-from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.gates._coverage import in_scope_findings as in_scope_findings
+from marestail.javascript import config_flag, tool, tooling_file
+from marestail.javascript import rel as relative
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
 MAX_LINES = 60
 NOISE = ("npm notice", "npm warn", "npm WARN")
-TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>.+)$")
+TSC_LINE = re.compile(r"^(?P<path>[^()]+)\((?P<line>\d+),\d+\):\s*(?P<rest>\S.*)$")
+FILE_PATH = "filePath"
+GATE = "ts.lint"
+TS_SUFFIXES = (".ts", ".tsx", ".js", ".jsx")
+EMPTY = ""
+EMPTY_LIST: list[Any] = []
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    if ctx.scoped and not ctx.changed_under(ctx.ts_root(), (".ts", ".tsx", ".js", ".jsx")):
-        return Result.skipped("ts.lint", "no changed typescript files")
+    if ctx.scoped and not ctx.changed_under(ctx.ts_root(), TS_SUFFIXES):
+        return Result.skipped(GATE, "no changed typescript files")
     findings = tsc_findings(ctx) + eslint_findings(ctx)
     summary = "tsc and eslint clean" if not findings else f"{len(findings)} problems"
-    return Result("ts.lint", not findings, summary, findings[:MAX_LINES], time.time() - started)
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def tsc_findings(ctx: Context) -> list[str]:
+    tooling = tooling_file(ctx, "tsconfig.json")
+    if tooling is not None:
+        return tsc_run(ctx, str(tooling))
     name = str(ctx.ts("tsconfig", "tsconfig.app.json"))
     if not (ctx.ts_root() / name).exists():
         return [f"marestail.toml:1 [ts] tsconfig = {name!r} does not exist under {relative(str(ctx.ts_root()), ctx)}"]
-    code, output = run(["npx", "tsc", "--noEmit", "-p", name], cwd=ctx.ts_root(), timeout=900)
-    if code == 0:
-        return []
+    return tsc_run(ctx, name)
+
+
+def tsc_run(ctx: Context, tsconfig: str) -> list[str]:
+    code, output = run([*tool(ctx, "tsc"), "--noEmit", "-p", tsconfig], cwd=ctx.ts_root(), timeout=900)
+    return [] if code == 0 else tsc_report(output, ctx)
+
+
+def tsc_report(output: str, ctx: Context) -> list[str]:
     lines = meaningful(output)
-    matches = [match for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
+    matches = tsc_matches(lines)
     if not matches:
         return [f"tsc: {line}" for line in lines]
-    findings = [tsc_finding(match, ctx) for match in matches]
-    if ctx.scoped:
-        findings = [finding for finding in findings if ctx.in_scope(finding.split(":", 1)[0])]
-    return findings
+    return ctx.on_changed_lines(in_scope_findings([tsc_finding(match, ctx) for match in matches], ctx))
 
 
-def tsc_finding(match: re.Match, ctx: Context) -> str:
+def tsc_matches(lines: list[str]) -> list[re.Match[str]]:
+    return [match for match in map(TSC_LINE.match, (line.strip() for line in lines)) if match]
+
+
+def tsc_finding(match: re.Match[str], ctx: Context) -> str:
     return f"{relative(match.group('path'), ctx)}:{match.group('line')} {match.group('rest').strip()[:300]}"
 
 
 def eslint_findings(ctx: Context) -> list[str]:
     code, output = run(eslint_command(ctx), cwd=ctx.ts_root(), timeout=900)
-    if code == 0:
-        return []
+    return [] if code == 0 else eslint_report(ctx, code, output)
+
+
+def eslint_report(ctx: Context, code: int, output: str) -> list[str]:
     report = parse(output)
     if report is None:
-        return [f"eslint: {line}" for line in meaningful(output)]
-    if ctx.scoped:
-        report = [file for file in report if ctx.in_scope(relative(file.get("filePath", ""), ctx))]
-        return [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
-    findings = [describe(file, message, ctx) for file in report for message in file.get("messages", [])]
-    return findings or [f"eslint: {line}" for line in meaningful(output)] or [f"marestail.toml:1 eslint exited {code} without a message"]
+        return eslint_lines(output)
+    if ctx.hyper:
+        return hyper_messages(report, ctx, code, output)
+    return scoped_messages(report, ctx) if ctx.scoped else unscoped_messages(report, ctx, code, output)
+
+
+def scoped_messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
+    return messages([file for file in report if ctx.in_scope(relative(str_field(file, FILE_PATH), ctx))], ctx)
+
+
+def unscoped_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
+    return messages(report, ctx) or silent_exit(code, output)
+
+
+def hyper_messages(report: list[dict[str, Any]], ctx: Context, code: int, output: str) -> list[str]:
+    located = messages(report, ctx)
+    return ctx.on_changed_lines(located) if located else silent_exit(code, output)
+
+
+def silent_exit(code: int, output: str) -> list[str]:
+    return eslint_lines(output) or [f"marestail.toml:1 eslint exited {code} without a message"]
+
+
+def messages(report: list[dict[str, Any]], ctx: Context) -> list[str]:
+    return [describe(file, message, ctx) for file in report for message in list_field(file, "messages")]
+
+
+def eslint_lines(output: str) -> list[str]:
+    return [f"eslint: {line}" for line in meaningful(output)]
 
 
 def eslint_command(ctx: Context) -> list[str]:
     benchmarks = ["--ignore-pattern", "perf/"] if ctx.ts_root().resolve() == ctx.root.resolve() else []
-    return ["npx", "eslint", ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
+    config = config_flag(ctx, "eslint.config.mjs", "-c")
+    return [*tool(ctx, "eslint"), *config, ".", *benchmarks, "--max-warnings", "0", "--format", "json"]
 
 
-def parse(output: str) -> list | None:
+def parse(output: str) -> list[Any] | None:
     start = output.find("[")
     if start < 0:
         return None
@@ -69,22 +113,34 @@ def parse(output: str) -> list | None:
         report, _ = json.JSONDecoder().raw_decode(output, start)
     except ValueError:
         return None
+    return as_report(report)
+
+
+def as_report(report: object) -> list[Any] | None:
     return report if isinstance(report, list) else None
 
 
-def describe(file: dict, message: dict, ctx: Context) -> str:
-    text = str(message.get("message", "")).splitlines()[0] if message.get("message") else ""
-    return f"{relative(file.get('filePath', ''), ctx)}:{message.get('line') or 1} {message.get('ruleId') or 'error'}: {text}"
+def describe(file: dict[str, Any], message: dict[str, Any], ctx: Context) -> str:
+    text = first_line(str_field(message, "message"))
+    line = message.get("line") or ctx.placeholder_line
+    return f"{relative(str_field(file, FILE_PATH), ctx)}:{line} {message.get('ruleId') or 'error'}: {text}"
 
 
-def relative(path: str, ctx: Context) -> str:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = ctx.ts_root() / path
-    try:
-        return candidate.resolve().relative_to(ctx.root.resolve()).as_posix()
-    except ValueError:
-        return path
+def str_field(data: dict[str, Any], key: str) -> str:
+    if key not in data or data[key] is None:
+        return EMPTY
+    return str(data[key])
+
+
+def list_field(data: dict[str, Any], key: str) -> list[Any]:
+    if key not in data:
+        return EMPTY_LIST
+    value = data[key]
+    return value if isinstance(value, list) else EMPTY_LIST
+
+
+def first_line(text: str) -> str:
+    return text.splitlines()[0] if text else EMPTY
 
 
 def meaningful(output: str) -> list[str]:

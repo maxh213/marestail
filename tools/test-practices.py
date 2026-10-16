@@ -6,24 +6,26 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import freeze, install, practices, runner
+from marestail import freeze, install, practices
 from marestail.config import Config
-from marestail.pipeline import find, names
+from marestail.pipeline import Judge, find, names
 from marestail.runner import Run, run_judge, run_step
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def git(root, *args):
+def git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
@@ -46,8 +48,14 @@ def new_repo(tmp: str, guidance: bool = False) -> Path:
     return root
 
 
-def state(root: Path, raw=None, retries: int = 1) -> Run:
-    return Run(config=Config(root=root, raw=raw or {"git": {"base": "main"}}), task=root / "tasks" / "t.md", model=None, retries=retries, agent="claude")
+def state(root: Path, raw: dict[str, Any] | None = None, retries: int = 1) -> Run:
+    return Run(
+        config=Config(root=root, raw=raw or {"git": {"base": "main"}}),
+        task=root / "tasks" / "t.md",
+        model=None,
+        retries=retries,
+        agent="claude",
+    )
 
 
 def passing_judge(verdict: str) -> str:
@@ -66,13 +74,13 @@ def passing_judge(verdict: str) -> str:
 
 
 @contextlib.contextmanager
-def quiet():
+def quiet() -> Iterator[None]:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         yield
 
 
 @contextlib.contextmanager
-def agent_stub(folder: Path, body: str):
+def agent_stub(folder: Path, body: str) -> Iterator[None]:
     stub = folder / "stub-agent"
     stub.write_text(body)
     stub.chmod(0o755)
@@ -87,12 +95,12 @@ def agent_stub(folder: Path, body: str):
             if previous[key] is None:
                 os.environ.pop(key, None)
             else:
-                os.environ[key] = previous[key]
+                os.environ[key] = cast(str, previous[key])
 
 
-def pipeline_order():
-    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "practices", "perf", "hardener", "qa"])
-    judge = find("practices")
+def pipeline_order() -> None:
+    expect("pipeline", names(), ["specifier", "critic", "coder", "cleaner", "architect", "design", "practices", "perf", "hardener", "qa"])
+    judge = cast(Judge, find("practices"))
     expect("practices-bounce-to", judge.bounce_to, "coder")
     expect("practices-tier", judge.tier, None)
     expect("practices-writes", judge.writes, ())
@@ -100,7 +108,7 @@ def pipeline_order():
     expect("practices-optional", judge.optional, True)
 
 
-def guidance_files():
+def guidance_files() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         expect("missing-folder", practices.files(root), [])
@@ -111,10 +119,16 @@ def guidance_files():
         (folder / "c.txt").write_text("c\n")
         (folder / "sub").mkdir()
         (folder / "sub" / "x.md").write_text("x\n")
-        expect("found-sorted", [path.name for path in practices.files(root)], ["a.md", "b.md"])
+        pattern = folder / "patterns" / "ts.md"
+        pattern.parent.mkdir()
+        pattern.write_text("p\n")
+        found = list(practices.files(root))
+        expect("pattern-present", pattern.is_file(), True)
+        expect("found-sorted", [path.name for path in found], ["a.md", "b.md"])
+        expect("no-pattern-rulebook", pattern in found, False)
 
 
-def no_guidance_skip():
+def no_guidance_skip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp)
         before = git(root, "rev-parse", "HEAD")
@@ -126,7 +140,7 @@ def no_guidance_skip():
         expect("noguidance-no-commit", git(root, "rev-parse", "HEAD"), before)
 
 
-def disabled_skip():
+def disabled_skip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, guidance=True)
         before = git(root, "rev-parse", "HEAD")
@@ -138,32 +152,34 @@ def disabled_skip():
         expect("disabled-no-commit", git(root, "rev-parse", "HEAD"), before)
 
 
-def freeze_guidance():
+def freeze_guidance() -> None:
     config = Config(root=Path("/tmp"), raw={})
     expect("spec-has-guidance", "guidance/**" in freeze.SPEC, True)
     expect("coder-frozen", freeze.frozen_paths(config, "coder", ["guidance/ts.md", "src/app.py"]), ["guidance/ts.md"])
     expect("practices-frozen", freeze.frozen_paths(config, "practices", ["guidance/ts.md", "src/app.py"]), ["guidance/ts.md"])
 
 
-def pass_commit():
+def pass_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = new_repo(tmp, guidance=True)
         with agent_stub(Path(tmp), passing_judge("VERDICT: PASS\n")), quiet():
-            outcome, target, _ = run_judge(state(root), find("practices"))
+            outcome, target, _ = run_judge(state(root), cast(Judge, find("practices")))
         expect("pass-verdict", (outcome, target), ("PASS", None))
         expect("pass-subject", "practices verdict: PASS" in git(root, "log", "-1", "--format=%s"), True)
         expect("pass-commit-empty", git(root, "show", "--name-only", "--format=", "HEAD"), "")
-        expect("guidance-kept", (root / "guidance" / "ts.md").read_text(), "# TypeScript practices\n\n- TS-1: prefer union types over enums\n")
+        expect(
+            "guidance-kept", (root / "guidance" / "ts.md").read_text(), "# TypeScript practices\n\n- TS-1: prefer union types over enums\n"
+        )
         expect("tree-clean", git(root, "status", "--porcelain"), "")
 
 
-def role_file():
+def role_file() -> None:
     role = Path(__file__).resolve().parent.parent / "roles" / "practices.md"
     expect("role-exists", role.is_file(), True)
     expect("role-mentions-guidance", "guidance" in role.read_text(), True)
 
 
-def install_template():
+def install_template() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "target"
         target.mkdir()
@@ -194,7 +210,7 @@ def install_template():
         expect("install-no-ruby-guidance", (target / "guidance" / "rb.md").exists(), False)
         expect("install-no-python-guidance", (target / "guidance" / "py.md").exists(), False)
         (target / "src").mkdir()
-        (target / "src" / "App.csproj").write_text("<Project Sdk=\"Microsoft.NET.Sdk\" />\n")
+        (target / "src" / "App.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk" />\n')
         with quiet():
             install.install(target)
         csharp = target / "guidance" / "cs.md"
@@ -212,7 +228,7 @@ def install_template():
         elixir = target / "guidance" / "ex.md"
         expect("install-creates-elixir-guidance", elixir.is_file(), True)
         expect("install-elixir-guidance-matches", elixir.read_text(), (ROOT / "templates" / "guidance" / "ex.md").read_text())
-        (target / "Gemfile").write_text("source \"https://rubygems.org\"\n")
+        (target / "Gemfile").write_text('source "https://rubygems.org"\n')
         with quiet():
             install.install(target)
         ruby = target / "guidance" / "rb.md"
@@ -227,13 +243,13 @@ def install_template():
         expect("install-python-guidance-matches", python.read_text(), (ROOT / "templates" / "guidance" / "py.md").read_text())
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp)
-        (target / "pyproject.toml").write_text("[project]\nname = \"box\"\n")
+        (target / "pyproject.toml").write_text('[project]\nname = "box"\n')
         with quiet():
             install.install(target)
         expect("install-creates-python-guidance-from-pyproject", (target / "guidance" / "py.md").is_file(), True)
 
 
-def rulebook_content():
+def rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "ts.md").read_text()
     ids = set(re.findall(r"\*\*TS-(\d+)", text))
     expect("rule-count", len(ids) >= 40, True)
@@ -244,14 +260,14 @@ def rulebook_content():
         expect(f"mentions {needle}", needle in text, True)
 
 
-def csharp_rulebook_content():
+def csharp_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "cs.md").read_text()
     expect("cs-rule-ids", re.findall(r"\*\*CS-(\d+)", text), ["1"])
     for needle in ["Arrange, Act, Assert", "exactly one action", "blank line", "never by comments"]:
         expect(f"cs mentions {needle}", needle in text, True)
 
 
-def erlang_rulebook_content():
+def erlang_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "er.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*ER-(\d+)", text)]
     expect("er-rule-count", len(ids) >= 40, True)
@@ -259,11 +275,20 @@ def erlang_rulebook_content():
     expect("er-rule-lines", len(text.splitlines()) <= 250, True)
     for heading in ["## Errors & functional style", "## OTP & concurrency", "## Testing", "## Types & style", "## Cowboy & real-time"]:
         expect(f"er heading {heading}", heading in text, True)
-    for needle in ["maybe", "gen_statem", "handle_event_function", "list_to_existing_atom", "handle_continue", "pg:", "cowboy_websocket", "simple_one_for_one"]:
+    for needle in [
+        "maybe",
+        "gen_statem",
+        "handle_event_function",
+        "list_to_existing_atom",
+        "handle_continue",
+        "pg:",
+        "cowboy_websocket",
+        "simple_one_for_one",
+    ]:
         expect(f"er mentions {needle}", needle in text, True)
 
 
-def ruby_rulebook_content():
+def ruby_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "rb.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*RB-(\d+)", text)]
     expect("rb-rule-count", len(ids) >= 40, True)
@@ -275,7 +300,7 @@ def ruby_rulebook_content():
         expect(f"rb mentions {needle}", needle in text, True)
 
 
-def python_rulebook_content():
+def python_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "py.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*PY-(\d+)", text)]
     expect("py-rule-count", len(ids) >= 40, True)
@@ -287,7 +312,7 @@ def python_rulebook_content():
         expect(f"py mentions {needle}", needle in text, True)
 
 
-def elixir_rulebook_content():
+def elixir_rulebook_content() -> None:
     text = (ROOT / "templates" / "guidance" / "ex.md").read_text()
     ids = [int(n) for n in re.findall(r"\*\*EX-(\d+)", text)]
     expect("ex-rule-count", len(ids) >= 40, True)

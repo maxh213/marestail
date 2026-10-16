@@ -1,0 +1,821 @@
+import json
+import os
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+import marestail.backends as backends
+from marestail import runner
+from marestail.config import Config
+from marestail.runner import Run
+
+AGENT_VARS = (
+    "MARESTAIL_AGENT",
+    "MARESTAIL_CLAUDE",
+    "MARESTAIL_AGY",
+    "MARESTAIL_CURSOR",
+    "MARESTAIL_GROK",
+    "MARESTAIL_GROK_EFFORT",
+    "MARESTAIL_KILO",
+    "MARESTAIL_KILO_VARIANT",
+    "MARESTAIL_KIMI",
+    "MARESTAIL_JUNIE",
+    "MARESTAIL_HERMES",
+)
+CLAUDE_BASE = ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
+KILO_BASE = ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model"]
+HERMES_VERIFIED = (
+    '{"type":"system","subtype":"init","model":"x-ai/grok-4.6","session_id":"20260918_151301_be7c1c","timestamp":1789740781416}\n'
+    '{"type":"tool_use","name":"terminal","input":{"command":"git status --short"},"timestamp":1789740714068}\n'
+    '{"type":"tool_result","name":"terminal","output":"{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}","duration_ms":218,"is_error":false,"timestamp":1789740714290}\n'
+    '{"type":"text","text":"pong","timestamp":1789740800465}\n'
+    '{"type":"result","session_id":"20260918_151301_be7c1c","exit_code":0,"text":"pong","tokens":{"input":14851,"output":1,"total":14980,"cache_read":128,"cache_write":0},"duration_ms":19100,"timestamp":1789740800516}'
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in AGENT_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def make_state(root: Path = Path("/work"), raw: dict[str, Any] | None = None, **fields: Any) -> Run:
+    base: dict[str, Any] = {"model": None, "retries": 1}
+    return Run(config=Config(root=root, raw=raw or {}), task=Path("/work/task.md"), **{**base, **fields})
+
+
+@pytest.mark.parametrize(
+    ("fields", "raw", "env", "expected"),
+    [
+        ({"agent": "Grok"}, {"agent": {"backend": "kimi"}}, "kilo", "grok"),
+        ({}, {"agent": {"backend": "kimi"}}, "Kilo", "kilo"),
+        ({}, {"agent": {"backend": "Kimi"}}, "", "kimi"),
+        ({}, {"agent": {"backend": "hermes"}}, "", "hermes"),
+        ({"agent": "hermes"}, {}, "", "hermes"),
+        ({}, {}, "hermes", "hermes"),
+        ({}, {}, "", "claude"),
+    ],
+)
+def test_resolve_agent(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], raw: dict[str, Any], env: str, expected: str) -> None:
+    monkeypatch.setenv("MARESTAIL_AGENT", env)
+    assert runner.resolve_agent(make_state(raw=raw, **fields)) == expected
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"model": "opus", "effort": "high"}, "claude/opus high"),
+        ({"route": "dandelion/route"}, "dandelion/route"),
+        ({"route": "dandelion/route", "agent": "claude", "effort": "low"}, "dandelion/route low"),
+        ({"agent": "kilo"}, f"{backends.KILO_DEFAULT_MODEL} high"),
+        ({"agent": "kilo", "model": "other"}, "kilo/other"),
+        ({"agent": "grok", "effort": "max"}, "grok max"),
+        ({"agent": "grok"}, "grok"),
+        ({"agent": "hermes"}, "hermes"),
+        ({"agent": "hermes", "model": "mymodel"}, "hermes/mymodel"),
+        ({"agent": "hermes", "effort": "xhigh"}, "hermes xhigh"),
+        ({"agent": "hermes", "model": "mymodel", "effort": "xhigh"}, "hermes/mymodel xhigh"),
+        ({}, "claude"),
+    ],
+)
+def test_agent_label(fields: dict[str, Any], expected: str) -> None:
+    assert runner.agent_label(make_state(**fields)) == expected
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"agent": "cursor", "model": "auto", "effort": "high"}, "cursor/auto high"),
+        ({"agent": "cursor", "model": "kimi-k3-max"}, "cursor/kimi-k3-max"),
+        ({"agent": "agy", "model": "gemini-3.8-flash-high", "effort": "high"}, "agy/gemini-3.8-flash-high high"),
+        ({"agent": "junie", "model": "gemini-3.8-flash", "effort": "high"}, "junie/gemini-3.8-flash high"),
+        ({"agent": "claude", "model": "claude-opus-5", "effort": "high"}, "claude-opus-5 high"),
+        ({"agent": "grok", "model": "grok-4.6", "effort": "xhigh"}, "grok-4.6 xhigh"),
+        ({"agent": "kimi", "model": "kimi-code/kimi-for-coding-highspeed"}, "kimi-code/kimi-for-coding-highspeed"),
+        ({"agent": "hermes", "model": "x-ai/grok-4.6", "effort": "xhigh"}, "x-ai/grok-4.6 xhigh"),
+    ],
+)
+def test_agent_label_names_the_backend(fields: dict[str, Any], expected: str) -> None:
+    assert runner.agent_label(make_state(**fields)) == expected
+
+
+def test_backend_effort_for_grok_and_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_GROK_EFFORT", "low")
+    grok = make_state(agent="grok", effort="")
+    other = make_state(agent="claude", effort="")
+    assert runner.backend_effort(grok) == "low"
+    assert runner.backend_effort(other) == ""
+
+
+def test_agent_env_for_claude_and_others() -> None:
+    claude = make_state(account_env={"A": "1"})
+    other = make_state(agent="grok", account_env={"A": "1"})
+    assert runner.agent_env(claude) == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "A": "1"}
+    assert runner.agent_env(other) == {"A": "1"}
+    assert runner.agent_env(other) is not other.account_env
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({}, CLAUDE_BASE),
+        ({"model": "m", "effort": "e"}, [*CLAUDE_BASE, "--model", "m", "--effort", "e"]),
+        (
+            {"agent": "agy", "model": "m", "effort": "e"},
+            ["agy", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "4h", "--model", "m", "--effort", "e"],
+        ),
+        ({"agent": "agy"}, ["agy", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "4h"]),
+        (
+            {"agent": "cursor", "model": "m", "effort": "e"},
+            ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "m"],
+        ),
+        ({"agent": "kilo"}, [*KILO_BASE, backends.KILO_DEFAULT_MODEL, "--variant", "high"]),
+        (
+            {"agent": "junie", "model": "m", "effort": "high"},
+            ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work", "--model=m", "--effort=high"],
+        ),
+        ({"agent": "junie"}, ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", "/work"]),
+    ],
+)
+def test_agent_command(fields: dict[str, Any], expected: list[str]) -> None:
+    assert runner.agent_command(make_state(**fields)) == expected
+
+
+def test_agent_command_binaries_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_CLAUDE", "/bin/c")
+    monkeypatch.setenv("MARESTAIL_AGY", "/bin/a")
+    monkeypatch.setenv("MARESTAIL_CURSOR", "/bin/u")
+    monkeypatch.setenv("MARESTAIL_JUNIE", "/bin/j")
+    assert runner.agent_command(make_state())[0] == "/bin/c"
+    assert runner.agent_command(make_state(agent="agy"))[0] == "/bin/a"
+    assert runner.agent_command(make_state(agent="cursor"))[0] == "/bin/u"
+    assert runner.agent_command(make_state(agent="junie"))[0] == "/bin/j"
+
+
+def test_grok_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt = Path("/work/p.md")
+    base = ["grok", "--prompt-file", "/work/p.md", "--output-format", "json", "--always-approve", "--no-plan", "--trust"]
+    assert backends.grok_command(make_state(), prompt) == base
+    assert backends.grok_command(make_state(model="m", effort="e"), prompt) == [*base, "--model", "m", "--reasoning-effort", "e"]
+    monkeypatch.setenv("MARESTAIL_GROK", "/bin/g")
+    monkeypatch.setenv("MARESTAIL_GROK_EFFORT", "low")
+    assert backends.grok_command(make_state(), prompt) == ["/bin/g", *base[1:], "--reasoning-effort", "low"]
+
+
+@pytest.mark.parametrize(
+    ("fields", "env", "expected"),
+    [
+        ({"effort": ""}, "low", None),
+        ({}, None, "high"),
+        ({"model": backends.KILO_DEFAULT_MODEL}, None, "high"),
+        ({"model": "other"}, None, None),
+        ({}, "low", "low"),
+        ({}, "", None),
+        ({"effort": "max"}, "low", "max"),
+    ],
+)
+def test_kilo_variant(monkeypatch: pytest.MonkeyPatch, fields: dict[str, Any], env: str | None, expected: str | None) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_KILO_VARIANT", env)
+    assert backends.kilo_variant(make_state(**fields)) == expected
+
+
+def test_kilo_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_KILO", "/bin/k")
+    assert backends.kilo_command(make_state(model="m", effort="")) == ["/bin/k", *KILO_BASE[1:], "m"]
+
+
+def test_kimi_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt = Path("/work/p.md")
+    expected_prompt = "Your instructions are in /work/p.md. Read that whole file first, then follow it exactly."
+    assert backends.kimi_prompt(prompt) == expected_prompt
+    assert backends.kimi_command(make_state(), prompt) == ["kimi", "-p", expected_prompt, "--output-format", "stream-json"]
+    monkeypatch.setenv("MARESTAIL_KIMI", "/bin/k")
+    assert backends.kimi_command(make_state(model="m"), prompt)[-2:] == ["-m", "m"]
+    assert backends.kimi_command(make_state(model="m"), prompt)[0] == "/bin/k"
+
+
+def test_junie_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="high")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+        "--model=m",
+        "--effort=high",
+    ]
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="low"))[-1] == "--effort=low"
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="medium"))[-1] == "--effort=medium"
+    assert backends.junie_command(make_state(agent="junie", model="m", effort="xhigh")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+        "--model=m",
+    ]
+    assert backends.junie_command(make_state(agent="junie")) == [
+        "junie",
+        "--skip-update-check",
+        "--input-format=json",
+        "--output-format=json",
+        "-p",
+        "/work",
+    ]
+    monkeypatch.setenv("MARESTAIL_JUNIE", "/opt/junie")
+    assert backends.junie_command(make_state(agent="junie"))[0] == "/opt/junie"
+
+
+def test_hermes_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt = Path("/work/p.md")
+    base = [
+        "hermes",
+        "chat",
+        "--query-file",
+        str(prompt.resolve()),
+        "--oneshot",
+        "-Q",
+        "--format",
+        "stream-json",
+        "--yolo",
+        "--accept-hooks",
+        "--max-turns",
+        "1000",
+    ]
+    assert backends.hermes_command(make_state(agent="hermes"), prompt) == base
+    assert backends.hermes_command(make_state(agent="hermes", model="m", effort="e"), prompt) == [*base, "-m", "m", "--reasoning", "e"]
+    monkeypatch.setenv("MARESTAIL_HERMES", "/bin/h")
+    assert backends.hermes_command(make_state(agent="hermes"), prompt)[0] == "/bin/h"
+
+
+def test_hermes_run_passes_empty_stdin_and_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (0, "out", "err"))
+    assert backends.hermes_run(make_state(root=Path("/repo"), agent="hermes"), Path("/work/p.md")) == (0, "out")
+    call = fake.calls[0]
+    assert call["command"] == backends.hermes_command(make_state(agent="hermes"), Path("/work/p.md"))
+    assert call["input"] == ""
+    assert call["cwd"] == Path("/repo")
+    assert call["env"] is os.environ
+    fake = install_subprocess(monkeypatch, (2, "", "subscription_expired"))
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (2, "subscription_expired")
+
+
+def test_hermes_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (127, "hermes: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    assert backends.hermes_run(make_state(agent="hermes"), Path("/work/p.md")) == (124, "hermes: timed out after 14400s")
+
+
+def test_junie_run_passes_json_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (0, '{"result":"ok"}', "err"))
+    assert backends.junie_run(make_state(root=Path("/repo"), agent="junie"), "the prompt") == (0, '{"result":"ok"}')
+    call = fake.calls[0]
+    assert call["command"] == backends.junie_command(make_state(root=Path("/repo"), agent="junie"))
+    assert json.loads(call["input"]) == {"task": "the prompt"}
+    assert call["cwd"] == Path("/repo")
+    assert call["env"] is os.environ
+
+
+def test_junie_run_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (1, "out", "err"))
+    assert backends.junie_run(make_state(agent="junie"), "p") == (1, "out\nerr")
+    assert fake.calls[0]["input"] == json.dumps({"task": "p"})
+
+
+def test_junie_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert backends.junie_run(make_state(agent="junie"), "p") == (127, "junie: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    assert backends.junie_run(make_state(agent="junie"), "p") == (124, "junie: timed out after 14400s")
+
+
+class FakeSubprocess:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, command: list[str], **options: Any) -> Any:
+        self.calls.append({"command": command, **options})
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return subprocess.CompletedProcess(command, self.result[0], self.result[1], self.result[2])
+
+
+def install_subprocess(monkeypatch: pytest.MonkeyPatch, result: Any) -> FakeSubprocess:
+    fake = FakeSubprocess(result)
+    monkeypatch.setattr(subprocess, "run", fake)
+    return fake
+
+
+def test_grok_run_timeout_shows_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    state = make_state()
+    prompt = Path("/work/p.md")
+    shown = backends.SPACE.join(backends.grok_command(state, prompt))
+    assert backends.grok_run(state, prompt) == (124, f"{shown}: timed out after 14400s")
+
+
+def test_grok_run_passes_env_and_empty_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = install_subprocess(monkeypatch, (0, "\x1b[1mout\r\n", "err"))
+    state = make_state(root=Path("/repo"))
+    assert backends.grok_run(state, Path("/work/p.md")) == (0, "out\n")
+    call = fake.calls[0]
+    assert call["command"][0] == "grok"
+    assert call["cwd"] == Path("/repo")
+    assert call["input"] == ""
+    assert call["timeout"] == 14400
+    assert call["env"]["GROK_MEMORY"] == "0"
+    assert (call["capture_output"], call["text"], call["check"]) == (True, True, False)
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        ((1, "  ", "bad"), (1, "bad")),
+        ((1, "partial", "bad"), (1, "partial")),
+        ((0, "", "bad"), (0, "")),
+    ],
+)
+def test_kilo_run_output_choice(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str, str], expected: tuple[int, str]) -> None:
+    fake = install_subprocess(monkeypatch, result)
+    assert backends.kilo_run(make_state(), "the prompt") == expected
+    assert fake.calls[0]["input"] == "the prompt"
+    assert fake.calls[0]["env"] is os.environ
+
+
+def test_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert backends.kilo_run(make_state(model="m", effort=""), "p") == (127, "kilo: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    command = " ".join(backends.kilo_command(make_state(model="m", effort="")))
+    assert backends.kilo_run(make_state(model="m", effort=""), "p") == (124, f"{command}: timed out after 14400s")
+    assert backends.kimi_run(make_state(), Path("/w/p.md")) == (124, "kimi: timed out after 14400s")
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        ((1, "out", "err"), (1, "out\nerr")),
+        ((1, "", "err"), (1, "err")),
+        ((0, "out", "err"), (0, "out")),
+    ],
+)
+def test_kimi_run_output(monkeypatch: pytest.MonkeyPatch, result: tuple[int, str, str], expected: tuple[int, str]) -> None:
+    fake = install_subprocess(monkeypatch, result)
+    assert backends.kimi_run(make_state(), Path("/w/p.md")) == expected
+    assert fake.calls[0]["input"] == ""
+    assert fake.calls[0]["command"] == backends.kimi_command(make_state(), Path("/w/p.md"))
+    assert fake.calls[0]["env"] is os.environ
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ('noise {"type": "text"} tail\n[1]\n{bad\nnothing\n  {"a": 1}', [{"type": "text"}, {"a": 1}]),
+        ('{"a": [1]}', [{"a": [1]}]),
+        ("x [1, 2]", []),
+    ],
+)
+def test_json_events(output: str, expected: list[dict[str, Any]]) -> None:
+    assert backends.kilo_events(output) == expected
+    assert backends.kimi_events(output) == expected
+
+
+def kilo(*events: dict[str, Any]) -> str:
+    return "\n".join(json.dumps(event) for event in events)
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (1, "rate limit hit", True),
+        (0, "rate limit hit", False),
+        (1, "boom", False),
+        (0, kilo({"type": "error", "error": {"message": "quota exceeded"}}), True),
+        (0, kilo({"type": "error", "error": "Too many requests"}), True),
+        (0, kilo({"type": "error", "note": "overloaded"}), True),
+        (0, kilo({"type": "error", "error": "broken"}), False),
+        (1, kilo({"type": "text", "text": "rate limit"}), False),
+    ],
+)
+def test_kilo_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.kilo_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
+        (
+            kilo(
+                {"type": "text", "part": {"text": " first "}},
+                {"type": "text", "text": "second"},
+                {"type": "text", "part": {"text": ""}},
+                {"type": "step_finish", "part": {"tokens": 10, "cost": 0.5}},
+                {"type": "step_finish", "part": {"total_tokens": 12, "costUSD": "n/a"}},
+                {"type": "step_finish", "part": {}},
+            ),
+            "tokens=12 cost=n/a 'second'",
+        ),
+        (
+            kilo(
+                {"type": "error", "error": {"message": "E" * 130}},
+                {"type": "text", "text": "hello"},
+                {"type": "step_finish", "part": "x", "cost": 3},
+            ),
+            f"{'E' * 120!r}",
+        ),
+        (kilo({"type": "error", "error": "boom"}, {"type": "error"}, {"type": "text", "text": "t"}), "'t'"),
+        (kilo({"type": "step_finish", "part": {"cost": 1.234}}), "api-equivalent=$1.23 ''"),
+        (kilo({"type": "text", "text": "z" * 130}), repr("z" * 120)),
+    ],
+)
+def test_kilo_summary(output: str, expected: str) -> None:
+    assert backends.kilo_summary(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, kilo({"error": {"message": "rate limited"}}), True),
+        (1, kilo({"error": {"message": "nope"}}), False),
+        (1, "usage limit", True),
+        (0, "usage limit", False),
+        (0, kilo({"role": "assistant", "content": "quota"}), False),
+        (1, kilo({"role": "assistant", "content": "quota"}), True),
+    ],
+)
+def test_kimi_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.kimi_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        ({"error": {"message": "m"}}, "m"),
+        ({"error": {"code": 1}}, "{'code': 1}"),
+        ({"error": "text"}, "text"),
+        ({"type": "error", "message": "msg"}, "msg"),
+        ({"role": "error_role", "content": "c"}, "c"),
+        ({"type": "fatal_error"}, "{'type': 'fatal_error'}"),
+        ({"type": "text", "error": ""}, None),
+        ({"role": None, "type": None}, None),
+    ],
+)
+def test_kimi_error(event: dict[str, Any], expected: str | None) -> None:
+    assert backends.kimi_error(event) == expected
+
+
+def test_kimi_texts() -> None:
+    events: list[dict[str, Any]] = [
+        {"role": "assistant", "content": " a "},
+        {"type": "assistant", "message": {"content": [{"text": " b "}, {"text": ""}, "raw", {"other": 1}]}},
+        {"role": "assistant", "content": "   ", "message": "not a dict"},
+        {"role": "assistant", "content": 5},
+        {"role": "user", "content": "ignored"},
+    ]
+    assert backends.kimi_texts(events) == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("plain\ntext", "plain text"),
+        (
+            kilo(
+                {"role": "assistant", "content": "hi"},
+                {"num_turns": 3, "usage": {"input_tokens": 5, "output_tokens": None}},
+                {"usage": {"total_tokens": 9}, "total_cost_usd": 0.126},
+            ),
+            "turns=3 tokens=9 api-equivalent=$0.13 'hi'",
+        ),
+        (kilo({"role": "assistant", "content": "hi"}, {"error": "bad" * 50}), f"{('bad' * 50)[:120]!r}"),
+        (kilo({"usage": {"output_tokens": 4}, "total_cost_usd": "free"}), "tokens=4 cost=free ''"),
+        (kilo({"usage": {"other": 1}}, {"usage": "x"}), "''"),
+        (kilo({"usage": {"total_tokens": 7}}, {"usage": {"input_tokens": 1}}), "tokens=7 ''"),
+    ],
+)
+def test_kimi_summary(output: str, expected: str) -> None:
+    assert backends.kimi_summary(output) == expected
+
+
+def test_error_typed_reads_type_and_role() -> None:
+    assert backends.error_typed({"type": "error"}) is True
+    assert backends.error_typed({"role": "error"}) is True
+    assert backends.error_typed({}) is False
+
+
+def test_kimi_usage_keeps_the_previous_cost() -> None:
+    events: list[dict[str, Any]] = [{backends.TOTAL_COST: 1.5, backends.NUM_TURNS: 2}, {"text": "later"}]
+    assert backends.kimi_usage(events) == (2, None, 1.5)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ('{"a": 1}', {"a": 1}),
+        ("[1]", None),
+        ('log line {"b": 2} trailing', {"b": 2}),
+        ("no json", None),
+        ("{broken", None),
+        ("x [1] {1}", None),
+    ],
+)
+def test_grok_parse_json(output: str, expected: dict[str, Any] | None) -> None:
+    assert backends.grok_parse_json(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (1, "HTTP 503", True),
+        (0, "HTTP 503", False),
+        (1, "plain", False),
+        (0, '{"type": "error", "message": "rate limit"}', True),
+        (1, '{"type": "done", "stopReason": "overloaded"}', True),
+        (0, '{"type": "done", "stopReason": "overloaded"}', False),
+        (1, '{"type": "done"} capacity', True),
+        (1, '{"type": "done", "text": "fine"}', False),
+    ],
+)
+def test_grok_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.grok_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("data", "output", "expected"),
+    [
+        ({backends.MESSAGE: "rate limit"}, "clean", True),
+        ({"text": "usage limit"}, "clean", True),
+        ({"type": "overloaded"}, "clean", True),
+        ({"stopReason": "capacity"}, "clean", True),
+        ({}, "too many requests", True),
+        ({}, "HTTP 529", True),
+        ({}, "HTTP 503", True),
+        ({backends.MESSAGE: "fine"}, "clean", False),
+        ({}, "clean", False),
+    ],
+)
+def test_grok_limit_text(data: dict[str, str], output: str, expected: bool) -> None:
+    assert backends.grok_limit_text(data, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("tail\nend", "tail end"),
+        ('{"text": "t", "num_turns": 2, "total_cost_usd": 1.5}', "turns=2 api-equivalent=$1.50 't'"),
+        (
+            '{"message": "m", "modelUsage": {"a": {"costUSD": 1}, "b": {"costUSD": 0.25}, "c": {}, "d": 3}}',
+            "turns=? api-equivalent=$1.25 'm'",
+        ),
+        ('{"modelUsage": {"c": {}}, "usage": {"total_tokens": 8}}', "turns=? tokens=8 ''"),
+        ('{"modelUsage": "x", "usage": {"total_tokens": 0}}', "turns=? ''"),
+        ('{"usage": "x", "text": "' + "q" * 130 + '"}', f"turns=? {'q' * 120!r}"),
+    ],
+)
+def test_grok_summary(output: str, expected: str) -> None:
+    assert backends.grok_summary(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, "always-approve disabled", False),
+        (1, "always-approve disabled", True),
+        (1, '{"message": "yolo mode is locked"}', True),
+        (1, '{"message": ""} bypassPermissions', True),
+        (1, '{"message": "other"} bypassPermissions', False),
+        (1, "fine", False),
+    ],
+)
+def test_grok_always_approve_locked(code: int, output: str, expected: bool) -> None:
+    assert backends.grok_always_approve_locked(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (1, "rate limit", True),
+        (0, "rate limit", False),
+        (1, "nope", False),
+        (0, '{"is_error": true, "result": "usage limit reached"}', True),
+        (0, '{"is_error": false, "result": "usage limit reached"}', False),
+        (0, '{"is_error": true, "result": "other"}', False),
+        (0, '{"status": "ERROR", "response": "quota"}', True),
+        (1, '{"error": "Too Many Requests"}', True),
+        (0, '{"error": "Too Many Requests"}', False),
+        (1, '{"response": "", "error": "fine"}', False),
+    ],
+)
+def test_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("not\njson", "not json"),
+        ('{"total_cost_usd": 0.5, "num_turns": 4, "result": "done"}', "turns=4 api-equivalent=$0.50 'done'"),
+        ('{"total_cost_usd": 1, "result": "' + "r" * 130 + '"}', f"turns=None api-equivalent=$1.00 {'r' * 120!r}"),
+        ('{"type": "result", "result": "ok", "usage": {"total_tokens": 0}}', "tokens=0 'ok'"),
+        ('{"type": "result"}', "''"),
+        ('{"usage": {"inputTokens": 2, "outputTokens": 3}, "result": "r"}', "tokens=5 'r'"),
+        ('{"usage": {"outputTokens": null}}', "tokens=0 ''"),
+        ('{"num_turns": 2, "response": "resp", "usage": {"total_tokens": 6}}', "turns=2 tokens=6 'resp'"),
+        ('{"usage": "x"}', "turns=? ''"),
+    ],
+)
+def test_summary(output: str, expected: str) -> None:
+    assert backends.summary(output) == expected
+
+
+def test_summary_without_a_result_key() -> None:
+    assert backends.summary('{"total_cost_usd": 2}') == "turns=None api-equivalent=$2.00 ''"
+
+
+def test_kilo_text_reads_part_then_text() -> None:
+    assert backends.kilo_text({"type": "text", "part": {"text": "from-part"}, "text": "fallback"}) == "from-part"
+    assert backends.kilo_text({"type": "text", "text": "plain"}) == "plain"
+    assert backends.kilo_text({"type": "other", "text": "nope"}) == ""
+
+
+def test_object_or_none_keeps_objects() -> None:
+    assert backends.object_or_none({"a": 1}) == {"a": 1}
+    assert backends.object_or_none([1]) is None
+    assert backends.json_object("[1, 2]") is None
+
+
+def test_stdout_or_stderr_uses_stderr_when_stdout_is_blank() -> None:
+    failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="  ", stderr="err")
+    assert backends.stdout_or_stderr(failed) == "err"
+    ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="out", stderr="err")
+    assert backends.stdout_or_stderr(ok) == "out"
+
+
+def test_turns_summary_prefers_result_over_response() -> None:
+    data = {backends.NUM_TURNS: 2, backends.RESULT: "hello", "response": "other"}
+    text = backends.turns_summary(data, {})
+    assert "hello" in text
+    assert "other" not in text
+
+
+JUNIE_VERIFIED_OUTPUT = '{"sessionId":"s","taskName":"t","result":"### Summary\\n- pong\\n\\n### Changes\\n- No files were created or modified as requested.\\n\\n### Verification\\n- Verified that the repository remains empty and untouched.","changes":[],"llmUsage":[{"model":"gemini-3.8-flash","calls":17,"cost":0.06395658750000001,"inputTokens":91729,"cacheInputTokens":261869,"cacheCreateTokens":0,"outputTokens":10527},{"model":"gpt-5.4-nano","calls":13,"cost":0.01091355,"inputTokens":44499,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":1611},{"model":"gpt-4.1-mini-2025-04-14","calls":16,"cost":0.004483599999999999,"inputTokens":10037,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":293},{"model":"gpt-4.1-2025-04-14","calls":1,"cost":0.0015019999999999999,"inputTokens":743,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":2},{"model":"gemini-3.5-flash-lite","calls":1,"cost":4.9225E-4,"inputTokens":1969,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":0}]}'
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (1, "Your balance is exhausted.", True),
+        (1, '{"errors":[{"level":"ERROR","message":"InsufficientAccountBalance"}]}', True),
+        (1, "insufficient balance", True),
+        (1, "rate limit exceeded", True),
+        (1, "Junie failed with the message: Invalid model: no-such-model-xyz", False),
+        (0, "the quota gate passed", False),
+        (0, JUNIE_VERIFIED_OUTPUT, False),
+        (1, '{"result": "ok"}', False),
+        (1, "plain error", False),
+        (1, '{"errors":["not a dict"]}', False),
+        (1, '{"errors":[{}]}', False),
+        (1, '{"errors":[{"message":"rate limit exceeded"}]}', True),
+        (1, '{"errors":[{"message":"rate\\u0020limit exceeded"}]}', True),
+    ],
+)
+def test_junie_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.junie_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            JUNIE_VERIFIED_OUTPUT,
+            "calls=48 tokens=423279 cost=$0.08 '### Summary - pong  ### Changes - No files were created or modified as requested.  ### Verification '",
+        ),
+        ('{"llmUsage": []}', "calls=0 tokens=0 cost=$0.00 ''"),
+        ("not json", "not json"),
+        ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
+    ],
+)
+def test_junie_summary(output: str, expected: str) -> None:
+    assert backends.junie_summary(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"llmUsage": [{"calls": 2, "inputTokens": 10, "cacheInputTokens": 5, "outputTokens": 3, "cost": 1.5}]}, (2, 18, 1.5)),
+        ({"llmUsage": [{}, {"calls": None, "inputTokens": None, "cost": None}]}, (0, 0, 0.0)),
+        ({"llmUsage": ["not a dict", {"calls": 1, "inputTokens": 2, "outputTokens": 3, "cost": 0.1}]}, (1, 5, 0.1)),
+        ("not a dict", (0, 0, 0.0)),
+        ({}, (0, 0, 0.0)),
+    ],
+)
+def test_junie_usage(data: Any, expected: tuple[int, int, float]) -> None:
+    assert backends.junie_usage(data) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, HERMES_VERIFIED, False),
+        (2, HERMES_VERIFIED, False),
+        (2, "insufficient_credits", True),
+        (2, "no_usable_credits", True),
+        (2, "subscription_expired", True),
+        (2, "subscription_required", True),
+        (2, "member_spend_cap_exceeded", True),
+        (2, "rate limit exceeded", True),
+        (2, "Subscription credits are exhausted. Top up/renew credits, then retry.", True),
+        (
+            2,
+            '{"type":"result","exit_code":2,"error":"Subscription credits are exhausted. Top up/renew credits, then retry.","text":""}',
+            True,
+        ),
+        (2, "Unknown --reasoning 'ultrahigh'", False),
+        (0, "the quota gate passed", False),
+        (1, "plain text failure", False),
+    ],
+)
+def test_hermes_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.hermes_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (HERMES_VERIFIED, 'tokens=14980 "pong"'),
+        (
+            '{"type":"result","text":"' + "word " * 60 + '","tokens":{"total":7}}',
+            'tokens=7 "word word word word word word word word word word word word word word word word word word word word "',
+        ),
+        ('{"type":"result","text":"","tokens":{"total":0}}', 'tokens=0 ""'),
+        ('{"type":"result","tokens":{"total":0}}', 'tokens=0 ""'),
+        ('{"type":"result","text":"first\\nsecond","tokens":{"total":3}}', 'tokens=3 "first second"'),
+        ("not json", "not json"),
+        ("x" * 190 + "\nend" + "y" * 20, "x" * 176 + " end" + "y" * 20),
+    ],
+)
+def test_hermes_summary(output: str, expected: str) -> None:
+    assert backends.hermes_summary(output) == expected
+
+
+@pytest.mark.parametrize(
+    ("backend", "readers"),
+    [
+        ("grok", (backends.grok_rate_limited, backends.grok_summary)),
+        ("kilo", (backends.kilo_rate_limited, backends.kilo_summary)),
+        ("kimi", (backends.kimi_rate_limited, backends.kimi_summary)),
+        ("junie", (backends.junie_rate_limited, backends.junie_summary)),
+        ("hermes", (backends.hermes_rate_limited, backends.hermes_summary)),
+        ("claude", (backends.rate_limited, backends.summary)),
+        ("agy", (backends.rate_limited, backends.summary)),
+    ],
+)
+def test_outcome_readers(backend: str, readers: tuple[Any, Any]) -> None:
+    assert runner.outcome_readers(backend) == readers
+
+
+def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
+    prompt = Path("/f")
+
+    def make_run(name: str, arg: Any) -> Callable[[Run, Any], tuple[int, str]]:
+        def run_fn(s: Run, p: Any) -> tuple[int, str]:
+            assert s is state
+            assert p == arg
+            return 1, f"{name} {arg}"
+
+        return run_fn
+
+    monkeypatch.setattr(backends, "grok_run", make_run("grok", prompt))
+    monkeypatch.setattr(backends, "kilo_run", make_run("kilo", "p"))
+    monkeypatch.setattr(backends, "kimi_run", make_run("kimi", prompt))
+    monkeypatch.setattr(backends, "junie_run", make_run("junie", "p"))
+    monkeypatch.setattr(backends, "hermes_run", make_run("hermes", prompt))
+    assert runner.run_backend(state, "grok", "p", prompt) == (1, f"grok {prompt}")
+    assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
+    assert runner.run_backend(state, "kimi", "p", prompt) == (1, f"kimi {prompt}")
+    assert runner.run_backend(state, "junie", "p", prompt) == (1, "junie p")
+    assert runner.run_backend(state, "hermes", "p", prompt) == (1, f"hermes {prompt}")
+
+
+def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
+    fake = fake_run(runner, [(4, "claude out")])
+    state = make_state(root=Path("/repo"), model="m", account_env={"K": "v"})
+    assert runner.run_backend(state, "claude", "p", Path("/f")) == (4, "claude out")
+    assert fake.calls == [[*CLAUDE_BASE, "--model", "m"]]
+    assert fake.options == [
+        {"cwd": Path("/repo"), "stdin": "p", "timeout": 14400, "env": {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "K": "v"}}
+    ]
+
+
+def test_parse_verdict_from_hermes_result() -> None:
+    assert runner.parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"result","text":"VERDICT: BOUNCE coder"}') == ("BOUNCE", "coder")

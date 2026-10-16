@@ -9,12 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from marestail.tui.collect import classify_gate, discover, display_name, latest_log
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def nested_beds():
+def nested_beds() -> None:
     with tempfile.TemporaryDirectory(prefix="marestail-watch-") as temp:
         root = Path(temp)
         (root / "top" / ".marestail").mkdir(parents=True)
@@ -31,7 +31,7 @@ def nested_beds():
         expect("display-top", display_name(root / "top", [root]), "top")
 
 
-def pipeline_log_wins():
+def pipeline_log_wins() -> None:
     with tempfile.TemporaryDirectory(prefix="marestail-watch-log-") as temp:
         root = Path(temp)
         runs = root / ".marestail" / "runs"
@@ -46,14 +46,22 @@ def pipeline_log_wins():
         expect("pipeline-newer", latest_log(root), pipeline)
 
 
-def remote_gates_say_so():
+def remote_gates_say_so() -> None:
     alias = ["-o", "HostKeyAlias=marestail-mutation"]
     job = "echo $$ > /var/lib/marestail/busy.d/ab; flock /var/lib/marestail/job.lock sg docker -c 'docker exec mt bash -c \"npx stryker run\"'"
     expect("remote-job", classify_gate(["ssh", *alias, "max@1.2.3.4", job]), "☁ stryker on marestail-mutation")
-    expect("remote-muex", classify_gate(["ssh", *alias, "max@1.2.3.4", job.replace("npx stryker run", "mix muex")]), "☁ muex on marestail-mutation")
+    expect(
+        "remote-muex",
+        classify_gate(["ssh", *alias, "max@1.2.3.4", job.replace("npx stryker run", "mix muex")]),
+        "☁ muex on marestail-mutation",
+    )
     sync = ["rsync", "-a", "-e", "ssh -i key -o HostKeyAlias=marestail-mutation", "/repo/", "max@1.2.3.4:/repo/"]
     expect("remote-sync", classify_gate(sync), "☁ syncing to marestail-mutation")
-    expect("remote-start", classify_gate(["gcloud", "compute", "instances", "start", "marestail-mutation", "--quiet"]), "☁ starting marestail-mutation")
+    expect(
+        "remote-start",
+        classify_gate(["gcloud", "compute", "instances", "start", "marestail-mutation", "--quiet"]),
+        "☁ starting marestail-mutation",
+    )
     expect("rsync-server-side", classify_gate(["ssh", *alias, "max@1.2.3.4", "rsync", "--server", "."]), None)
     expect("local-stays-plain", classify_gate(["npx", "stryker", "run"]), "stryker")
 

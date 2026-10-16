@@ -1,13 +1,28 @@
+import importlib
+import os
+import time
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
-from marestail.context import Context
-from marestail.report import Result
+from marestail import config as config_module
+from marestail import context as context_module
+from marestail.context import Context, hook_focus, resolve_focus
+from marestail.report import Result, elapsed
 
 FAST = "fast"
 SONAR = "sonar"
 FULL = "full"
 QA = "qa"
+PYTHON = "python"
+TS = "ts"
+ELIXIR = "elixir"
+RUBY = "ruby"
+DOTNET = "dotnet"
+ERLANG = "erlang"
+RUST = "rust"
+JAVA = "java"
 
 Runner = Callable[[Context], Result]
 
@@ -20,70 +35,134 @@ class Gate:
     run: Runner
 
 
-def registry() -> list[Gate]:
-    from marestail.gates import comments, deadcode, depth, docs, ex_crap, ex_deps, ex_lint, ex_mutation, ex_tests, py_crap, py_deps, py_lint, py_mutation, py_runtime, py_tests, qa, sonar
-    from marestail.gates import cs_crap, cs_deps, cs_lint, cs_mutation, cs_tests
-    from marestail.gates import er_crap, er_deps, er_lint, er_mutation, er_tests
-    from marestail.gates import java_crap, java_deps, java_lint, java_mutation, java_tests
-    from marestail.gates import rb_crap, rb_deps, rb_lint, rb_mutation, rb_tests
-    from marestail.gates import rs_crap, rs_deps, rs_lint, rs_mutation, rs_tests
-    from marestail.gates import ts_crap, ts_deps, ts_lint, ts_mutation, ts_tests
+GATE_SPECS: tuple[tuple[str, str, str | None, str], ...] = (
+    ("py.tests", FAST, PYTHON, "py_tests"),
+    ("py.crap", FAST, PYTHON, "py_crap"),
+    ("py.lint", FAST, PYTHON, "py_lint"),
+    ("py.deps", FAST, PYTHON, "py_deps"),
+    ("py.runtime", FAST, PYTHON, "py_runtime"),
+    ("ts.tests", FAST, TS, "ts_tests"),
+    ("ts.crap", FAST, TS, "ts_crap"),
+    ("ts.lint", FAST, TS, "ts_lint"),
+    ("ts.deps", FAST, TS, "ts_deps"),
+    ("ex.tests", FAST, ELIXIR, "ex_tests"),
+    ("ex.crap", FAST, ELIXIR, "ex_crap"),
+    ("ex.lint", FAST, ELIXIR, "ex_lint"),
+    ("ex.deps", FAST, ELIXIR, "ex_deps"),
+    ("rb.tests", FAST, RUBY, "rb_tests"),
+    ("rb.crap", FAST, RUBY, "rb_crap"),
+    ("rb.lint", FAST, RUBY, "rb_lint"),
+    ("rb.deps", FAST, RUBY, "rb_deps"),
+    ("cs.tests", FAST, DOTNET, "cs_tests"),
+    ("cs.crap", FAST, DOTNET, "cs_crap"),
+    ("cs.lint", FAST, DOTNET, "cs_lint"),
+    ("cs.deps", FAST, DOTNET, "cs_deps"),
+    ("er.tests", FAST, ERLANG, "er_tests"),
+    ("er.crap", FAST, ERLANG, "er_crap"),
+    ("er.lint", FAST, ERLANG, "er_lint"),
+    ("er.deps", FAST, ERLANG, "er_deps"),
+    ("rs.tests", FAST, RUST, "rs_tests"),
+    ("rs.crap", FAST, RUST, "rs_crap"),
+    ("rs.lint", FAST, RUST, "rs_lint"),
+    ("rs.deps", FAST, RUST, "rs_deps"),
+    ("java.tests", FAST, JAVA, "java_tests"),
+    ("java.crap", FAST, JAVA, "java_crap"),
+    ("java.lint", FAST, JAVA, "java_lint"),
+    ("java.deps", FAST, JAVA, "java_deps"),
+    ("comments", FAST, None, "comments"),
+    ("depth", FAST, None, "depth"),
+    ("deadcode", FAST, None, "deadcode"),
+    ("docs", FAST, "docs", "docs"),
+    ("py.mutation", FULL, PYTHON, "py_mutation"),
+    ("ts.mutation", FULL, TS, "ts_mutation"),
+    ("ex.mutation", FULL, ELIXIR, "ex_mutation"),
+    ("rb.mutation", FULL, RUBY, "rb_mutation"),
+    ("cs.mutation", FULL, DOTNET, "cs_mutation"),
+    ("er.mutation", FULL, ERLANG, "er_mutation"),
+    ("rs.mutation", FULL, RUST, "rs_mutation"),
+    ("java.mutation", FULL, JAVA, "java_mutation"),
+    ("sonar", SONAR, SONAR, "sonar"),
+    ("qa", QA, QA, "qa"),
+    ("visual", QA, "visual", "visual"),
+)
+RUN_GATE = "run_gate"
 
-    return [
-        Gate("py.tests", FAST, "python", py_tests.run_gate),
-        Gate("py.crap", FAST, "python", py_crap.run_gate),
-        Gate("py.lint", FAST, "python", py_lint.run_gate),
-        Gate("py.deps", FAST, "python", py_deps.run_gate),
-        Gate("py.runtime", FAST, "python", py_runtime.run_gate),
-        Gate("ts.tests", FAST, "ts", ts_tests.run_gate),
-        Gate("ts.crap", FAST, "ts", ts_crap.run_gate),
-        Gate("ts.lint", FAST, "ts", ts_lint.run_gate),
-        Gate("ts.deps", FAST, "ts", ts_deps.run_gate),
-        Gate("ex.tests", FAST, "elixir", ex_tests.run_gate),
-        Gate("ex.crap", FAST, "elixir", ex_crap.run_gate),
-        Gate("ex.lint", FAST, "elixir", ex_lint.run_gate),
-        Gate("ex.deps", FAST, "elixir", ex_deps.run_gate),
-        Gate("rb.tests", FAST, "ruby", rb_tests.run_gate),
-        Gate("rb.crap", FAST, "ruby", rb_crap.run_gate),
-        Gate("rb.lint", FAST, "ruby", rb_lint.run_gate),
-        Gate("rb.deps", FAST, "ruby", rb_deps.run_gate),
-        Gate("cs.tests", FAST, "dotnet", cs_tests.run_gate),
-        Gate("cs.crap", FAST, "dotnet", cs_crap.run_gate),
-        Gate("cs.lint", FAST, "dotnet", cs_lint.run_gate),
-        Gate("cs.deps", FAST, "dotnet", cs_deps.run_gate),
-        Gate("er.tests", FAST, "erlang", er_tests.run_gate),
-        Gate("er.crap", FAST, "erlang", er_crap.run_gate),
-        Gate("er.lint", FAST, "erlang", er_lint.run_gate),
-        Gate("er.deps", FAST, "erlang", er_deps.run_gate),
-        Gate("rs.tests", FAST, "rust", rs_tests.run_gate),
-        Gate("rs.crap", FAST, "rust", rs_crap.run_gate),
-        Gate("rs.lint", FAST, "rust", rs_lint.run_gate),
-        Gate("rs.deps", FAST, "rust", rs_deps.run_gate),
-        Gate("java.tests", FAST, "java", java_tests.run_gate),
-        Gate("java.crap", FAST, "java", java_crap.run_gate),
-        Gate("java.lint", FAST, "java", java_lint.run_gate),
-        Gate("java.deps", FAST, "java", java_deps.run_gate),
-        Gate("comments", FAST, None, comments.run_gate),
-        Gate("depth", FAST, None, depth.run_gate),
-        Gate("deadcode", FAST, None, deadcode.run_gate),
-        Gate("docs", FAST, "docs", docs.run_gate),
-        Gate("py.mutation", FULL, "python", py_mutation.run_gate),
-        Gate("ts.mutation", FULL, "ts", ts_mutation.run_gate),
-        Gate("ex.mutation", FULL, "elixir", ex_mutation.run_gate),
-        Gate("rb.mutation", FULL, "ruby", rb_mutation.run_gate),
-        Gate("cs.mutation", FULL, "dotnet", cs_mutation.run_gate),
-        Gate("er.mutation", FULL, "erlang", er_mutation.run_gate),
-        Gate("rs.mutation", FULL, "rust", rs_mutation.run_gate),
-        Gate("java.mutation", FULL, "java", java_mutation.run_gate),
-        Gate("sonar", SONAR, "sonar", sonar.run_gate),
-        Gate("qa", QA, "qa", qa.run_gate),
-    ]
+
+def registry() -> list[Gate]:
+    return [gate_from(spec) for spec in GATE_SPECS]
+
+
+def gate_from(spec: tuple[str, str, str | None, str]) -> Gate:
+    name, tier, section, module = spec
+    return Gate(name, tier, section, load_runner(module))
+
+
+def load_runner(module: str) -> Runner:
+    loaded = importlib.import_module(f"{__package__}.{module}")
+    found: Runner = getattr(loaded, RUN_GATE)
+    return found
 
 
 def select(tier: str, only: set[str] | None) -> list[Gate]:
     wanted = tiers_for(tier)
-    return [gate for gate in registry() if gate.tier in wanted and (not only or gate.name in only)]
+    return [gate for gate in registry() if wanted_gate(gate, wanted, only)]
+
+
+def wanted_gate(gate: Gate, wanted: set[str], only: set[str] | None) -> bool:
+    return gate.tier in wanted and (not only or gate.name in only)
 
 
 def tiers_for(tier: str) -> set[str]:
     return {FAST: {FAST}, SONAR: {FAST, SONAR}, FULL: {FAST, SONAR, FULL}, QA: {FAST, QA}, "all": {FAST, SONAR, FULL, QA}}[tier]
+
+
+def run_gates(
+    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False, hyper: bool = False
+) -> list[Result]:
+    results, _ = run_gates_with_context(tier, scope_changed, only, focus, hard, hyper)
+    return results
+
+
+def run_gates_with_context(
+    tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False, hyper: bool = False
+) -> tuple[list[Result], Context]:
+    os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
+    config = config_module.load(Path.cwd())
+    ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard, hyper)
+    return [run_one(gate, ctx) for gate in configured_gates(config, tier, only)], ctx
+
+
+def gate_focus(config: config_module.Config, focus: set[str], hard: bool) -> set[str]:
+    focused = resolve_focus(config, focus)
+    return focused | hook_focus(config) if hard else focused
+
+
+def configured_gates(config: config_module.Config, tier: str, only: set[str] | None) -> list[Gate]:
+    return [gate for gate in select(tier, only) if not gate.section or config.section(gate.section) is not None]
+
+
+def run_one(gate: Gate, ctx: Context) -> Result:
+    started = time.time()
+    ctx.take_file_level()
+    try:
+        return noted(gate.run(ctx), ctx)
+    except BaseException as error:
+        if not isinstance(error, Exception | SystemExit):
+            raise
+        return crashed(gate, error, started)
+
+
+def noted(result: Result, ctx: Context) -> Result:
+    result.summary += ctx.file_level_note()
+    return result
+
+
+def crashed(gate: Gate, error: BaseException, started: float) -> Result:
+    detail = " ".join(str(error).split())[:200]
+    return Result(
+        gate.name,
+        False,
+        f"{gate.name} crashed: {type(error).__name__} {detail}",
+        traceback.format_exc().strip().splitlines()[-6:],
+        elapsed(started),
+    )

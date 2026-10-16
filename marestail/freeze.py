@@ -4,55 +4,165 @@ from fnmatch import fnmatch
 from marestail.config import Config
 
 GATE_CONFIG = [
-    "marestail.toml", "sonar-project.properties", "pyproject.toml", "**/setup.cfg", ".importlinter",
-    "**/.coveragerc", "**/.dependency-cruiser.cjs", "**/stryker.config.*", "**/vite.config.*",
-    "**/vitest.config.*", "**/eslint.config.*", "**/tsconfig*.json", "**/knip.json*", "**/knip.config.*",
-    "mix.exs", "mix.lock", ".formatter.exs", ".credo.exs",
-    "rebar.config", "rebar.lock", "**/*.app.src",
-    "Gemfile", "Gemfile.lock", ".rubocop.yml", "**/.rubocop.yml", ".rspec", ".ruby-version", ".ruby-layers.json",
-    "**/mutant.yml", "**/mutant.yaml",
-    "**/jest.config.*", "**/babel.config.*", "**/.babelrc*", "**/next.config.*", "**/playwright.config.*",
-    "**/*.csproj", "**/*.sln", "**/*.props", "**/*.targets", "**/NuGet.config", "**/nuget.config", "**/dotnet-tools.json",
-    "**/Cargo.toml", "Cargo.lock", "**/clippy.toml", "**/.clippy.toml", "**/rustfmt.toml", "**/.rustfmt.toml",
-    "rust-toolchain", "rust-toolchain.toml", "**/.cargo/config.toml", "**/.cargo/mutants.toml", ".rust-layers.json",
-    "**/.editorconfig", "**/.globalconfig", "**/*.runsettings", "**/stryker-config.*", ".dotnet-layers.json",
-    "**/pom.xml", "mvnw", "mvnw.cmd", "**/.mvn/**", "**/lombok.config", "**/pmd-ruleset.xml", ".java-layers.json",
-
-    ".claude/settings.json", "CLAUDE.md", "AGENTS.md", "GEMINI.md", ".agents/hooks.json",
-    ".grok/hooks/**", ".grok/config.toml",
-    ".cursor/hooks.json", ".cursor/hooks/**", ".cursor/cli.json",
+    "marestail.toml",
+    "sonar-project.properties",
+    "pyproject.toml",
+    "**/setup.cfg",
+    ".importlinter",
+    "**/.coveragerc",
+    "**/.dependency-cruiser.cjs",
+    "**/stryker.config.*",
+    "**/vite.config.*",
+    "**/vitest.config.*",
+    "**/eslint.config.*",
+    "**/tsconfig*.json",
+    "**/knip.json*",
+    "**/knip.config.*",
+    "mix.exs",
+    "mix.lock",
+    ".formatter.exs",
+    ".credo.exs",
+    "rebar.config",
+    "rebar.lock",
+    "**/*.app.src",
+    "Gemfile",
+    "Gemfile.lock",
+    ".rubocop.yml",
+    "**/.rubocop.yml",
+    ".rspec",
+    ".ruby-version",
+    ".ruby-layers.json",
+    "**/mutant.yml",
+    "**/mutant.yaml",
+    "**/jest.config.*",
+    "**/babel.config.*",
+    "**/.babelrc*",
+    "**/next.config.*",
+    "**/playwright.config.*",
+    "**/*.csproj",
+    "**/*.sln",
+    "**/*.props",
+    "**/*.targets",
+    "**/NuGet.config",
+    "**/nuget.config",
+    "**/dotnet-tools.json",
+    "**/Cargo.toml",
+    "Cargo.lock",
+    "**/clippy.toml",
+    "**/.clippy.toml",
+    "**/rustfmt.toml",
+    "**/.rustfmt.toml",
+    "rust-toolchain",
+    "rust-toolchain.toml",
+    "**/.cargo/config.toml",
+    "**/.cargo/mutants.toml",
+    ".rust-layers.json",
+    "**/.editorconfig",
+    "**/.globalconfig",
+    "**/*.runsettings",
+    "**/stryker-config.*",
+    ".dotnet-layers.json",
+    "**/pom.xml",
+    "mvnw",
+    "mvnw.cmd",
+    "**/.mvn/**",
+    "**/lombok.config",
+    "**/pmd-ruleset.xml",
+    ".java-layers.json",
+    ".claude/settings.json",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "GEMINI.md",
+    ".agents/hooks.json",
+    ".grok/hooks/**",
+    ".grok/config.toml",
+    ".cursor/hooks.json",
+    ".cursor/hooks/**",
+    ".cursor/cli.json",
+    ".marestail/runs/**/timeline.md",
+    ".marestail/runs/**/timeline.json",
+    ".marestail/runs/**/events.jsonl",
 ]
 SPEC = ["features/**", "qa/**", "tasks/**", "perf/**", "PERFORMANCE.md", "guidance/**"]
 CSPROJ_ADDITION = re.compile(r'^\+\s*<(PackageReference|InternalsVisibleTo) Include="[^"]+"(?: Version="[^"]+")? />\s*$')
-CSPROJ_WRAPPER = re.compile(r"^\+\s*(<ItemGroup>|</ItemGroup>)?\s*$")
+CSPROJ_WRAPPERS = ("", "<ItemGroup>", "</ItemGroup>")
+DIFF_HEADERS = ("+++", "---")
 ALLOWED = {
     "specifier": ["features/**", "qa/**"],
-    "architect": ["pyproject.toml", ".importlinter", "**/.dependency-cruiser.cjs", "mix.exs", ".ruby-layers.json", ".dotnet-layers.json", ".rust-layers.json", ".java-layers.json"],
+    "architect": [
+        "pyproject.toml",
+        ".importlinter",
+        "**/.dependency-cruiser.cjs",
+        "mix.exs",
+        ".ruby-layers.json",
+        ".dotnet-layers.json",
+        ".rust-layers.json",
+        ".java-layers.json",
+    ],
 }
 
 
-def frozen_paths(config: Config, role: str, paths: list[str]) -> list[str]:
+SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rb", ".rs", ".cs", ".java", ".ex", ".exs", ".erl", ".hrl")
+TEST_SEGMENTS = {"tests", "test", "spec", "__tests__"}
+TEST_NAMES = ["test_*", "*_test.*", "*.test.*", "*.spec.*"]
+
+
+def frozen_paths(config: Config, role: str, paths: list[str], hyper: bool = False) -> list[str]:
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
     allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
-    return [path for path in paths if matches_any(path, frozen) and not matches_any(path, allowed)]
+    return [path for path in paths if frozen_under(path, frozen, hyper) and not matches_any(path, allowed)]
+
+
+def frozen_under(path: str, frozen: list[str], hyper: bool) -> bool:
+    return matches_any(path, frozen) or (hyper and not is_test(path) and not is_source(path))
+
+
+def is_test(path: str) -> bool:
+    *folders, name = path.split("/")
+    return bool(TEST_SEGMENTS.intersection(folders)) or any(fnmatch(name, pattern) for pattern in TEST_NAMES)
+
+
+def is_source(path: str) -> bool:
+    return path.endswith(SOURCE_SUFFIXES)
 
 
 def tolerated(path: str, diff: str) -> bool:
-    if not matches(path, "**/*.csproj"):
-        return False
-    changes = [line for line in diff.splitlines() if line[:1] in ("+", "-") and not line.startswith(("+++", "---"))]
-    additions = [line for line in changes if CSPROJ_ADDITION.match(line)]
-    return bool(additions) and all(CSPROJ_ADDITION.match(line) or CSPROJ_WRAPPER.match(line) for line in changes)
+    return matches(path, "**/*.csproj") and only_csproj_additions(changed_lines(diff))
+
+
+def only_csproj_additions(changes: list[str]) -> bool:
+    return any(is_addition(line) for line in changes) and all(is_csproj_line(line) for line in changes)
+
+
+def changed_lines(diff: str) -> list[str]:
+    return [line for line in diff.splitlines() if line[:1] in ("+", "-") and not line.startswith(DIFF_HEADERS)]
+
+
+def is_addition(line: str) -> bool:
+    return CSPROJ_ADDITION.match(line) is not None
+
+
+def is_csproj_line(line: str) -> bool:
+    return is_addition(line) or is_wrapper(line)
+
+
+def is_wrapper(line: str) -> bool:
+    return line.startswith("+") and line[1:].strip() in CSPROJ_WRAPPERS
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
     return any(matches(path, pattern) for pattern in patterns)
 
 
+DOUBLE_STAR = "**/"
+DIR_SUFFIX = "/**"
+ANY_DIR = "*/"
+
+
 def matches(path: str, pattern: str) -> bool:
-    if pattern.startswith("**/"):
-        rest = pattern[3:]
-        return fnmatch(path, rest) or fnmatch(path, "*/" + rest)
-    if pattern.endswith("/**"):
-        return path.startswith(pattern[:-3] + "/")
+    if pattern.startswith(DOUBLE_STAR):
+        rest = pattern[len(DOUBLE_STAR) :]
+        return fnmatch(path, rest) or fnmatch(path, ANY_DIR + rest)
+    if pattern.endswith(DIR_SUFFIX):
+        return path.startswith(pattern[: -len(DIR_SUFFIX)] + "/")
     return fnmatch(path, pattern)

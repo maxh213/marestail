@@ -4,13 +4,19 @@ import subprocess
 from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+PARENTS = True
+EXIST_OK = True
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=PARENTS, exist_ok=EXIST_OK)
 
 
 def run(
     command: list[str],
     cwd: Path,
     env: dict[str, str] | None = None,
-    timeout: int = 3600,
+    timeout: int | None = 3600,
     stdin: str | None = None,
 ) -> tuple[int, str]:
     merged = {**os.environ, **(env or {})}

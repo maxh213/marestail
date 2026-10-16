@@ -3,10 +3,17 @@ import time
 from pathlib import Path
 
 from marestail.context import Context
-from marestail.report import Result
+from marestail.elixir import project_files
+from marestail.report import Result, elapsed
 from marestail.shell import run
 
+scoped_sources = project_files
+GATE = "ex.lint"
 MAX_LINES = 60
+FORMAT = ["mix", "format", "--check-formatted"]
+COMPILE = ["mix", "compile", "--warnings-as-errors"]
+FORMAT_TIMEOUT = 300
+COMPILE_TIMEOUT = 600
 
 
 def run_gate(ctx: Context) -> Result:
@@ -14,45 +21,38 @@ def run_gate(ctx: Context) -> Result:
     root = ctx.elixir_root()
     if ctx.scoped:
         return scoped_run(ctx, root, started)
-    findings = []
-    format_code, format_out = run(["mix", "format", "--check-formatted"], cwd=root, timeout=300)
-    if format_code != 0:
-        findings.extend(f"format: {line}" for line in relevant(format_out))
-    compile_code, compile_out = run(["mix", "compile", "--warnings-as-errors"], cwd=root, timeout=600)
-    if compile_code != 0:
-        findings.extend(f"compile: {line}" for line in relevant(compile_out))
-    summary = "mix format, compile clean" if not findings else f"{len(findings)} problems"
-    return Result("ex.lint", not findings, summary, findings, time.time() - started)
+    findings = problems("format", run(FORMAT, cwd=root, timeout=FORMAT_TIMEOUT))
+    findings += problems("compile", run(COMPILE, cwd=root, timeout=COMPILE_TIMEOUT))
+    summary = f"{len(findings)} problems" if findings else "mix format, compile clean"
+    return Result(GATE, not findings, summary, findings, elapsed(started))
+
+
+def problems(label: str, outcome: tuple[int, str]) -> list[str]:
+    code, output = outcome
+    return labeled_lines(label, output) if code else []
+
+
+def labeled_lines(label: str, output: str) -> list[str]:
+    return [f"{label}: {line}" for line in relevant(output)]
 
 
 def scoped_run(ctx: Context, root: Path, started: float) -> Result:
     files = scoped_sources(ctx, root, ctx.changed_under(root, (".ex", ".exs")))
     if not files:
-        return Result.skipped("ex.lint", "no elixir files in scope")
-    findings = []
-    format_code, format_out = run(["mix", "format", "--check-formatted", *files], cwd=root, timeout=300)
-    if format_code != 0:
-        findings.extend(f"format: {line}" for line in relevant(format_out))
-    compile_code, compile_out = run(["mix", "compile", "--warnings-as-errors"], cwd=root, timeout=600)
+        return Result.skipped(GATE, "no elixir files in scope")
+    findings = problems("format", run([*FORMAT, *files], cwd=root, timeout=FORMAT_TIMEOUT))
+    compile_code, compile_out = run(COMPILE, cwd=root, timeout=COMPILE_TIMEOUT)
     if compile_code != 0:
-        for block in scoped_blocks(compile_out, files):
-            findings.extend(f"compile: {line}" for line in block.splitlines() if line.strip())
+        findings.extend(compile_findings(compile_out, files, ctx))
     findings = findings[:MAX_LINES]
-    summary = "mix format, compile clean in scope" if not findings else f"{len(findings)} problems in scope"
-    return Result("ex.lint", not findings, summary, findings, time.time() - started)
+    summary = f"{len(findings)} problems in scope" if findings else "mix format, compile clean in scope"
+    return Result(GATE, not findings, summary, findings, elapsed(started))
 
 
-def scoped_sources(ctx: Context, root: Path, files: list[str]) -> list[str]:
-    prefix = root.relative_to(ctx.root)
-    relatives = [strip_prefix(path, prefix) for path in files]
-    return sorted(str(path) for path in relatives if (root / path).is_file())
-
-
-def strip_prefix(path: str, prefix: Path) -> Path:
-    relative = Path(path)
-    if str(prefix) == ".":
-        return relative
-    return relative.relative_to(prefix)
+def compile_findings(output: str, files: list[str], ctx: Context) -> list[str]:
+    return [
+        f"compile: {line}" for block in ctx.on_changed_lines(scoped_blocks(output, files)) for line in block.splitlines() if line.strip()
+    ]
 
 
 def scoped_blocks(output: str, files: list[str]) -> list[str]:

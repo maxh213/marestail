@@ -1,0 +1,151 @@
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from marestail import rust
+from marestail.gates import _hyper_crap, rs_crap
+from tests.conftest import checked, make_context, untimed
+
+
+def setup_crate(root: Path) -> None:
+    for name in ("src/lib.rs", "src/gen/out.rs"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("fn x() {}\n")
+    binary = root / ".marestail" / rust.SCAN_BIN
+    binary.parent.mkdir(parents=True)
+    binary.write_text("")
+    (root / ".marestail" / "rs-scan" / "stamp").write_text(rust.scanner_digest())
+    coverage = {"files": {"src/lib.rs": {"lines": {"1": 1, "2": 0, "3": 0, "4": 5, "9": 0}}}}
+    (root / ".marestail" / "rs-coverage.json").write_text(json.dumps(coverage))
+
+
+def functions(root: Path) -> str:
+    lib = str(root / "src" / "lib.rs")
+    return json.dumps(
+        [
+            {"file": lib, "line": 1, "end": 4, "name": "half", "complexity": 4},
+            {"file": lib, "line": 9, "end": 9, "name": "cold", "complexity": 1},
+            {"file": "src/gen/out.rs", "line": 1, "end": 1, "name": "gen", "complexity": 2},
+        ]
+    )
+
+
+def test_needs_coverage(tmp_path: Path) -> None:
+    result = untimed(rs_crap.run_gate(make_context(tmp_path)), rs_crap.GATE)
+    assert (result.gate, result.ok, result.summary, result.findings, result.seconds) == (
+        "rs.crap",
+        False,
+        "no coverage data; rs.tests must run first",
+        [],
+        0.0,
+    )
+
+
+def test_no_files(tmp_path: Path) -> None:
+    setup_crate(tmp_path)
+    result = untimed(rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "src/"}})), rs_crap.GATE)
+    assert (result.ok, result.summary) == (True, "skipped: no files in scope")
+
+
+def test_scanner_failure(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake_run(rust, [(1, "bad\n")])
+    result = checked(rs_crap.run_gate(make_context(tmp_path)), rs_crap.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "complexity scanner failed", ["rust scanner failed (complexity): bad"])
+
+
+def test_scores(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake = fake_run(rust, [(0, functions(tmp_path))])
+    result = checked(rs_crap.run_gate(make_context(tmp_path, {"rust": {"coverage_ignore_regex": "gen/"}})), rs_crap.GATE)
+    assert fake.calls == [[str(tmp_path / ".marestail" / rust.SCAN_BIN), "complexity", str(tmp_path / "src" / "lib.rs")]]
+    assert (result.ok, result.summary) == (False, "3 functions, 2 above CRAP 4")
+    assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%)", "src/gen/out.rs:1 gen crap=6.0 (cc=2, coverage=0%)"]
+
+
+def test_clean_scores(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake_run(rust, [(0, "[]")])
+    result = checked(rs_crap.run_gate(make_context(tmp_path, {"rust": {"crap_max": 1.5}})), rs_crap.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "0 functions, 0 above CRAP 1.5", [])
+
+
+def test_crap_result_without_functions(tmp_path: Path) -> None:
+    result = rs_crap.crap_result(make_context(tmp_path), {"files": {}}, None, 0.0)
+    assert result.summary == "0 functions, 0 above CRAP 4"
+
+
+@pytest.mark.parametrize(("ignored", "expected"), [(None, False), ("", False), ("gen", True), ("^src", False)])
+def test_ignored_path(ignored: str | None, expected: bool) -> None:
+    assert rs_crap.ignored_path(ignored, Path("/r/src/gen/a.rs")) is expected
+
+
+@pytest.mark.parametrize(("hits", "share"), [([], 0.0), ([0, 2, 3, 0], 0.5), ([1], 1.0)])
+def test_covered_share(hits: list[int], share: float) -> None:
+    assert rs_crap.covered_share(hits) == share
+
+
+def test_measured() -> None:
+    assert rs_crap.measured({"1": 1, "5": 2, "10": 3, "11": 4}, 5, 10) == [2, 3]
+
+
+def test_score(tmp_path: Path) -> None:
+    fn = {"file": "src/a.rs", "line": 1, "end": 2, "name": "f", "complexity": 3}
+    assert rs_crap.score(fn, {}, make_context(tmp_path)) == {"file": "src/a.rs", "line": 1, "name": "f", "cc": 3, "cov": 0.0, "crap": 12.0}
+
+
+def hyper_rs(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, base_reply: tuple[int, str]) -> Any:
+    setup_crate(tmp_path)
+    monkeypatch.setattr(_hyper_crap, "base_text", lambda root, ref, path: "fn half() {}\n")
+    head = [fn for fn in json.loads(functions(tmp_path)) if fn["name"] == "half"]
+    fake = fake_run(rust, [(0, json.dumps(head)), base_reply])
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True, changed={"src/lib.rs"}, changed_lines_map={"src/lib.rs": {2, 4}})
+    return checked(rs_crap.run_gate(ctx), rs_crap.GATE), fake
+
+
+def test_hyper_names_uncovered_changed_lines(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = [{"file": "copy", "line": 1, "end": 4, "name": "half", "complexity": 4}]
+    result, fake = hyper_rs(tmp_path, fake_run, monkeypatch, (0, json.dumps(base)))
+    assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%); changed lines not covered: 2"]
+    assert result.summary == "1 innermost changed functions, 1 above CRAP 4, 0 of them no worse than base"
+    assert fake.calls[1][1:] == ["complexity", fake.calls[1][-1]]
+    assert fake.calls[1][-1].endswith("/src/lib.rs")
+
+
+def test_hyper_base_scanner_failure_falls_back(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    result, _ = hyper_rs(tmp_path, fake_run, monkeypatch, (1, "bad"))
+    assert result.summary.endswith("; no base complexity for src/lib.rs, crap_max only")
+    assert result.findings == ["src/lib.rs:1 half crap=6.0 (cc=4, coverage=50%)"]
+
+
+def test_hyper_without_functions(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, scope_changed=True, hyper=True)
+    result = rs_crap.crap_result(ctx, {"files": {}}, None, 0.0)
+    assert (result.ok, result.summary) == (True, "0 innermost changed functions, 0 above CRAP 4, 0 of them no worse than base")
+
+
+def test_base_units_leave_the_file_to_the_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        rust, "scan", lambda ctx, mode, paths: ([{"file": "copy", "line": 1, "end": 4, "name": "half", "complexity": 4}], None)
+    )
+    units = rs_crap.base_units(make_context(tmp_path), tmp_path / "copy.rs")
+    assert units == [{"file": "", "line": 1, "start": 1, "end": 4, "name": "half", "label": "half", "cc": 4}]
+
+
+def test_hyper_units_of_a_file_without_coverage_miss_no_lines(tmp_path: Path) -> None:
+    found = [{"file": "src/lib.rs", "line": 1, "end": 4, "name": "half", "complexity": 4}]
+    expected = {
+        "file": "src/lib.rs",
+        "line": 1,
+        "start": 1,
+        "end": 4,
+        "name": "half",
+        "label": "half",
+        "cc": 4,
+        "cov": 0.0,
+        "missing": set(),
+    }
+    assert rs_crap.hyper_units(make_context(tmp_path), {"files": {}}, found) == [expected]
+    assert rs_crap.hyper_units(make_context(tmp_path), {"files": {"src/lib.rs": {}}}, found) == [expected]

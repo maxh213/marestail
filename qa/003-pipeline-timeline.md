@@ -1,0 +1,33 @@
+# QA procedure: Durable per-step pipeline timeline
+
+1. `cd` to the marestail-green repo root with `.venv` active.
+2. `python3 tools/test-timeline.py`
+   Expected: exit `0`, last line contains `ok`.
+3. `python3 tools/test-watch.py`
+   Expected: exit `0`, last line contains `ok` (green-shaped: overnight logs / discovery only; no pipeline.log preference).
+4. In a temp repo (same layout as `tools/test-audit.py` / `tools/dryrun.sh`: stub agent via `MARESTAIL_CLAUDE`, git user set, `.marestail/` gitignored), run:
+   `marestail run tasks/t.md --from coder --to coder --auto --retries 1`
+   with a stub that commits `src.py` and writes handoff first paragraph `coded the adder`.
+   Expected: stdout has `== coder (` and `finished in`; `.marestail/runs/t/timeline.json` has `task` `"t"` and one step with `role` `"coder"`, `attempt` `1`, non-empty `commits`/`files`/`done`, `agent.minutes >= 0`; `.marestail/runs/t/timeline.md` has one `##` section for that step id.
+5. In `tools/test-timeline.py`, double `Run.gates` so hardener's pre-loop `gate_for` returns `[Result(gate="sonar", ok=False, summary="fail", seconds=41.0)]`, then run:
+   `marestail run tasks/t.md --from hardener --to hardener --auto --retries 1`
+   with a stub that writes `VERDICT: PASS`.
+   Expected: `gate_for` / `state.gates` invoked once before attempts (not per attempt); every reused attempt step has `gate` containing `{"name": "sonar", "seconds": 41.0, "ok": false}`; `"verdict": "BOUNCE"` (not PASS); `agent` present.
+6. In `tools/test-timeline.py`, seed a temp repo like `tools/test-perf.py` (`readme_first=True`, `perf_trees.record_start`), force `JudgeProgress.author_left` to start at `0` (so `prepare_perf` skips `author_phase`), and use an agent stub that writes `VERDICT: AUTHOR` on the first invoke then `VERDICT: PASS` on the second; run `run_judge(state(root, retries=2), find("perf"))`.
+   Expected: `timeline.json` has a step with `"verdict": "AUTHOR"` before a later step with `"verdict": "PASS"`; the AUTHOR step was appended when that session ended even though `judged` returned None.
+7. With `MARESTAIL_LIMIT_WAIT_SECONDS=0` and a stub claude whose first session prints only `{"is_error": true, "result": "rate limit exceeded"}` (exit 0) and whose second prints normal success JSON and does the coder work, run:
+   `marestail run tasks/t.md --from coder --to coder --auto --retries 1`
+   Expected: step `waits` includes `{"reason": "rate-limit", "seconds": 0}`; stdout still has `rate limited; waiting`.
+8. With `MARESTAIL_LIMIT_WAIT_SECONDS=0`, `MARESTAIL_DANDELION` stub plan `1 none` then `0 claude-opus-5 high claude` (same shape as `tools/test-route.py`), `MARESTAIL_CLAUDE` / STUB_PLAN `code` and features/qa pre-seeded, run:
+   `marestail run tasks/t.md --from coder --to coder --auto --retries 1 --model dandelion/route`
+   Expected: step `waits` includes `{"reason": "dandelion-unrouted", "seconds": 0}`; stdout still has `dandelion/route:`.
+9. In a temp repo pre-seeded with features/qa matching the stub coder Audit lines, with STUB_PLAN `code bad-audit` then `code`, run:
+   `marestail run tasks/t.md --from coder --to coder --auto --retries 2`
+   Expected: first attempt fails verify (bad audit), second commits + handoff; `timeline.json` `"steps"` length 2 with `attempt` 1 then 2; `timeline.md` has two `##` sections; ids match.
+10. In a temp repo with `MARESTAIL_CLAUDE=tools/stub-claude`, STUB_PLAN line `code`, features/qa pre-seeded, run:
+    `START_FROM=coder STOP_AT=coder tools/overnight.sh tasks/t.md`
+    Expected: `overnight-*.md` still has exit/HEAD/grep lines under `### tasks/t.md`, and also embeds that task's `timeline.md` (heading `timeline.md` or a step id).
+11. `grep -E 'timeline\.(md|json)' README.md` near the Overnight `.marestail/runs/overnight-<stamp>.md` mention.
+    Expected: both names present; no new false claim of `.marestail/runs/<task>/pipeline.log`.
+12. Confirm freeze lists the timeline artefacts (e.g. `grep -E 'timeline\.(md|json)' marestail/freeze.py`).
+    Expected: a worker cannot keep a commit that only clobbers those files.

@@ -1,8 +1,22 @@
+import sys
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+from marestail._location import location
 from marestail.changes import base_exists, changed_files, changed_lines, file_lines
-from marestail.config import Config
+from marestail.config import Config, focus_paths
+
+CHANGED = "changed"
+HYPER = "hyper"
+NO_CHANGED_MUTANTS = "no mutants on changed lines"
+FOCUS_CLASHES = {
+    "all": "--focus cannot be combined with --scope all",
+    HYPER: "--focus cannot be combined with --scope hyper; hyper gates the diff and nothing else",
+}
+DEFAULT_BASE = "origin/master"
+BENCHMARKS = "perf"
 
 
 @dataclass(frozen=True)
@@ -10,6 +24,22 @@ class MutationScope:
     mode: str
     files: list[str] | None = None
     note: str = ""
+
+
+def matches(path: str, relative: Path, suffixes: tuple[str, ...]) -> bool:
+    return path.endswith(suffixes) and Path(path).is_relative_to(relative)
+
+
+def is_benchmark(relative: str | Path) -> bool:
+    return Path(relative).parts[:1] == (BENCHMARKS,)
+
+
+def under_benchmarks(root: Path, path: Path) -> bool:
+    return is_benchmark(path.relative_to(root))
+
+
+def scoped_files(files: list[str]) -> MutationScope:
+    return MutationScope("scoped", files) if files else MutationScope("skip", [])
 
 
 @dataclass
@@ -20,6 +50,9 @@ class Context:
     focus: set[str] = field(default_factory=set)
     changed_lines_map: dict[str, set[int]] = field(default_factory=dict)
     hard: bool = False
+    hyper: bool = False
+    file_level: int = 0
+    memo: dict[str, Any] = field(default_factory=dict)
 
     @property
     def root(self) -> Path:
@@ -30,6 +63,13 @@ class Context:
         return self.config.work
 
     @property
+    def test_cmd(self) -> str | None:
+        if not self.hyper or self.config.section("ts") is None:
+            return None
+        found = self.config.get(HYPER, "test_cmd")
+        return None if found is None else str(found)
+
+    @property
     def scoped(self) -> bool:
         return self.scope_changed or bool(self.focus)
 
@@ -37,18 +77,23 @@ class Context:
     def scope_name(self) -> str:
         if self.hard:
             return "hard"
-        return "changed" if self.scoped else "all"
+        if self.hyper:
+            return HYPER
+        return CHANGED if self.scoped else "all"
 
-    def python(self, key: str, default=None):
+    def section_root(self, section: str) -> Path:
+        return Path(self.root, self.config.get(section, "root", "."))
+
+    def python(self, key: str, default: Any = None) -> Any:
         return self.config.get("python", key, default)
 
-    def ts(self, key: str, default=None):
+    def ts(self, key: str, default: Any = None) -> Any:
         return self.config.get("ts", key, default)
 
-    def elixir(self, key: str, default=None):
+    def elixir(self, key: str, default: Any = None) -> Any:
         return self.config.get("elixir", key, default)
 
-    def ruby(self, key: str, default=None):
+    def ruby(self, key: str, default: Any = None) -> Any:
         return self.config.get("ruby", key, default)
 
     def timeouts_fail(self, section: str) -> bool:
@@ -59,66 +104,66 @@ class Context:
         return str(venv / "bin" / tool)
 
     def python_root(self) -> Path:
-        return self.root / self.python("root", ".")
+        return self.section_root("python")
 
     def ts_root(self) -> Path:
-        return self.root / self.ts("root", ".")
+        return self.section_root("ts")
 
     def elixir_root(self) -> Path:
-        return self.root / self.elixir("root", ".")
+        return self.section_root("elixir")
 
     def ruby_root(self) -> Path:
-        return self.root / self.ruby("root", ".")
+        return self.section_root("ruby")
 
-    def dotnet(self, key: str, default=None):
+    def dotnet(self, key: str, default: Any = None) -> Any:
         return self.config.get("dotnet", key, default)
 
     def dotnet_root(self) -> Path:
-        return self.root / self.dotnet("root", ".")
+        return self.section_root("dotnet")
 
-    def erlang(self, key: str, default=None):
+    def erlang(self, key: str, default: Any = None) -> Any:
         return self.config.get("erlang", key, default)
 
     def erlang_root(self) -> Path:
-        return self.root / self.erlang("root", ".")
+        return self.section_root("erlang")
 
-    def rust(self, key: str, default=None):
+    def rust(self, key: str, default: Any = None) -> Any:
         return self.config.get("rust", key, default)
 
     def rust_root(self) -> Path:
-        return self.root / self.rust("root", ".")
+        return self.section_root("rust")
 
-    def java(self, key: str, default=None):
+    def java(self, key: str, default: Any = None) -> Any:
         return self.config.get("java", key, default)
 
     def java_root(self) -> Path:
-        return self.root / self.java("root", ".")
+        return self.section_root("java")
 
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)
-        paths = {
-            path
-            for path in self.changed
-            if path.endswith(suffixes) and Path(path).is_relative_to(relative)
-        }
+        paths = {path for path in self.changed if matches(path, relative, suffixes)}
         paths.update(self.focus_under(relative, suffixes))
         return sorted(paths)
 
     def focus_under(self, relative: Path, suffixes: tuple[str, ...]) -> set[str]:
         found: set[str] = set()
         for entry in self.focus:
-            target = self.root / entry
-            if target.is_file() and entry.endswith(suffixes) and Path(entry).is_relative_to(relative):
-                found.add(entry)
-            elif target.is_dir():
-                found.update(
-                    path.relative_to(self.root).as_posix()
-                    for path in target.rglob("*")
-                    if path.is_file()
-                    and path.name.endswith(suffixes)
-                    and path.relative_to(self.root).is_relative_to(relative)
-                )
+            found.update(self.focus_entry(entry, relative, suffixes))
         return found
+
+    def focus_entry(self, entry: str, relative: Path, suffixes: tuple[str, ...]) -> set[str]:
+        target = self.root / entry
+        if target.is_file():
+            return {entry} if matches(entry, relative, suffixes) else set()
+        if target.is_dir():
+            return self.files_below(target, relative, suffixes)
+        return set()
+
+    def files_below(self, target: Path, relative: Path, suffixes: tuple[str, ...]) -> set[str]:
+        return {path for path in self.files_in(target) if matches(path, relative, suffixes)}
+
+    def files_in(self, target: Path) -> list[str]:
+        return [path.relative_to(self.root).as_posix() for path in target.rglob("*") if path.is_file()]
 
     def in_focus(self, path: str) -> bool:
         return any(path == entry or Path(path).is_relative_to(entry) for entry in self.focus)
@@ -127,9 +172,6 @@ class Context:
         if not self.scoped:
             return True
         return path in self.changed or self.in_focus(path)
-
-    def changed_line_set(self, path: str) -> set[int]:
-        return self.changed_lines_map.get(path, set())
 
     def gated_lines(self, path: str) -> set[int] | None:
         if not self.scoped:
@@ -143,11 +185,52 @@ class Context:
             return "all"
         if self.hard:
             return "hard: " + ", ".join(sorted(self.focus))
-        total =sum(len(lines) for lines in self.changed_lines_map.values())
-        summary = f"changed ({len(self.changed)} files, {total} lines)"
+        if self.hyper:
+            return f"hyper: {self.changed_line_count()} changed lines in {len(self.changed)} files"
+        return self.changed_summary()
+
+    def changed_line_count(self) -> int:
+        return sum(len(lines) for lines in self.changed_lines_map.values())
+
+    def changed_summary(self) -> str:
+        summary = f"changed ({len(self.changed)} files, {self.changed_line_count()} lines)"
         if self.focus:
             summary += " + focus: " + ", ".join(sorted(self.focus))
         return summary
+
+    @property
+    def placeholder_line(self) -> int:
+        return 0 if self.hyper else 1
+
+    def on_changed_lines(self, records: list[Any], where: Callable[[Any], str] = str) -> list[Any]:
+        if not self.hyper:
+            return records
+        return [record for record in records if self.keeps(where(record))]
+
+    def keeps(self, finding: str) -> bool:
+        if not self.hyper:
+            return True
+        place = location(finding)
+        if place is None:
+            return self.dropped_file_level(any(token in self.changed for token in finding.split()))
+        return self.kept_line(*place)
+
+    def kept_line(self, path: str, line: int) -> bool:
+        if line == 0:
+            return self.dropped_file_level(path in self.changed)
+        return line in self.changed_lines_map.get(path, set())
+
+    def dropped_file_level(self, counted: bool) -> bool:
+        self.file_level += counted
+        return False
+
+    def take_file_level(self) -> int:
+        count, self.file_level = self.file_level, 0
+        return count
+
+    def file_level_note(self) -> str:
+        count = self.take_file_level()
+        return f"; {count} file-level findings not gated under hyper" if count else ""
 
     def global_note(self, summary: str) -> str:
         if not self.scoped:
@@ -155,34 +238,98 @@ class Context:
         return f"{summary} (global gate — scope: {self.scope_name})"
 
     def mutation_files(self, lang_key: str, root: Path, suffixes: tuple[str, ...]) -> MutationScope:
-        setting = self.config.get(lang_key, "mutation_scope", "changed")
-        if setting not in ("changed", "all"):
-            return MutationScope("error", note=f"[{lang_key}] mutation_scope must be \"changed\" or \"all\", got {setting!r}")
+        setting = self.config.get(lang_key, "mutation_scope", CHANGED)
+        if setting not in (CHANGED, "all"):
+            return MutationScope("error", note=f'[{lang_key}] mutation_scope must be "changed" or "all", got {setting!r}')
         if self.scoped:
-            files = self.changed_under(root, suffixes)
-            return MutationScope("scoped", files) if files else MutationScope("skip", [])
+            return scoped_files(self.changed_under(root, suffixes))
         if setting == "all":
             return MutationScope("full")
-        base = self.config.get("git", "base", "origin/master")
+        return self.branch_mutation_files(root, suffixes)
+
+    def branch_mutation_files(self, root: Path, suffixes: tuple[str, ...]) -> MutationScope:
+        base = self.config.get("git", "base", DEFAULT_BASE)
         if not base_exists(self.root, base):
             return MutationScope("full", note=f"(no base {base}; full run)")
         relative = root.relative_to(self.root)
-        files = sorted(
-            path
-            for path in changed_files(self.root, base)
-            if path.endswith(suffixes) and Path(path).is_relative_to(relative)
-        )
-        return MutationScope("scoped", files) if files else MutationScope("skip", [])
+        return scoped_files(sorted(path for path in changed_files(self.root, base) if matches(path, relative, suffixes)))
 
 
-def build(config: Config, scope_changed: bool, focus: set[str] | None = None, hard: bool = False) -> Context:
-    focused = focus or set()
+def hard_context(config: Config, focused: set[str]) -> Context:
+    if not focused:
+        raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
+    return Context(config=config, scope_changed=True, focus=focused, hard=True)
+
+
+def diff_context(config: Config, scoped: bool, focused: set[str]) -> Context:
+    if not scoped:
+        return Context(config=config, focus=focused)
+    base = config.get("git", "base", DEFAULT_BASE)
+    changed = changed_files(config.root, base)
+    lines = changed_lines(config.root, base)
+    return Context(config=config, scope_changed=True, changed=changed, focus=focused, changed_lines_map=lines)
+
+
+def focus_clash(scope: str | None, focus: Collection[str]) -> str | None:
+    return FOCUS_CLASHES.get(scope) if focus and scope else None
+
+
+def hyper_context(config: Config) -> Context:
+    ctx = diff_context(config, True, set())
+    ctx.hyper = True
+    return ctx
+
+
+def build(config: Config, scope_changed: bool, focus: set[str] | None = None, hard: bool = False, hyper: bool = False) -> Context:
+    if hyper:
+        return hyper_context(config)
+    return scoped_context(config, scope_changed, focus or set(), hard)
+
+
+def scoped_context(config: Config, scope_changed: bool, focused: set[str], hard: bool) -> Context:
     if hard:
-        if not focused:
-            raise SystemExit("--scope hard needs at least one focus path: pass --focus or set [focus] paths in marestail.toml")
-        return Context(config=config, scope_changed=True, focus=focused, hard=True)
-    base = config.get("git", "base", "origin/master")
-    scoped = scope_changed or bool(focused)
-    changed = changed_files(config.root, base) if scoped else set()
-    lines = changed_lines(config.root, base) if scoped else {}
-    return Context(config=config, scope_changed=scoped, changed=changed, focus=focused, changed_lines_map=lines)
+        return hard_context(config, focused)
+    return diff_context(config, scope_changed or bool(focused), focused)
+
+
+def resolve_focus(config: Config, focus: set[str]) -> set[str]:
+    resolved = {path: locate_focus(config, path) for path in focus}
+    missing = missing_focus(resolved)
+    if missing:
+        raise SystemExit(f"focus path not found under {config.root}: {', '.join(missing)}")
+    return found_focus(resolved)
+
+
+def found_focus(resolved: dict[str, str | None]) -> set[str]:
+    return {entry for entry in resolved.values() if entry is not None}
+
+
+def missing_focus(resolved: dict[str, str | None]) -> list[str]:
+    return sorted(path for path, entry in resolved.items() if entry is None)
+
+
+def locate_focus(config: Config, path: str) -> str | None:
+    full = focus_path(config, Path(path.strip()))
+    if not full.exists():
+        return None
+    try:
+        return full.resolve().relative_to(config.root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def focus_path(config: Config, candidate: Path) -> Path:
+    if candidate.is_absolute():
+        return candidate
+    return config.root / candidate
+
+
+def hook_focus(config: Config) -> set[str]:
+    found = set()
+    for path in focus_paths(config):
+        entry = locate_focus(config, path)
+        if entry is None:
+            sys.stderr.write(f"warning: ignoring missing focus path: {path}\n")
+        else:
+            found.add(entry)
+    return found

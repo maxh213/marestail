@@ -1,11 +1,4 @@
-from pathlib import Path
+from marestail.context import is_benchmark as is_benchmark
+from marestail.context import under_benchmarks as under_benchmarks
 
-DIRECTORY = "perf"
-
-
-def is_benchmark(relative: str | Path) -> bool:
-    return Path(relative).parts[:1] == (DIRECTORY,)
-
-
-def under_benchmarks(root: Path, path: Path) -> bool:
-    return is_benchmark(path.relative_to(root))
+__all__ = ["is_benchmark", "under_benchmarks"]

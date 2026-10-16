@@ -2,12 +2,25 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from marestail.context import Context
-from marestail.gates.rb_tests import COVERAGE_JSON, relative_path
-from marestail.report import Result
-from marestail.ruby import scan
+from marestail.gates._coverage import RB_COVERAGE
+from marestail.gates._coverage import relative_path as relative_path
+from marestail.gates._crap import DEFAULT as DEFAULT
+from marestail.gates._crap import KEY as KEY
+from marestail.gates._crap import above as above
+from marestail.gates._crap import describe as describe
+from marestail.gates._hyper_crap import Hyper, judged, unit
+from marestail.report import Result, elapsed
+from marestail.ruby import scan, scanned, sources
 
+COVERAGE_JSON = RB_COVERAGE
+GATE = "rb.crap"
+CRAP_POWER = 3
+HASH = "#"
+EQUALS = "="
+EMPTY = ""
 STRING = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
 OPENER = re.compile(r"^\s*(?:def|class|module|if|unless|case|while|until|for|begin)\b")
 BLOCK_DO = re.compile(r"\bdo\b(?:\s*\|[^|]*\|)?\s*$")
@@ -18,59 +31,55 @@ def run_gate(ctx: Context) -> Result:
     started = time.time()
     coverage_path = ctx.work / COVERAGE_JSON
     if not coverage_path.exists():
-        return Result("rb.crap", False, "no coverage data; rb.tests must run first", [], 0.0)
+        return Result(GATE, False, "no coverage data; rb.tests must run first")
     coverage = json.loads(coverage_path.read_text())
     files = sources_in_scope(ctx)
     if not files:
-        return Result.skipped("rb.crap", "no files in scope")
+        return Result.skipped(GATE, "no files in scope")
     code, output = scan(ctx, "complexity", files)
     if code != 0:
-        return Result("rb.crap", False, "complexity scanner failed", output.splitlines()[-10:], time.time() - started)
-    functions = functions_in_scope(json.loads(output or "[]"), ctx)
-    limit = float(ctx.ruby("crap_max", 4))
-    scored = [score(fn, coverage["files"].get(relative_path(fn["file"], ctx), {}), ctx) for fn in functions]
-    offenders = sorted((f for f in scored if f["crap"] > limit), key=lambda f: -f["crap"])
+        return Result(GATE, False, "complexity scanner failed", output.splitlines()[-10:], elapsed(started))
+    return crap_result(ctx, coverage, scanned(output), started)
+
+
+def crap_result(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]], started: float) -> Result:
+    limit = float(ctx.ruby(KEY, DEFAULT))
+    if ctx.hyper:
+        return judged(ctx, Hyper(GATE, limit, lambda copy: base_units(ctx, copy)), hyper_units(ctx, coverage, functions), started)
+    in_scope = functions_in_scope(functions, ctx)
+    scored = [score(fn, coverage["files"].get(relative_path(fn["file"], ctx), {}), ctx) for fn in in_scope]
+    offenders = above(scored, limit)
     summary = f"{len(scored)} methods, {len(offenders)} above CRAP {limit:g}"
-    return Result("rb.crap", not offenders, summary, [describe(f) for f in offenders], time.time() - started)
-
-
-def ruby_sources(ctx: Context) -> list[Path]:
-    root = ctx.ruby_root()
-    sources = ctx.ruby("sources", ["app", "lib"])
-    skip = {"vendor", "spec", "test", "tmp", "log", "node_modules", ".git", "coverage"}
-    files = []
-    for folder in sources:
-        for path in (root / folder).rglob("*.rb"):
-            if not any(part in skip for part in path.relative_to(ctx.root).parts):
-                files.append(path)
-    return sorted(files)
+    return Result(GATE, not offenders, summary, [describe(f) for f in offenders], elapsed(started))
 
 
 def sources_in_scope(ctx: Context) -> list[Path]:
-    files = ruby_sources(ctx)
+    files = sources(ctx)
     if not ctx.scoped:
         return files
     return [path for path in files if ctx.in_scope(str(path.relative_to(ctx.root)))]
 
 
-def functions_in_scope(functions: list[dict], ctx: Context) -> list[dict]:
+def functions_in_scope(functions: list[dict[str, Any]], ctx: Context) -> list[dict[str, Any]]:
     if not ctx.scoped:
         return functions
-    kept = []
-    for file, group in by_file(functions, ctx).items():
-        if not ctx.in_scope(file):
-            continue
-        gated = ctx.gated_lines(file)
-        if gated is None:
-            kept.extend(group)
-            continue
-        ends = method_ranges(file_text(ctx, file), [fn["line"] for fn in group])
-        kept.extend(fn for fn in group if body_touched(fn["line"], ends.get(fn["line"], fn["line"]), gated))
-    return kept
+    return [fn for file, group in by_file(functions, ctx).items() for fn in touched(ctx, file, group)]
 
 
-def by_file(functions: list[dict], ctx: Context) -> dict[str, list[dict]]:
-    groups: dict[str, list[dict]] = {}
+def touched(ctx: Context, file: str, group: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not ctx.in_scope(file):
+        return []
+    gated = ctx.gated_lines(file)
+    return group if gated is None else touched_methods(ctx, file, group, gated)
+
+
+def touched_methods(ctx: Context, file: str, group: list[dict[str, Any]], gated: set[int]) -> list[dict[str, Any]]:
+    ends = method_ranges(file_text(ctx, file), [fn["line"] for fn in group])
+    return [fn for fn in group if body_touched(fn["line"], method_end_line(ends, fn["line"]), gated)]
+
+
+def by_file(functions: list[dict[str, Any]], ctx: Context) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
     for fn in functions:
         groups.setdefault(relative_path(fn["file"], ctx), []).append(fn)
     return groups
@@ -83,58 +92,116 @@ def file_text(ctx: Context, file: str) -> str:
         return ""
 
 
+def method_end_line(ends: dict[int, int], start: int) -> int:
+    try:
+        return ends[start]
+    except KeyError:
+        return start
+
+
 def body_touched(start: int, end: int, gated: set[int]) -> bool:
     if start < 1 or end < start:
         return True
     return not gated.isdisjoint(range(start, end + 1))
 
 
+def boundary(ordered: list[int], index: int, total: int) -> int:
+    following = index + 1
+    if following < len(ordered):
+        return ordered[following] - 1
+    return total
+
+
 def method_ranges(text: str, starts: list[int]) -> dict[int, int]:
     deltas = [line_delta(line) for line in text.splitlines()]
     ordered = sorted(starts)
-    return {
-        start: method_end(deltas, start, (ordered[index + 1] - 1) if index + 1 < len(ordered) else len(deltas))
-        for index, start in enumerate(ordered)
-        if start >= 1
-    }
+    return {start: method_end(deltas, start, boundary(ordered, index, len(deltas))) for index, start in enumerate(ordered) if start >= 1}
 
 
-def method_end(deltas: list[int], start: int, boundary: int) -> int:
+def method_end(deltas: list[int], start: int, limit: int) -> int:
     depth = 0
     for cursor in range(start - 1, len(deltas)):
         depth += deltas[cursor]
         if depth <= 0:
             return cursor + 1
-    return max(start, min(boundary, len(deltas)))
+    return max(start, min(limit, len(deltas)))
+
+
+def opens(code: str) -> int:
+    return 1 if OPENER.match(code) or BLOCK_DO.search(code) else 0
+
+
+def without_strings(line: str) -> str:
+    return STRING.sub(EMPTY, line)
+
+
+def stripped_left(code: str) -> str:
+    return code.lstrip()
 
 
 def line_delta(line: str) -> int:
-    code = STRING.sub("", line).split("#", 1)[0]
-    if code.lstrip().startswith("="):
+    code = comment_prefix(without_strings(line))
+    if stripped_left(code).startswith(EQUALS):
         return 0
-    opens = 1 if OPENER.match(code) else (1 if BLOCK_DO.search(code) else 0)
-    return opens - len(CLOSER.findall(code))
+    return opens(code) - len(CLOSER.findall(code))
 
 
-def score(fn: dict, file_cov: dict, ctx: Context) -> dict:
-    complexity = fn["complexity"]
-    lines = file_cov.get("lines") or []
-    line = fn["line"]
-    covered = 1.0
+def comment_prefix(line: str) -> str:
+    if HASH not in line:
+        return line
+    return line[: line.index(HASH)]
+
+
+def recorded_hits(line: int, lines: list[Any]) -> int | None:
     if 1 <= line <= len(lines) and isinstance(lines[line - 1], int):
-        covered = 1.0 if lines[line - 1] > 0 else 0.0
-    elif file_cov.get("missing_lines") and line in file_cov["missing_lines"]:
-        covered = 0.0
-    crap = complexity**2 * (1 - covered) ** 3 + complexity
+        hits: int = lines[line - 1]
+        return hits
+    return None
+
+
+def line_covered(line: int, file_cov: dict[str, Any]) -> float:
+    hits = recorded_hits(line, file_cov.get("lines") or [])
+    if hits is None:
+        return float(line not in (file_cov.get("missing_lines") or []))
+    return float(hits > 0)
+
+
+def score(fn: dict[str, Any], file_cov: dict[str, Any], ctx: Context) -> dict[str, Any]:
+    complexity = fn["complexity"]
+    line = fn["line"]
+    covered = line_covered(line, file_cov)
     return {
         "file": relative_path(fn["file"], ctx),
         "line": line,
         "name": fn["name"],
         "cc": complexity,
         "cov": covered,
-        "crap": crap,
+        "crap": complexity**2 * (1 - covered) ** CRAP_POWER + complexity,
     }
 
 
-def describe(f: dict) -> str:
-    return f"{f['file']}:{f['line']} {f['name']} crap={f['crap']:.1f} (cc={f['cc']}, coverage={f['cov']:.0%})"
+def hyper_units(ctx: Context, coverage: dict[str, Any], functions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    units: list[dict[str, Any]] = []
+    for file, group in by_file(functions, ctx).items():
+        units.extend(covered_units(ranged(file, group, file_text(ctx, file)), coverage["files"].get(file, {})))
+    return units
+
+
+def covered_units(units: list[dict[str, Any]], file_cov: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{**unit, "cov": line_covered(unit["line"], file_cov), "missing": missed(unit, file_cov)} for unit in units]
+
+
+def ranged(file: str, group: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    ends = method_ranges(text, [fn["line"] for fn in group])
+    return [unit(file, fn, fn["line"], method_end_line(ends, fn["line"])) for fn in group]
+
+
+def missed(unit: dict[str, Any], file_cov: dict[str, Any]) -> set[int]:
+    return {line for line in range(unit["start"], unit["end"] + 1) if not line_covered(line, file_cov)}
+
+
+def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
+    code, output = scan(ctx, "complexity", [copy])
+    if code != 0:
+        return None
+    return ranged("", scanned(output), copy.read_text(errors="replace"))

@@ -1,8 +1,38 @@
 from pathlib import Path
 
-from marestail import audit
+from marestail import audit, task_file
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
+
+EMPTY = ""
+PARAGRAPH = "\n\n"
+_ONE_DEPENDENCY = (
+    "This task depends on `{name}`, which runs before it, so its work is already in the tree. "
+    "Treat what it delivered as existing behaviour: build on it and keep it working."
+)
+_MANY_DEPENDENCIES = (
+    "This task depends on {names}, which run before it, so their work is already in the tree. "
+    "Treat what they delivered as existing behaviour: build on it and keep it working."
+)
+
+
+def _task_body(task: Path) -> str:
+    loaded = task_file.read(task)
+    if not loaded.depends:
+        return loaded.body
+    return f"{_dependency_note(loaded.depends)}\n\n{loaded.body}"
+
+
+def _dependency_note(depends: tuple[str, ...]) -> str:
+    if len(depends) == 1:
+        return _ONE_DEPENDENCY.format(name=depends[0])
+    return _MANY_DEPENDENCIES.format(names=_quoted_names(depends))
+
+
+def _quoted_names(depends: tuple[str, ...]) -> str:
+    head = ", ".join(f"`{item}`" for item in depends[:-1])
+    return f"{head} and `{depends[-1]}`"
+
 
 ROLES_DIR = Path(__file__).resolve().parent.parent / "roles"
 WORKER_SCOPE = (
@@ -10,49 +40,137 @@ WORKER_SCOPE = (
     "supporting edits the change cannot work without, such as a caller, an import or a test; refactor, rename, reformat and "
     "clean up nothing outside them, even where your role asks for it. The gates measure only these paths."
 )
+TASK = "Task"
+SPECIFICATION = "Specification"
+HANDOFFS = "Handoffs so far"
+BENCHES_FROZEN = (
+    "`perf/` is frozen in this phase and the runner has already taken every missing sample; any edit you make to `perf/` "
+    "is discarded. If a bench is missing or broken, write `VERDICT: AUTHOR` as your first line to return to the authoring "
+    "phase. Otherwise analyse the measurements and write your verdict."
+)
+AUTHORING = (
+    "This is the authoring phase: `perf/` is editable now and frozen afterwards. Look at the diff since the task's start "
+    "commit and make sure every endpoint and function the task added or changed is measured by a `perf/bench_*` script, "
+    "extending or creating benches as needed and keeping every existing target. Do not take samples: the runner measures "
+    "between the phases. If the benches already cover the diff, change nothing. Write one short paragraph on what you "
+    "changed (or `nothing`) to {note}. Edit nothing outside `perf/`."
+)
 JUDGE_SCOPE = (
     "This run has a hard scope: {paths}. The gate report covers only these paths, and code outside them is not the task's to "
     "improve. Outside them, bounce only when the diff goes beyond the smallest supporting edits the change needs, such as a "
     "refactor, a rename or a cleanup, naming the file and line."
 )
 
+HYPER_SCOPE = (
+    "This run is hyper-scoped. Make the smallest change that does what the task asks. Leave the code you touch a little "
+    "better than you found it. Leave code the change does not touch exactly as it is, including code you would like to "
+    "improve. The gates measure only the lines that change."
+)
+HUNKS_INSTRUCTION = (
+    "Add a `## Hunks` section to your handoff: one line per hunk outside the tests, `path:start-end — why`, where why is "
+    "`the fix needs it` or `boy scout: <what got better> in <the touched function>`."
+)
+TESTS_RULE = (
+    "Tests must run with a command the repository already supports, in the style its existing tests use; find that out "
+    "first. If the repository has a runner, use it. If it has tests but no runner, write the same kind of script. If it "
+    "has no tests at all, write dependency-free tests for the language's standard runtime and say so in your handoff. A "
+    "test that loads code with vm must pass process into the sandbox, so mutation testing can switch mutants."
+)
+HYPER_ROLE_SCOPE = {
+    "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
+    "changed lines can reach.",
+    "critic": "Bounce a scenario that would force a change outside the fix.",
+    "coder": "Change as few lines as the fix needs. Prefer a small, well-named function over a longer inline condition. "
+    + TESTS_RULE
+    + " Write as many as you need. "
+    + HUNKS_INSTRUCTION,
+    "architect": "Apply the boy scout rule to the code this change touches, and only that code. If the function the fix "
+    "lands in is long, split it. If the changed condition is hard to read, give it a name. Do not reshape, move or rename "
+    "anything the change does not touch. Leave the dependency contracts as they are unless the change itself adds a "
+    "dependency. " + HUNKS_INSTRUCTION,
+    "hardener": "Judge the changed lines and their tests. Do not ask for clean-up, renames, or coverage of lines that did not change. "
+    "Do not bounce for a reason that would grow the diff beyond the fix; if you believe the fix is wrong, bounce to the specifier. "
+    + TESTS_RULE
+    + " Rule on every changed line the gate reports as not provable by mutation.",
+}
 
-def worker_prompt(config: Config, worker: Worker, task: Path, task_name: str, report: Path, feedback: str, label: str = "", gate_flags: str = "", hard_focus: set[str] | None = None) -> str:
-    parts = [
-        role_text(worker.name),
-        section("Task", task.read_text()),
-        *hard_scope(hard_focus, WORKER_SCOPE),
-        section("Specification files", spec_listing(config, task_name)),
-        section("Handoffs so far", handoffs(config, task_name)),
-        section("Finishing", finishing(config, worker, task_name, report, label, gate_flags)),
-    ]
-    if feedback:
-        parts.append(section("Why the work came back to you", feedback))
-    return "\n\n".join(parts)
+
+def worker_prompt(
+    config: Config,
+    worker: Worker,
+    task: Path,
+    task_name: str,
+    report: Path,
+    feedback: str,
+    label: str = EMPTY,
+    gate_flags: str = EMPTY,
+    hard_focus: set[str] | None = None,
+    hyper: bool = False,
+    bug: dict[str, str] | None = None,
+) -> str:
+    return PARAGRAPH.join(
+        [
+            role_text(worker.name),
+            *qa_app_note(config, worker),
+            section(TASK, _task_body(task)),
+            *bug_sections(bug),
+            *scope_section(worker.name, hard_focus, WORKER_SCOPE, hyper),
+            section("Specification files", spec_listing(config, task_name)),
+            section(HANDOFFS, handoffs(config, task_name)),
+            section("Finishing", finishing(config, worker, task_name, report, label, gate_flags)),
+            *optional_section("Why the work came back to you", feedback),
+        ]
+    )
 
 
-def judge_prompt(config: Config, judge: Judge, task: Path, task_name: str, report: Path, gate_report: str, trees: str = "", feedback: str = "", hard_focus: set[str] | None = None) -> str:
-    parts = [
-        role_text(judge.name),
-        section("Task", task.read_text()),
-        *hard_scope(hard_focus, JUDGE_SCOPE),
-        section("Specification",spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)),
-    ]
-    if gate_report:
-        parts.append(section("Gate report", gate_report))
-    if trees:
-        parts.append(section("Trees", trees))
-    parts.append(section("Handoffs so far", handoffs(config, task_name)))
-    if judge.name == "perf":
-        parts.append(section("Benches frozen", (
-            "`perf/` is frozen in this phase and the runner has already taken every missing sample; any edit you make to `perf/` "
-            "is discarded. If a bench is missing or broken, write `VERDICT: AUTHOR` as your first line to return to the authoring "
-            "phase. Otherwise analyse the measurements and write your verdict."
-        )))
-    parts.append(section("Verdict", verdict_instructions(report, judge)))
-    if feedback:
-        parts.append(section("Why your verdict was rejected", feedback))
-    return "\n\n".join(parts)
+def qa_app_note(config: Config, worker: Worker) -> list[str]:
+    if worker.name != "qa" or not config.get("qa", "start"):
+        return []
+    return ["The app is started for the qa gate; its address is in MARESTAIL_APP_URL."]
+
+
+def judge_prompt(
+    config: Config,
+    judge: Judge,
+    task: Path,
+    task_name: str,
+    report: Path,
+    gate_report: str,
+    trees: str = EMPTY,
+    feedback: str = EMPTY,
+    hard_focus: set[str] | None = None,
+    hyper: bool = False,
+    review: dict[str, str] | None = None,
+    bug: dict[str, str] | None = None,
+) -> str:
+    return PARAGRAPH.join(
+        [
+            role_text(judge.name),
+            section(TASK, _task_body(task)),
+            *bug_sections(bug),
+            *scope_section(judge.name, hard_focus, JUDGE_SCOPE, hyper),
+            section(SPECIFICATION, judge_specification(config, judge, task_name)),
+            *review_sections(review or {}),
+            *optional_section("Gate report", gate_report),
+            *optional_section("Trees", trees),
+            section(HANDOFFS, handoffs(config, task_name)),
+            *optional_section("Benches frozen", BENCHES_FROZEN if judge.name == "perf" else ""),
+            section("Verdict", verdict_instructions(report, judge)),
+            *optional_section("Why your verdict was rejected", feedback),
+        ]
+    )
+
+
+def bug_sections(bug: dict[str, str] | None) -> list[str]:
+    return [section(title, body) for title, body in (bug or {}).items() if body]
+
+
+def review_sections(review: dict[str, str]) -> list[str]:
+    return [section(title, body or "none") for title, body in review.items()]
+
+
+def judge_specification(config: Config, judge: Judge, task_name: str) -> str:
+    return spec_contents(config, task_name) if judge.name == "critic" else spec_listing(config, task_name)
 
 
 def role_text(name: str) -> str:
@@ -61,6 +179,20 @@ def role_text(name: str) -> str:
 
 def section(title: str, body: str) -> str:
     return f"# {title}\n{body.strip()}"
+
+
+def optional_section(title: str, body: str) -> list[str]:
+    return [section(title, body)] if body else []
+
+
+def scope_section(name: str, focus: set[str] | None, template: str, hyper: bool) -> list[str]:
+    if hyper:
+        return [section("Scope", hyper_text(name))]
+    return hard_scope(focus, template)
+
+
+def hyper_text(name: str) -> str:
+    return " ".join([HYPER_SCOPE, HYPER_ROLE_SCOPE.get(name, EMPTY)]).strip()
 
 
 def hard_scope(focus: set[str] | None, template: str) -> list[str]:
@@ -76,21 +208,17 @@ def spec_listing(config: Config, task_name: str) -> str:
 
 def spec_contents(config: Config, task_name: str) -> str:
     files = audit.feature_files(config, task_name) + qa_files(config, task_name)
-    return "\n\n".join(f"## {f.relative_to(config.root)}\n{f.read_text().strip()}" for f in files) or "none yet"
+    return PARAGRAPH.join(f"## {f.relative_to(config.root)}\n{f.read_text().strip()}" for f in files) or "none yet"
 
 
 def qa_files(config: Config, task_name: str) -> list[Path]:
-    folder = config.root / "qa"
-    files = sorted(folder.glob("*.md")) if folder.exists() else []
-    related = [f for f in files if f.stem in task_name or task_name.endswith(f.stem)]
-    return related or files
+    return audit.related_files(config.root / "qa", "*.md", task_name)
 
 
 def handoffs(config: Config, task_name: str) -> str:
-    folder = config.work / "handoffs" / task_name
-    files = sorted(folder.glob("*.md")) if folder.exists() else []
+    files = audit.listing(config.work / "handoffs" / task_name, "*.md")
     if files:
-        return "\n\n".join(f"## {f.stem}\n{f.read_text().strip()}" for f in files)
+        return PARAGRAPH.join(f"## {file.stem}\n{file.read_text().strip()}" for file in files)
     return handoffs_from_history(config) or "none"
 
 
@@ -103,37 +231,40 @@ def handoffs_from_history(config: Config) -> str:
     return "\n".join(f"## {entry.strip()}" for entry in entries)
 
 
-def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = "", gate_flags: str = "") -> str:
-    steps = []
-    if worker.audit:
-        steps.append(audit.instructions(config, task_name))
-    if worker.tier:
-        steps.append(f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED.")
-    opening = f"starting with `[{label}] ` and " if label else ""
-    steps.append(
-        f"Commit tracked changes with a message {opening}ending in `By {worker.name}.` "
+def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = EMPTY, gate_flags: str = EMPTY) -> str:
+    steps = [
+        *audit_step(config, worker, task_name),
+        *gate_step(worker, gate_flags),
+        f"Commit tracked changes with a message {commit_opening(label)}ending in `By {worker.name}.` "
         "Do not use `git add -f` or `--force`. Paths ignored by `.gitignore` stay untracked on disk; "
-        "the next role still reads them. The runner drops any gitignored path you force-add."
-    )
-    steps.append(
+        "the next role still reads them. The runner drops any gitignored path you force-add.",
         f"Write {report.relative_to(config.root)}: what you did, what is left, what the next role must know. "
-        "Under 40 lines, plus the audit section if one is required."
-    )
-    steps.append(
+        "Under 40 lines, plus the audit section if one is required.",
         "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
         "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
-        "sees it after the run. Then find a way within the current configuration."
-        + csproj_note(config)
-    )
-    return "\n".join(f"{i}. {step}" for i, step in enumerate(steps, start=1))
+        "sees it after the run. Then find a way within the current configuration." + csproj_note(config),
+    ]
+    return "\n".join(f"{number}. {step}" for number, step in enumerate(steps, start=1))
+
+
+def audit_step(config: Config, worker: Worker, task_name: str) -> list[str]:
+    return [audit.instructions(config, task_name)] if worker.audit else []
+
+
+def gate_step(worker: Worker, gate_flags: str) -> list[str]:
+    return [f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED."] if worker.tier else []
+
+
+def commit_opening(label: str) -> str:
+    return f"starting with `[{label}] ` and " if label else ""
 
 
 def csproj_note(config: Config) -> str:
     if config.section("dotnet") is None:
         return ""
     return (
-        " The one frozen edit that is kept: adding `<PackageReference Include=\"...\" Version=\"...\" />` or "
-        "`<InternalsVisibleTo Include=\"...\" />` lines to a `.csproj`. Any other csproj change, including removing or "
+        ' The one frozen edit that is kept: adding `<PackageReference Include="..." Version="..." />` or '
+        '`<InternalsVisibleTo Include="..." />` lines to a `.csproj`. Any other csproj change, including removing or '
         "changing a line, is reverted."
     )
 
@@ -163,22 +294,15 @@ def bounce_choices(judge: Judge) -> str:
     )
 
 
-def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, note: Path, feedback: str = "") -> str:
-    parts = [
-        role_text("perf"),
-        section("Task", task.read_text()),
-        section("Specification", spec_listing(config, task_name)),
-        section("Handoffs so far", handoffs(config, task_name)),
-    ]
-    if trees:
-        parts.append(section("Trees", trees))
-    parts.append(section("Authoring", (
-        "This is the authoring phase: `perf/` is editable now and frozen afterwards. Look at the diff since the task's start "
-        "commit and make sure every endpoint and function the task added or changed is measured by a `perf/bench_*` script, "
-        "extending or creating benches as needed and keeping every existing target. Do not take samples: the runner measures "
-        "between the phases. If the benches already cover the diff, change nothing. Write one short paragraph on what you "
-        f"changed (or `nothing`) to {note}. Edit nothing outside `perf/`."
-    )))
-    if feedback:
-        parts.append(section("Earlier feedback", feedback))
-    return "\n\n".join(parts)
+def perf_author_prompt(config: Config, task: Path, task_name: str, trees: str, note: Path, feedback: str = EMPTY) -> str:
+    return PARAGRAPH.join(
+        [
+            role_text("perf"),
+            section(TASK, _task_body(task)),
+            section(SPECIFICATION, spec_listing(config, task_name)),
+            section(HANDOFFS, handoffs(config, task_name)),
+            *optional_section("Trees", trees),
+            section("Authoring", AUTHORING.format(note=note)),
+            *optional_section("Earlier feedback", feedback),
+        ]
+    )

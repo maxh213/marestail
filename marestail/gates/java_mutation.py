@@ -1,62 +1,114 @@
 import shutil
 import time
 import xml.etree.ElementTree as ET
+from functools import partial
 from pathlib import Path
 
 from marestail import java, remote
-from marestail.context import Context
-from marestail.report import Result
+from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
+from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
 
+GATE = "java.mutation"
 PITEST = "org.pitest:pitest-maven"
 KILLED = {"KILLED", "TIMED_OUT"}
 IGNORED = {"NON_VIABLE"}
 INSTALL = "declare org.pitest:pitest-maven with the org.pitest:pitest-junit5-plugin dependency in pom.xml; copy templates/java-pitest.xml"
+STATUS = "status"
+NO_MUTANTS = "no mutants were generated"
+EMPTY = ""
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    error = java.require_pom(ctx)
-    if error:
-        return Result("java.mutation", False, error, [], 0.0)
-    if PITEST.split(":")[1] not in java.pom(ctx).read_text(errors="replace"):
-        return Result("java.mutation", False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"], 0.0)
+    blocked = pom_problem(ctx)
+    if blocked is not None:
+        return blocked
     scope = ctx.mutation_files("java", ctx.java_root(), (".java",))
     if scope.mode == "error":
-        return Result("java.mutation", False, scope.note, [], time.time() - started)
+        return Result(GATE, False, scope.note, [], elapsed(started))
+    return run_scope(ctx, scope, started)
+
+
+def pom_problem(ctx: Context) -> Result | None:
+    error = java.require_pom(ctx)
+    if error:
+        return Result(GATE, False, error)
+    if PITEST.split(":")[1] not in java.read_replaced(java.pom(ctx)):
+        return Result(GATE, False, "PIT is not in the pom", [f"{java.rel(ctx, java.pom(ctx))}:1 {INSTALL}"])
+    return None
+
+
+def run_scope(ctx: Context, scope: MutationScope, started: float) -> Result:
     wanted = None if scope.files is None else set(scope.files)
-    targets = [path for path in java.sources(ctx) if (wanted is None or java.rel(ctx, path) in wanted) and not java.mutation_excluded(ctx, java.rel(ctx, path))]
+    targets = mutation_targets(ctx, wanted)
     if not targets:
-        return Result.skipped("java.mutation", "no changed Java sources" if wanted is not None else "no Java sources")
+        return Result.skipped(GATE, "no changed Java sources" if wanted is not None else "no Java sources")
+    return mutate(ctx, targets, scope.note, started)
+
+
+def mutation_targets(ctx: Context, wanted: set[str] | None) -> list[Path]:
+    return [path for path in java.sources(ctx) if targeted(ctx, java.rel(ctx, path), wanted)]
+
+
+def targeted(ctx: Context, relative: str, wanted: set[str] | None) -> bool:
+    return (wanted is None or relative in wanted) and not java.mutation_excluded(ctx, relative)
+
+
+def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Result:
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
     outcome = remote.run_mutation(
-        ctx, "java.mutation", lambda on_remote: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, on_remote)], ctx.java_root(),
-        timeout=int(ctx.java("mutation_timeout", 7200)), pull=(str(out.relative_to(ctx.root)),),
+        ctx,
+        GATE,
+        lambda workers: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, workers)],
+        ctx.java_root(),
+        ctx.java("mutation_threads", 2),
+        timeout=int(ctx.java("mutation_timeout", 7200)),
+        pull=(str(out.relative_to(ctx.root)),),
     )
     code, output = outcome.code, outcome.output
     report = out / "mutations.xml"
     if not report.exists():
-        return Result("java.mutation", False, (java.maven_hint(code, output) or missing(output, code)) + outcome.where, tail(output), time.time() - started)
-    mutants = [m for m in ET.parse(report).getroot().findall("mutation") if m.get("status") not in IGNORED]
+        return Result(GATE, False, (java.maven_hint(code, output) or missing(output, code)) + outcome.where, tail(output), elapsed(started))
+    mutants = viable(report)
     if not mutants:
-        return Result("java.mutation", False, "no mutants were generated" + outcome.where, tail(output), time.time() - started)
-    findings = [describe(ctx, mutant) for mutant in mutants if mutant.get("status") not in KILLED]
-    summary = f"{len(findings)} of {len(mutants)} mutants not killed" if findings else f"all {len(mutants)} mutants killed"
-    summary += f" {scope.note}" if scope.note else ""
-    summary += outcome.where
-    return Result("java.mutation", not findings, summary, findings, time.time() - started)
+        return Result(GATE, False, NO_MUTANTS + outcome.where, tail(output), elapsed(started))
+    return judged(ctx, ctx.on_changed_lines(mutants, partial(describe, ctx)), (note + outcome.where).strip(), started)
 
 
-def command(ctx: Context, targets: list[Path], out: Path, on_remote: bool = False) -> list[str]:
-    classes = [name for path in targets for name in class_globs(java.class_name(ctx, path))]
+def judged(ctx: Context, mutants: list[ET.Element], note: str, started: float) -> Result:
+    if not mutants:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    findings = survivors(ctx, mutants)
+    return Result(GATE, not findings, mutation_summary(len(findings), len(mutants), note), findings, elapsed(started))
+
+
+def viable(report: Path) -> list[ET.Element]:
+    return [m for m in ET.parse(report).getroot().findall("mutation") if m.get(STATUS) not in IGNORED]
+
+
+def survivors(ctx: Context, mutants: list[ET.Element]) -> list[str]:
+    return [describe(ctx, mutant) for mutant in mutants if mutant.get(STATUS) not in KILLED]
+
+
+def command(ctx: Context, targets: list[Path], out: Path, workers: int) -> list[str]:
+    classes = target_classes(ctx, targets)
     packages = sorted({test_glob(java.class_name(ctx, path)) for path in java.tests(ctx)})
     args = [
-        "test-compile", f"{PITEST}:mutationCoverage",
-        f"-DtargetClasses={','.join(classes)}", "-DoutputFormats=XML", "-DtimestampedReports=false",
-        f"-DreportsDirectory={out}", f"-Dthreads={remote.workers(ctx, 'java.mutation', ctx.java('mutation_threads', 2), on_remote)}",
+        "test-compile",
+        f"{PITEST}:mutationCoverage",
+        f"-DtargetClasses={','.join(classes)}",
+        "-DoutputFormats=XML",
+        "-DtimestampedReports=false",
+        f"-DreportsDirectory={out}",
+        f"-Dthreads={workers}",
     ]
     return args + ([f"-DtargetTests={','.join(packages)}"] if packages else [])
+
+
+def target_classes(ctx: Context, targets: list[Path]) -> list[str]:
+    return [name for path in targets for name in class_globs(java.class_name(ctx, path))]
 
 
 def class_globs(name: str | None) -> list[str]:
@@ -64,7 +116,7 @@ def class_globs(name: str | None) -> list[str]:
 
 
 def test_glob(name: str | None) -> str:
-    package = (name or "").rpartition(".")[0]
+    package = xml_text(name).rpartition(".")[0]
     return f"{package}.*" if package else "*"
 
 
@@ -73,13 +125,30 @@ def missing(output: str, code: int) -> str:
     if "pitest plugin" in lowered or "could not run any tests" in lowered:
         return INSTALL
     if "no mutations found" in lowered:
-        return "no mutants were generated"
+        return NO_MUTANTS
     return f"PIT produced no report (exit {code})"
 
 
 def describe(ctx: Context, mutant: ET.Element) -> str:
-    owner = (mutant.findtext("mutatedClass") or "").split("$", 1)[0]
-    path = java.locate(ctx, "/".join(owner.split(".")[:-1]), mutant.findtext("sourceFile") or "", java.source_roots(ctx))
-    where = java.rel(ctx, path) if path is not None else owner
-    status = (mutant.get("status") or "?").lower().replace("_", " ")
-    return f"{where}:{mutant.findtext('lineNumber') or 0} {mutant.findtext('mutatedMethod')}: {mutant.findtext('description')} {status}"
+    where = f"{mutant_location(ctx, mutant)}:{mutant.findtext('lineNumber') or 0}"
+    status = (mutant.get(STATUS) or "?").lower().replace("_", " ")
+    return f"{where} {mutant.findtext('mutatedMethod')}: {mutant.findtext('description')} {status}"
+
+
+def mutant_location(ctx: Context, mutant: ET.Element) -> str:
+    owner = before_dollar(xml_text(mutant.findtext("mutatedClass")))
+    path = java.locate(java.source_roots(ctx), java.package_dir(owner), xml_text(mutant.findtext("sourceFile")))
+    return java.rel(ctx, path) if path is not None else owner
+
+
+def xml_text(value: str | None) -> str:
+    return value if value is not None else EMPTY
+
+
+DOLLAR = "$"
+
+
+def before_dollar(text: str) -> str:
+    if DOLLAR not in text:
+        return text
+    return text[: text.index(DOLLAR)]

@@ -1,0 +1,596 @@
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from marestail import _guidance, _hyper, _install, install
+
+TEMPLATES = _install.TEMPLATES
+GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
+CURSOR_GATE = {"command": "marestail gate --hook", "timeout": 900, "loop_limit": 5}
+ROOT = Path(__file__).resolve().parent.parent
+INSTALLED_DIRECTORIES = [
+    ".agents",
+    ".claude",
+    ".cursor",
+    ".grok",
+    ".grok/hooks",
+    "guidance",
+    "guidance/patterns",
+    "tasks",
+]
+INSTALL_HARD_CASES = (
+    "full_install_creates_gate",
+    "hard_install_creates_neither",
+    "hard_install_keeps_claude",
+    "hard_install_implies_gitignore",
+    "hard_install_writes_tree",
+    "cli_scope_hard_matches_api",
+    "cli_scope_all_matches_full",
+    "gitignore_generated_still_appends_gate",
+)
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    folder = tmp_path / "home"
+    folder.mkdir()
+    monkeypatch.setenv("HOME", str(folder))
+    monkeypatch.delenv("GROK_HOME", raising=False)
+    monkeypatch.setattr(time, "time", lambda: 1234.9)
+    monkeypatch.setattr(_hyper, "install_hyper", refuse_hyper)
+    return folder
+
+
+def refuse_hyper(path: Path) -> int:
+    raise AssertionError(f"hyper install was not asked for: {path}")
+
+
+@pytest.fixture
+def target(tmp_path: Path) -> Path:
+    folder = tmp_path / "target"
+    folder.mkdir()
+    return folder
+
+
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text())
+
+
+def assert_matches_template(target: Path, relative: str) -> None:
+    assert (target / relative).read_text() == (TEMPLATES / relative).read_text()
+
+
+def relative_directories(root: Path) -> list[str]:
+    found = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()]
+    return sorted(found)
+
+
+def test_install_into_an_empty_repo(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert install.install(target) == 0
+    for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
+        assert (target / name).read_text() == (TEMPLATES / name).read_text()
+    assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
+    assert not (target / "guidance" / "cs.md").exists()
+    guidance = sorted(str(path.relative_to(target / "guidance")) for path in (target / "guidance").rglob("*.md"))
+    assert guidance == ["patterns/ts.md", "ts.md"]
+    assert (target / "CLAUDE.md").read_text() == (TEMPLATES / "CLAUDE.md").read_text()
+    assert (target / "AGENTS.md").read_text() == (TEMPLATES / "CLAUDE.md").read_text()
+    assert read_json(target / ".claude" / "settings.json") == {"hooks": {"Stop": [read_json(TEMPLATES / "stop-hook.json")]}}
+    assert read_json(target / ".agents" / "hooks.json") == read_json(TEMPLATES / "agy-hooks.json")
+    assert read_json(target / ".grok" / "hooks" / "marestail-gate.json") == read_json(TEMPLATES / "grok-hooks.json")
+    assert read_json(target / ".cursor" / "hooks.json") == read_json(TEMPLATES / "cursor-hooks.json")
+    assert (target / ".gitignore").read_text() == "\n# marestail\n" + "\n".join(_install.GITIGNORE_LINES) + "\n"
+    assert capsys.readouterr().out == (
+        f"trusted {target} for grok project hooks\ninstalled into {target}; edit marestail.toml and sonar-project.properties\n"
+    )
+    assert (home / ".grok" / "trusted_folders.toml").read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1234\n'
+
+
+def test_hard_install_skips_agent_docs(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert install.install(target, hard=True) == 0
+    assert not (target / "CLAUDE.md").exists()
+    assert not (target / "AGENTS.md").exists()
+    for name in ("marestail.toml", "sonar-project.properties", "PERFORMANCE.md", "guidance/ts.md"):
+        assert (target / name).read_text() == (TEMPLATES / name).read_text()
+    assert (target / "tasks" / "README.md").read_text() == (TEMPLATES / "tasks-README.md").read_text()
+    assert "marestail gate --hook" in (target / ".claude" / "settings.json").read_text()
+    assert "marestail gate --hook" in (target / ".agents" / "hooks.json").read_text()
+    assert "marestail gate --hook" in (target / ".grok" / "hooks" / "marestail-gate.json").read_text()
+    assert "marestail gate --hook" in (target / ".cursor" / "hooks.json").read_text()
+    ignore = (target / ".gitignore").read_text()
+    for line in _install.GITIGNORE_GENERATED_LINES:
+        assert line in ignore
+    assert capsys.readouterr().out.endswith(
+        f"installed into {target}; left CLAUDE.md and AGENTS.md alone; edit marestail.toml and sonar-project.properties\n"
+    )
+
+
+def test_hard_install_leaves_existing_claude(home: Path, target: Path) -> None:
+    (target / "CLAUDE.md").write_text("team rules\n")
+    install.install(target, hard=True)
+    assert (target / "CLAUDE.md").read_text() == "team rules\n"
+    assert not (target / "AGENTS.md").exists()
+
+
+def test_hard_install_leaves_existing_agents(home: Path, target: Path) -> None:
+    (target / "AGENTS.md").write_text("team rules\n")
+    install.install(target, hard=True)
+    assert (target / "AGENTS.md").read_text() == "team rules\n"
+    assert not (target / "CLAUDE.md").exists()
+
+
+def test_hard_install_keeps_prior_gate(home: Path, target: Path) -> None:
+    install.install(target)
+    before = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
+    install.install(target, hard=True)
+    after = {(target / "CLAUDE.md").read_text(), (target / "AGENTS.md").read_text()}
+    assert after == before
+
+
+def test_install_hard_diagnostic_covers_cases() -> None:
+    script = ROOT / "tools" / "test-install-hard.py"
+    text = script.read_text()
+    missing = [name for name in INSTALL_HARD_CASES if f"def {name}(" not in text]
+    assert missing == []
+    completed = subprocess.run([sys.executable, str(script)], cwd=ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0
+    assert "install-hard ok" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("generated", "hard", "expected"),
+    [(False, False, []), (True, False, _install.GITIGNORE_GENERATED_LINES), (False, True, _install.GITIGNORE_GENERATED_LINES)],
+)
+def test_generated_ignore(generated: bool, hard: bool, expected: list[str]) -> None:
+    assert _install.generated_ignore(generated, hard) == expected
+
+
+@pytest.mark.parametrize(
+    ("hard", "needle"),
+    [(False, "installed into /t; edit marestail.toml and sonar-project.properties"), (True, "left CLAUDE.md and AGENTS.md alone")],
+)
+def test_done_message(hard: bool, needle: str) -> None:
+    assert needle in _install.done_message(Path("/t"), hard)
+
+
+def test_write_agent_docs_skips_when_hard(tmp_path: Path) -> None:
+    _install.write_agent_docs(tmp_path, True)
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_write_agent_docs_appends_when_full(tmp_path: Path) -> None:
+    _install.write_agent_docs(tmp_path, False)
+    assert _install.GATE_MARKER in (tmp_path / "CLAUDE.md").read_text()
+    assert _install.GATE_MARKER in (tmp_path / "AGENTS.md").read_text()
+
+
+@pytest.mark.parametrize(("generated", "hard"), [(False, False), (True, False), (False, True)])
+def test_classic_installs_leave_the_git_exclude_alone(home: Path, git_repo: Path, generated: bool, hard: bool) -> None:
+    exclude = git_repo / ".git" / "info" / "exclude"
+    before = exclude.read_bytes()
+
+    assert install.install(git_repo, gitignore_generated=generated, hard=hard) == 0
+
+    assert exclude.read_bytes() == before
+    assert (git_repo / "sonar-project.properties").exists()
+    assert not (git_repo / ".marestail" / "tooling").exists()
+
+
+def test_install_twice_changes_nothing(home: Path, target: Path) -> None:
+    assert install.install(target, gitignore_generated=True) == 0
+    before = {path: path.read_text() for path in target.rglob("*") if path.is_file()}
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
+    install.install(target, gitignore_generated=True)
+    assert {path: path.read_text() for path in target.rglob("*") if path.is_file()} == before
+    assert relative_directories(target) == INSTALLED_DIRECTORIES
+
+
+def test_copy_templates_directory_names(target: Path) -> None:
+    _install.copy_templates(target)
+    assert relative_directories(target) == ["guidance", "guidance/patterns", "tasks"]
+
+
+def test_install_is_classic_unless_hyper_is_asked(home: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hyper_calls: list[Path] = []
+
+    def fake_hyper(path: Path) -> int:
+        hyper_calls.append(path)
+        return 7
+
+    monkeypatch.setattr(_hyper, "install_hyper", fake_hyper)
+    assert install.install(target) == 0
+    assert hyper_calls == []
+    assert (target / "marestail.toml").read_text() == (TEMPLATES / "marestail.toml").read_text()
+
+
+def test_install_for_dotnet_and_csharp(home: Path, target: Path) -> None:
+    (target / "marestail.toml").write_text("[dotnet]\nsolution = 'a.sln'\n")
+    (target / "src").mkdir()
+    (target / "src" / "App.csproj").write_text("<Project />")
+    install.install(target, gitignore_generated=True)
+    assert (target / "marestail.toml").read_text() == "[dotnet]\nsolution = 'a.sln'\n"
+    assert not (target / "sonar-project.properties").exists()
+    assert (target / "guidance" / "cs.md").read_text() == (TEMPLATES / "guidance" / "cs.md").read_text()
+    lines = (target / ".gitignore").read_text().splitlines()
+    assert lines[-len(_install.GITIGNORE_GENERATED_LINES) :] == _install.GITIGNORE_GENERATED_LINES
+
+
+def test_install_copies_every_marker_rulebook_with_its_patterns(home: Path, target: Path) -> None:
+    for name, text in (("Gemfile", ""), ("mix.exs", ""), ("go.mod", "module x\n")):
+        (target / name).write_text(text)
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    (target / "src" / "App.csproj").write_text("<Project />")
+    install.install(target)
+    for name in ("ts", "cs", "rb", "ex", "er", "go"):
+        assert_matches_template(target, f"guidance/{name}.md")
+        assert_matches_template(target, f"guidance/patterns/{name}.md")
+
+
+def test_install_takes_erlang_anywhere_but_the_other_markers_at_the_root_only(home: Path, target: Path) -> None:
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    install.install(target)
+    assert (target / "guidance" / "er.md").exists()
+    assert (target / "guidance" / "patterns" / "er.md").exists()
+    for name in ("rb", "ex", "go", "cs"):
+        assert not (target / "guidance" / f"{name}.md").exists()
+
+
+def test_install_ignores_language_markers_below_the_root(home: Path, target: Path) -> None:
+    (target / "nested").mkdir()
+    for name in ("Gemfile", "mix.exs", "go.mod"):
+        (target / "nested" / name).write_text("")
+    install.install(target)
+    for name in ("rb", "ex", "go"):
+        assert not (target / "guidance" / f"{name}.md").exists()
+        assert not (target / "guidance" / "patterns" / f"{name}.md").exists()
+
+
+def test_install_keeps_edited_rulebooks_and_patterns(home: Path, target: Path) -> None:
+    (target / "go.mod").write_text("module x\n")
+    install.install(target)
+    (target / "guidance" / "patterns" / "ts.md").write_text("# edited\n")
+    (target / "guidance" / "go.md").write_text("# edited\n")
+    install.install(target)
+    assert (target / "guidance" / "patterns" / "ts.md").read_text() == "# edited\n"
+    assert (target / "guidance" / "go.md").read_text() == "# edited\n"
+
+
+@pytest.mark.parametrize(("name", "marker"), [("_uses_elixir", "mix.exs"), ("_uses_ruby", "Gemfile"), ("_uses_go", "go.mod")])
+def test_root_marker_detectors(target: Path, name: str, marker: str) -> None:
+    assert getattr(_guidance, name)(target) is False
+    (target / marker).write_text("")
+    assert getattr(_guidance, name)(target) is True
+
+
+def test_uses_erlang_finds_a_nested_erl(target: Path) -> None:
+    assert _guidance._uses_erlang(target) is False
+    (target / "src").mkdir()
+    (target / "src" / "a.erl").write_text("-module(a).\n")
+    assert _guidance._uses_erlang(target) is True
+
+
+@pytest.mark.parametrize(("text", "expected"), [(None, False), ("[python]\n", False), ("[dotnet]\n", True)])
+def test_uses_dotnet(target: Path, text: str | None, expected: bool) -> None:
+    if text is not None:
+        (target / "marestail.toml").write_text(text)
+    assert _install.uses_dotnet(target) is expected
+
+
+def test_copy_if_missing_keeps_existing(tmp_path: Path) -> None:
+    source = tmp_path / "s"
+    source.write_text("new")
+    destination = tmp_path / "d"
+    _install.copy_if_missing(source, destination)
+    assert destination.read_text() == "new"
+    source.write_text("newer")
+    _install.copy_if_missing(source, destination)
+    assert destination.read_text() == "new"
+
+
+@pytest.mark.parametrize(
+    ("existing", "keeps"),
+    [
+        ("# Rules\n\nbe nice\n\n\n", False),
+        ("run marestail gate first", True),
+        ("", False),
+    ],
+)
+def test_append_instructions(tmp_path: Path, existing: str, keeps: bool) -> None:
+    path = tmp_path / "CLAUDE.md"
+    path.write_text(existing)
+    _install.append_instructions(path)
+    if keeps:
+        assert path.read_text() == existing
+        return
+    snippet = (TEMPLATES / "CLAUDE.md").read_text()
+    assert path.read_text() == existing.rstrip() + ("\n\n" if existing else "") + snippet
+
+
+def test_merge_hook_keeps_other_settings(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"model": "x", "hooks": {"Stop": [{"command": "other"}], "Pre": []}}))
+    _install.merge_hook(path)
+    assert (
+        path.read_text()
+        == json.dumps(
+            {"model": "x", "hooks": {"Stop": [{"command": "other"}, read_json(TEMPLATES / "stop-hook.json")], "Pre": []}}, indent=2
+        )
+        + "\n"
+    )
+
+
+def test_merge_hook_skips_when_gate_present(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"hooks": {"Stop": [{"command": "npx marestail gate"}]}}))
+    _install.merge_hook(path)
+    assert read_json(path) == {"hooks": {"Stop": [{"command": "npx marestail gate"}]}}
+
+
+def test_merge_agy_hook_adds_to_existing(tmp_path: Path) -> None:
+    path = tmp_path / ".agents" / "hooks.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"other": {}, "marestail-gate": {"Stop": [{"command": "lint"}]}}))
+    _install.merge_agy_hook(path)
+    assert read_json(path) == {"other": {}, "marestail-gate": {"Stop": [{"command": "lint"}, GATE]}}
+
+
+def test_merge_grok_hook_creates_parents(tmp_path: Path) -> None:
+    path = tmp_path / ".grok" / "hooks" / "gate.json"
+    _install.merge_grok_hook(path)
+    _install.merge_grok_hook(path)
+    assert read_json(path) == {"hooks": {"Stop": [{"hooks": [GATE]}]}}
+
+
+def test_merge_cursor_hook_adds_version_after_existing_keys(tmp_path: Path) -> None:
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"hooks": {"stop": [{"command": "x"}]}}))
+    _install.merge_cursor_hook(path)
+    assert list(read_json(path)) == ["hooks", "version"]
+    assert read_json(path) == {"hooks": {"stop": [{"command": "x"}, CURSOR_GATE]}, "version": 1}
+
+
+def test_mapping_default_uses_the_fallback() -> None:
+    assert _install.mapping_default({}, "version", 1) == 1
+    assert _install.mapping_default({"version": 2}, "version", 1) == 2
+
+
+def test_merge_cursor_hook_passes_the_version_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+
+    def mapping_default(data: dict[str, Any], key: str, default: Any) -> Any:
+        seen.append((key, default))
+        return 1
+
+    monkeypatch.setattr(_install, "mapping_default", mapping_default)
+    path = tmp_path / "hooks.json"
+    path.write_text("{}")
+    _install.merge_cursor_hook(path)
+    assert seen == [(_install.VERSION, _install.VERSION_DEFAULT)]
+
+
+def test_trust_entry_marks_the_folder_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "time", lambda: 9.7)
+    assert _install.trust_entry() == {_install.TRUSTED: True, _install.DECIDED: 9}
+
+
+def test_mapping_and_listed() -> None:
+    assert _install.mapping({"hooks": {"stop": []}}, "hooks") == {"stop": []}
+    assert _install.mapping({}, "hooks") == {}
+    assert _install.listed({"stop": [1]}, "stop") == [1]
+    assert _install.listed({}, "stop") == []
+    assert _install.mapping({"hooks": 1}, "hooks") == {}
+    assert _install.listed({"stop": 1}, "stop") == []
+
+
+def test_add_template_stops_without_template_key() -> None:
+    settings: dict[str, Any] = {}
+    _install.add_template_stops(settings, {}, "hooks", "Stop")
+    assert settings == {"hooks": {"Stop": []}}
+
+
+def test_merge_cursor_hook_keeps_version(tmp_path: Path) -> None:
+    path = tmp_path / "hooks.json"
+    path.write_text(json.dumps({"version": 2}))
+    _install.merge_cursor_hook(path)
+    assert read_json(path) == {"version": 2, "hooks": {"stop": [CURSOR_GATE]}}
+
+
+def test_trust_grok_folder_uses_grok_home(
+    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    grok = tmp_path / "grok"
+    monkeypatch.setenv("GROK_HOME", str(grok))
+    store = grok / "trusted_folders.toml"
+    grok.mkdir()
+    store.write_text('[folders."/old"]\ntrusted = false\ndecided_at = 7\n\n[folders."/bare"]\n[folders."/other"]\ntrusted = true\n')
+    _install.trust_grok_folder(tmp_path / "x" / "..")
+    assert store.read_text() == (
+        '[folders."/old"]\ntrusted = false\ndecided_at = 7\n\n'
+        '[folders."/bare"]\ntrusted = true\ndecided_at = 1234\n\n'
+        '[folders."/other"]\ntrusted = true\ndecided_at = 1234\n\n'
+        f'[folders."{tmp_path}"]\ntrusted = true\ndecided_at = 1234\n'
+    )
+    assert store.stat().st_mode & 0o777 == 0o600
+    assert capsys.readouterr().out == f"trusted {tmp_path} for grok project hooks\n"
+
+
+def test_trust_grok_folder_hands_the_writer_a_trusted_entry(home: Path, target: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = home / ".grok" / "trusted_folders.toml"
+    store.parent.mkdir()
+    store.write_text("folders = {}\n")
+    saved: list[Any] = []
+    monkeypatch.setattr(_install, "save_trusted_folders", lambda path, key, folders: saved.append((path, key, folders[key])))
+    _install.trust_grok_folder(target)
+    assert saved == [(store, str(target), {_install.TRUSTED: True, _install.DECIDED: 1234})]
+
+
+def test_trust_grok_folder_skips_trusted(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = home / ".grok" / "trusted_folders.toml"
+    store.parent.mkdir()
+    store.write_text(f'[folders."{target}"]\ntrusted = true\ndecided_at = 1\n')
+    _install.trust_grok_folder(target)
+    assert store.read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1\n'
+    assert capsys.readouterr().out == ""
+
+
+def test_trust_grok_folder_retrusts_untrusted(home: Path, target: Path) -> None:
+    store = home / ".grok" / "trusted_folders.toml"
+    store.parent.mkdir()
+    store.write_text(f'[folders."{target}"]\ntrusted = false\ndecided_at = 1\n')
+    _install.trust_grok_folder(target)
+    assert store.read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1234\n'
+
+
+def test_trust_grok_folder_with_empty_store(home: Path, target: Path) -> None:
+    store = home / ".grok" / "trusted_folders.toml"
+    store.parent.mkdir()
+    store.write_text("folders = {}\n")
+    _install.trust_grok_folder(target)
+    assert store.read_text() == f'[folders."{target}"]\ntrusted = true\ndecided_at = 1234\n'
+    folders = _install.trusted_folders(store)
+    assert folders[str(target.resolve())] == {_install.TRUSTED: True, _install.DECIDED: 1234}
+
+
+def test_trust_grok_folder_reports_write_errors(home: Path, target: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (home / ".grok").write_text("not a folder")
+    _install.trust_grok_folder(target)
+    output = capsys.readouterr().out
+    assert output == f"could not trust {target} for grok hooks: [Errno 17] File exists: '{home / '.grok'}'\n"
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"), [(None, False), (True, False), ({"trusted": False}, False), ({"trusted": 1}, True), ({}, False)]
+)
+def test_is_trusted(entry: Any, expected: bool) -> None:
+    assert _install.is_trusted(entry) is expected
+
+
+def test_folder_lines(home: Path) -> None:
+    assert _install.folder_lines('a"b', {"trusted": 0, "decided_at": 5.7}) == ['[folders."a\\"b"]', "trusted = false", "decided_at = 5", ""]
+    assert _install.folder_lines("p", "odd") == ['[folders."p"]', "trusted = true", "decided_at = 1234", ""]
+
+
+def test_extend_gitignore_appends_missing_lines(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("node_modules/\n.venv/\n")
+    _install.extend_gitignore(path, ["qa/", ".venv/"])
+    missing = [line for line in _install.GITIGNORE_LINES if line != ".venv/"]
+    assert path.read_text() == "\n".join(["node_modules/", ".venv/", "", "# marestail", *missing, "qa/"]) + "\n"
+
+
+def test_extend_gitignore_reuses_header(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("# marestail\n.marestail/\n")
+    _install.extend_gitignore(path)
+    assert path.read_text() == "\n".join(["# marestail", *_install.GITIGNORE_LINES]) + "\n"
+
+
+def test_extend_gitignore_leaves_complete_file_alone(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("\n".join(_install.GITIGNORE_LINES))
+    _install.extend_gitignore(path, [])
+    assert path.read_text() == "\n".join(_install.GITIGNORE_LINES)
+
+
+@pytest.mark.parametrize(
+    ("toml", "steps"),
+    [
+        ("[visual]\nenabled = true\n", [["npm", "install"], ["npx", "playwright", "install", "chromium"]]),
+        ("[visual]\nport = 3400\n", [["npm", "install"], ["npx", "playwright", "install", "chromium"]]),
+        ("[visual]\nenabled = false\n", []),
+        ("[qa]\ncmd = 'true'\n", []),
+        ("visual = 1\n", []),
+    ],
+)
+def test_install_fetches_playwright_only_when_visual_is_on(
+    home: Path, target: Path, toml: str, steps: list[list[str]], fake_run: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (target / "marestail.toml").write_text(toml)
+    fake = fake_run(_install)
+    assert install.install(target) == 0
+    assert fake.calls == steps
+    assert all(option["cwd"] == ROOT / "marestail" / "js" for option in fake.options)
+    assert all(option["timeout"] == 1800 for option in fake.options)
+
+
+def test_visual_enabled_without_a_config(target: Path) -> None:
+    assert _install.visual_enabled(target) is False
+
+
+@pytest.mark.parametrize(
+    ("replies", "message"),
+    [
+        ([(1, "")], "npm install failed (exit 1); everything else is installed"),
+        ([(0, ""), (1, "")], "npx playwright install chromium failed (exit 1); everything else is installed"),
+    ],
+)
+def test_install_reports_a_failed_playwright_step(
+    home: Path, target: Path, replies: list[tuple[int, str]], message: str, fake_run: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (target / "marestail.toml").write_text("[visual]\nenabled = true\n")
+    fake_run(_install, replies)
+    assert install.install(target) == 1
+    assert capsys.readouterr().out.splitlines()[-1] == message
+
+
+def test_refuse_hyper_fails_the_test(tmp_path: Path) -> None:
+    with pytest.raises(AssertionError, match="hyper install was not asked for"):
+        refuse_hyper(tmp_path)
+
+
+def test_playwright_is_the_only_js_dependency() -> None:
+    assert read_json(ROOT / "marestail" / "js" / "package.json")["dependencies"].keys() == {"playwright"}
+
+
+def test_install_copies_the_python_rulebook_only_for_a_python_target(
+    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    python = tmp_path / "python"
+    python.mkdir()
+    (python / "pyproject.toml").write_text("")
+    install.install(python)
+    assert "## Python-native idioms\n" in (python / "guidance" / "py.md").read_text()
+    assert_matches_template(python, "guidance/py.md")
+    assert capsys.readouterr().out.endswith(f"installed into {python}; edit marestail.toml and sonar-project.properties\n")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    install.install(empty)
+    assert not (empty / "guidance" / "py.md").exists()
+    assert (empty / "guidance" / "ts.md").exists()
+
+
+@pytest.mark.parametrize("marker", ["pyproject.toml", "requirements.txt", "setup.py"])
+def test_uses_python_finds_a_marker_at_the_root_without_a_config(target: Path, marker: str) -> None:
+    assert _guidance._uses_python(target) is False
+    (target / marker).write_text("")
+    assert _guidance._uses_python(target) is True
+
+
+def test_uses_python_follows_the_python_root(target: Path) -> None:
+    (target / "marestail.toml").write_text('[python]\nroot = "backend"\n')
+    (target / "backend").mkdir()
+    assert _guidance._uses_python(target) is False
+    (target / "backend" / "requirements.txt").write_text("")
+    assert _guidance._uses_python(target) is True
+
+
+def test_uses_python_ignores_a_marker_that_is_a_folder(target: Path) -> None:
+    (target / "setup.py").mkdir()
+    assert _guidance._uses_python(target) is False
+
+
+def test_python_root_defaults_to_the_target(target: Path) -> None:
+    assert _guidance._python_root(target) == target
+    (target / "marestail.toml").write_text("[git]\n")
+    assert _guidance._python_root(target) == target / "."
+    (target / "marestail.toml").write_text('[python]\nroot = "svc"\n')
+    assert _guidance._python_root(target) == target / "svc"

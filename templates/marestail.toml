@@ -2,7 +2,7 @@
 base = "origin/master"
 
 # [agent]
-# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi
+# backend = "claude"  # claude | agy | grok | cursor | kilo | kimi | junie | hermes
 # model = "claude-opus-5"  # or dandelion/route / dandelion/route-best: ask dandelion before every session, which picks backend, model and effort
 # effort = "high"  # reasoning effort or variant; stamped on every commit
 
@@ -11,6 +11,9 @@ base = "origin/master"
 
 # [practices]
 # enabled = true  # the practices judge runs between architect and perf unless false; skips repos with no guidance/*.md
+
+# [design]
+# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md
 
 # [perf]
 # enabled = true  # the perf judge runs between architect and hardener unless false
@@ -119,3 +122,8 @@ paths = ["server", "client/app"]
 [qa]
 cmd = "npx playwright test"
 cwd = "client/app"
+# start = "yarn dev -p $PORT"
+# ready = "/"
+# port = 3400
+# ready_timeout = 180
+# env = { CMS_URL = "https://example/graphql", LOCALE = "en-gb" }

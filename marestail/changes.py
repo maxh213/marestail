@@ -2,10 +2,15 @@ from pathlib import Path
 
 from marestail.shell import run
 
+STATUS = ["git", "status", "--porcelain", "--untracked-files=all"]
+STATUS_WIDTH = 2
+PATH_START = 3
+RENAME_ARROW = " -> "
+
 
 def changed_files(root: Path, base: str) -> set[str]:
     committed = diff_names(root, ["git", "diff", "--name-only", f"{base}...HEAD"])
-    working = diff_names(root, ["git", "status", "--porcelain", "--untracked-files=all"])
+    working = diff_names(root, STATUS)
     return committed | working
 
 
@@ -17,9 +22,20 @@ def diff_names(root: Path, command: list[str]) -> set[str]:
 
 
 def parse_line(line: str) -> str:
-    if line[:2].strip() and line[2:3] == " " and len(line) > 3:
-        return line[3:].split(" -> ")[-1]
-    return line.strip()
+    path = porcelain_path(line)
+    if path is None:
+        return line.strip()
+    return path.split(RENAME_ARROW)[-1]
+
+
+def porcelain_path(line: str) -> str | None:
+    if len(line) <= PATH_START:
+        return None
+    if not line[:STATUS_WIDTH].strip():
+        return None
+    if line[STATUS_WIDTH] != " ":
+        return None
+    return line[PATH_START:]
 
 
 def changed_lines(root: Path, base: str) -> dict[str, set[int]]:
@@ -37,15 +53,24 @@ def diff_hunks(root: Path, command: list[str]) -> dict[str, set[int]]:
     code, output = run(command, cwd=root)
     if code != 0:
         return {}
+    return hunks_of(output)
+
+
+def hunks_of(output: str) -> dict[str, set[int]]:
     hunks: dict[str, set[int]] = {}
     current: str | None = None
     for line in output.splitlines():
         if line.startswith("+++ "):
             current = parse_plus(line)
-        elif line.startswith("@@") and current is not None:
-            start, count = hunk_span(line)
-            hunks.setdefault(current, set()).update(range(start, start + count))
+        else:
+            add_hunk(hunks, current, line)
     return hunks
+
+
+def add_hunk(hunks: dict[str, set[int]], current: str | None, line: str) -> None:
+    if line.startswith("@@") and current is not None:
+        start, count = hunk_span(line)
+        hunks.setdefault(current, set()).update(range(start, start + count))
 
 
 def parse_plus(line: str) -> str | None:
@@ -67,7 +92,7 @@ def merge_hunks(lines: dict[str, set[int]], hunks: dict[str, set[int]]) -> None:
 
 
 def untracked(root: Path) -> set[str]:
-    code, output = run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=root)
+    code, output = run(STATUS, cwd=root)
     if code != 0:
         return set()
     return {parse_line(line) for line in output.splitlines() if line.startswith("??")}
@@ -86,3 +111,8 @@ def file_lines(path: Path) -> set[int] | None:
     if b"\0" in raw:
         return None
     return set(range(1, len(raw.decode("utf-8", errors="replace").splitlines()) + 1))
+
+
+def base_text(root: Path, base: str, path: str) -> str | None:
+    code, output = run(["git", "show", f"{base}:./{path}"], cwd=root)
+    return output if code == 0 else None

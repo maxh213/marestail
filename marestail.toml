@@ -1,0 +1,31 @@
+[git]
+base = "origin/main"
+
+[agent]
+model = "dandelion/route"
+
+[python]
+root = "."
+venv = ".venv"
+sources = ["marestail"]
+crap_max = 4
+mutation_workers = 4
+
+[sonar]
+project_key = "marestail"
+project_name = "marestail"
+exclusions = ["tools/samples/**", "templates/**", "roles/**"]
+
+[deadcode]
+min_confidence = 60
+python_ignore_names = ["run_gate"]
+
+[docs]
+files = ["README.md"]
+routes_file = "README.md"
+sources = ["marestail"]
+path_prefixes = ["marestail/", "tools/", "tasks/", "roles/", "templates/", "guidance/"]
+ignore_env = []
+
+[comments]
+paths = ["marestail"]

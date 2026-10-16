@@ -2,17 +2,20 @@
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail.config import Config
-from marestail.runner import (
+from marestail.backends import (
     KILO_DEFAULT_MODEL,
     KILO_DEFAULT_VARIANT,
-    Run,
-    agent_command,
-    agent_label,
     grok_command,
+    hermes_command,
+    hermes_rate_limited,
+    hermes_summary,
+    junie_command,
+    junie_rate_limited,
+    junie_summary,
     kilo_command,
     kilo_events,
     kilo_rate_limited,
@@ -22,6 +25,12 @@ from marestail.runner import (
     kimi_prompt,
     kimi_rate_limited,
     kimi_summary,
+)
+from marestail.config import Config
+from marestail.runner import (
+    Run,
+    agent_command,
+    agent_label,
     parse_verdict,
     resolve_agent,
     stamped,
@@ -32,16 +41,16 @@ TASK = Path("/tmp/t.md")
 PROMPT = Path("/tmp/p.md")
 
 
-def state(agent=None, model="mymodel", raw=None, effort=None):
+def state(agent: str | None = None, model: str | None = "mymodel", raw: dict[str, Any] | None = None, effort: str | None = None) -> Run:
     return Run(config=Config(root=ROOT, raw=raw or {}), task=TASK, model=model, retries=0, agent=agent, effort=effort)
 
 
-def expect(name, got, wanted):
+def expect(name: str, got: object, wanted: object) -> None:
     if got != wanted:
         raise SystemExit(f"{name}: {got!r} != {wanted!r}")
 
 
-def restore(keys, previous):
+def restore(keys: list[str], previous: dict[str, str | None]) -> None:
     for key in keys:
         value = previous.get(key)
         if value is None:
@@ -50,11 +59,21 @@ def restore(keys, previous):
             os.environ[key] = value
 
 
-def snapshot_existing():
+def snapshot_existing() -> None:
     expect(
         "claude",
         agent_command(state("claude")),
-        ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json", "--model", "mymodel"],
+        [
+            "claude",
+            "-p",
+            "--permission-mode",
+            "bypassPermissions",
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "json",
+            "--model",
+            "mymodel",
+        ],
     )
     expect(
         "agy",
@@ -67,19 +86,47 @@ def snapshot_existing():
         ["cursor-agent", "-p", "--output-format", "json", "--force", "--trust", "--sandbox", "disabled", "--model", "mymodel"],
     )
     expect(
+        "junie",
+        agent_command(state("junie")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
+    )
+    expect(
         "grok",
         grok_command(state("grok"), PROMPT),
-        ["grok", "--prompt-file", str(PROMPT.resolve()), "--output-format", "json", "--always-approve", "--no-plan", "--trust", "--model", "mymodel"],
+        [
+            "grok",
+            "--prompt-file",
+            str(PROMPT.resolve()),
+            "--output-format",
+            "json",
+            "--always-approve",
+            "--no-plan",
+            "--trust",
+            "--model",
+            "mymodel",
+        ],
     )
     expect("default", resolve_agent(state(None, model=None)), "claude")
     expect("default-command", agent_command(state(None)), agent_command(state("claude")))
 
 
-def kilo_defaults():
+def kilo_defaults() -> None:
     expect(
         "kilo-default",
         kilo_command(state("kilo", model=None)),
-        ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model", KILO_DEFAULT_MODEL, "--variant", KILO_DEFAULT_VARIANT],
+        [
+            "kilo",
+            "run",
+            "--auto",
+            "--format",
+            "json",
+            "--log-level",
+            "ERROR",
+            "--model",
+            KILO_DEFAULT_MODEL,
+            "--variant",
+            KILO_DEFAULT_VARIANT,
+        ],
     )
     expect("kilo-default-model", KILO_DEFAULT_MODEL, "kilo/stepfun/step-3.7-flash:free")
     expect("kilo-default-variant", KILO_DEFAULT_VARIANT, "high")
@@ -91,7 +138,7 @@ def kilo_defaults():
     expect("kilo-via-agent-command", agent_command(state("kilo", model=None)), kilo_command(state("kilo", model=None)))
 
 
-def kimi_backend():
+def kimi_backend() -> None:
     expect(
         "kimi-command",
         kimi_command(state("kimi"), PROMPT),
@@ -103,14 +150,161 @@ def kimi_backend():
         ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json"],
     )
     expect("kimi-prompt-points-at-file", str(PROMPT.resolve()) in kimi_prompt(PROMPT), True)
-    expect("kimi-prompt-stays-short", len(kimi_prompt(PROMPT)) < 4096, True
-    )
+    expect("kimi-prompt-stays-short", len(kimi_prompt(PROMPT)) < 4096, True)
     expect("kimi-resolve", resolve_agent(state("kimi", model=None)), "kimi")
     expect("kimi-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kimi"}})), "kimi")
 
 
-def env_overrides():
-    keys = ["MARESTAIL_AGENT", "MARESTAIL_KILO", "MARESTAIL_KILO_VARIANT", "MARESTAIL_CLAUDE", "MARESTAIL_AGY", "MARESTAIL_CURSOR", "MARESTAIL_GROK", "MARESTAIL_GROK_EFFORT", "MARESTAIL_KIMI"]
+def junie_backend() -> None:
+    expect(
+        "junie-command",
+        junie_command(state("junie", model="gemini-3.8-flash", effort="high")),
+        [
+            "junie",
+            "--skip-update-check",
+            "--input-format=json",
+            "--output-format=json",
+            "-p",
+            str(ROOT),
+            "--model=gemini-3.8-flash",
+            "--effort=high",
+        ],
+    )
+    expect(
+        "junie-command-no-model",
+        junie_command(state("junie", model=None)),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT)],
+    )
+    expect(
+        "junie-command-xhigh",
+        junie_command(state("junie", model="gemini-3.8-flash", effort="xhigh")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=gemini-3.8-flash"],
+    )
+    expect("junie-resolve", resolve_agent(state("junie", model=None)), "junie")
+    expect("junie-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "junie"}})), "junie")
+    verified = '{"sessionId":"s","taskName":"t","result":"### Summary\\n- pong\\n\\n### Changes\\n- No files were created or modified as requested.\\n\\n### Verification\\n- Verified that the repository remains empty and untouched.","changes":[],"llmUsage":[{"model":"gemini-3.8-flash","calls":17,"cost":0.06395658750000001,"inputTokens":91729,"cacheInputTokens":261869,"cacheCreateTokens":0,"outputTokens":10527},{"model":"gpt-5.4-nano","calls":13,"cost":0.01091355,"inputTokens":44499,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":1611},{"model":"gpt-4.1-mini-2025-04-14","calls":16,"cost":0.004483599999999999,"inputTokens":10037,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":293},{"model":"gpt-4.1-2025-04-14","calls":1,"cost":0.0015019999999999999,"inputTokens":743,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":2},{"model":"gemini-3.5-flash-lite","calls":1,"cost":4.9225E-4,"inputTokens":1969,"cacheInputTokens":0,"cacheCreateTokens":0,"outputTokens":0}]}'
+    summary = junie_summary(verified)
+    expect(
+        "junie-summary",
+        summary,
+        "calls=48 tokens=423279 cost=$0.08 '### Summary - pong  ### Changes - No files were created or modified as requested.  ### Verification '",
+    )
+    expect("junie-not-limited", junie_rate_limited(0, verified), False)
+    expect("junie-balance-exhausted", junie_rate_limited(1, "Your balance is exhausted."), True)
+    expect("junie-insufficient-balance", junie_rate_limited(1, "insufficient balance"), True)
+    expect("junie-rate-limit", junie_rate_limited(1, "rate limit exceeded"), True)
+    expect("junie-invalid-model", junie_rate_limited(1, "Junie failed with the message: Invalid model: no-such-model-xyz"), False)
+    expect("junie-quota-ok", junie_rate_limited(0, "the quota gate passed"), False)
+    expect("junie-summary-tail", junie_summary("plain text failure"), "plain text failure")
+
+
+def hermes_backend() -> None:
+    expect(
+        "hermes-command",
+        hermes_command(state("hermes"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "-m",
+            "mymodel",
+        ],
+    )
+    expect(
+        "hermes-command-no-model",
+        hermes_command(state("hermes", model=None), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+        ],
+    )
+    expect(
+        "hermes-command-effort-only",
+        hermes_command(state("hermes", model=None, effort="xhigh"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "--reasoning",
+            "xhigh",
+        ],
+    )
+    expect("hermes-resolve", resolve_agent(state("hermes", model=None)), "hermes")
+    expect(
+        "hermes-config-backend",
+        resolve_agent(state(None, model=None, raw={"agent": {"backend": "hermes"}})),
+        "hermes",
+    )
+    verified = (
+        '{"type":"system","subtype":"init","model":"x-ai/grok-4.6","session_id":"20260918_151301_be7c1c","timestamp":1789740781416}\n'
+        '{"type":"tool_use","name":"terminal","input":{"command":"git status --short"},"timestamp":1789740714068}\n'
+        '{"type":"tool_result","name":"terminal","output":"{\\"output\\": \\"exit1=0\\", \\"exit_code\\": 0, \\"error\\": null}","duration_ms":218,"is_error":false,"timestamp":1789740714290}\n'
+        '{"type":"text","text":"pong","timestamp":1789740800465}\n'
+        '{"type":"result","session_id":"20260918_151301_be7c1c","exit_code":0,"text":"pong","tokens":{"input":14851,"output":1,"total":14980,"cache_read":128,"cache_write":0},"duration_ms":19100,"timestamp":1789740800516}'
+    )
+    expect("hermes-summary", hermes_summary(verified), 'tokens=14980 "pong"')
+    expect("hermes-not-limited", hermes_rate_limited(0, verified), False)
+    expect(
+        "hermes-credits-exhausted",
+        hermes_rate_limited(
+            2,
+            '{"type":"result","exit_code":2,"error":"Subscription credits are exhausted. Top up/renew credits, then retry.","text":""}',
+        ),
+        True,
+    )
+    expect("hermes-insufficient-credits", hermes_rate_limited(2, "insufficient_credits"), True)
+    expect("hermes-no-usable-credits", hermes_rate_limited(2, "no_usable_credits"), True)
+    expect("hermes-subscription-expired", hermes_rate_limited(2, "subscription_expired"), True)
+    expect("hermes-subscription-required", hermes_rate_limited(2, "subscription_required"), True)
+    expect("hermes-spend-cap", hermes_rate_limited(2, "member_spend_cap_exceeded"), True)
+    expect("hermes-rate-limit", hermes_rate_limited(2, "rate limit exceeded"), True)
+    expect("hermes-unknown-reasoning", hermes_rate_limited(2, "Unknown --reasoning 'ultrahigh'"), False)
+    expect("hermes-quota-ok", hermes_rate_limited(0, "the quota gate passed"), False)
+    expect("hermes-summary-tail", hermes_summary("plain text failure"), "plain text failure")
+
+
+def env_overrides() -> None:
+    keys = [
+        "MARESTAIL_AGENT",
+        "MARESTAIL_KILO",
+        "MARESTAIL_KILO_VARIANT",
+        "MARESTAIL_CLAUDE",
+        "MARESTAIL_AGY",
+        "MARESTAIL_CURSOR",
+        "MARESTAIL_GROK",
+        "MARESTAIL_GROK_EFFORT",
+        "MARESTAIL_KIMI",
+        "MARESTAIL_JUNIE",
+        "MARESTAIL_HERMES",
+    ]
     previous = {key: os.environ.get(key) for key in keys}
     try:
         os.environ["MARESTAIL_AGENT"] = "kilo"
@@ -137,18 +331,27 @@ def env_overrides():
         expect("kimi-binary", kimi_command(state("kimi"), PROMPT)[0], "/opt/kimi")
         os.environ["MARESTAIL_AGENT"] = "kimi"
         expect("env-agent-kimi", resolve_agent(state(None, model=None)), "kimi")
+        os.environ["MARESTAIL_JUNIE"] = "/opt/junie"
+        expect("junie-binary", junie_command(state("junie", model=None))[0], "/opt/junie")
+        os.environ["MARESTAIL_AGENT"] = "junie"
+        expect("env-agent-junie", resolve_agent(state(None, model=None)), "junie")
+        os.environ["MARESTAIL_HERMES"] = "/opt/hermes"
+        expect("hermes-binary", hermes_command(state("hermes"), PROMPT)[0], "/opt/hermes")
+        os.environ["MARESTAIL_AGENT"] = "hermes"
+        expect("env-agent-hermes", resolve_agent(state(None, model=None)), "hermes")
     finally:
         restore(keys, previous)
     expect("config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "kilo"}})), "kilo")
     expect("flag-wins", resolve_agent(state("cursor", model=None, raw={"agent": {"backend": "kilo"}})), "cursor")
 
 
-def labels():
+def labels() -> None:
     expect("label-model-only", agent_label(state("claude")), "claude/mymodel")
     expect("label-with-effort", agent_label(state("claude", effort="high")), "claude/mymodel high")
     expect("label-no-model", agent_label(state("claude", model=None)), "claude")
     expect("label-kilo-default", agent_label(state("kilo", model=None)), f"{KILO_DEFAULT_MODEL} {KILO_DEFAULT_VARIANT}")
     expect("label-kilo-plain", agent_label(state("kilo", model="kilo/other")), "kilo/other")
+    expect("label-cursor-auto", agent_label(state("cursor", model="auto", effort="high")), "cursor/auto high")
     effortful = state("grok", effort="xhigh")
     expect("label-grok", agent_label(effortful), "grok/mymodel xhigh")
     expect("grok-effort-flag", grok_command(effortful, PROMPT)[-2:], ["--reasoning-effort", "xhigh"])
@@ -166,12 +369,45 @@ def labels():
         kimi_command(state("kimi", effort="high"), PROMPT),
         ["kimi", "-p", kimi_prompt(PROMPT), "--output-format", "stream-json", "-m", "mymodel"],
     )
+    expect("label-junie", agent_label(state("junie")), "junie/mymodel")
+    expect("label-junie-no-model", agent_label(state("junie", model=None)), "junie")
+    expect("label-junie-effort", agent_label(state("junie", effort="high")), "junie/mymodel high")
+    expect(
+        "junie-effort-unflagged",
+        junie_command(state("junie", effort="xhigh")),
+        ["junie", "--skip-update-check", "--input-format=json", "--output-format=json", "-p", str(ROOT), "--model=mymodel"],
+    )
+    expect("label-hermes", agent_label(state("hermes")), "hermes/mymodel")
+    expect("label-hermes-no-model", agent_label(state("hermes", model=None)), "hermes")
+    expect("label-hermes-effort", agent_label(state("hermes", effort="xhigh")), "hermes/mymodel xhigh")
+    expect(
+        "hermes-effort-flag",
+        hermes_command(state("hermes", effort="xhigh"), PROMPT),
+        [
+            "hermes",
+            "chat",
+            "--query-file",
+            str(PROMPT.resolve()),
+            "--oneshot",
+            "-Q",
+            "--format",
+            "stream-json",
+            "--yolo",
+            "--accept-hooks",
+            "--max-turns",
+            "1000",
+            "-m",
+            "mymodel",
+            "--reasoning",
+            "xhigh",
+        ],
+    )
     expect("stamp", stamped("coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-once", stamped("[mymodel high] coder handoff", "mymodel high"), "[mymodel high] coder handoff")
     expect("stamp-unlabelled", stamped("coder handoff", ""), "coder handoff")
 
 
-def kilo_output():
+def kilo_output() -> None:
     output = "\n".join(
         [
             "INFO ignore this",
@@ -196,7 +432,7 @@ def kilo_output():
         raise SystemExit(f"kilo_summary missing tokens: {summary!r}")
 
 
-def kimi_output():
+def kimi_output() -> None:
     output = "\n".join(
         [
             "notice: not json",
@@ -225,10 +461,14 @@ def kimi_output():
     stderr_failure = '{"role":"meta","type":"system.version","version":"0.42.0"}\nerror: failed to run prompt: usage limit reached'
     expect("kimi-rate-limited-stderr", kimi_rate_limited(1, stderr_failure), True)
     expect("kimi-not-limited-clean-exit", kimi_rate_limited(0, "usage limit mentioned in passing"), False)
-    expect("kimi-not-limited-nonquota-error", kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'), False)
+    expect(
+        "kimi-not-limited-nonquota-error",
+        kimi_rate_limited(1, '{"role":"meta","type":"error","error":{"message":"model not configured"}}'),
+        False,
+    )
 
 
-def verdict_parse():
+def verdict_parse() -> None:
     report = Path("/tmp/marestail-verdict-test.md")
     report.write_text("Here is my judgement.\n\nVERDICT: BOUNCE specifier\n1. fix it\n")
     parsed = parse_verdict(report)
@@ -237,12 +477,16 @@ def verdict_parse():
     expect("verdict-from-json", parsed, ("PASS", None))
     parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"role":"assistant","content":"VERDICT: BOUNCE coder"}')
     expect("verdict-from-kimi-json", parsed, ("BOUNCE", "coder"))
+    parsed = parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"result","text":"VERDICT: BOUNCE coder"}')
+    expect("verdict-from-hermes-result", parsed, ("BOUNCE", "coder"))
 
 
 if __name__ == "__main__":
     snapshot_existing()
     kilo_defaults()
     kimi_backend()
+    junie_backend()
+    hermes_backend()
     env_overrides()
     labels()
     kilo_output()

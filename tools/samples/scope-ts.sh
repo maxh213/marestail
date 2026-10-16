@@ -57,9 +57,9 @@ with tempfile.TemporaryDirectory() as d:
     assert ts_crap.touches_hunk(fn_untouched, unscoped)
     report = {"files": {str(root / "src" / "a.ts"): {"mutants": [{"status": "Survived", "mutatorName": "Eq", "location": {"start": {"line": 3}}, "replacement": "x"}]},
                         str(root / "src" / "b.ts"): {"mutants": [{"status": "Survived", "mutatorName": "Eq", "location": {"start": {"line": 1}}, "replacement": "y"}]}}}
-    survivors = ts_mutation.surviving(report, ctx)
+    survivors = ts_mutation.survivors_of(ts_mutation.placed(report, ctx))
     assert survivors == ["src/a.ts:3 Eq Survived: x"], survivors
-    assert len(ts_mutation.surviving(report, unscoped)) == 2
+    assert len(ts_mutation.survivors_of(ts_mutation.placed(report, unscoped))) == 2
     err = "  error no-circular: src/dirty.ts → src/helper.ts\n  warn no-orphans: src/a.ts\nx 2 dependency violations. 3 modules cruised.\n"
     assert ts_deps.scoped_findings(err, ctx) == ["warn no-orphans: src/a.ts"]
     chain = "  error no-circular: src/dirty.ts → \n      src/helper.ts →\n      src/dirty.ts\n\nx 1 dependency violations (1 errors, 0 warnings). 2 modules cruised.\n"

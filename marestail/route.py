@@ -5,9 +5,21 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import marestail.backends as backends
+
 REPO = "https://github.com/maxh213/dandelion"
 MODES = {"dandelion/route": (), "dandelion/route-best": ("--high",)}
-BACKENDS = {"claude": "claude", "claude-work": "claude", "claude-deepseek": "claude", "agy": "agy", "kimi": "kimi", "grok": "grok", "cursor": "cursor"}
+BACKENDS = {
+    "claude": backends.CLAUDE,
+    "claude-work": backends.CLAUDE,
+    "claude-deepseek": backends.CLAUDE,
+    "agy": backends.AGY,
+    "kimi": backends.KIMI,
+    "grok": backends.GROK,
+    "cursor": backends.CURSOR,
+    "junie": backends.JUNIE,
+    "hermes": backends.HERMES,
+}
 NO_ROUTE = "none"
 TIMEOUT_SECONDS = 300
 
@@ -58,17 +70,30 @@ def command(args: list[str]) -> int:
 def choose(model: str, cwd: Path) -> tuple[Choice | None, str]:
     require()
     try:
-        completed = subprocess.run([binary(), "route", *MODES[model]], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False)
+        completed = subprocess.run(
+            [binary(), "route", *MODES[model]], cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
+        )
     except subprocess.TimeoutExpired:
         return None, f"dandelion route timed out after {TIMEOUT_SECONDS}s"
-    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    line = lines[-1] if lines else ""
+    return interpret(completed)
+
+
+def interpret(completed: subprocess.CompletedProcess[str]) -> tuple[Choice | None, str]:
+    line = last_line(completed.stdout)
     if line == NO_ROUTE:
         return None, "no subscription has quota left"
     if completed.returncode != 0 or not line:
-        detail = (completed.stderr.strip() or line or "no output")[-200:]
-        return None, f"dandelion route failed with exit {completed.returncode}: {detail}"
+        return None, f"dandelion route failed with exit {completed.returncode}: {failure_detail(completed.stderr, line)}"
     return parse(line), ""
+
+
+def last_line(output: str) -> str:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def failure_detail(stderr: str, line: str) -> str:
+    return (stderr.strip() or line or "no output")[-200:]
 
 
 def parse(line: str) -> Choice:
