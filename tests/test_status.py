@@ -5,6 +5,7 @@ import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -12,9 +13,16 @@ from marestail import status
 from marestail.shell import run as real_run
 from tests.conftest import git
 
+
+class _Calls(TypedDict):
+    reply: tuple[int, str]
+    calls: int
+    commands: list[list[str]]
+
+
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC).timestamp()
 REAL_PROCS = status._machine_processes
-LAST = {"reply": (1, ""), "calls": 0, "commands": []}
+LAST: _Calls = {"reply": (1, ""), "calls": 0, "commands": []}
 REAL_STRFTIME = time.strftime
 REVIVE = "Move the handoffs-abandoned-* folder back to .marestail/handoffs/<task>/ and delete this file to revive it.\n"
 GIVEN_UP = "abandoned 2026-10-16 09:00: superseded by 007-done"
@@ -230,12 +238,18 @@ def add_events(repo: Path, task: str, rows: list[dict[str, object]], log: str | 
     return folder
 
 
-def dispatch(command: list[str], cwd: Path, **options: object) -> tuple[int, str]:
+def dispatch(
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    timeout: int | None = 3600,
+    stdin: str | None = None,
+) -> tuple[int, str]:
     LAST["commands"].append(list(command))
     if command[:1] == ["last"]:
         LAST["calls"] += 1
         return LAST["reply"]
-    return real_run(command, cwd, **options)
+    return real_run(command, cwd, env, timeout, stdin)
 
 
 @pytest.fixture(autouse=True)
@@ -243,7 +257,7 @@ def pinned_clock(monkeypatch: pytest.MonkeyPatch) -> object:
     previous = os.environ.get("TZ")
     os.environ["TZ"] = "UTC"
     time.tzset()
-    monkeypatch.setattr(status.time, "time", lambda: NOW)
+    monkeypatch.setattr(time, "time", lambda: NOW)
     monkeypatch.setattr(status, "_machine_processes", lambda: [])
     monkeypatch.setattr(status, "run", dispatch)
     LAST["reply"] = (1, "")
@@ -524,12 +538,14 @@ def git_writing(command: list[str]) -> bool:
     return command[3] in {"add", "commit", "mv", "rm", "reset", "clean", "checkout"}
 
 
-def frozen(fmt: str, *args: object) -> str:
+def frozen(fmt: str, when: time.struct_time | None = None) -> str:
     if fmt == "%Y%m%dT%H%M%S":
         return "20261016T120000"
     if fmt == "%Y-%m-%d %H:%M":
         return "2026-10-16 12:00"
-    return REAL_STRFTIME(fmt, *args)
+    if when is None:
+        return REAL_STRFTIME(fmt)
+    return REAL_STRFTIME(fmt, when)
 
 
 def import_names(node: ast.AST) -> list[str]:
@@ -747,10 +763,10 @@ def check_pid_matrix(root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest
 def patch_explode(monkeypatch: pytest.MonkeyPatch) -> None:
     real = Path.resolve
 
-    def wrapped(self: Path, *args: object, **kwargs: object) -> Path:
+    def wrapped(self: Path, strict: bool = False) -> Path:
         if self.name == "explode":
             raise OSError
-        return real(self, *args, **kwargs)
+        return real(self, strict)
 
     monkeypatch.setattr(Path, "resolve", wrapped)
 
@@ -1250,7 +1266,7 @@ def test_abandon_moves_handoffs_and_writes_the_marker(
     handoff(alpha, "009-paused", "02-critic.md", "two\n")
     run_dir(alpha, "008-fresh")
     events = (alpha / ".marestail" / "runs" / "009-paused" / "events.jsonl").read_bytes()
-    monkeypatch.setattr(status.time, "strftime", frozen)
+    monkeypatch.setattr(time, "strftime", frozen)
     monkeypatch.chdir(root)
     code = status.abandon(["alpha/009-paused"], "superseded")
     out, err = capsys.readouterr()
@@ -1430,9 +1446,9 @@ def proc_link(path: str) -> str:
 
 
 def test_proc_reader_lists_tokens_and_skips_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(status.os, "listdir", proc_names)
-    monkeypatch.setattr(status.Path, "read_bytes", proc_bytes)
-    monkeypatch.setattr(status.os, "readlink", proc_link)
+    monkeypatch.setattr(os, "listdir", proc_names)
+    monkeypatch.setattr(Path, "read_bytes", proc_bytes)
+    monkeypatch.setattr(os, "readlink", proc_link)
     assert REAL_PROCS() == [(3, ["python3", "/bin/marestail", "run", "tasks/z.md"], Path("/tmp").resolve())]
 
 
@@ -1440,7 +1456,7 @@ def test_proc_listing_survives_a_missing_proc(monkeypatch: pytest.MonkeyPatch) -
     def boom(path: str) -> list[str]:
         raise OSError
 
-    monkeypatch.setattr(status.os, "listdir", boom)
+    monkeypatch.setattr(os, "listdir", boom)
     assert REAL_PROCS() == []
 
 
@@ -1467,10 +1483,10 @@ def test_resolve_errors_are_not_this_repo(tmp_path: Path, monkeypatch: pytest.Mo
     make_task(fleet / "broken", "099-broken")
     real = Path.resolve
 
-    def wrapped(self: Path, *args: object, **kwargs: object) -> Path:
+    def wrapped(self: Path, strict: bool = False) -> Path:
         if self.name == "broken":
             raise OSError
-        return real(self, *args, **kwargs)
+        return real(self, strict)
 
     monkeypatch.setattr(Path, "resolve", wrapped)
     _code, out, _err = capture_show([fleet], capsys)
@@ -1486,10 +1502,10 @@ def test_oserror_while_reading_falls_through(tmp_path: Path, monkeypatch: pytest
     )
     real = Path.read_text
 
-    def wrapped(self: Path, *args: object, **kwargs: object) -> str:
+    def wrapped(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if self.name in {"events.jsonl", "abandoned"}:
             raise OSError
-        return real(self, *args, **kwargs)
+        return real(self, encoding, errors)
 
     monkeypatch.setattr(Path, "read_text", wrapped)
     record = status.read_run(repo, "events", [])
@@ -1669,7 +1685,7 @@ def test_abandon_creates_a_missing_run_folder(tmp_path: Path, monkeypatch: pytes
     folder = repo / ".marestail" / "handoffs" / "015-txt"
     folder.mkdir(parents=True)
     (folder / "notes.txt").write_text("z\n")
-    monkeypatch.setattr(status.time, "strftime", frozen)
+    monkeypatch.setattr(time, "strftime", frozen)
     monkeypatch.chdir(repo.parent)
     code = status.abandon([f"{repo.name}/014-only", f"{repo.name}/015-txt"], "")
     out, err = capsys.readouterr()
