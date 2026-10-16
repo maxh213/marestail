@@ -202,12 +202,20 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   In the exact-text scenarios the time zone is UTC and "now" is 2026-10-16
   12:00:00 UTC. The shared fixture is a folder `fleet/` holding two repos.
   `alpha/` (branch `main`) holds: `011-live`, an events-era run at pid 4242
-  with step-starts `01-specifier` (step-end `done`, head `bbb222`) and
-  `03-coder` at `2026-10-16T11:58:00.000Z`, and a live process whose cmdline
-  is `python3 -u /opt/marestail/marestail/cli.py run tasks/011-live.md --auto`
-  with cwd `alpha`; `010-killed`, an events-era run at pid 999999 with
-  `01-specifier` done and `02-critic` started at `2026-10-16T11:10:00.000Z`,
-  and no such process; `009-paused`, an events-era run at pid 5555 whose
+  with run-start `branch` `main`, step-starts `01-specifier` (step-end
+  `done`, head `bbb222`) and `03-coder` at `2026-10-16T11:58:00.000Z`, a
+  live process whose cmdline is `python3 -u
+  /opt/marestail/marestail/cli.py run tasks/011-live.md --auto` with cwd
+  `alpha`, and `runs/011-live/pipeline.log` containing `== qa (04-qa)
+  attempt 1` then `pipeline complete`. That log on its own would read
+  `complete` with step `04-qa`. The state, the text, the step and `since`
+  still come from the events (`running`, `in 03-coder`, step `03-coder`,
+  `2026-10-16T11:58:00.000Z`), and JSON `log` is that file's absolute path;
+  `010-killed`, an events-era run at pid 999999 whose run-start `branch` is
+  `feature` while the checkout stays `main`, with `01-specifier` done and
+  `02-critic` started at `2026-10-16T11:10:00.000Z`, and no such process, so
+  the JSON `branch` and the table cell are `feature`; every other events
+  run-start `branch` is `main`; `009-paused`, an events-era run at pid 5555 whose
   run-end is `stopped`, exit 1, stopped_at `critic`, reason `not approved` at
   `2026-10-16T10:20:00.000Z`; `008-fresh`, an empty run folder with mtime
   2026-10-16 10:50; `007-done`, an events-era complete run of two steps whose
@@ -243,14 +251,14 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       """
       marestail runs: 9 known, 1 running, 6 shown, 3 complete/abandoned/leftover hidden (use --all)
 
-      | Repo  | Task       | State         | Where it stands               | Last activity         | Branch |
-      |-------|------------|---------------|-------------------------------|-----------------------|--------|
-      | alpha | 011-live   | running       | in 03-coder                   | 10-16 11:58 (2m ago)  | main   |
-      | beta  | 003-later  | dead          | mid 04-qa                     | 10-16 11:30 (30m ago) | main   |
-      | alpha | 010-killed | dead          | mid 02-critic                 | 10-16 11:10 (50m ago) | main   |
-      | beta  | 004-old    | dead          | mid 02-coder                  | 10-15 08:00 (28h ago) | main   |
-      | alpha | 009-paused | stopped       | at critic: not approved       | 10-16 10:20 (1h ago)  | main   |
-      | alpha | 008-fresh  | never-started | no handoffs, no steps, no log | 10-16 10:50 (1h ago)  | main   |
+      | Repo  | Task       | State         | Where it stands               | Last activity         | Branch  |
+      |-------|------------|---------------|-------------------------------|-----------------------|---------|
+      | alpha | 011-live   | running       | in 03-coder                   | 10-16 11:58 (2m ago)  | main    |
+      | beta  | 003-later  | dead          | mid 04-qa                     | 10-16 11:30 (30m ago) | main    |
+      | alpha | 010-killed | dead          | mid 02-critic                 | 10-16 11:10 (50m ago) | feature |
+      | beta  | 004-old    | dead          | mid 02-coder                  | 10-15 08:00 (28h ago) | main    |
+      | alpha | 009-paused | stopped       | at critic: not approved       | 10-16 10:20 (1h ago)  | main    |
+      | alpha | 008-fresh  | never-started | no handoffs, no steps, no log | 10-16 10:50 (1h ago)  | main    |
       """
     And stderr is empty
     When I run `marestail status --queued fleet`
@@ -264,17 +272,17 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       """
       marestail runs: 9 known, 1 running, 9 shown
 
-      | Repo  | Task         | State         | Where it stands                                      | Last activity         | Branch |
-      |-------|--------------|---------------|------------------------------------------------------|-----------------------|--------|
-      | alpha | 011-live     | running       | in 03-coder                                          | 10-16 11:58 (2m ago)  | main   |
-      | beta  | 003-later    | dead          | mid 04-qa                                            | 10-16 11:30 (30m ago) | main   |
-      | alpha | 010-killed   | dead          | mid 02-critic                                        | 10-16 11:10 (50m ago) | main   |
-      | beta  | 004-old      | dead          | mid 02-coder                                         | 10-15 08:00 (28h ago) | main   |
-      | alpha | 009-paused   | stopped       | at critic: not approved                              | 10-16 10:20 (1h ago)  | main   |
-      | alpha | 008-fresh    | never-started | no handoffs, no steps, no log                        | 10-16 10:50 (1h ago)  | main   |
-      | alpha | 007-done     | complete      | 2 steps                                              | 10-16 10:00 (2h ago)  | main   |
-      | alpha | 006-given-up | abandoned     | abandoned 2026-10-16 09:00: superseded by 007-done   | 10-16 09:00 (3h ago)  | main   |
-      | alpha | 005-restored | leftover      | handoff copies from git or a checkout, no run folder | ?                     | main   |
+      | Repo  | Task         | State         | Where it stands                                      | Last activity         | Branch  |
+      |-------|--------------|---------------|------------------------------------------------------|-----------------------|---------|
+      | alpha | 011-live     | running       | in 03-coder                                          | 10-16 11:58 (2m ago)  | main    |
+      | beta  | 003-later    | dead          | mid 04-qa                                            | 10-16 11:30 (30m ago) | main    |
+      | alpha | 010-killed   | dead          | mid 02-critic                                        | 10-16 11:10 (50m ago) | feature |
+      | beta  | 004-old      | dead          | mid 02-coder                                         | 10-15 08:00 (28h ago) | main    |
+      | alpha | 009-paused   | stopped       | at critic: not approved                              | 10-16 10:20 (1h ago)  | main    |
+      | alpha | 008-fresh    | never-started | no handoffs, no steps, no log                        | 10-16 10:50 (1h ago)  | main    |
+      | alpha | 007-done     | complete      | 2 steps                                              | 10-16 10:00 (2h ago)  | main    |
+      | alpha | 006-given-up | abandoned     | abandoned 2026-10-16 09:00: superseded by 007-done   | 10-16 09:00 (3h ago)  | main    |
+      | alpha | 005-restored | leftover      | handoff copies from git or a checkout, no run folder | ?                     | main    |
       """
     When I run `marestail status` in an empty folder
     Then the exit code is 0 and stdout is exactly:
@@ -347,7 +355,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       | t9 | a log whose last step `03-coder` is done with a `verdict PASS` line | dead | after 03-coder finished (verdict PASS) | 03-coder | coder |
       | t10 | the same without a verdict line | dead | after 03-coder finished | 03-coder | coder |
       | t11 | one `handoffs-*` archive and no live handoffs, no log | complete | archived | null | null |
-      | t12 | the same plus a byte-identical live copy of the archived handoff | complete | archived, leftover copies in handoffs/ | null | null |
+      | t12 | the t11 archive plus an untracked live `01-specifier.md`, byte-identical to the archived `01-specifier.md` of the same name | complete | archived, leftover copies in handoffs/ | null | null |
       | t13 | a run folder and nothing else | never-started | no handoffs, no steps, no log | null | null |
       | t14 | only a live handoff `02-critic.md`, no run folder, untracked | dead | after 02-critic wrote its handoff (no pipeline.log) | 02-critic | critic |
       | t15 | `03-coder.prompt.md` and no json | dead | mid 03-coder: prompt written, no result (no pipeline.log) | null | null |
@@ -378,14 +386,14 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: a newer legacy stopped row does not block promotion of an older mid-step
     Given a repo `gamma` on branch `main` with no events files
-    And task `020-halted` has a pipeline.log ending `pipeline stopped at 04-coder` with no `stopping for a human` line, log mtime 2026-10-16 11:00 UTC
+    And task `020-halted` has a pipeline.log of `== coder (03-coder) attempt 1` then `pipeline stopped at 04-coder`, with no `stopping for a human` line, the same shape as t4, log mtime 2026-10-16 11:00 UTC
     And after that log is written, `runs/020-halted` is touched to 2026-10-16 11:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
     And task `019-cut` has a pipeline.log `== coder (03-coder) attempt 1` and no finished line, log mtime 2026-10-16 10:00 UTC
     And after that log is written, `runs/019-cut` is touched to 2026-10-16 10:00 UTC, with no fresh handoffs and no archives, so that stamp is the max
     And the live processes in `gamma` are pid 80 and pid 50, both cmdline `python3 -u /opt/marestail/marestail/cli.py run tasks/other.md`, cwd `gamma`, neither an events-era run's pid
     When I run `marestail status gamma`
     Then `019-cut` is `running` with text `in 03-coder`, JSON `step` `03-coder`, JSON `role` `coder` and JSON `pid` 50
-    And `020-halted` stays `stopped` with text `at 04-coder, runner asked for a human`
+    And `020-halted` stays `stopped` with text `at 04-coder, runner asked for a human`, JSON `step` `03-coder` and JSON `role` `coder`
 
   Scenario: a finished legacy step promotes to in that step, with step and role null
     Given a repo `delta` on branch `main` with no events files and one task `018-done-step`
@@ -471,11 +479,12 @@ Feature: marestail status says where every run stands, and marestail abandon giv
         "stopped_at": null,
         "reason": null,
         "events": "<alpha absolute>/.marestail/runs/011-live/events.jsonl",
-        "log": null
+        "log": "<alpha absolute>/.marestail/runs/011-live/pipeline.log"
       }
       """
+    And that pipeline.log is `== qa (04-qa) attempt 1` then `pipeline complete`, and the record stays `running` with step `03-coder` and `since` `2026-10-16T11:58:00.000Z`, not the log's `complete` or `04-qa`
     And `009-paused` has `result` `stopped`, `exit_code` 1, `stopped_at` `critic`, `reason` `not approved` and `pid` 5555
-    And `010-killed` has `state` `dead`, `pid` 999999 and `reason` null
+    And `010-killed` has `state` `dead`, `branch` `feature`, `pid` 999999 and `reason` null
     And `007-done` has `head` `ddd444`, `result` `complete`, `exit_code` 0 and its run-start pid
     And `003-later` has `step` `04-qa`, `role` `qa`, `since` `2026-10-16T11:30:00Z` (the `runs/003-later` directory mtime, not the log mtime `2026-10-16T09:30:00Z`), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
     And `004-old` has `step` `02-coder`, `role` `coder`, `since` `2026-10-15T08:00:00Z` (the max, after `runs/004-old` was touched to the log's stamp), `head` null, `pid` null, `result` null, `reason` null, `events` null and `log` its pipeline.log's absolute path
