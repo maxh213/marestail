@@ -73,7 +73,9 @@ def test_probe_once_runs_dandelion_json_and_remembers_it(monkeypatch: pytest.Mon
     dash = make_dash(tmp_path)
     web_sources.probe_once(dash)
     assert seen == [["dandelion", "--json"]]
-    assert dash.dandelion.data == {"route": "r"} and dash.dandelion.running is False and dash.dandelion.at
+    assert dash.dandelion.data == {"route": "r"}
+    assert dash.dandelion.running is False
+    assert dash.dandelion.at
     assert json.loads(dash.cache.read_text())["data"] == {"route": "r"}
 
 
@@ -85,15 +87,17 @@ def test_probe_once_keeps_going_when_dandelion_is_missing(monkeypatch: pytest.Mo
     dash = make_dash(tmp_path)
     dash.cache = tmp_path
     web_sources.probe_once(dash)
-    assert dash.dandelion.error == "dandelion" and dash.dandelion.running is False
+    assert dash.dandelion.error == "dandelion"
+    assert dash.dandelion.running is False
 
 
 def test_probe_forever_sleeps_the_interval_between_probes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     probes: list[Dash] = []
     monkeypatch.setattr(web_sources, "probe_once", probes.append)
     sleep = stop_after(2)
+    dash = make_dash(tmp_path)
     with pytest.raises(StopLoopError):
-        web_sources.probe_forever(make_dash(tmp_path), sleep)
+        web_sources.probe_forever(dash, sleep)
     assert len(probes) == 2
 
 
@@ -134,9 +138,15 @@ def test_cpu_usage_needs_a_matching_earlier_sample() -> None:
 def test_cpu_forever_publishes_usage_and_survives_a_bad_read(tmp_path: Path) -> None:
     reads = iter([STAT_BEFORE, "cpu x", STAT_AFTER])
     dash = make_dash(tmp_path)
+    halt = stop_after(3)
+
+    def next_read() -> str:
+        return next(reads)
+
     with pytest.raises(StopLoopError):
-        web_sources.cpu_forever(dash, stop_after(3), lambda: next(reads))
-    assert dash.cpu is not None and dash.cpu["all"] == 20.0
+        web_sources.cpu_forever(dash, halt, next_read)
+    assert dash.cpu is not None
+    assert dash.cpu["all"] == 20.0
 
 
 def test_memory_used_leaves_cache_out() -> None:
@@ -233,7 +243,8 @@ def test_task_view_reads_the_task_log_and_newest_archived_handoff(tmp_path: Path
     assert view is not None
     assert (view["state"], view["step"], view["task_text"]) == ("running", "coder", "# do x")
     assert view["working"].split("\n\n")[:2] == ["running · coder · PASS", "busy"]
-    assert "== coder (03-coder) attempt 1\n   coding" in view["working"] and "old line" not in view["working"]
+    assert "== coder (03-coder) attempt 1\n   coding" in view["working"]
+    assert "old line" not in view["working"]
     assert view["working"].endswith("── 03-coder.md\nhanded off")
 
 
@@ -246,7 +257,9 @@ def test_task_view_prefers_live_handoffs_and_reads_a_named_log(tmp_path: Path) -
     log.write_text("plain log")
     record = {"repo": "proj", "task": "001-x", "root": str(root), "log": str(log)}
     view = web_sources.task_view(make_dash(tmp_path, runs_script(tmp_path, [record])), "proj", "001-x")
-    assert view is not None and view["state"] == "" and view["step"] == ""
+    assert view is not None
+    assert view["state"] == ""
+    assert view["step"] == ""
     assert view["working"] == "unknown\n\nplain log\n\n── 04-cleaner.md\nlive one"
 
 
@@ -272,9 +285,11 @@ def test_file_helpers_cope_with_missing_paths(tmp_path: Path) -> None:
 
 
 def test_text_helpers() -> None:
-    assert web_render.esc(None) == "" and web_render.esc("<a>") == "&lt;a&gt;"
+    assert web_render.esc(None) == ""
+    assert web_render.esc("<a>") == "&lt;a&gt;"
     assert [web_render.ago(ts, NOW) for ts in (None, NOW - 30, NOW - 600, NOW - 7200)] == ["", "30s ago", "10m ago", "2h ago"]
-    assert web_render.until(None, CLOCK) == "" and web_render.until("soon", CLOCK) == ""
+    assert web_render.until(None, CLOCK) == ""
+    assert web_render.until("soon", CLOCK) == ""
     assert web_render.until("2020-01-01T00:00:00Z", CLOCK) == "reset due"
     assert web_render.until(datetime.fromtimestamp(NOW + 90061, UTC).isoformat(), CLOCK) == "↻ 1d1h"
     assert web_render.until(datetime.fromtimestamp(NOW + 3720, UTC).isoformat(), CLOCK) == "↻ 1h02m"
@@ -326,10 +341,13 @@ def test_render_dandelion_shows_routes_providers_and_windows() -> None:
         "junk",
     ]
     out = web_render.render_dandelion(Dandelion(data={"providers": providers, "route": "r1", "routeHigh": "r2"}, error="late", at=NOW), NOW)
-    assert "route → <b>r1</b>" in out and "route --high → <b>r2</b>" in out
+    assert "route → <b>r1</b>" in out
+    assert "route --high → <b>r2</b>" in out
     assert '<div class="prov off"><span class="name">kimi</span> <span class="dim"></span> <span class="dim">no token</span></div>' in out
     assert '<div class="win dim">no usage windows</div>' in out
-    assert "routing off" in out and "↻ 2h00m → 100% 2h00m" in out and "last error: late" in out
+    assert "routing off" in out
+    assert "↻ 2h00m → 100% 2h00m" in out
+    assert "last error: late" in out
 
 
 def test_render_fleet_shows_live_and_idle_beds(tmp_path: Path) -> None:
@@ -348,8 +366,10 @@ def test_render_fleet_shows_live_and_idle_beds(tmp_path: Path) -> None:
     ]
     out = web_render.render_fleet(beds)
     assert "2 running · 3 beds" in out
-    assert '▶ coder <span class="dim">1h02m m claude</span>' in out and '<div class="tail">w2</div>' in out
-    assert '▶ <span class="dim">gate ts.tests</span>' in out and '<span class="task">001</span>' in out
+    assert '▶ coder <span class="dim">1h02m m claude</span>' in out
+    assert '<div class="tail">w2</div>' in out
+    assert '▶ <span class="dim">gate ts.tests</span>' in out
+    assert '<span class="task">001</span>' in out
     assert ('<div class="tail">' + "x" * 220 + "</div>") in out
     assert web_render.render_fleet("collect failed: x") == '<h2>marestail watch</h2><p class="dim">collect failed: x</p>'
 
@@ -367,26 +387,38 @@ def test_render_runs_sorts_and_drops_leftovers() -> None:
         {"repo": "d", "task": "4", "state": "dead", "detail": "killed", "last_activity": NOW - 5},
     ]
     out = web_render.render_runs(table, NOW)
-    assert "3 known" in out and ">c<" not in out
+    assert "3 known" in out
+    assert ">c<" not in out
     assert out.index(">d<") < out.index(">b<") < out.index(">a<")
-    assert 'data-repo="b" data-task="2"' in out and "<td>killed</td>" in out and "30s ago" in out
+    assert 'data-repo="b" data-task="2"' in out
+    assert "<td>killed</td>" in out
+    assert "30s ago" in out
 
 
 def test_render_host_with_and_without_cpu_and_swap() -> None:
     assert web_render.render_host("unavailable: x") == '<h2>host</h2><p class="dim">unavailable: x</p>'
     sampling = web_render.render_host(Host(None, 1, 0, 0, 0, 1, 0))
-    assert "sampling…" in sampling and "swp" not in sampling and "1B/0B" in sampling
+    assert "sampling…" in sampling
+    assert "swp" not in sampling
+    assert "1B/0B" in sampling
     busy = web_render.render_host(Host({"all": 50.0, "cores": [("0", 10.0), ("1", 99.0)]}, 512, 1024, 1, 4, 2, 4))
-    assert "swp" in busy and '<span class="crit">99.0%</span>' in busy and "512B/1.0K" in busy
+    assert "swp" in busy
+    assert '<span class="crit">99.0%</span>' in busy
+    assert "512B/1.0K" in busy
     single = web_render.render_host(Host({"all": 5.0, "cores": [("0", 5.0)]}, 1, 2, 0, 0, 1, 2))
     assert 'class="cores"' not in single
 
 
 def test_document_carries_the_assets() -> None:
     out = web_render.document("box", "now", ["<p>s</p>"])
-    assert out.startswith("<!doctype html>") and "<title>marestail dash</title>" in out
-    assert web_render.CSS in out and web_render.HEAD_JS in out and web_render.TAIL_JS in out and 'id="task-pop"' in out
-    assert "marestail · box" in out and "<p>s</p>" in out
+    assert out.startswith("<!doctype html>")
+    assert "<title>marestail dash</title>" in out
+    assert web_render.CSS in out
+    assert web_render.HEAD_JS in out
+    assert web_render.TAIL_JS in out
+    assert 'id="task-pop"' in out
+    assert "marestail · box" in out
+    assert "<p>s</p>" in out
 
 
 class Started:
@@ -416,8 +448,11 @@ def test_app_serves_the_page_json_and_head(monkeypatch: pytest.MonkeyPatch, tmp_
     dash.dandelion = Dandelion(data={"providers": []}, at=5)
     app = web.application(dash)
     status, headers, body = call(app, "/")
-    assert status == "200 OK" and headers["Content-Type"] == web.HTML and headers["Cache-Control"] == "no-store"
-    assert headers["Content-Length"] == str(len(body)) and b"marestail runs" in body
+    assert status == "200 OK"
+    assert headers["Content-Type"] == web.HTML
+    assert headers["Cache-Control"] == "no-store"
+    assert headers["Content-Length"] == str(len(body))
+    assert b"marestail runs" in body
     assert json.loads(call(app, "/json")[2]) == {
         "dandelion": {"providers": []},
         "dandelion_at": 5,
@@ -459,7 +494,8 @@ def test_start_probes_recalls_then_starts_both_threads(monkeypatch: pytest.Monke
     monkeypatch.setattr(web_sources, "recall", recalled.append)
     dash = make_dash(tmp_path)
     web.start_probes(dash)
-    assert recalled == [dash] and started == [(web_sources.probe_forever, True), (web_sources.cpu_forever, True)]
+    assert recalled == [dash]
+    assert started == [(web_sources.probe_forever, True), (web_sources.cpu_forever, True)]
 
 
 class FakeServer:
@@ -487,7 +523,9 @@ def test_run_serves_until_stopped_with_the_default_runs_script(monkeypatch: pyte
     monkeypatch.setattr(web, "start_probes", dashes.append)
     assert web.run(tmp_path, "0.0.0.0", 1234, 30.0, None) == 0
     assert made == [("0.0.0.0", 1234, web.ThreadingServer, web.QuietHandler), "served"]
-    assert dashes[0].runs_script == web.RUNS_SCRIPT and dashes[0].every == 30.0 and dashes[0].root == tmp_path
+    assert dashes[0].runs_script == web.RUNS_SCRIPT
+    assert dashes[0].every == 30.0
+    assert dashes[0].root == tmp_path
     assert web.run(tmp_path, "h", 1, 1.0, tmp_path / "r.py") == 0
     assert dashes[1].runs_script == tmp_path / "r.py"
 

@@ -11,12 +11,15 @@ from typing import Any
 from marestail.shell import run
 
 _EVENTS = "events.jsonl"
+_LOG = "pipeline.log"
+_META = ".marestail"
+_NO_LOG = " (no pipeline.log)"
 _KEPT = {"run-start", "step-start", "step-end", "wait", "run-end"}
 _HIDDEN = {"complete", "abandoned", "leftover"}
 _STATE_ORDER = ["running", "dead", "stopped", "never-started", "complete", "abandoned", "leftover"]
 _SKIP = {
     ".git",
-    ".marestail",
+    _META,
     "node_modules",
     "deps",
     "_build",
@@ -29,7 +32,10 @@ _SKIP = {
     "tmp",
 }
 _MAX_DEPTH = 2
+_MINUTE = 60
 _HOUR = 3600
+_DAY = 86400
+_TWO_DAYS = 172800
 _STEP = re.compile(r"^== (\S+) \((\S+)\) attempt (\d+)")
 _FINISH = re.compile(r"^\s+(\S+) finished in ([0-9.]+) min:")
 _VERDICT = re.compile(r"^\s+verdict (\S+)")
@@ -42,7 +48,7 @@ _STEP_FILE = re.compile(r"^(\d+-[a-z][a-z-]*)(\.prompt\.md|\.json)$")
 _ROLE_FILE = re.compile(r"^\d+-(specifier|critic|coder|cleaner|architect|practices|perf|hardener|qa|proposal)\.md$")
 _LAST = re.compile(r"([A-Z][a-z]{2} [A-Z][a-z]{2} +\d+ \d\d:\d\d:\d\d \d{4})")
 _REASON = re.compile(r"^abandoned \d{4}-\d{2}-\d{2} \d{2}:\d{2}: (.*)$")
-_REVIVE = "Move the handoffs-abandoned-* folder back to .marestail/handoffs/<task>/ and delete this file to revive it.\n"
+_REVIVE = f"Move the handoffs-abandoned-* folder back to {_META}/handoffs/<task>/ and delete this file to revive it.\n"
 _KEYS = (
     "repo",
     "task",
@@ -97,28 +103,36 @@ class _Legacy:
 class _Row:
     repo: str
     task: str
-    state: str
-    step: str | None
-    role: str | None
-    since: str | None
-    branch: str | None
-    head: str | None
-    pid: int | None
-    result: str | None
-    exit_code: int | None
-    stopped_at: str | None
-    reason: str | None
-    events: str | None
-    log: str | None
-    detail: str
-    activity: float
-    current_step: str
-    last_step: str
-    era: str
+    state: str = "never-started"
+    step: str | None = None
+    role: str | None = None
+    since: str | None = None
+    branch: str | None = None
+    head: str | None = None
+    pid: int | None = None
+    result: str | None = None
+    exit_code: int | None = None
+    stopped_at: str | None = None
+    reason: str | None = None
+    events: str | None = None
+    log: str | None = None
+    detail: str = ""
+    activity: float = 0.0
+    current_step: str = ""
+    last_step: str = ""
+    era: str = "legacy"
+
+
+def _meta(root: Path, *parts: str) -> Path:
+    return root.joinpath(_META, *parts)
+
+
+def _is_repo(path: Path) -> bool:
+    return _meta(path).is_dir()
 
 
 def read_run(repo: Path, task: str, procs: list[_Proc] | None = None) -> dict[str, Any]:
-    rows = _repo_rows(repo, _listed(procs))
+    rows = _repo_rows(repo, _processes(procs))
     _apply_shutdowns(rows)
     return _record(_row_for(rows, task, repo))
 
@@ -146,11 +160,12 @@ def abandon(targets: list[str], reason: str) -> int:
     stamp = time.strftime("%Y%m%dT%H%M%S")
     failed = 0
     for target in targets:
-        failed += _one_abandon(target, reason, stamp, procs)
+        if not _abandon_target(target, reason, stamp, procs):
+            failed += 1
     return 1 if failed else 0
 
 
-def _listed(procs: list[_Proc] | None) -> list[_Proc]:
+def _processes(procs: list[_Proc] | None) -> list[_Proc]:
     if procs is None:
         return _machine_processes()
     return procs
@@ -196,7 +211,7 @@ def _default_root() -> Path:
 
 def _repo_above(start: Path) -> Path | None:
     for candidate in [start, *start.parents]:
-        if (candidate / ".marestail").is_dir():
+        if _is_repo(candidate):
             return candidate
     return None
 
@@ -211,9 +226,7 @@ def _discover(roots: list[Path]) -> list[Path]:
 
 def _walk(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
     real = _safe_resolve(path)
-    if real is None:
-        return
-    if real in seen:
+    if real is None or real in seen:
         return
     seen.add(real)
     _visit(path, depth, found, seen)
@@ -227,7 +240,7 @@ def _visit(path: Path, depth: int, found: list[Path], seen: set[Path]) -> None:
 
 
 def _repo_or_deep(path: Path, depth: int, found: list[Path]) -> bool:
-    if (path / ".marestail").is_dir():
+    if _is_repo(path):
         found.append(path)
         return True
     return depth >= _MAX_DEPTH
@@ -309,7 +322,7 @@ def _one_row(repo: Path, task: str, procs: list[_Proc], branch: str | None, trac
 
 def _task_names(repo: Path) -> list[str]:
     names: set[str] = set()
-    for parent in (repo / ".marestail" / "handoffs", repo / ".marestail" / "runs"):
+    for parent in (_meta(repo, "handoffs"), _meta(repo, "runs")):
         names.update(_dir_names(parent))
     return sorted(names)
 
@@ -330,32 +343,11 @@ def _row_for(rows: list[_Row], task: str, repo: Path) -> _Row:
 
 
 def _missing_row(repo: Path, task: str) -> _Row:
-    return _Row(
-        repo=str(repo.resolve()),
-        task=task,
-        state="never-started",
-        step=None,
-        role=None,
-        since=None,
-        branch=None,
-        head=None,
-        pid=None,
-        result=None,
-        exit_code=None,
-        stopped_at=None,
-        reason=None,
-        events=None,
-        log=None,
-        detail="",
-        activity=0.0,
-        current_step="",
-        last_step="",
-        era="legacy",
-    )
+    return _Row(repo=str(repo.resolve()), task=task)
 
 
 def _events_row(repo: Path, task: str, procs: list[_Proc]) -> _Row | None:
-    path = repo / ".marestail" / "runs" / task / _EVENTS
+    path = _meta(repo, "runs", task, _EVENTS)
     if not path.is_file():
         return None
     run = _event_lines(path)
@@ -369,13 +361,13 @@ def _event_lines(path: Path) -> list[dict[str, Any]] | None:
         text = path.read_text(errors="replace")
     except OSError:
         return None
-    return _latest_run(_kept(text))
+    return _latest_run(_known_events(text))
 
 
-def _kept(text: str) -> list[dict[str, Any]]:
+def _known_events(text: str) -> list[dict[str, Any]]:
     found = []
     for line in text.splitlines():
-        event = _known(_valid_event(line))
+        event = _kept_event(_valid_event(line))
         if event is not None:
             found.append(event)
     return found
@@ -402,7 +394,7 @@ def _version_one(data: dict[str, Any] | None) -> bool:
     return data is not None and data.get("v") == 1 and isinstance(data.get("event"), str)
 
 
-def _known(event: dict[str, Any] | None) -> dict[str, Any] | None:
+def _kept_event(event: dict[str, Any] | None) -> dict[str, Any] | None:
     if event is None or event["event"] not in _KEPT:
         return None
     return event
@@ -419,8 +411,8 @@ def _row_from_events(repo: Path, task: str, run: list[dict[str, Any]], procs: li
     start = _last(run, "run-start") or {}
     end = _last(run, "run-end")
     state = _events_state(run, end, repo, task, procs)
-    row = _base_events(repo, task, run, start, end, state, path)
-    _maybe_abandon(row, repo / ".marestail" / "runs" / task / "abandoned", _text(start.get("at")))
+    row = _events_record(repo, task, run, start, end, state, path)
+    _maybe_abandon(row, _meta(repo, "runs", task, "abandoned"), _text(start.get("at")))
     return row
 
 
@@ -463,7 +455,7 @@ def _proc_is_task(proc: _Proc, repo: Path, task: str) -> bool:
     index = _run_index(tokens)
     if index is None:
         return False
-    return _stem_after(tokens, index, task) and _inside(cwd, repo)
+    return _names_task(tokens, index, task) and _inside(cwd, repo)
 
 
 def _run_index(tokens: list[str]) -> int | None:
@@ -477,7 +469,7 @@ def _launches(token: str, nxt: str) -> bool:
     return Path(token).name in {"cli.py", "marestail"} and nxt == "run"
 
 
-def _stem_after(tokens: list[str], index: int, task: str) -> bool:
+def _names_task(tokens: list[str], index: int, task: str) -> bool:
     return any(Path(token).stem == task for token in tokens[index + 1 :])
 
 
@@ -496,7 +488,7 @@ def _is_pipeline(tokens: list[str]) -> bool:
     return _run_index(tokens) is not None
 
 
-def _base_events(
+def _events_record(
     repo: Path,
     task: str,
     run: list[dict[str, Any]],
@@ -511,30 +503,22 @@ def _base_events(
         repo=str(repo.resolve()),
         task=task,
         state=state,
-        step=_step_of(step_event),
-        role=_role_field(step_event),
+        step=_field(step_event, "step"),
+        role=_field(step_event, "role"),
         since=since,
         branch=_text(start.get("branch")),
         head=_events_head(run),
-        pid=_pid_of(start),
-        result=_end_text(end, "result"),
+        pid=_int_or_none(start.get("pid")),
+        result=_field(end, "result"),
         exit_code=_exit_of(end),
-        stopped_at=_end_text(end, "stopped_at"),
+        stopped_at=_field(end, "stopped_at"),
         reason=_events_reason(state, end),
         events=str(path.resolve()),
-        log=_existing(repo / ".marestail" / "runs" / task / "pipeline.log"),
+        log=_existing(_meta(repo, "runs", task, _LOG)),
         detail=_events_detail(run, state),
         activity=_activity_of(since),
-        current_step="",
-        last_step="",
         era="events",
     )
-
-
-def _end_text(end: dict[str, Any] | None, key: str) -> str | None:
-    if end is None:
-        return None
-    return _text(end.get(key))
 
 
 def _events_reason(state: str, end: dict[str, Any] | None) -> str | None:
@@ -581,7 +565,7 @@ def _stop_prefix(end: dict[str, Any]) -> str:
 def _dead_text(run: list[dict[str, Any]]) -> str:
     if _was_interrupted(run):
         return _interrupted_text(run)
-    opened = _open_name(run)
+    opened = _unfinished_step(run)
     if opened:
         return f"mid {opened}"
     ended = _last(run, "step-end")
@@ -596,24 +580,20 @@ def _was_interrupted(run: list[dict[str, Any]]) -> bool:
 
 
 def _interrupted_text(run: list[dict[str, Any]]) -> str:
-    name = _any_step(run)
+    name = _field(_latest_step(run), "step")
     if name:
         return f"interrupted in {name}"
     return "interrupted"
 
 
-def _any_step(run: list[dict[str, Any]]) -> str | None:
-    return _step_of(_latest_step(run))
-
-
-def _open_name(run: list[dict[str, Any]]) -> str | None:
+def _unfinished_step(run: list[dict[str, Any]]) -> str | None:
     start = _index(run, "step-start")
-    if start is None or _later(_index(run, "step-end"), start):
+    if start is None or _comes_after(_index(run, "step-end"), start):
         return None
     return _text(run[start].get("step"))
 
 
-def _later(end: int | None, start: int) -> bool:
+def _comes_after(end: int | None, start: int) -> bool:
     return end is not None and end > start
 
 
@@ -640,23 +620,11 @@ def _latest_step(run: list[dict[str, Any]]) -> dict[str, Any] | None:
     return found[-1]
 
 
-def _step_of(event: dict[str, Any] | None) -> str | None:
-    if event is None:
-        return None
-    return _text(event.get("step"))
-
-
-def _role_field(event: dict[str, Any] | None) -> str | None:
-    if event is None:
-        return None
-    return _text(event.get("role"))
-
-
 def _last(run: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
-    found = [event for event in run if event["event"] == name]
-    if not found:
+    index = _index(run, name)
+    if index is None:
         return None
-    return found[-1]
+    return run[index]
 
 
 def _index(run: list[dict[str, Any]], name: str) -> int | None:
@@ -668,10 +636,6 @@ def _index(run: list[dict[str, Any]], name: str) -> int | None:
 
 def _count(run: list[dict[str, Any]], name: str) -> int:
     return sum(1 for event in run if event["event"] == name)
-
-
-def _pid_of(start: dict[str, Any]) -> int | None:
-    return _int_or_none(start.get("pid"))
 
 
 def _exit_of(end: dict[str, Any] | None) -> int | None:
@@ -709,11 +673,8 @@ def _parse_time(text: str) -> float | None:
 
 
 def _maybe_abandon(row: _Row, marker: Path, started: str | None) -> None:
-    if row.state not in {"dead", "stopped"}:
-        return
-    if not _marker_applies(marker, started):
-        return
-    _overlay_marker(row, marker)
+    if row.state in {"dead", "stopped"} and _marker_applies(marker, started):
+        _overlay_marker(row, marker)
 
 
 def _marker_applies(marker: Path, started: str | None) -> bool:
@@ -760,15 +721,15 @@ def _reason_line(text: str) -> str | None:
 
 
 def _legacy_row(repo: Path, task: str, branch: str | None, tracked: set[str]) -> _Row:
-    ctx = _context(repo, task, tracked)
+    ctx = _legacy_context(repo, task, tracked)
     state, detail = _with_abandon(ctx, *_classify(ctx))
-    return _built(repo, task, branch, ctx, state, detail)
+    return _row_from_legacy(repo, task, branch, ctx, state, detail)
 
 
-def _context(repo: Path, task: str, tracked: set[str]) -> _Legacy:
-    folder = repo / ".marestail" / "handoffs" / task
-    run_dir = repo / ".marestail" / "runs" / task
-    log_path = run_dir / "pipeline.log"
+def _legacy_context(repo: Path, task: str, tracked: set[str]) -> _Legacy:
+    folder = _meta(repo, "handoffs", task)
+    run_dir = _meta(repo, "runs", task)
+    log_path = run_dir / _LOG
     log = _parse_log(log_path)
     live = _handoff_files(folder)
     archives = _archives(run_dir)
@@ -779,13 +740,13 @@ def _context(repo: Path, task: str, tracked: set[str]) -> _Legacy:
         fresh=fresh,
         archives=archives,
         leftover=leftover,
-        handoff_written=_wrote(log, folder),
+        handoff_written=_step_handoff_exists(log, folder),
         steps=_folder_steps(run_dir),
         handoff_dir=folder,
         marker=run_dir / "abandoned",
         log_path=log_path,
         run_dir=run_dir,
-        activity=_moments(fresh, log_path, archives, run_dir),
+        activity=_latest_mtime(fresh, log_path, archives, run_dir),
         last_step=_legacy_last_step(fresh, log),
         current_step=_current_step(log),
     )
@@ -797,7 +758,7 @@ def _fresh(leftover: bool, live: list[Path]) -> list[Path]:
     return live
 
 
-def _wrote(log: _Log | None, folder: Path) -> bool:
+def _step_handoff_exists(log: _Log | None, folder: Path) -> bool:
     if log is None or not log.step_label:
         return False
     return (folder / f"{log.step_label}.md").is_file()
@@ -818,7 +779,7 @@ def _current_step(log: _Log | None) -> str:
     return log.step_label
 
 
-def _moments(fresh: list[Path], log_path: Path, archives: list[Path], run_dir: Path) -> float:
+def _latest_mtime(fresh: list[Path], log_path: Path, archives: list[Path], run_dir: Path) -> float:
     return max([*_mtimes(fresh), _mtime(log_path), *_mtimes(archives), _mtime(run_dir), 0.0])
 
 
@@ -855,9 +816,9 @@ def _abandon_detail(marker: Path) -> str:
     return _first_line(_read_text(marker))
 
 
-def _built(repo: Path, task: str, branch: str | None, ctx: _Legacy, state: str, detail: str) -> _Row:
+def _row_from_legacy(repo: Path, task: str, branch: str | None, ctx: _Legacy, state: str, detail: str) -> _Row:
     since, activity = _legacy_clock(state, ctx.activity, ctx.marker)
-    step = _shown_step(ctx.last_step)
+    step = ctx.last_step or None
     return _Row(
         repo=str(repo.resolve()),
         task=task,
@@ -887,12 +848,6 @@ def _legacy_clock(state: str, activity: float, marker: Path) -> tuple[str | None
         when = _mtime(marker)
         return _since_from(when), when
     return _since_from(activity), activity
-
-
-def _shown_step(last_step: str) -> str | None:
-    if last_step:
-        return last_step
-    return None
 
 
 def _role_of(step: str | None) -> str | None:
@@ -987,15 +942,15 @@ def _mid_note(step: str, written: bool) -> str:
 
 
 def _after_note(log: _Log) -> str:
-    if _perf(log.last_line):
+    if _is_sampling(log.last_line):
         return f"after {log.step_label}, in perf sampling"
     if log.verdict:
         return f"after {log.step_label} finished (verdict {log.verdict})"
     return f"after {log.step_label} finished"
 
 
-def _perf(tail: str) -> bool:
-    return tail.startswith("filling perf") or tail.startswith("perf-author")
+def _is_sampling(tail: str) -> bool:
+    return tail.startswith(("filling perf", "perf-author"))
 
 
 def _from_archive(ctx: _Legacy) -> tuple[str, str] | None:
@@ -1031,18 +986,18 @@ def _empty_state(leftover: bool) -> tuple[str, str]:
 
 def _file_state(entry: dict[str, int | None] | None, label: str, folder: Path) -> tuple[str, str]:
     if entry is None:
-        return "dead", f"after {label} wrote its handoff (no pipeline.log)"
+        return "dead", f"after {label} wrote its handoff{_NO_LOG}"
     if entry["result"] is None:
-        return "dead", f"mid {label}: prompt written, no result (no pipeline.log)"
+        return "dead", f"mid {label}: prompt written, no result{_NO_LOG}"
     if entry["result"] == 0:
-        return "dead", f"after {label} returned nothing, 0-byte result (no pipeline.log)"
+        return "dead", f"after {label} returned nothing, 0-byte result{_NO_LOG}"
     return _after_files(label, folder)
 
 
 def _after_files(label: str, folder: Path) -> tuple[str, str]:
     if (folder / f"{label}.md").is_file():
-        return "dead", f"after {label} wrote its handoff, then nothing (no pipeline.log)"
-    return "dead", f"after {label} finished, then nothing (no pipeline.log)"
+        return "dead", f"after {label} wrote its handoff, then nothing{_NO_LOG}"
+    return "dead", f"after {label} finished, then nothing{_NO_LOG}"
 
 
 def _label_number(label: str) -> int:
@@ -1170,7 +1125,7 @@ def _is_leftover(root: Path, live: list[Path], archives: list[Path], tracked: se
         return False
     if _tracked_live(root, live, tracked):
         return True
-    return _twins(live, archives)
+    return _copies_match(live, archives)
 
 
 def _tracked_live(root: Path, live: list[Path], tracked: set[str]) -> bool:
@@ -1181,25 +1136,25 @@ def _relative(root: Path, path: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def _twins(live: list[Path], archives: list[Path]) -> bool:
+def _copies_match(live: list[Path], archives: list[Path]) -> bool:
     if not archives:
         return False
-    return all(_twin(path, archives) for path in live)
+    return all(_copy_matches(path, archives) for path in live)
 
 
-def _twin(path: Path, archives: list[Path]) -> bool:
+def _copy_matches(path: Path, archives: list[Path]) -> bool:
     try:
-        return _bytes_match(path, _twin_paths(path, archives))
+        return _bytes_match(path, _archived_copies(path, archives))
     except OSError:
         return False
 
 
-def _twin_paths(path: Path, archives: list[Path]) -> list[Path]:
+def _archived_copies(path: Path, archives: list[Path]) -> list[Path]:
     return [archive / path.name for archive in archives if (archive / path.name).is_file()]
 
 
-def _bytes_match(path: Path, twins: list[Path]) -> bool:
-    return any(twin.read_bytes() == path.read_bytes() for twin in twins)
+def _bytes_match(path: Path, copies: list[Path]) -> bool:
+    return any(copy.read_bytes() == path.read_bytes() for copy in copies)
 
 
 def _folder_steps(folder: Path) -> dict[str, dict[str, int | None]]:
@@ -1255,7 +1210,7 @@ def _mark_running(row: _Row, pid: int) -> None:
 
 def _unattributed_pids(procs: list[_Proc], repo: Path, rows: list[_Row]) -> list[int]:
     taken = _running_event_pids(rows)
-    return sorted(pid for pid, tokens, cwd in procs if _free_pipeline(pid, tokens, cwd, repo, taken))
+    return sorted(pid for pid, tokens, cwd in procs if _is_unattributed(pid, tokens, cwd, repo, taken))
 
 
 def _running_event_pids(rows: list[_Row]) -> set[int]:
@@ -1270,7 +1225,7 @@ def _event_running(row: _Row) -> bool:
     return row.era == "events" and row.state == "running" and isinstance(row.pid, int)
 
 
-def _free_pipeline(pid: int, tokens: list[str], cwd: Path, repo: Path, taken: set[int]) -> bool:
+def _is_unattributed(pid: int, tokens: list[str], cwd: Path, repo: Path, taken: set[int]) -> bool:
     if pid in taken:
         return False
     return _is_pipeline(tokens) and _inside(cwd, repo)
@@ -1295,17 +1250,17 @@ def _note_shutdowns(dead: list[_Row]) -> None:
 
 def _add_shutdown(row: _Row, stamps: list[float]) -> None:
     down = _shutdown_after(row.activity, stamps)
-    if not down:
+    if down is None:
         return
     row.detail += f"; machine shut down {time.strftime('%H:%M', time.localtime(down))}"
     row.reason = f"machine shut down {_utc_stamp(down)}"
 
 
-def _shutdown_after(activity: float, stamps: list[float]) -> float:
+def _shutdown_after(activity: float, stamps: list[float]) -> float | None:
     for stamp in stamps:
         if activity <= stamp <= activity + _HOUR:
             return stamp
-    return 0.0
+    return None
 
 
 def _shutdown_times() -> list[float]:
@@ -1371,7 +1326,7 @@ def _identity(root: Path) -> str:
 
 
 def _tracked(root: Path) -> set[str]:
-    out = _git(root, "ls-files", "-z", "--", ".marestail/handoffs")
+    out = _git(root, "ls-files", "-z", "--", f"{_META}/handoffs")
     return {path for path in out.split("\0") if path}
 
 
@@ -1409,29 +1364,15 @@ def _queue_item(repo: Path, path: Path) -> dict[str, str]:
 
 
 def _queue_list(ran: dict[str, set[str]], chosen: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, str]]:
-    pending = [item for identity, tasks in chosen.items() for stem, item in tasks.items() if stem not in ran.get(identity, set())]
+    pending: list[dict[str, str]] = []
+    for identity, tasks in chosen.items():
+        done = ran.get(identity, set())
+        pending.extend(item for stem, item in tasks.items() if stem not in done)
     return sorted(pending, key=lambda item: (item["repo"], item["task"]))
 
 
 def _record(row: _Row) -> dict[str, Any]:
-    data = {
-        "repo": row.repo,
-        "task": row.task,
-        "state": row.state,
-        "step": row.step,
-        "role": row.role,
-        "since": row.since,
-        "branch": row.branch,
-        "head": row.head,
-        "pid": row.pid,
-        "result": row.result,
-        "exit_code": row.exit_code,
-        "stopped_at": row.stopped_at,
-        "reason": row.reason,
-        "events": row.events,
-        "log": row.log,
-    }
-    return {key: data[key] for key in _KEYS}
+    return {key: getattr(row, key) for key in _KEYS}
 
 
 def _print_json(records: list[dict[str, Any]], waiting: list[dict[str, str]], queued: bool) -> None:
@@ -1441,14 +1382,14 @@ def _print_json(records: list[dict[str, Any]], waiting: list[dict[str, str]], qu
 
 
 def _print_table(rows: list[_Row], waiting: list[dict[str, str]], roots: list[Path], show_all: bool, queued: bool) -> None:
-    shown = _shown(rows, show_all)
+    shown = _visible_rows(rows, show_all)
     print(_header(rows, shown))
     print()
     print(_body(shown, roots))
     _maybe_queued(waiting, roots, queued)
 
 
-def _shown(rows: list[_Row], show_all: bool) -> list[_Row]:
+def _visible_rows(rows: list[_Row], show_all: bool) -> list[_Row]:
     picked = [row for row in rows if show_all or row.state not in _HIDDEN]
     picked.sort(key=_sort_key)
     return picked
@@ -1480,7 +1421,7 @@ def _cells(row: _Row, roots: list[Path], now: float) -> list[str]:
         row.task,
         row.state,
         row.detail,
-        _when(row.activity, now),
+        _activity_text(row.activity, now),
         row.branch or "(detached)",
     ]
 
@@ -1525,7 +1466,7 @@ def _relative_to(repo: Path, root: Path) -> str | None:
     return rel
 
 
-def _when(activity: float, now: float) -> str:
+def _activity_text(activity: float, now: float) -> str:
     if not activity:
         return "?"
     return time.strftime("%m-%d %H:%M", time.localtime(activity)) + f" ({_age(activity, now)})"
@@ -1534,10 +1475,10 @@ def _when(activity: float, now: float) -> str:
 def _age(activity: float, now: float) -> str:
     seconds = int(now - activity)
     if seconds < _HOUR:
-        return f"{seconds // 60}m ago"
-    if seconds < 172800:
-        return f"{seconds // 3600}h ago"
-    return f"{seconds // 86400}d ago"
+        return f"{seconds // _MINUTE}m ago"
+    if seconds < _TWO_DAYS:
+        return f"{seconds // _HOUR}h ago"
+    return f"{seconds // _DAY}d ago"
 
 
 def _table(rows: list[list[str]], header: list[str]) -> str:
@@ -1564,29 +1505,23 @@ def _rule(widths: list[int]) -> str:
     return "|" + "|".join("-" * (width + 2) for width in widths) + "|"
 
 
-def _one_abandon(target: str, reason: str, stamp: str, procs: list[_Proc]) -> int:
-    if _abandon_target(target, reason, stamp, procs):
-        return 0
-    return 1
-
-
 def _abandon_target(target: str, reason: str, stamp: str, procs: list[_Proc]) -> bool:
     repo, task, problem = _target_repo(target)
     if problem:
-        _say(target, problem)
+        _report_error(target, problem)
         return False
     blocked = _refuse(repo, task, procs)
     if blocked:
-        _say(target, blocked)
+        _report_error(target, blocked)
         return False
-    return _commit_abandon(repo, task, target, reason, stamp)
+    return _give_up(repo, task, target, reason, stamp)
 
 
 def _target_repo(target: str) -> tuple[Path, str, str]:
     repo_text, task = _split_target(target)
     repo = _locate_repo(repo_text)
     if repo is None:
-        return Path(), task, f"no .marestail folder at {_shown_repo(repo_text)}"
+        return Path(), task, f"no {_META} folder at {_shown_repo(repo_text)}"
     return repo, task, ""
 
 
@@ -1605,20 +1540,18 @@ def _shown_repo(repo_text: str) -> str:
 
 def _locate_repo(repo_text: str) -> Path | None:
     if repo_text:
-        return _dir_repo(Path(repo_text))
+        return _repo_at(Path(repo_text))
     return _repo_above(Path.cwd().resolve())
 
 
-def _dir_repo(path: Path) -> Path | None:
-    if (path / ".marestail").is_dir():
+def _repo_at(path: Path) -> Path | None:
+    if _is_repo(path):
         return path
     return None
 
 
 def _refuse(repo: Path, task: str, procs: list[_Proc]) -> str:
-    if read_run(repo, task, procs)["state"] == "running":
-        return _busy_text(repo)
-    if _unattributed_pids(procs, repo, _repo_rows(repo, procs)):
+    if read_run(repo, task, procs)["state"] == "running" or _unattributed_pids(procs, repo, _repo_rows(repo, procs)):
         return _busy_text(repo)
     return ""
 
@@ -1627,15 +1560,15 @@ def _busy_text(repo: Path) -> str:
     return f"a marestail pipeline is running in {repo.resolve()}, not touching it"
 
 
-def _say(target: str, problem: str) -> None:
+def _report_error(target: str, problem: str) -> None:
     print(f"{target}: {problem}", file=sys.stderr)
 
 
-def _commit_abandon(repo: Path, task: str, target: str, reason: str, stamp: str) -> bool:
-    run_dir = repo / ".marestail" / "runs" / task
-    live = repo / ".marestail" / "handoffs" / task
+def _give_up(repo: Path, task: str, target: str, reason: str, stamp: str) -> bool:
+    run_dir = _meta(repo, "runs", task)
+    live = _meta(repo, "handoffs", task)
     if not run_dir.is_dir() and not live.is_dir():
-        _say(target, "no run or handoffs folder for that task")
+        _report_error(target, "no run or handoffs folder for that task")
         return False
     run_dir.mkdir(parents=True, exist_ok=True)
     moved = _relocate(live, run_dir, stamp, repo)
@@ -1645,9 +1578,7 @@ def _commit_abandon(repo: Path, task: str, target: str, reason: str, stamp: str)
 
 
 def _relocate(live: Path, run_dir: Path, stamp: str, repo: Path) -> str:
-    if not live.is_dir():
-        return ""
-    if not _handoff_files(live):
+    if not live.is_dir() or not _handoff_files(live):
         return ""
     dest = run_dir / f"handoffs-abandoned-{stamp}"
     live.rename(dest)

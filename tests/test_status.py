@@ -1093,7 +1093,8 @@ def test_scan_finds_repos_two_levels_down(tmp_path: Path, monkeypatch: pytest.Mo
 
 def check_scan_tree(fleet: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, out, err = capture_show([fleet], capsys)
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert sorted(repo_cells(out)) == ["alpha", "team/gamma"]
     assert "001-outer" in out
     for banned in ("099-inside", "030-deep", "skip-hidden", "skip-node_modules", "skip-mutants", "skip-tmp", "nested"):
@@ -1124,7 +1125,8 @@ def test_legacy_run_outside_git_has_null_branch(tmp_path: Path, capsys: pytest.C
     loose = tmp_path / "loose"
     make_task(loose, "014-plain")
     code, out, err = capture_show([loose], capsys)
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert row_named(out, "014-plain")[2:4] == ["never-started", "no handoffs, no steps, no log"]
     assert row_named(out, "014-plain")[5] == "(detached)"
     assert status.read_run(loose, "014-plain")["branch"] is None
@@ -1150,7 +1152,8 @@ def test_json_prints_every_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 
     fleet = build_fleet(tmp_path)
     use_procs(monkeypatch, fleet_procs(fleet))
     code, out, err = capture_show([fleet], capsys, True, False, False)
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     payload = json.loads(out)
     assert out == json.dumps(payload, indent=2) + "\n"
     assert payload["v"] == 1
@@ -1270,7 +1273,8 @@ def test_abandon_moves_handoffs_and_writes_the_marker(
     monkeypatch.chdir(root)
     code = status.abandon(["alpha/009-paused"], "superseded")
     out, err = capsys.readouterr()
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert out == "alpha/009-paused: abandoned, 2 handoffs moved to .marestail/runs/009-paused/handoffs-abandoned-20261016T120000\n"
     dest = alpha / ".marestail" / "runs" / "009-paused" / "handoffs-abandoned-20261016T120000"
     assert not (alpha / ".marestail" / "handoffs" / "009-paused").exists()
@@ -1283,13 +1287,15 @@ def test_abandon_moves_handoffs_and_writes_the_marker(
     assert row_named(table, "009-paused")[2:4] == ["abandoned", "abandoned 2026-10-16 12:00: superseded"]
     code = status.abandon(["alpha/009-paused"], "")
     out, err = capsys.readouterr()
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert out == "alpha/009-paused: abandoned\n"
     assert marker_path.read_text().splitlines()[0] == "abandoned 2026-10-16 12:00"
     monkeypatch.chdir(alpha)
     code = status.abandon(["008-fresh"], "")
     out, err = capsys.readouterr()
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert out == "008-fresh: abandoned\n"
     assert (alpha / ".marestail" / "runs" / "008-fresh" / "abandoned").is_file()
 
@@ -1303,7 +1309,8 @@ def test_abandon_refuses_a_running_events_era_task(
     monkeypatch.chdir(fleet)
     code = status.abandon(["alpha/011-live"], "")
     out, err = capsys.readouterr()
-    assert code == 1 and out == ""
+    assert code == 1
+    assert out == ""
     assert err == f"alpha/011-live: a marestail pipeline is running in {alpha.resolve()}, not touching it\n"
     assert not (alpha / ".marestail" / "runs" / "011-live" / "abandoned").exists()
 
@@ -1318,7 +1325,8 @@ def test_abandon_refuses_while_an_unattributed_pipeline_is_alive(
     before = list((alpha / ".marestail" / "runs" / "010-killed").iterdir())
     code = status.abandon(["alpha/010-killed"], "")
     out, err = capsys.readouterr()
-    assert code == 1 and out == ""
+    assert code == 1
+    assert out == ""
     assert err == f"alpha/010-killed: a marestail pipeline is running in {alpha.resolve()}, not touching it\n"
     assert list((alpha / ".marestail" / "runs" / "010-killed").iterdir()) == before
 
@@ -1691,7 +1699,8 @@ def test_abandon_creates_a_missing_run_folder(tmp_path: Path, monkeypatch: pytes
     monkeypatch.chdir(repo.parent)
     code = status.abandon([f"{repo.name}/014-only", f"{repo.name}/015-txt"], "")
     out, err = capsys.readouterr()
-    assert code == 0 and err == ""
+    assert code == 0
+    assert err == ""
     assert f"{repo.name}/014-only: abandoned, 1 handoffs moved to .marestail/runs/014-only/handoffs-abandoned-20261016T120000" in out
     assert f"{repo.name}/015-txt: abandoned\n" in out
     assert (repo / ".marestail" / "runs" / "014-only" / "abandoned").is_file()
