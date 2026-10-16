@@ -66,7 +66,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   an archived file of the same name. `abandoned` means the
   `runs/<task>/abandoned` marker or a `handoffs-abandoned-*` or
   `handoffs-aborted-*` archive, with no fresh live handoffs and a state other
-  than `complete`. A lone `handoffs-aborted-*` archive, with no log and no
+  than `complete`. A fresh handoff is one `classify` did not clear, so an
+  untracked live `03-coder.md` beside a mid-step log and a marker stays
+  `dead` (t23). A lone `handoffs-aborted-*` archive, with no log and no
   live handoffs, is `complete` (`archived`): the archive is already complete,
   so the abandoned override does not apply. When a marestail run process is
   alive in the repo, the newest legacy record that is already `dead` or
@@ -95,7 +97,10 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   when at least one run is dead. A shutdown at or up to 3600 seconds after the
   run's last activity adds `; machine shut down HH:MM` (local time) to the
   table text and makes the JSON `reason` `machine shut down <UTC ISO-8601 with
-  Z>`. A missing `last` or a failed parse means no shutdowns.
+  Z>`. The `last` stamp is parsed as local time, and the `Z` time is that
+  instant in UTC. In `America/New_York` on 2026-10-16 (EDT, UTC−4) a local
+  `11:10` is `2026-10-16T15:10:00Z`, not the local clock with a `Z` appended.
+  A missing `last` or a failed parse means no shutdowns.
 
   The table is the script's output, line for line: a header
   `marestail runs: N known, N running, N shown` plus `, N
@@ -135,7 +140,9 @@ Feature: marestail status says where every run stands, and marestail abandon giv
   `NN-<role>.md` names are not tasks. Worktrees are the same repo when
   `git config --get remote.origin.url`, else `git rev-parse --git-common-dir`,
   else the path, matches, and the first worktree scanned that holds the file
-  is the one reported.
+  is the one reported. Two clones of one origin match on that URL. A
+  `git worktree add` of a repo with no origin does not: the main tree's
+  common dir is `.git` and the linked tree's is an absolute path.
 
   `--json` prints `{"v": 1, "runs": [...], "queued": [...]}` with
   `json.dumps(..., indent=2)` and nothing else. `runs` is sorted by `repo`
@@ -366,6 +373,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       | t20 | an `abandoned` marker beside a mid-step `03-coder` log, no fresh handoffs | abandoned | the marker's first line | 03-coder | coder |
       | t21 | a log mid step `03-coder` and a `handoffs-aborted-*` archive, no fresh handoffs | abandoned | aborted archive, nothing since | 03-coder | coder |
       | t22 | one `handoffs-aborted-*` archive and no live handoffs, no log | complete | archived | null | null |
+      | t23 | a mid-step `03-coder` log, an `abandoned` marker, and an untracked live `03-coder.md`, no archive | dead | mid 03-coder (its handoff was written, the runner never logged it) | 03-coder | coder |
 
   Scenario: a legacy log that ends complete or stopped fills result, reason and step
     Given the t1 fixture, a log with 4 `==` steps whose last `==` label is `04-qa`, then `pipeline complete`, and no archive
@@ -409,26 +417,33 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And `010-killed` stays `dead` with text `mid 02-critic`
 
   Scenario: a shutdown within the hour explains a dead run
-    Given a dead run whose last activity is 2026-10-16 11:00 UTC
+    Given a dead run whose last activity is 2026-10-16 11:00 UTC and the time zone is UTC
     When `last -x -F shutdown` prints a line with `Thu Oct 16 11:10:00 2026`
     Then the text gains `; machine shut down 11:10` and the JSON `reason` is `machine shut down 2026-10-16T11:10:00Z`
     When the only shutdown is at `Thu Oct 16 13:01:00 2026`
+    Then neither the note nor the reason appears
+    Given the time zone is `America/New_York` (EDT, UTC−4, on 2026-10-16) and a dead run whose last activity is `2026-10-16T15:00:00Z`
+    When `last -x -F shutdown` prints a line with `Thu Oct 16 11:10:00 2026`
+    Then the text gains `; machine shut down 11:10` and the JSON `reason` is `machine shut down 2026-10-16T15:10:00Z`
+    When the only shutdown is at `Thu Oct 16 13:01:00 2026`, which is 17:01 UTC
     Then neither the note nor the reason appears
     When `last` is missing or its output fails to parse
     Then the run is still `dead`, with no note, and the exit code is 0
     And `last` runs at most once per invocation, and not at all when nothing is dead
 
   Scenario: the scan finds repos two levels down, once each, and skips noise
-    Given `fleet/alpha` is a repo, `fleet/team/gamma` is a repo, `fleet/team/deep/delta` is a repo, and `fleet/team/deep` is not
+    Given `fleet/alpha` is a repo with `.marestail/runs/001-outer/`, `fleet/team/gamma` is a repo, `fleet/team/deep/delta` is a repo, and `fleet/team/deep` is not
+    And `fleet/alpha/nested` holds `.marestail/runs/099-inside/`
     And folders named `fleet/node_modules/x`, `fleet/.hidden/x` and `fleet/tmp/x` each hold a `.marestail`
     And `fleet/link` is a symlink to `fleet/alpha`
     When I run `marestail status fleet`
-    Then the repos found are `alpha` and `team/gamma`, and nothing under `node_modules`, `.hidden`, `tmp`, `link` or `team/deep`
+    Then the repos found are `alpha` and `team/gamma`, and nothing under `node_modules`, `.hidden`, `tmp`, `link`, `team/deep` or `alpha/nested`
+    And a row has Repo `alpha` and Task `001-outer`, and neither Repo `alpha/nested` nor Task `099-inside` appears
     When I run `marestail status fleet fleet/team`
     Then `team/gamma` is listed once, and its Repo cell is `team/gamma`, the path relative to the first PATH `fleet`, not `gamma`
     When I run `marestail status fleet/alpha`
-    Then the Repo column is `alpha`
-    When I run `marestail status` from a folder inside `fleet/alpha`, with no PATH
+    Then the Repo column is `alpha`, Task `001-outer` appears, and neither Repo `nested` nor Task `099-inside` appears
+    When I run `marestail status` from the plain folder `fleet/alpha/sub`, not from `fleet/alpha/nested`, with no PATH
     Then the one PATH is `fleet/alpha` and the Repo column is `alpha`
     When I run `marestail status fleet/no-such`
     Then the exit code is 2, stdout is empty, and stderr is `marestail status: not a directory: fleet/no-such`
@@ -441,8 +456,8 @@ Feature: marestail status says where every run stands, and marestail abandon giv
     And the table Branch cell is `(detached)`
 
   Scenario: --queued lists task files that never ran, once per clone
-    Given two worktrees `w1` and `w2` of one clone, `w1` scanned first
-    And `w1/tasks/012-next.md` and `w2/tasks/012-next.md` both exist and neither worktree has a task folder for `012-next`
+    Given two clones `w1` and `w2` of one origin, so both `git config --get remote.origin.url` values match, `w1` scanned first
+    And `w1/tasks/012-next.md` and `w2/tasks/012-next.md` both exist and neither clone has a task folder for `012-next`
     And `w1/tasks/013-done.md` exists and `w2` has a run folder for `013-done`
     And `w1/tasks/README.md` and `w1/tasks/03-coder.md` exist
     When I run `marestail status --queued fleet`
@@ -498,6 +513,7 @@ Feature: marestail status says where every run stands, and marestail abandon giv
 
   Scenario: abandon moves the handoffs aside and writes the marker
     Given a repo `alpha` whose task `009-paused` reads `stopped` and whose `handoffs/009-paused/` holds `01-specifier.md` and `02-critic.md`
+    And the same repo has an empty `runs/008-fresh/` and no `handoffs/008-fresh/` directory, so that task has no `.md` file
     When I run `marestail abandon alpha/009-paused --reason superseded` at 2026-10-16 12:00:00
     Then the exit code is 0
     And stdout is `alpha/009-paused: abandoned, 2 handoffs moved to .marestail/runs/009-paused/handoffs-abandoned-20261016T120000`
@@ -509,10 +525,10 @@ Feature: marestail status says where every run stands, and marestail abandon giv
       """
     And a later `marestail status` shows the task `abandoned` with the marker's first line as its text
     And `events.jsonl` is unchanged, nothing is deleted, and no git command that writes ran
-    When I run `marestail abandon alpha/009-paused` with no reason and no `.md` in the handoffs folder
+    When I run `marestail abandon alpha/009-paused` with no reason, while `handoffs/009-paused/` is already gone
     Then the marker's first line is `abandoned 2026-10-16 12:00` and stdout is `alpha/009-paused: abandoned`
     When I run `marestail abandon 008-fresh` from inside `alpha`
-    Then the repo is found as with `status` and no PATH, the marker is written, and stdout is `008-fresh: abandoned`
+    Then the repo is found as with `status` and no PATH, the empty `runs/008-fresh/` is enough, no handoffs are moved, the marker is written, and stdout is `008-fresh: abandoned`
 
   Scenario: abandon refuses a running events-era task
     Given the fleet fixture, where `011-live` reads `running`
