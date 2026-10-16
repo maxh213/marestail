@@ -16,7 +16,7 @@ layers =
     marestail.remote
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
-    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice : marestail.status
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice
     marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events
     marestail.shell
 
@@ -63,7 +63,6 @@ source_modules =
     marestail.timeline
     marestail.ran_against
     marestail.worktree
-    marestail.status
 forbidden_modules =
     marestail.hunks
     marestail.gates
