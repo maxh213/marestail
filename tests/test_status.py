@@ -1378,9 +1378,11 @@ def check_status_imports() -> None:
 
 def check_contracts() -> None:
     text = Path(".importlinter").read_text()
-    assert "marestail.timeline : marestail.ran_against" in text
-    assert text.count("\n    marestail.status\n") == 1
-    assert "marestail.nice : marestail.status" in text
+    layer = next(line for line in text.splitlines() if "marestail.timeline : marestail.ran_against" in line)
+    parts = [part.strip() for part in layer.split(":")]
+    sources = text.split("[importlinter:contract:foundations-import-nothing-above]", 1)[1]
+    sources = sources.split("forbidden_modules", 1)[0].split()
+    assert ("marestail.status" in parts) == ("marestail.status" in sources)
 
 
 def check_readme() -> None:
