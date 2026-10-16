@@ -141,6 +141,7 @@ def test_interpret(result: subprocess.CompletedProcess[str], expected: tuple[Cho
         ("gemini-3.8-flash high junie", Choice("gemini-3.8-flash high junie", "junie", "gemini-3.8-flash", "high", {})),
         ("gemini-3.8-flash junie", Choice("gemini-3.8-flash junie", "junie", "gemini-3.8-flash", None, {})),
         ("x-ai/grok-4.6 xhigh hermes", Choice("x-ai/grok-4.6 xhigh hermes", "hermes", "x-ai/grok-4.6", "xhigh", {})),
+        ("gpt-6.1-sol high codex", Choice("gpt-6.1-sol high codex", "codex", "gpt-6.1-sol", "high", {})),
     ],
 )
 def test_parse(line: str, expected: Choice) -> None:
@@ -152,14 +153,21 @@ def test_parse_claude_work(monkeypatch: pytest.MonkeyPatch) -> None:
     assert route.parse("m high claude-work") == Choice("m high claude-work", "claude", "m", "high", {"CLAUDE_CONFIG_DIR": "/cfg/work"})
 
 
+def test_parse_codex_animus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DANDELION_CODEX_ANIMUS_HOME", "/cfg/animus")
+    assert route.parse("gpt-6-astra xhigh codex-animus") == Choice(
+        "gpt-6-astra xhigh codex-animus", "codex", "gpt-6-astra", "xhigh", {"CODEX_HOME": "/cfg/animus"}
+    )
+
+
 @pytest.mark.parametrize(
     ("line", "message"),
     [
         ("claude", "dandelion route printed 'claude'; expected `<model> [effort] <provider>`"),
         ("a b c claude", "dandelion route printed 'a b c claude'; expected `<model> [effort] <provider>`"),
         (
-            "gpt high codex",
-            "dandelion route picked 'codex', which marestail has no backend for; it knows claude, claude-work, claude-deepseek, agy, kimi, grok, cursor, junie, hermes",
+            "gpt high gemini",
+            "dandelion route picked 'gemini', which marestail has no backend for; it knows claude, claude-work, claude-deepseek, agy, kimi, grok, cursor, junie, hermes, codex, codex-animus",
         ),
     ],
 )
@@ -174,6 +182,9 @@ def test_account_env_default_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setenv("HOME", str(tmp_path))
     assert route.account_env("claude-work") == {"CLAUDE_CONFIG_DIR": str(tmp_path / ".claude-work")}
     assert route.account_env("claude") == {}
+    monkeypatch.delenv("DANDELION_CODEX_ANIMUS_HOME", raising=False)
+    assert route.account_env("codex-animus") == {"CODEX_HOME": str(tmp_path / ".codex-animus")}
+    assert route.account_env("codex") == {}
 
 
 def test_account_env_empty_setting_uses_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

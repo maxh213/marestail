@@ -59,6 +59,7 @@ def parsed(line: str) -> tuple[str, str, str | None, dict[str, str]]:
 def parses_every_line() -> None:
     work = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-work").expanduser())}
     deepseek = {"CLAUDE_CONFIG_DIR": str(Path("~/.claude-deepseek").expanduser())}
+    animus = {"CODEX_HOME": str(Path("~/.codex-animus").expanduser())}
     flash = "deepseek/deepseek-v4.1-flash max claude-deepseek"
     cases = {
         "claude-opus-5 high claude": ("claude", "claude-opus-5", "high", {}),
@@ -73,12 +74,17 @@ def parses_every_line() -> None:
         "grok-4.6 xhigh grok": ("grok", "grok-4.6", "xhigh", {}),
         "kimi-k3-max cursor": ("cursor", "kimi-k3-max", None, {}),
         "x-ai/grok-4.6 xhigh hermes": ("hermes", "x-ai/grok-4.6", "xhigh", {}),
+        "gpt-6.1-sol high codex": ("codex", "gpt-6.1-sol", "high", {}),
+        "gpt-6-astra xhigh codex-animus": ("codex", "gpt-6-astra", "xhigh", animus),
     }
     for line, wanted in cases.items():
         expect(f"parse {line}", parsed(line), wanted)
     os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"] = "/srv/work-claude"
     expect("work-dir-env", parsed("claude-opus-5 high claude-work")[3], {"CLAUDE_CONFIG_DIR": "/srv/work-claude"})
     del os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"]
+    os.environ["DANDELION_CODEX_ANIMUS_HOME"] = "/srv/codex-animus"
+    expect("animus-home-env", parsed("gpt-6-astra xhigh codex-animus")[3], {"CODEX_HOME": "/srv/codex-animus"})
+    del os.environ["DANDELION_CODEX_ANIMUS_HOME"]
     os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = "/srv/deepseek-claude"
     expect("deepseek-dir-env", parsed(flash)[3], {"CLAUDE_CONFIG_DIR": "/srv/deepseek-claude"})
     os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"] = ""
@@ -86,7 +92,7 @@ def parses_every_line() -> None:
     del os.environ["DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR"]
     expect_exit("one-word", lambda: route.parse("claude"), "expected")
     expect_exit("four-words", lambda: route.parse("a b c claude"), "expected")
-    expect_exit("unknown-account", lambda: route.parse("gpt-6 high codex"), "no backend for")
+    expect_exit("unknown-account", lambda: route.parse("gpt-6 high gemini"), "no backend for")
     expect(
         "routed-models",
         (

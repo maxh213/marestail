@@ -1014,7 +1014,7 @@ def test_run_parser_defaults_and_help() -> None:
         helped["--effort"]
         == "reasoning effort (claude and agy: low|medium|high|xhigh|max; grok and hermes: reasoning effort; kilo: variant; junie: low|medium|high); stamped on every commit"
     )
-    assert helped["--agent"] == "agent backend (claude, agy, kimi, grok, cursor, junie, hermes, or kilo)"
+    assert helped["--agent"] == "agent backend (claude, agy, kimi, grok, cursor, junie, hermes, codex, or kilo)"
     retries = next(action for action in parser._actions if "--retries" in action.option_strings)
     assert (retries.metavar, retries.type) == ("N", int)
     agent = next(action for action in parser._actions if "--agent" in action.option_strings)

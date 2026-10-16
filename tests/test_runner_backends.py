@@ -24,6 +24,7 @@ AGENT_VARS = (
     "MARESTAIL_KIMI",
     "MARESTAIL_JUNIE",
     "MARESTAIL_HERMES",
+    "MARESTAIL_CODEX",
 )
 CLAUDE_BASE = ["claude", "-p", "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions", "--output-format", "json"]
 KILO_BASE = ["kilo", "run", "--auto", "--format", "json", "--log-level", "ERROR", "--model"]
@@ -775,6 +776,7 @@ def test_hermes_summary(output: str, expected: str) -> None:
         ("kimi", (backends.kimi_rate_limited, backends.kimi_summary)),
         ("junie", (backends.junie_rate_limited, backends.junie_summary)),
         ("hermes", (backends.hermes_rate_limited, backends.hermes_summary)),
+        ("codex", (backends.codex_rate_limited, backends.codex_summary)),
         ("claude", (backends.rate_limited, backends.summary)),
         ("agy", (backends.rate_limited, backends.summary)),
     ],
@@ -800,11 +802,13 @@ def test_run_backend_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backends, "kimi_run", make_run("kimi", prompt))
     monkeypatch.setattr(backends, "junie_run", make_run("junie", "p"))
     monkeypatch.setattr(backends, "hermes_run", make_run("hermes", prompt))
+    monkeypatch.setattr(backends, "codex_run", make_run("codex", "p"))
     assert runner.run_backend(state, "grok", "p", prompt) == (1, f"grok {prompt}")
     assert runner.run_backend(state, "kilo", "p", prompt) == (1, "kilo p")
     assert runner.run_backend(state, "kimi", "p", prompt) == (1, f"kimi {prompt}")
     assert runner.run_backend(state, "junie", "p", prompt) == (1, "junie p")
     assert runner.run_backend(state, "hermes", "p", prompt) == (1, f"hermes {prompt}")
+    assert runner.run_backend(state, "codex", "p", prompt) == (1, "codex p")
 
 
 def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
@@ -819,3 +823,111 @@ def test_run_backend_generic_uses_agent_command(fake_run: Any) -> None:
 
 def test_parse_verdict_from_hermes_result() -> None:
     assert runner.parse_verdict(Path("/tmp/missing-verdict.md"), '{"type":"result","text":"VERDICT: BOUNCE coder"}') == ("BOUNCE", "coder")
+
+
+CODEX_BASE = ["codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+CODEX_VERIFIED = (
+    '{"type":"thread.started","thread_id":"01a143eb-4866-7a72-ad08-216f4a190852"}\n'
+    '{"type":"turn.started"}\n'
+    '{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"git status"}}\n'
+    '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"VERDICT: PASS pong"}}\n'
+    '{"type":"turn.completed","usage":{"input_tokens":15323,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":0}}'
+)
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({}, [*CODEX_BASE, "-"]),
+        ({"model": "gpt-6.1-sol"}, [*CODEX_BASE, "-m", "gpt-6.1-sol", "-"]),
+        ({"effort": "xhigh"}, [*CODEX_BASE, "-c", "model_reasoning_effort=xhigh", "-"]),
+        ({"model": "gpt-6-astra", "effort": "high"}, [*CODEX_BASE, "-m", "gpt-6-astra", "-c", "model_reasoning_effort=high", "-"]),
+        ({"model": "", "effort": ""}, [*CODEX_BASE, "-"]),
+    ],
+)
+def test_codex_command(fields: dict[str, Any], expected: list[str]) -> None:
+    assert backends.codex_command(make_state(agent="codex", **fields)) == expected
+
+
+def test_codex_command_binary_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_CODEX", "/opt/codex")
+    assert backends.codex_command(make_state(agent="codex"))[0] == "/opt/codex"
+
+
+def test_codex_run_passes_the_prompt_on_stdin_with_the_account_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_PROBE", "kept")
+    fake = install_subprocess(monkeypatch, (0, CODEX_VERIFIED, "err"))
+    state = make_state(root=Path("/repo"), agent="codex", model="gpt-6.1-sol", account_env={"CODEX_HOME": "/home/x/.codex-animus"})
+    assert backends.codex_run(state, "the prompt") == (0, CODEX_VERIFIED)
+    call = fake.calls[0]
+    assert call["command"] == backends.codex_command(state)
+    assert call["input"] == "the prompt"
+    assert call["cwd"] == Path("/repo")
+    assert call["env"]["CODEX_HOME"] == "/home/x/.codex-animus"
+    assert call["env"]["MARESTAIL_PROBE"] == "kept"
+    assert "CODEX_HOME" not in os.environ
+
+
+def test_codex_run_appends_stderr_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, (1, "out", "err"))
+    assert backends.codex_run(make_state(agent="codex"), "p") == (1, "out\nerr")
+
+
+def test_codex_run_errors_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_subprocess(monkeypatch, FileNotFoundError("nope"))
+    assert backends.codex_run(make_state(agent="codex"), "p") == (127, "codex: not found (nope)")
+    install_subprocess(monkeypatch, subprocess.TimeoutExpired("x", 1))
+    assert backends.codex_run(make_state(agent="codex"), "p") == (124, "codex: timed out after 14400s")
+
+
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, CODEX_VERIFIED, False),
+        (1, '{"type":"error","message":"You have hit your usage limit. Try again at 3pm."}', True),
+        (1, '{"type":"error","message":"usage_limit_reached"}', True),
+        (0, '{"type":"turn.failed","error":{"message":"429 Too Many Requests"}}', True),
+        (1, '{"type":"turn.failed","error":"insufficient_quota"}', True),
+        (1, '{"type":"turn.failed"}', False),
+        (1, '{"type":"error"}', False),
+        (1, '{"type":"error","message":"model not found"}', False),
+        (1, '{"type":"item.completed","item":{"type":"agent_message","text":"rate limit"}}\n{"type":"error","message":"boom"}', False),
+        (1, "rate limit exceeded", True),
+        (1, "usageLimitExceeded", True),
+        (0, "rate limit exceeded", False),
+        (1, "boom", False),
+        (1, "", False),
+    ],
+)
+def test_codex_rate_limited(code: int, output: str, expected: bool) -> None:
+    assert backends.codex_rate_limited(code, output) is expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (CODEX_VERIFIED, "tokens=15332 'VERDICT: PASS pong'"),
+        (
+            '{"type":"item.completed","item":{"type":"agent_message","text":" first "}}\n{"type":"item.completed","item":{"type":"agent_message","text":"last"}}',
+            "'last'",
+        ),
+        (
+            '{"type":"item.completed","item":{"type":"agent_message"}}\n{"type":"item.completed"}\n{"type":"turn.completed","usage":{"input_tokens":2}}\n{"type":"turn.completed","usage":{"output_tokens":3}}',
+            "tokens=5 ''",
+        ),
+        ('{"type":"turn.completed"}', "tokens=0 ''"),
+        (
+            '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n{"type":"error","message":"boom"}',
+            "tokens=None 'boom'".replace("tokens=None ", ""),
+        ),
+        ('{"type":"error"}', "\"{'type': 'error'}\""),
+        ('{"type":"turn.failed","error":{"code":1}}', "\"{'code': 1}\""),
+        ('{"type":"turn.failed","error":"insufficient_quota"}', "'insufficient_quota'"),
+        ('{"type":"turn.failed"}', "\"{'type': 'turn.failed'}\""),
+        ('{"type":"item.completed","item":{"type":"agent_message","text":"' + "x" * 130 + '"}}', repr("x" * 120)),
+        ("not json", "not json"),
+        ("", ""),
+    ],
+)
+def test_codex_summary(output: str, expected: str) -> None:
+    assert backends.codex_summary(output) == expected

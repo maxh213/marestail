@@ -19,6 +19,8 @@ BACKENDS = {
     "cursor": backends.CURSOR,
     "junie": backends.JUNIE,
     "hermes": backends.HERMES,
+    "codex": backends.CODEX,
+    "codex-animus": backends.CODEX,
 }
 NO_ROUTE = "none"
 TIMEOUT_SECONDS = 300
@@ -107,15 +109,16 @@ def parse(line: str) -> Choice:
     return Choice(line, BACKENDS[provider], words[0], effort, account_env(provider))
 
 
-CONFIG_DIRS = {
-    "claude-work": ("DANDELION_CLAUDE_WORK_CONFIG_DIR", "~/.claude-work"),
-    "claude-deepseek": ("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/.claude-deepseek"),
+ACCOUNT_HOMES = {
+    "claude-work": ("CLAUDE_CONFIG_DIR", "DANDELION_CLAUDE_WORK_CONFIG_DIR", "~/.claude-work"),
+    "claude-deepseek": ("CLAUDE_CONFIG_DIR", "DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "~/.claude-deepseek"),
+    "codex-animus": ("CODEX_HOME", "DANDELION_CODEX_ANIMUS_HOME", "~/.codex-animus"),
 }
 
 
 def account_env(provider: str) -> dict[str, str]:
-    configured = CONFIG_DIRS.get(provider)
+    configured = ACCOUNT_HOMES.get(provider)
     if configured is None:
         return {}
-    name, fallback = configured
-    return {"CLAUDE_CONFIG_DIR": str(Path(os.environ.get(name) or fallback).expanduser())}
+    variable, name, fallback = configured
+    return {variable: str(Path(os.environ.get(name) or fallback).expanduser())}

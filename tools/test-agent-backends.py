@@ -9,6 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from marestail.backends import (
     KILO_DEFAULT_MODEL,
     KILO_DEFAULT_VARIANT,
+    codex_command,
+    codex_rate_limited,
+    codex_summary,
     grok_command,
     hermes_command,
     hermes_rate_limited,
@@ -291,6 +294,33 @@ def hermes_backend() -> None:
     expect("hermes-summary-tail", hermes_summary("plain text failure"), "plain text failure")
 
 
+def codex_backend() -> None:
+    base = ["codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+    expect("codex-command", codex_command(state("codex")), [*base, "-m", "mymodel", "-"])
+    expect("codex-command-no-model", codex_command(state("codex", model=None)), [*base, "-"])
+    expect(
+        "codex-command-effort",
+        codex_command(state("codex", model="gpt-6-astra", effort="xhigh")),
+        [*base, "-m", "gpt-6-astra", "-c", "model_reasoning_effort=xhigh", "-"],
+    )
+    expect("codex-resolve", resolve_agent(state("codex", model=None)), "codex")
+    expect("codex-config-backend", resolve_agent(state(None, model=None, raw={"agent": {"backend": "codex"}})), "codex")
+    verified = (
+        '{"type":"thread.started","thread_id":"01a143eb-4866-7a72-ad08-216f4a190852"}\n'
+        '{"type":"turn.started"}\n'
+        '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"VERDICT: PASS pong"}}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":15323,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":0}}'
+    )
+    expect("codex-summary", codex_summary(verified), "tokens=15332 'VERDICT: PASS pong'")
+    expect("codex-not-limited", codex_rate_limited(0, verified), False)
+    expect("codex-usage-limit", codex_rate_limited(1, '{"type":"error","message":"You have hit your usage limit."}'), True)
+    expect("codex-turn-failed-429", codex_rate_limited(1, '{"type":"turn.failed","error":{"message":"429 Too Many Requests"}}'), True)
+    expect("codex-other-error", codex_rate_limited(1, '{"type":"error","message":"model not found"}'), False)
+    expect("codex-plain-limit", codex_rate_limited(1, "rate limit exceeded"), True)
+    expect("codex-quota-ok", codex_rate_limited(0, "the quota gate passed"), False)
+    expect("codex-summary-tail", codex_summary("plain text failure"), "plain text failure")
+
+
 def env_overrides() -> None:
     keys = [
         "MARESTAIL_AGENT",
@@ -487,6 +517,7 @@ if __name__ == "__main__":
     kimi_backend()
     junie_backend()
     hermes_backend()
+    codex_backend()
     env_overrides()
     labels()
     kilo_output()

@@ -1748,8 +1748,8 @@ def routed(state: Run, prompt: str) -> tuple[str, str]:
 def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:
     if backend in (GROK, "kimi", HERMES):
         return {GROK: backends.grok_run, "kimi": backends.kimi_run, HERMES: backends.hermes_run}[backend](state, prompt_file)
-    if backend in ("kilo", JUNIE):
-        return {"kilo": backends.kilo_run, JUNIE: backends.junie_run}[backend](state, prompt)
+    if backend in ("kilo", JUNIE, backends.CODEX):
+        return {"kilo": backends.kilo_run, JUNIE: backends.junie_run, backends.CODEX: backends.codex_run}[backend](state, prompt)
     return run(agent_command(state), cwd=state.config.root, stdin=prompt, timeout=AGENT_TIMEOUT, env=agent_env(state))
 
 
@@ -1760,6 +1760,7 @@ def outcome_readers(backend: str) -> tuple[Callable[[int, str], bool], Callable[
         "kimi": (backends.kimi_rate_limited, backends.kimi_summary),
         JUNIE: (backends.junie_rate_limited, backends.junie_summary),
         HERMES: (backends.hermes_rate_limited, backends.hermes_summary),
+        backends.CODEX: (backends.codex_rate_limited, backends.codex_summary),
     }
     return readers.get(backend, (backends.rate_limited, backends.summary))
 

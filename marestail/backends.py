@@ -25,7 +25,8 @@ KILO = "kilo"
 KIMI = "kimi"
 JUNIE = "junie"
 HERMES = "hermes"
-BACKENDS = frozenset({CLAUDE, AGY, CURSOR, GROK, KILO, KIMI, JUNIE, HERMES})
+CODEX = "codex"
+BACKENDS = frozenset({CLAUDE, AGY, CURSOR, GROK, KILO, KIMI, JUNIE, HERMES, CODEX})
 IMAGE_BLIND = frozenset({KILO})
 
 LIMIT_PATTERN = re.compile(
@@ -55,6 +56,14 @@ HERMES_LIMIT_PATTERN = re.compile(
     r"insufficient_credits|Subscription credits are exhausted|no_usable_credits|subscription_expired|subscription_required|member_spend_cap_exceeded",
     re.IGNORECASE,
 )
+CODEX_LIMIT_PATTERN = re.compile(r"usage_limit|usageLimitExceeded|hit your usage limit|insufficient_quota", re.IGNORECASE)
+CODEX_EFFORT_KEY = "model_reasoning_effort"
+CODEX_TOKENS = ("input_tokens", "output_tokens")
+ITEM = "item"
+ITEM_COMPLETED = "item.completed"
+AGENT_MESSAGE = "agent_message"
+TURN_COMPLETED = "turn.completed"
+TURN_FAILED = "turn.failed"
 AGENT_TIMEOUT = 4 * 3600
 SUMMARY_WIDTH = 120
 MODEL_FLAG = "--model"
@@ -553,6 +562,87 @@ def hermes_summary(output: str) -> str:
     tokens = event_dict(result, TOKENS).get("total")
     text = str(result.get("text") or "").replace("\n", " ")[:HERMES_SUMMARY_WIDTH]
     return f'tokens={tokens} "{text}"'
+
+
+codex_events = json_events
+
+
+def codex_command(state: AgentRun) -> list[str]:
+    command = [os.environ.get("MARESTAIL_CODEX", CODEX), "exec", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+    return command + optional_flag("-m", state.model) + optional_flag("-c", codex_effort(state.effort)) + ["-"]
+
+
+def codex_effort(effort: str | None) -> str | None:
+    return f"{CODEX_EFFORT_KEY}={effort}" if effort else None
+
+
+def codex_run(state: AgentRun, prompt: str) -> tuple[int, str]:
+    command = codex_command(state)
+    env = {**os.environ, **state.account_env}
+    return session_result(spawn(command, state, env, prompt, command[0]), stdout_and_stderr)
+
+
+def codex_item_text(event: Event) -> str:
+    item = event_dict(event, ITEM)
+    if event.get(TYPE_KEY) != ITEM_COMPLETED or item.get(TYPE_KEY) != AGENT_MESSAGE:
+        return EMPTY
+    return mapping_text(item, TEXT).strip()
+
+
+def codex_texts(events: list[Event]) -> list[str]:
+    return [text for text in map(codex_item_text, events) if text]
+
+
+def failed_turn_text(event: Event) -> str:
+    return str(event_dict(event, ERROR).get(MESSAGE) or event.get(ERROR) or event)
+
+
+def codex_error(event: Event) -> str | None:
+    kind = event.get(TYPE_KEY)
+    if kind == ERROR:
+        return str(event.get(MESSAGE) or event)
+    if kind == TURN_FAILED:
+        return failed_turn_text(event)
+    return None
+
+
+def codex_errors(events: list[Event]) -> list[str]:
+    return [error for error in map(codex_error, events) if error is not None]
+
+
+def codex_limit_match(text: str) -> bool:
+    return bool(CODEX_LIMIT_PATTERN.search(text) or LIMIT_PATTERN.search(text))
+
+
+def codex_rate_limited(code: int, output: str) -> bool:
+    errors = codex_errors(codex_events(output))
+    if errors:
+        return codex_limit_match(SPACE.join(errors))
+    return code != 0 and codex_limit_match(output)
+
+
+def codex_usages(events: list[Event]) -> list[Event]:
+    return [event_dict(event, USAGE) for event in events if event.get(TYPE_KEY) == TURN_COMPLETED]
+
+
+def usage_total(usage: Event) -> int:
+    return sum(token_count(usage, key) for key in CODEX_TOKENS)
+
+
+def codex_tokens(events: list[Event]) -> int | None:
+    usages = codex_usages(events)
+    if not usages:
+        return None
+    return sum(map(usage_total, usages))
+
+
+def codex_summary(output: str) -> str:
+    events = codex_events(output)
+    if not events:
+        return output_tail(output)
+    errors = codex_errors(events)
+    text = (errors[-1] if errors else last_text(codex_texts(events)))[:SUMMARY_WIDTH]
+    return summary_line({TOKENS: codex_tokens(events)}, None, text)
 
 
 def grok_parse_json(output: str) -> Event | None:
