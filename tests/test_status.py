@@ -1599,10 +1599,10 @@ def test_repo_cell_is_the_folder_name_when_it_sits_outside_every_root(
     assert repo_cells(out) == ["team/gamma"]
     real = Path.is_relative_to
 
-    def outside(self: Path, *others: object) -> bool:
+    def outside(self: Path, other: Path) -> bool:
         if self.name == "gamma":
             return False
-        return bool(real(self, *others))
+        return real(self, other)
 
     monkeypatch.setattr(Path, "is_relative_to", outside)
     code, out, err = capture_show([fleet], capsys)
