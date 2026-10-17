@@ -479,33 +479,25 @@ def _read_toml_push_pr(cfg: config_module.Config) -> tuple[int, bool, bool]:
     return 0, push_raw, pr_raw
 
 
+def _env_flag(name: str) -> tuple[int, bool | None]:
+    raw = os.environ.get(name)
+    if raw is None:
+        return 0, None
+    if raw.lower() in BOOLEAN_ENV_TRUE:
+        return 0, True
+    if raw.lower() in BOOLEAN_ENV_FALSE:
+        return 0, False
+    sys.stderr.write(f"{name} must be 1, 0, true or false, got '{raw}'\n")
+    return 2, None
+
+
 def _read_env_push_pr() -> tuple[int, bool | None, bool | None]:
-    push_env = os.environ.get("MARESTAIL_QUEUE_PUSH")
-    if push_env is not None:
-        if push_env.lower() in BOOLEAN_ENV_TRUE:
-            p_val: bool | None = True
-        elif push_env.lower() in BOOLEAN_ENV_FALSE:
-            p_val = False
-        else:
-            sys.stderr.write(f"MARESTAIL_QUEUE_PUSH must be 1, 0, true or false, got '{push_env}'\n")
-            return 2, None, None
-    else:
-        p_val = None
-    return _read_env_pr(p_val)
-
-
-def _read_env_pr(push_val: bool | None) -> tuple[int, bool | None, bool | None]:
-    pr_env = os.environ.get("MARESTAIL_QUEUE_PR")
-    if pr_env is not None:
-        if pr_env.lower() in BOOLEAN_ENV_TRUE:
-            pr_val: bool | None = True
-        elif pr_env.lower() in BOOLEAN_ENV_FALSE:
-            pr_val = False
-        else:
-            sys.stderr.write(f"MARESTAIL_QUEUE_PR must be 1, 0, true or false, got '{pr_env}'\n")
-            return 2, None, None
-    else:
-        pr_val = None
+    push_code, push_val = _env_flag("MARESTAIL_QUEUE_PUSH")
+    if push_code != 0:
+        return push_code, None, None
+    pr_code, pr_val = _env_flag("MARESTAIL_QUEUE_PR")
+    if pr_code != 0:
+        return pr_code, None, None
     return 0, push_val, pr_val
 
 
@@ -747,11 +739,11 @@ def _should_stop_queue(res_code: int, here: bool, state: dict[str, Any], task_id
     if res_code == 2:
         return True
     if res_code == 1:
-        return _is_code1_stop(here, state, task_id)
+        return _failure_stops_queue(here, state, task_id)
     return False
 
 
-def _is_code1_stop(here: bool, state: dict[str, Any], task_id: str) -> bool:
+def _failure_stops_queue(here: bool, state: dict[str, Any], task_id: str) -> bool:
     if here:
         return True
     return _was_uncommitted_stop(state, task_id)
@@ -774,7 +766,7 @@ def _step_one_task(
 ) -> tuple[int, bool]:
     blocked_reason = _find_blocked_reason(task, state, opts.root, opts.git.here, opts.git.base, opts.log_path)
     if blocked_reason is not None:
-        _record_blocked(task, blocked_reason, state, opts.state_file, opts.log_path)
+        _record_persisted_state(task.id, "blocked", blocked_reason, state, opts.state_file, opts.log_path)
         return 0, start_used
     action, reason = _determine_initial_action(task.id, state, opts.retry, opts.root)
     if action in ("stopped", "failed"):
@@ -810,17 +802,22 @@ def _read_run_action(root: Path, task_id: str) -> tuple[str, str | None]:
     return "run", None
 
 
-def _record_persisted_state(task_id: str, st: str, reason: str | None, state: dict[str, Any], state_path: Path, log_path: Path) -> None:
-    now_iso = _format_iso(_now_utc())
-    state["tasks"][task_id] = {
+def _state_entry(
+    st: str, branch: str | None, head: str | None, to: str | None, exit_code: int | None, reason: str | None
+) -> dict[str, Any]:
+    return {
         "status": st,
-        "branch": None,
-        "head": None,
-        "finished_at": now_iso,
-        "to": None,
-        "exit_code": None,
+        "branch": branch,
+        "head": head,
+        "finished_at": _format_iso(_now_utc()),
+        "to": to,
+        "exit_code": exit_code,
         "reason": reason,
     }
+
+
+def _record_persisted_state(task_id: str, st: str, reason: str | None, state: dict[str, Any], state_path: Path, log_path: Path) -> None:
+    state["tasks"][task_id] = _state_entry(st, None, None, None, None, reason)
     _write_state(state_path, state)
     _log_event(log_path, f"{st} {task_id} {reason}")
 
@@ -862,15 +859,14 @@ def _external_dep_reason(dep: str, state: dict[str, Any], root: Path) -> str | N
 
 def _record_external_done(dep: str, rec: dict[str, Any], state: dict[str, Any]) -> None:
     has_events = rec.get("events") is not None
-    state.setdefault("tasks", {})[dep] = {
-        "status": "done",
-        "branch": rec.get("branch") if has_events else None,
-        "head": rec.get("head") if has_events else None,
-        "finished_at": _format_iso(_now_utc()),
-        "to": None,
-        "exit_code": 0,
-        "reason": None,
-    }
+    state.setdefault("tasks", {})[dep] = _state_entry(
+        "done",
+        rec.get("branch") if has_events else None,
+        rec.get("head") if has_events else None,
+        None,
+        0,
+        None,
+    )
 
 
 def _check_stack_ancestor_blocked(task: TaskFile, state: dict[str, Any], root: Path, here: bool, base: str, log_path: Path) -> str | None:
@@ -897,21 +893,6 @@ def _check_ancestor_merges(task: TaskFile, state: dict[str, Any], root: Path, ba
     return None
 
 
-def _record_blocked(task: TaskFile, reason: str, state: dict[str, Any], state_path: Path, log_path: Path) -> None:
-    now_iso = _format_iso(_now_utc())
-    state["tasks"][task.id] = {
-        "status": "blocked",
-        "branch": None,
-        "head": None,
-        "finished_at": now_iso,
-        "to": None,
-        "exit_code": None,
-        "reason": reason,
-    }
-    _write_state(state_path, state)
-    _log_event(log_path, f"blocked {task.id} {reason}")
-
-
 def _execute_child_flow(
     task: TaskFile,
     ordered: list[TaskFile],
@@ -928,7 +909,7 @@ def _execute_child_flow(
     child_code, outcome = _run_child_process(task, opts.root, opts.log_path, branch, where, role, opts.child)
     if child_code == 2:
         return 2, new_used
-    _update_state_record(task.id, branch, opts.child.stop, outcome, state, opts.state_file)
+    _update_state_record(task.id, branch, opts.child.stop, outcome, state, opts.state_file, opts.root)
     _after_child_finish(
         task,
         branch,
@@ -1137,20 +1118,11 @@ def _git_head(root: Path) -> str:
 
 
 def _update_state_record(
-    task_id: str, branch: str, stop: str | None, outcome: dict[str, Any], state: dict[str, Any], state_path: Path
+    task_id: str, branch: str, stop: str | None, outcome: dict[str, Any], state: dict[str, Any], state_path: Path, root: Path
 ) -> None:
-    root = state_path.parent.parent.parent
-    head = _git_head(root)
-    now_iso = _format_iso(_now_utc())
-    state.setdefault("tasks", {})[task_id] = {
-        "status": outcome["status"],
-        "branch": branch,
-        "head": head,
-        "finished_at": now_iso,
-        "to": stop,
-        "exit_code": outcome["exit_code"],
-        "reason": outcome["reason"],
-    }
+    state.setdefault("tasks", {})[task_id] = _state_entry(
+        outcome["status"], branch, _git_head(root), stop, outcome["exit_code"], outcome["reason"]
+    )
     _write_state(state_path, state)
 
 

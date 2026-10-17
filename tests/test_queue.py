@@ -1616,7 +1616,8 @@ def test_pr_env_beats_a_false_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     fake_start, _recorded = make_child_seam(repo, {})
     monkeypatch.setattr(queue, "_start_child", fake_start)
     assert queue.run_queue(["tasks/a.md"], None, None, False, [], None, None, None, None, []) == 0
-    assert created and created[0][created[0].index("--title") + 1] == "Task A"
+    assert created
+    assert created[0][created[0].index("--title") + 1] == "Task A"
 
 
 def test_failed_push_keeps_the_done_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
