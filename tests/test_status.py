@@ -1,5 +1,4 @@
 import ast
-import inspect
 import json
 import os
 import re
@@ -1589,27 +1588,27 @@ def test_unreadable_directory_is_skipped(tmp_path: Path, monkeypatch: pytest.Mon
     assert "099-blocked" not in out
 
 
-def from_relative_to() -> bool:
-    return any(frame.function == "_relative_to" for frame in inspect.stack())
-
-
-def test_repo_name_is_kept_when_printing_cannot_resolve_it(
+def test_repo_cell_is_the_folder_name_when_it_sits_outside_every_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    repo = tmp_path / "alpha"
-    make_task(repo, "001-outer")
-    real = Path.resolve
-
-    def wrapped(self: Path, strict: bool = False) -> Path:
-        if self == repo and from_relative_to():
-            raise OSError
-        return real(self, strict)
-
-    monkeypatch.setattr(Path, "resolve", wrapped)
-    code, out, err = capture_show([repo], capsys)
+    fleet = tmp_path / "fleet"
+    make_task(fleet / "team" / "gamma", "001-outer")
+    code, out, err = capture_show([fleet], capsys)
     assert code == 0
     assert err == ""
-    assert repo_cells(out) == ["alpha"]
+    assert repo_cells(out) == ["team/gamma"]
+    real = Path.is_relative_to
+
+    def outside(self: Path, *others: object) -> bool:
+        if self.name == "gamma":
+            return False
+        return bool(real(self, *others))
+
+    monkeypatch.setattr(Path, "is_relative_to", outside)
+    code, out, err = capture_show([fleet], capsys)
+    assert code == 0
+    assert err == ""
+    assert repo_cells(out) == ["gamma"]
     assert "001-outer" in out
 
 
@@ -1873,29 +1872,6 @@ def test_only_arguments_after_run_name_the_task(tmp_path: Path, monkeypatch: pyt
     use_procs(monkeypatch, [(50, tokens, repo), (51, tokens, repo)])
     assert status.read_run(repo, "run")["state"] == "dead"
     assert status.read_run(repo, "cli")["state"] == "dead"
-
-
-def test_equal_step_indexes_stay_mid_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    repo = tmp_path / "repo"
-    init_repo(repo)
-    add_events(
-        repo,
-        "open",
-        [
-            ev("run-start", "2026-10-16T11:00:00.000Z", pid=9, branch="main"),
-            ev("step-start", "2026-10-16T11:01:00.000Z", pid=9, step="03-coder", role="coder"),
-        ],
-    )
-    real = status._index
-
-    def same(run: list[dict[str, object]], name: str) -> int | None:
-        if name == "step-end":
-            return real(run, "step-start")
-        return real(run, name)
-
-    monkeypatch.setattr(status, "_index", same)
-    _code, out, _err = capture_show([repo], capsys, False, True, False)
-    assert row_named(out, "open")[3] == "mid 03-coder"
 
 
 def test_the_highest_step_number_wins(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

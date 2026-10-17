@@ -587,14 +587,19 @@ def _interrupted_text(run: list[dict[str, Any]]) -> str:
 
 
 def _unfinished_step(run: list[dict[str, Any]]) -> str | None:
-    start = _index(run, "step-start")
-    if start is None or _comes_after(_index(run, "step-end"), start):
+    opened: str | None = None
+    for event in run:
+        opened = _open_after(opened, event)
+    return opened
+
+
+def _open_after(opened: str | None, event: dict[str, Any]) -> str | None:
+    kind = event["event"]
+    if kind == "step-start":
+        return _text(event.get("step"))
+    if kind == "step-end":
         return None
-    return _text(run[start].get("step"))
-
-
-def _comes_after(end: int | None, start: int) -> bool:
-    return end is not None and end > start
+    return opened
 
 
 def _events_head(run: list[dict[str, Any]]) -> str | None:
@@ -1441,11 +1446,8 @@ def _display(repo: Path, roots: list[Path]) -> str:
 
 
 def _relative_to(repo: Path, root: Path) -> str | None:
-    try:
-        base = root.resolve()
-        real = repo.resolve()
-    except OSError:
-        return None
+    base = root.resolve()
+    real = repo.resolve()
     if not real.is_relative_to(base):
         return None
     rel = real.relative_to(base).as_posix()
