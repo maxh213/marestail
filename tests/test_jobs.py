@@ -19,6 +19,34 @@ ENV_ROW = (
     "wins over [run] jobs and the per-language worker keys |"
 )
 PICK_SNIPPET = 'jobs.pick(ctx.config, "<section>", "<key>", <today\'s default>)'
+CALLERS = [
+    "marestail.runner",
+    "marestail.gates.py_mutation",
+    "marestail.gates.ts_mutation",
+    "marestail.gates.ex_mutation",
+    "marestail.gates.rb_mutation",
+    "marestail.gates.cs_mutation",
+    "marestail.gates.er_mutation",
+    "marestail.gates.rs_mutation",
+    "marestail.gates.java_mutation",
+]
+SIDEWAYS = [
+    "marestail.context",
+    "marestail.pipeline",
+    "marestail.freeze",
+    "marestail.sonar",
+    "marestail.timeline",
+    "marestail.ran_against",
+    "marestail.worktree",
+    "marestail.nice",
+    "marestail.status",
+    "marestail.report",
+    "marestail.changes",
+    "marestail._location",
+    "marestail.task_file",
+    "marestail.events",
+    "marestail.shell",
+]
 PARAGRAPH_PHRASES = [
     "MARESTAIL_JOBS",
     "[python] mutation_workers",
@@ -239,6 +267,30 @@ def test_jobs_imports_only_config() -> None:
     modules = {str(node.module) for node in tree.body if isinstance(node, ast.ImportFrom)}
     assert plain == {"os", "re"}
     assert modules == {"marestail.config"}
+
+
+def test_jobs_sits_with_context_and_the_contracts_name_its_edges() -> None:
+    text = (ROOT / ".importlinter").read_text()
+    layer = next(line for line in text.splitlines() if "marestail.context" in line and "marestail.ran_against" in line)
+    assert "marestail.jobs" in [part.strip() for part in layer.split(":")]
+    callers = listed(contract_section(text, "jobs-belongs-to-the-run-and-mutation-gates"), "allowed_importers")
+    sideways = listed(contract_section(text, "jobs-reads-config-only"), "forbidden_modules")
+    assert callers == CALLERS
+    assert sideways == SIDEWAYS
+    assert "marestail.config" not in sideways
+
+
+def contract_section(text: str, name: str) -> str:
+    return text.split(f"[importlinter:contract:{name}]", 1)[1].split("\n[", 1)[0]
+
+
+def listed(section: str, heading: str) -> list[str]:
+    found: list[str] = []
+    for line in section.split(heading, 1)[1].splitlines()[1:]:
+        if not line.startswith("    "):
+            break
+        found.append(line.strip())
+    return found
 
 
 def test_conftest_clears_the_variable() -> None:

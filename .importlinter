@@ -17,7 +17,7 @@ layers =
     marestail.remote
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
-    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice : marestail.status
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice : marestail.status : marestail.jobs
     marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events
     marestail.shell
 
@@ -525,6 +525,45 @@ protected_modules =
     marestail.nice
 allowed_importers =
     marestail.runner
+
+[importlinter:contract:jobs-belongs-to-the-run-and-mutation-gates]
+name = The mutation worker count is read only by the runner and the mutation gates
+type = protected
+protected_modules =
+    marestail.jobs
+allowed_importers =
+    marestail.runner
+    marestail.gates.py_mutation
+    marestail.gates.ts_mutation
+    marestail.gates.ex_mutation
+    marestail.gates.rb_mutation
+    marestail.gates.cs_mutation
+    marestail.gates.er_mutation
+    marestail.gates.rs_mutation
+    marestail.gates.java_mutation
+as_packages = false
+
+[importlinter:contract:jobs-reads-config-only]
+name = The worker count reads the config and the environment, never a sibling module or another foundation
+type = forbidden
+source_modules =
+    marestail.jobs
+forbidden_modules =
+    marestail.context
+    marestail.pipeline
+    marestail.freeze
+    marestail.sonar
+    marestail.timeline
+    marestail.ran_against
+    marestail.worktree
+    marestail.nice
+    marestail.status
+    marestail.report
+    marestail.changes
+    marestail._location
+    marestail.task_file
+    marestail.events
+    marestail.shell
 
 [importlinter:contract:hunk-check-belongs-to-runner]
 name = The hyper hunk check and the blast review are asked for only by the runner
