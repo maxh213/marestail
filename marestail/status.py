@@ -566,7 +566,7 @@ def _dead_text(run: list[dict[str, Any]]) -> str:
     if _was_interrupted(run):
         return _interrupted_text(run)
     opened = _unfinished_step(run)
-    if opened:
+    if opened is not None:
         return f"mid {opened}"
     ended = _last(run, "step-end")
     if ended is not None:
