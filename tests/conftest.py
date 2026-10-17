@@ -28,6 +28,8 @@ MUTMUT_COPIES = (
     "AGENTS.md",
     "tools",
     "bin",
+    ".claude",
+    ".agents",
 )
 
 

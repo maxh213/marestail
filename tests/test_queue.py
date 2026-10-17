@@ -1731,8 +1731,8 @@ def test_task_title_fallback() -> None:
 
 def test_after_child_finish_push_only_no_pr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     log_path = tmp_path / "queue.log"
-    pushed: list[tuple[str, str]] = []
-    monkeypatch.setattr(queue, "_push_branch", lambda task_id, branch, remote, root, log_path: pushed.append((task_id, branch)))
+    pushed: list[tuple[str, str, Path]] = []
+    monkeypatch.setattr(queue, "_push_branch", lambda task_id, branch, remote, root, log_path: pushed.append((task_id, branch, root)))
     queue._after_child_finish(
         TaskFile("a", Path("tasks/a.md"), (), None, "", True),
         "marestail/a",
@@ -1746,7 +1746,7 @@ def test_after_child_finish_push_only_no_pr(tmp_path: Path, monkeypatch: pytest.
         tmp_path,
         log_path,
     )
-    assert pushed == [("a", "marestail/a")]
+    assert pushed == [("a", "marestail/a", tmp_path)]
 
 
 def _sigint_after_done(state: dict[str, Any]) -> None:
@@ -2347,3 +2347,36 @@ def test_git_head_reads_the_given_repo(tmp_path: Path, monkeypatch: pytest.Monke
     repo, _ = setup_bare_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert queue._git_head(repo) == git(repo, "rev-parse", "HEAD").strip()
+
+
+def test_emit_outcome_log_records_outcome_and_uses_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen_roots: list[Path] = []
+
+    def spy_git(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+        seen_roots.append(root)
+        return subprocess.CompletedProcess(["git"], 0, stdout="abcdef1234567890\n")
+
+    monkeypatch.setattr(queue, "_git_run", spy_git)
+    log_path = tmp_path / "queue.log"
+    repo = tmp_path / "repo"
+    queue._emit_outcome_log(log_path, "t1", "done", None, 5, repo)
+    assert seen_roots == [repo, repo]
+    assert "done t1 abcdef1234567890 5" in log_path.read_text()
+    queue._emit_outcome_log(log_path, "t2", "stopped", "critic rejected", 2, repo)
+    assert "stopped t2 critic rejected" in log_path.read_text()
+
+
+def test_update_state_record_handles_empty_state_and_passes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen_roots: list[Path] = []
+
+    def spy_git(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+        seen_roots.append(root)
+        return subprocess.CompletedProcess(["git"], 0, stdout="feedface1234\n")
+
+    monkeypatch.setattr(queue, "_git_run", spy_git)
+    state: dict[str, Any] = {}
+    state_path = tmp_path / "state.json"
+    repo = tmp_path / "repo"
+    queue._update_state_record("t1", "branch1", "critic", {"status": "stopped", "exit_code": 1, "reason": "why"}, state, state_path, repo)
+    assert seen_roots == [repo]
+    assert state["tasks"]["t1"]["status"] == "stopped"

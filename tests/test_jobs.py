@@ -263,8 +263,10 @@ def test_both_add_language_skills_carry_the_rule() -> None:
 
 def test_jobs_imports_only_config() -> None:
     tree = ast.parse((ROOT / "marestail" / "jobs.py").read_text())
-    plain = {alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names}
-    modules = {str(node.module) for node in tree.body if isinstance(node, ast.ImportFrom)}
+    plain = {
+        alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names if not alias.name.startswith("mutmut")
+    }
+    modules = {str(node.module) for node in tree.body if isinstance(node, ast.ImportFrom) if not str(node.module).startswith("mutmut")}
     assert plain == {"os", "re"}
     assert modules == {"marestail.config"}
 
