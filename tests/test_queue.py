@@ -14,6 +14,8 @@ import pytest
 from marestail import cli, queue
 from marestail import config as config_module
 from marestail import status as status_module
+from marestail.pipeline import Step
+from marestail.pipeline import window as pipeline_window
 from marestail.task_file import TaskFile
 from tests.conftest import commit_all, git
 
@@ -2236,11 +2238,10 @@ def test_commit_task_copy_creates_parents_and_commits(tmp_path: Path, monkeypatc
 
 def test_accept_roles_passes_hyper_through_to_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str | None, str | None, str | None]] = []
-    real = queue.window
 
-    def spy(start: str | None, stop: str | None, mode: str | None = None, visual: bool = False) -> list[Any]:
+    def spy(start: str | None, stop: str | None, mode: str | None = None, visual: bool = False) -> list[Step]:
         calls.append((start, stop, mode))
-        return real(start, stop, mode, visual)
+        return pipeline_window(start, stop, mode, visual)
 
     monkeypatch.setattr(queue, "window", spy)
     assert queue._accept_roles("blast", "qa", "hyper") == 0
