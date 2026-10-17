@@ -178,13 +178,10 @@ def _execute_queue(
     tasks, check_code = _prepare_tasks(paths, root)
     if check_code != 0:
         return check_code
-    state_file = queue_dir / "state.json"
-    state_code, state = _check_load_state(state_file, root)
-    if state_code != 0:
-        return state_code
-    pre_code, branch, push_on, pr_on, remote, base = _pre_flight(root, tasks, retry, state, here, queue_dir)
+    pre_code, branch, push_on, pr_on, remote, base, state = _pre_flight(root, tasks, retry, here, queue_dir)
     if pre_code != 0:
         return pre_code
+    state_file = queue_dir / "state.json"
     git_opts = _GitOptions(branch, remote, base, push_on, pr_on, here)
     child_opts = _ChildOptions(agent, model, effort, scope, focus, start, stop)
     opts = _QueueOptions(root, queue_dir, queue_dir / _QUEUE_LOG_NAME, state_file, retry, git_opts, child_opts)
@@ -260,12 +257,27 @@ def _is_gitignored(path: Path, root: Path) -> bool:
 
 
 def _pre_flight(
-    root: Path, tasks: list[TaskFile], retry: list[str], state: dict[str, Any], here: bool, queue_dir: Path
-) -> tuple[int, str, bool, bool, str, str]:
+    root: Path, tasks: list[TaskFile], retry: list[str], here: bool, queue_dir: Path
+) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
     code, branch = _pre_flight_tree(root)
     if code != 0:
-        return code, "", False, False, "", ""
-    return _pre_flight_config(root, tasks, retry, state, here, queue_dir, branch)
+        return _failed_flight(code)
+    state_code, state = _check_load_state(queue_dir / "state.json", root)
+    if state_code != 0:
+        return _failed_flight(state_code)
+    ready = _pre_flight_config(root, tasks, retry, state, here, queue_dir, branch)
+    return _flight_ready(ready, state)
+
+
+def _failed_flight(code: int) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
+    return code, "", False, False, "", "", {}
+
+
+def _flight_ready(
+    ready: tuple[int, str, bool, bool, str, str], state: dict[str, Any]
+) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
+    code, branch, push_on, pr_on, remote, base = ready
+    return code, branch, push_on, pr_on, remote, base, state
 
 
 def _pre_flight_tree(root: Path) -> tuple[int, str]:
@@ -711,10 +723,17 @@ def _exit_verdict(ordered: list[TaskFile], state: dict[str, Any]) -> int:
 def _iterate_tasks(ordered: list[TaskFile], state: dict[str, Any], opts: _QueueOptions) -> int | None:
     start_used = False
     for t in ordered:
+        _stop_if_signalled()
         code, start_used, stop_now = _handle_task_in_loop(t, ordered, state, opts, start_used)
         if stop_now:
             return code
     return None
+
+
+def _stop_if_signalled() -> None:
+    signum = _SIG_STATE.received
+    if signum is not None:
+        sys.exit(128 + signum)
 
 
 def _handle_task_in_loop(
@@ -724,8 +743,6 @@ def _handle_task_in_loop(
     opts: _QueueOptions,
     start_used: bool,
 ) -> tuple[int, bool, bool]:
-    if _SIG_STATE.received is not None:
-        sys.exit(128 + _SIG_STATE.received)
     if _is_done(task.id, state):
         _log_event(opts.log_path, f"skip {task.id} done")
         return 0, start_used, False
@@ -779,9 +796,21 @@ def _step_one_task(
         return 0, start_used
     action, reason = _determine_initial_action(task.id, state, opts.retry, opts.root)
     if action in ("stopped", "failed"):
-        _record_persisted_state(task.id, action, reason, state, opts.state_file, opts.log_path)
+        _keep_sticky(task.id, action, reason, state, opts.state_file, opts.log_path)
         return 0, start_used
     return _execute_child_flow(task, ordered, state, opts, start_used)
+
+
+def _keep_sticky(task_id: str, action: str, reason: str | None, state: dict[str, Any], state_path: Path, log_path: Path) -> None:
+    if _already_sticky(state, task_id, action):
+        _log_event(log_path, f"{action} {task_id} {reason}")
+        return
+    _record_persisted_state(task_id, action, reason, state, state_path, log_path)
+
+
+def _already_sticky(state: dict[str, Any], task_id: str, action: str) -> bool:
+    entry = state.get("tasks", {}).get(task_id)
+    return isinstance(entry, dict) and entry.get("status") == action
 
 
 def _determine_initial_action(task_id: str, state: dict[str, Any], retry: list[str], root: Path) -> tuple[str, str | None]:
@@ -981,13 +1010,30 @@ def _branch_exists_locally(name: str, root: Path) -> bool:
 
 
 def _commit_task_file_if_needed(task: TaskFile, root: Path, expected: str) -> None:
-    rel = task.path.relative_to(root) if task.path.is_absolute() else task.path
-    res = _git_run(["rev-parse", "--verify", "--quiet", f"HEAD:{rel}"], root)
-    if res.returncode != 0:
-        task.path.parent.mkdir(parents=True, exist_ok=True)
-        task.path.write_text(expected)
-        _git_run(["add", str(rel)], root)
-        _git_run(["commit", "--quiet", "-m", f"queue: task {task.id}", "--", str(rel)], root)
+    if _worktree_matches(task.path, expected):
+        return
+    _commit_task_copy(task, root, expected)
+
+
+def _worktree_matches(path: Path, expected: str) -> bool:
+    try:
+        return path.read_text() == expected
+    except OSError:
+        return False
+
+
+def _commit_task_copy(task: TaskFile, root: Path, expected: str) -> None:
+    rel = _relative_task(task, root)
+    task.path.parent.mkdir(parents=True, exist_ok=True)
+    task.path.write_text(expected)
+    _git_run(["add", "--", str(rel)], root)
+    _git_run(["commit", "--quiet", "-m", f"queue: task {task.id}", "--", str(rel)], root)
+
+
+def _relative_task(task: TaskFile, root: Path) -> Path:
+    if task.path.is_absolute():
+        return task.path.relative_to(root)
+    return task.path
 
 
 def _choose_start_role(task_id: str, start: str | None, start_used: bool, retry: list[str], root: Path) -> tuple[str | None, bool]:
@@ -1148,6 +1194,7 @@ def _after_child_finish(
     root: Path,
     log_path: Path,
 ) -> None:
+    _stop_if_signalled()
     if push_on:
         _push_branch(task.id, branch, remote, root, log_path)
         if pr_on and task_status == "done":
@@ -1168,11 +1215,12 @@ def _maybe_open_pr(
     res = _run_gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--jq", "length"], root)
     if res.stdout.strip() != "0":
         return
-    pr_file = root / _MARESTAIL_DIR / "queue" / f"pr-{task.id}.md"
+    rel_body = f"{_MARESTAIL_DIR}/queue/pr-{task.id}.md"
+    pr_file = root / rel_body
     pr_file.parent.mkdir(parents=True, exist_ok=True)
     pr_file.write_text(_format_pr_body(task.id, branch, ordered, state))
     base_branch = base.split("/", 1)[1] if "/" in base else base
-    cmd = ["pr", "create", "--base", base_branch, "--head", branch, "--title", _task_title(task), "--body-file", str(pr_file)]
+    cmd = ["pr", "create", "--base", base_branch, "--head", branch, "--title", _task_title(task), "--body-file", rel_body]
     created = _run_gh(cmd, root, {"GH_PROMPT_DISABLED": "1"})
     if created.returncode == 0:
         _log_event(log_path, f"pr-opened {task.id} {branch}")
