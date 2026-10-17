@@ -669,6 +669,34 @@ def test_squash_merge_leaves_c_blocked(tmp_path: Path, monkeypatch: pytest.Monke
     assert state["c"]["reason"] == f"waiting for a ({short}) to be merged into origin/main"
 
 
+def _checkout(repo: Path) -> tuple[str, str]:
+    branch = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip()
+    tip = git(repo, "rev-parse", "HEAD").strip()
+    return branch, tip
+
+
+def _plant_dep_tip(repo: Path, branch: str) -> str:
+    git(repo, "switch", "-q", "-c", branch)
+    (repo / "dep-tip.txt").write_text("not main\n")
+    git(repo, "add", "dep-tip.txt")
+    git(repo, "commit", "-q", "-m", "dep tip")
+    tip = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "switch", "-q", "main")
+    return tip
+
+
+def _watch_child_checkout(
+    repo: Path, inner: Callable[[list[str], Path, dict[str, str]], FakeChild]
+) -> tuple[Callable[[list[str], Path, dict[str, str]], FakeChild], list[tuple[str, str]]]:
+    seen: list[tuple[str, str]] = []
+
+    def _start(argv: list[str], cwd: Path, env: dict[str, str]) -> FakeChild:
+        seen.append(_checkout(repo))
+        return inner(argv, cwd, env)
+
+    return _start, seen
+
+
 @pytest.mark.parametrize(
     "stack,flags,rec,expected_outcome",
     [
@@ -694,6 +722,8 @@ def test_dependency_outside_the_set(
     write_task_file(repo / "tasks" / "e.md", "e", ["021-dep"], stack=stack)
     commit_all(repo, "add e")
     git(repo, "push", "-q", "origin", "main")
+    start = _checkout(repo)
+    dep_tip = _outside_dep_tip(repo, flags, expected_outcome)
     res_kind, b_name, h_sha, ev = rec
     record: dict[str, Any] = {
         "task": "021-dep",
@@ -706,21 +736,68 @@ def test_dependency_outside_the_set(
     orig_read_run = status_module.read_run
     monkeypatch.setattr(status_module, "read_run", lambda _r, t: record if t == "021-dep" else orig_read_run(_r, t))
     fake_start, recorded = make_child_seam(repo, {})
-    monkeypatch.setattr(queue, "_start_child", fake_start)
+    watching, seen = _watch_child_checkout(repo, fake_start)
+    monkeypatch.setattr(queue, "_start_child", watching)
     code = queue.run_queue(["tasks/e.md"], None, None, "--here" in flags, [], None, None, None, None, [])
+    _assert_outside_dependency(repo, expected_outcome, flags, code, recorded, seen, start, dep_tip)
+
+
+def _outside_dep_tip(repo: Path, flags: list[str], expected_outcome: str) -> str:
+    if expected_outcome != "runs" or "--here" in flags:
+        return ""
+    tip = _plant_dep_tip(repo, "marestail/021-dep")
+    assert tip != git(repo, "rev-parse", "main").strip()
+    return tip
+
+
+def _assert_outside_dependency(
+    repo: Path,
+    expected_outcome: str,
+    flags: list[str],
+    code: int,
+    recorded: list[list[str]],
+    seen: list[tuple[str, str]],
+    start: tuple[str, str],
+    dep_tip: str,
+) -> None:
+    if expected_outcome == "runs" and "--here" not in flags:
+        _assert_stacked_outside_dep(repo, code, recorded, seen, dep_tip)
+        return
     if expected_outcome == "runs":
-        assert code == 0
-        assert len(recorded) == 1
-    elif expected_outcome == "blocked_not_completed":
-        assert code == 1
-        assert len(recorded) == 0
-        st = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]["e"]
-        assert st["reason"] == "021-dep is not in this queue and has not completed"
-    elif expected_outcome == "blocked_no_branch":
-        assert code == 1
-        assert len(recorded) == 0
-        st = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]["e"]
-        assert st["reason"] == "021-dep has no recorded branch; run it with --here or rerun it through the queue"
+        _assert_here_legacy_dep(repo, code, recorded, seen, start)
+        return
+    _assert_outside_blocked(repo, expected_outcome, code, recorded)
+
+
+def _assert_stacked_outside_dep(repo: Path, code: int, recorded: list[list[str]], seen: list[tuple[str, str]], dep_tip: str) -> None:
+    assert code == 0
+    assert len(recorded) == 1
+    assert seen == [("marestail/021-dep", dep_tip)]
+    assert git(repo, "rev-parse", "marestail/021-dep~1").strip() == dep_tip
+    assert git(repo, "log", "-1", "--format=%s", "marestail/021-dep").strip() == "commit e"
+
+
+def _assert_here_legacy_dep(
+    repo: Path,
+    code: int,
+    recorded: list[list[str]],
+    seen: list[tuple[str, str]],
+    start: tuple[str, str],
+) -> None:
+    assert code == 0
+    assert len(recorded) == 1
+    assert seen == [start]
+    assert _ref_missing(repo, "marestail/e")
+
+
+def _assert_outside_blocked(repo: Path, expected_outcome: str, code: int, recorded: list[list[str]]) -> None:
+    assert code == 1
+    assert len(recorded) == 0
+    reason = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]["e"]["reason"]
+    if expected_outcome == "blocked_not_completed":
+        assert reason == "021-dep is not in this queue and has not completed"
+        return
+    assert reason == "021-dep has no recorded branch; run it with --here or rerun it through the queue"
 
 
 def test_missing_task_file_committed_onto_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
