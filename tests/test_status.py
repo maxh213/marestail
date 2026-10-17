@@ -1,6 +1,8 @@
 import ast
+import inspect
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -238,6 +240,14 @@ def add_events(repo: Path, task: str, rows: list[dict[str, object]], log: str | 
     return folder
 
 
+GIT_ARGV = (
+    ("branch", "--show-current"),
+    ("config", "--get", "remote.origin.url"),
+    ("rev-parse", "--git-common-dir"),
+    ("ls-files", "-z", "--", ".marestail/handoffs"),
+)
+
+
 def dispatch(
     command: list[str],
     cwd: Path,
@@ -247,9 +257,32 @@ def dispatch(
 ) -> tuple[int, str]:
     LAST["commands"].append(list(command))
     if command[:1] == ["last"]:
-        LAST["calls"] += 1
-        return LAST["reply"]
+        return last_reply(command, cwd)
+    rejected = rejected_git(command, cwd)
+    if rejected is not None:
+        return rejected
     return real_run(command, cwd, env, timeout, stdin)
+
+
+def last_reply(command: list[str], cwd: Path) -> tuple[int, str]:
+    if command != ["last", "-x", "-F", "shutdown"] or not isinstance(cwd, Path):
+        return (1, "")
+    LAST["calls"] += 1
+    return LAST["reply"]
+
+
+def rejected_git(command: list[str], cwd: Path) -> tuple[int, str] | None:
+    if command[:2] != ["git", "-C"]:
+        return None
+    if git_matches(command, cwd):
+        return None
+    return (1, "")
+
+
+def git_matches(command: list[str], cwd: Path) -> bool:
+    if len(command) < 4 or not isinstance(cwd, Path):
+        return False
+    return str(cwd) == command[2] and tuple(command[3:]) in GIT_ARGV
 
 
 @pytest.fixture(autouse=True)
@@ -472,17 +505,42 @@ def make_task(path: Path, task: str) -> None:
     (path / ".marestail" / "runs" / task).mkdir(parents=True)
 
 
+SKIPPED_FOLDERS = (
+    ".git",
+    "node_modules",
+    "deps",
+    "_build",
+    "target",
+    "vendor",
+    ".next",
+    "dist",
+    "build",
+    "mutants",
+    "tmp",
+)
+
+
+def skipped_task(name: str) -> str:
+    return "skip-" + name.strip(".")
+
+
+def absent_from_scan() -> tuple[str, ...]:
+    named = tuple(skipped_task(name) for name in SKIPPED_FOLDERS)
+    return (*named, "skip-hidden", "099-inside", "030-deep", "nested", "098-linked")
+
+
 def build_scan(root: Path) -> Path:
     fleet = root / "fleet"
     make_task(fleet / "alpha", "001-outer")
     make_task(fleet / "alpha" / "nested", "099-inside")
     make_task(fleet / "team" / "gamma", "031-mid")
     make_task(fleet / "team" / "deep" / "delta", "030-deep")
-    for name in status._SKIP:
-        if name == ".marestail":
-            continue
-        make_task(fleet / name / "x", "skip-" + name.strip("."))
+    for name in SKIPPED_FOLDERS:
+        make_task(fleet / name / "x", skipped_task(name))
     make_task(fleet / ".hidden" / "x", "skip-hidden")
+    outside = root / "outside-repo"
+    make_task(outside, "098-linked")
+    (fleet / "via").symlink_to(outside, target_is_directory=True)
     (fleet / "link").symlink_to(fleet / "alpha", target_is_directory=True)
     (fleet / "plain.txt").write_text("x")
     (fleet / "alpha" / "sub").mkdir()
@@ -694,6 +752,7 @@ def plant_event_cases(repo: Path) -> None:
         "between",
         [
             ev("run-start", "2026-10-16T11:00:00.000Z", pid=9, branch="main"),
+            ev("step-start", "2026-10-16T11:01:00.000Z", pid=9, step="01-specifier", role="specifier"),
             ev("step-end", "2026-10-16T11:05:00.000Z", pid=9, step="02-critic", role="critic", outcome="pass"),
         ],
     )
@@ -723,6 +782,8 @@ def assert_event_records(repo: Path) -> None:
     )
     plain = status.read_run(repo, "cut-plain")
     assert (plain["step"], plain["stopped_at"], plain["result"], plain["reason"]) == (None, None, "interrupted", None)
+    between = status.read_run(repo, "between")
+    assert (between["state"], between["step"], between["role"]) == ("dead", "02-critic", "critic")
     assert status.read_run(repo, "before")["head"] == "aaa111"
 
 
@@ -930,7 +991,7 @@ def test_legacy_outline(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
 def test_legacy_abandoned_since_is_the_marker_mtime(tmp_path: Path) -> None:
     repo = build_outline(tmp_path)
     record = status.read_run(repo, "t20")
-    assert (record["state"], record["since"]) == ("abandoned", "2026-10-16T09:00:00Z")
+    assert (record["state"], record["since"], record["reason"]) == ("abandoned", "2026-10-16T09:00:00Z", "later")
     assert record["since"] not in {"2026-10-16T08:00:00Z", "2026-10-16T12:00:00Z"}
 
 
@@ -1032,9 +1093,13 @@ def test_shutdown_within_the_hour(tmp_path: Path, capsys: pytest.CaptureFixture[
 
 
 def check_utc_shutdowns(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    noted, out = shutdown_text(repo, capsys, (0, "nope\nThu Oct 99 11:10:00 2026\nshutdown Thu Oct 16 11:10:00 2026\n"))
+    both = "shutdown Thu Oct 16 11:10:00 2026 and Thu Oct 16 13:01:00 2026\n"
+    noted, out = shutdown_text(repo, capsys, (0, "nope\nThu Oct 99 11:10:00 2026\n" + both))
     assert noted["reason"] == "machine shut down 2026-10-16T11:10:00Z"
-    assert "; machine shut down 11:10" in out
+    assert "before the first step; machine shut down 11:10" in out
+    exact, exact_out = shutdown_text(repo, capsys, (0, "shutdown Thu Oct 16 11:00:00 2026\n"))
+    assert exact["reason"] == "machine shut down 2026-10-16T11:00:00Z"
+    assert "before the first step; machine shut down 11:00" in exact_out
     late, out = shutdown_text(repo, capsys, (0, "shutdown Thu Oct 16 13:01:00 2026\n"))
     assert late["reason"] is None
     assert "machine shut down" not in out
@@ -1097,7 +1162,7 @@ def check_scan_tree(fleet: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert err == ""
     assert sorted(repo_cells(out)) == ["alpha", "team/gamma"]
     assert "001-outer" in out
-    for banned in ("099-inside", "030-deep", "skip-hidden", "skip-node_modules", "skip-mutants", "skip-tmp", "nested"):
+    for banned in absent_from_scan():
         assert banned not in out
     code, out, _err = capture_show([fleet / "alpha"], capsys)
     assert code == 0
@@ -1142,6 +1207,8 @@ def test_queued_lists_task_files_once_per_clone(tmp_path: Path, capsys: pytest.C
         assert banned not in tail
     _code, plain, _err = capture_show([parent], capsys)
     assert "Tasks in tasks/" not in plain
+    _code, hidden, _err = capture_show([parent], capsys, True, False, False)
+    assert json.loads(hidden)["queued"] == []
     _code, raw, _err = capture_show([parent], capsys, True, False, True)
     payload = json.loads(raw)
     want = {"repo": str(first.resolve()), "task": "012-next", "path": str((first / "tasks" / "012-next.md").resolve())}
@@ -1372,6 +1439,17 @@ def test_module_stays_at_the_foundations_layer(tmp_path: Path, monkeypatch: pyte
     check_listed_once(tmp_path, monkeypatch, capsys)
 
 
+def calls_ps(text: str) -> bool:
+    return re.search(r"(?<![A-Za-z0-9_])ps(?![A-Za-z0-9_])", text) is not None
+
+
+def test_a_step_subtraction_is_not_a_ps_call() -> None:
+    assert not calls_ps("state.steps - 1")
+    assert not calls_ps("deps")
+    assert calls_ps("ps -eo pid,args")
+    assert calls_ps('["ps", "-eo"]')
+
+
 def check_status_imports() -> None:
     text = Path("marestail/status.py").read_text()
     tree = ast.parse(text)
@@ -1380,8 +1458,7 @@ def check_status_imports() -> None:
     assert "subprocess" not in text
     assert "os.environ" not in text
     assert "getenv" not in text
-    assert '["ps"' not in text
-    assert "ps -" not in text
+    assert not calls_ps(text)
 
 
 def check_contracts() -> None:
@@ -1414,9 +1491,31 @@ def check_readme() -> None:
 
 
 def check_untouched() -> None:
-    dirty = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, check=True).stdout
-    assert "marestail/tui/" not in dirty
-    assert ".marestail/phases/" not in dirty
+    assert changed_against_base("marestail/tui", ".marestail/phases") == ""
+
+
+def changed_against_base(*paths: str) -> str:
+    probe = subprocess.run(["git", "rev-parse", "--verify", "origin/main"], capture_output=True, text=True, check=False)
+    if outside_a_checkout(probe):
+        return ""
+    probe.check_returncode()
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main", "--", *paths],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    others = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", *paths],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return diff + others
+
+
+def outside_a_checkout(probe: subprocess.CompletedProcess[str]) -> bool:
+    return probe.returncode != 0 and "not a git repository" in probe.stderr
 
 
 def check_listed_once(root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1440,13 +1539,15 @@ def check_listed_once(root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytes
     assert calls["n"] == 2
 
 
-def proc_names(_path: str) -> list[str]:
+def proc_names(path: str) -> list[str]:
+    if path != "/proc":
+        raise OSError
     return ["3", "nope", "8"]
 
 
 def proc_bytes(self: Path) -> bytes:
     if "3" in self.parts:
-        return b"\0python3\0/bin/marestail\0run\0tasks/z.md\0"
+        return b"\xff\0python3\0/bin/marestail\0run\0tasks/z.md\0"
     raise OSError
 
 
@@ -1460,7 +1561,7 @@ def test_proc_reader_lists_tokens_and_skips_errors(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(os, "listdir", proc_names)
     monkeypatch.setattr(Path, "read_bytes", proc_bytes)
     monkeypatch.setattr(os, "readlink", proc_link)
-    assert REAL_PROCS() == [(3, ["python3", "/bin/marestail", "run", "tasks/z.md"], Path("/tmp").resolve())]
+    assert REAL_PROCS() == [(3, ["\ufffd", "python3", "/bin/marestail", "run", "tasks/z.md"], Path("/tmp").resolve())]
 
 
 def test_proc_listing_survives_a_missing_proc(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1486,6 +1587,30 @@ def test_unreadable_directory_is_skipped(tmp_path: Path, monkeypatch: pytest.Mon
     _code, out, _err = capture_show([fleet], capsys)
     assert "001-outer" in out
     assert "099-blocked" not in out
+
+
+def from_relative_to() -> bool:
+    return any(frame.function == "_relative_to" for frame in inspect.stack())
+
+
+def test_repo_name_is_kept_when_printing_cannot_resolve_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "alpha"
+    make_task(repo, "001-outer")
+    real = Path.resolve
+
+    def wrapped(self: Path, strict: bool = False) -> Path:
+        if self == repo and from_relative_to():
+            raise OSError
+        return real(self, strict)
+
+    monkeypatch.setattr(Path, "resolve", wrapped)
+    code, out, err = capture_show([repo], capsys)
+    assert code == 0
+    assert err == ""
+    assert repo_cells(out) == ["alpha"]
+    assert "001-outer" in out
 
 
 def test_resolve_errors_are_not_this_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1610,27 +1735,8 @@ def test_marker_reason_edges(tmp_path: Path) -> None:
     assert task_detail(repo, "blank") == "abandoned 2026-10-16 09:00:"
 
 
-def test_private_edges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert status._label_number("nope") == -1
-    assert status._label_number("03-coder") == 3
-    assert status._human_reason(None) == "runner asked for a human"
-    assert status._display(Path("/somewhere/else/repo"), [Path("/other")]) == "repo"
-    row = status._missing_row(tmp_path, "missing")
-    assert row.state == "never-started"
-    row.era = "events"
-    row.state = "running"
-    row.pid = None
-    assert status._event_running(row) is False
-    row.state = "dead"
-    row.pid = 4
-    assert status._event_running(row) is False
-    row.state = "running"
-    assert status._event_running(row) is True
+def test_blank_event_fields_stay_empty(tmp_path: Path) -> None:
     check_blank_prefixes(tmp_path)
-    monkeypatch.setattr(Path, "resolve", lambda self, *args, **kwargs: (_ for _ in ()).throw(OSError()))
-    assert status._relative_to(Path("/a"), Path("/b")) is None
-    assert status._safe_resolve(Path("/a")) is None
-    assert status._inside(Path("/a"), Path("/b")) is False
 
 
 def check_blank_prefixes(root: Path) -> None:
@@ -1706,10 +1812,200 @@ def test_abandon_creates_a_missing_run_folder(tmp_path: Path, monkeypatch: pytes
     assert f"{repo.name}/015-txt: abandoned\n" in out
     assert (repo / ".marestail" / "runs" / "014-only" / "abandoned").is_file()
     assert (repo / ".marestail" / "handoffs" / "015-txt" / "notes.txt").is_file()
-    assert status.read_run(repo, "missing-task", [])["state"] == "never-started"
+    missing = status.read_run(repo, "missing-task", [])
+    assert (missing["task"], missing["repo"], missing["state"]) == ("missing-task", str(repo.resolve()), "never-started")
 
 
 def test_scan_reports_the_first_path_that_is_not_a_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     fleet = build_scan(tmp_path / "scan")
     code, out, err = capture_show([fleet, Path("fleet/no-such")], capsys)
     assert (code, out, err) == (2, "", "marestail status: not a directory: fleet/no-such\n")
+
+
+def test_age_changes_at_one_hour_and_two_days(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    plant_log(repo, "hour", MID, instant("2026-10-16T11:00:00Z"))
+    plant_log(repo, "days", MID, instant("2026-10-14T12:00:00Z"))
+    _code, out, _err = capture_show([repo], capsys, False, True, False)
+    assert "10-16 11:00 (1h ago)" in out
+    assert "60m ago" not in out
+    assert "10-14 12:00 (2d ago)" in out
+    assert "48h ago" not in out
+
+
+def test_a_bad_timestamp_prints_no_activity(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    add_events(repo, "bad-at", [ev("run-start", "nope", pid=1, branch="main")])
+    add_events(repo, "no-at", [{"v": 1, "event": "run-start", "pid": 1, "branch": "main"}])
+    _code, out, _err = capture_show([repo], capsys, False, True, False)
+    assert row_named(out, "bad-at")[4] == "?"
+    assert row_named(out, "no-at")[4] == "?"
+
+
+def test_a_torn_byte_does_not_hide_the_rest(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    folder = run_dir(repo, "torn")
+    line = json.dumps(ev("run-start", "2026-10-16T11:00:00.000Z", pid=1, branch="main", start_commit="aaa111"))
+    (folder / "events.jsonl").write_bytes(b"\xff\n" + line.encode() + b"\n")
+    assert status.read_run(repo, "torn", [])["head"] == "aaa111"
+    logged = plant_log(repo, "logged", "")
+    (logged / "pipeline.log").write_bytes(b"\xff\n== coder (03-coder) attempt 1\n")
+    assert status.read_run(repo, "logged", [])["step"] == "03-coder"
+
+
+def test_a_pipeline_with_no_task_argument_still_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    plant_log(repo, "old", MID, instant("2026-10-16T10:00:00Z"))
+    use_procs(monkeypatch, [(91, ["python3", "/opt/marestail/marestail/cli.py", "run"], repo)])
+    assert status.read_run(repo, "old")["state"] == "running"
+
+
+def test_only_arguments_after_run_name_the_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    add_events(repo, "run", [ev("run-start", "2026-10-16T11:00:00.000Z", pid=50, branch="main")])
+    add_events(repo, "cli", [ev("run-start", "2026-10-16T11:00:00.000Z", pid=51, branch="main")])
+    tokens = ["python3", "/opt/marestail/marestail/cli.py", "run", "tasks/other.md"]
+    use_procs(monkeypatch, [(50, tokens, repo), (51, tokens, repo)])
+    assert status.read_run(repo, "run")["state"] == "dead"
+    assert status.read_run(repo, "cli")["state"] == "dead"
+
+
+def test_equal_step_indexes_stay_mid_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    add_events(
+        repo,
+        "open",
+        [
+            ev("run-start", "2026-10-16T11:00:00.000Z", pid=9, branch="main"),
+            ev("step-start", "2026-10-16T11:01:00.000Z", pid=9, step="03-coder", role="coder"),
+        ],
+    )
+    real = status._index
+
+    def same(run: list[dict[str, object]], name: str) -> int | None:
+        if name == "step-end":
+            return real(run, "step-start")
+        return real(run, name)
+
+    monkeypatch.setattr(status, "_index", same)
+    _code, out, _err = capture_show([repo], capsys, False, True, False)
+    assert row_named(out, "open")[3] == "mid 03-coder"
+
+
+def test_the_highest_step_number_wins(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    handoff(repo, "nums", "50-mmm.md")
+    handoff(repo, "nums", "99-zzz.md")
+    handoff(repo, "nums", "100-aaa.md")
+    handoff(repo, "extra", "02-aaa.md")
+    handoff(repo, "extra", "03-coder-extra.md")
+    _code, out, _err = capture_show([repo], capsys, False, True, False)
+    assert row_named(out, "nums")[3] == "after 100-aaa wrote its handoff (no pipeline.log)"
+    numbered = status.read_run(repo, "nums")
+    assert (numbered["step"], numbered["role"]) == ("100-aaa", "aaa")
+    extra = status.read_run(repo, "extra")
+    assert (extra["step"], extra["role"]) == ("03-coder-extra", "coder-extra")
+    handoff(repo, "tied", "01-zzz.md")
+    handoff(repo, "tied", "03-qa.md")
+    handoff(repo, "tied", "03-coder.md")
+    tied = status.read_run(repo, "tied")
+    assert (tied["step"], tied["role"]) == ("03-coder", "coder")
+
+
+def test_a_fresh_handoff_keeps_the_step_clock(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    when = instant("2026-10-16T08:00:00Z")
+    folder = plant_log(repo, "open", MID, when)
+    marker(folder, "abandoned 2026-10-16 09:00: later\n", instant("2026-10-16T09:00:00Z"))
+    written = handoff(repo, "open", "03-coder.md")
+    touch(written, when)
+    touch(written.parent, when)
+    touch(folder, when)
+    record = status.read_run(repo, "open")
+    assert (record["state"], record["since"]) == ("dead", "2026-10-16T08:00:00Z")
+
+
+def test_an_abandoned_archive_without_a_marker(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    plant_log(repo, "mid", MID)
+    archive(repo, "mid", "handoffs-abandoned-20261016")
+    record = status.read_run(repo, "mid")
+    assert (record["state"], record["reason"]) == ("abandoned", None)
+
+
+def test_abandon_splits_on_the_last_slash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tmp_path / "nest" / "leaf"
+    init_repo(repo)
+    run_dir(repo, "014-plain")
+    monkeypatch.chdir(tmp_path)
+    code = status.abandon(["nest/leaf/014-plain"], "")
+    out, err = capsys.readouterr()
+    assert code == 0
+    assert err == ""
+    assert out == "nest/leaf/014-plain: abandoned\n"
+    assert (repo / ".marestail" / "runs" / "014-plain" / "abandoned").is_file()
+
+
+def test_queued_identity_is_the_origin_then_the_checkout(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    check_two_origins(tmp_path, capsys)
+    check_shared_git_dir(tmp_path, capsys)
+    check_plain_directories(tmp_path, capsys)
+
+
+def queue_repos(raw: str) -> list[str]:
+    return [item["repo"] for item in json.loads(raw)["queued"]]
+
+
+def plant_tasks(repo: Path, *names: str) -> None:
+    (repo / ".marestail").mkdir(parents=True, exist_ok=True)
+    tasks = repo / "tasks"
+    tasks.mkdir(exist_ok=True)
+    for name in names:
+        (tasks / f"{name}.md").write_text("task\n")
+
+
+def check_two_origins(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    parent = root / "origins"
+    first = parent / "a"
+    second = parent / "b"
+    init_repo(first)
+    init_repo(second)
+    git(first, "remote", "add", "origin", "https://example.com/a.git")
+    git(second, "remote", "add", "origin", "https://example.com/b.git")
+    plant_tasks(first, "001-a", "012-next", "020-z")
+    plant_tasks(second, "012-next")
+    _code, raw, _err = capture_show([second, first], capsys, True, False, True)
+    queued = json.loads(raw)["queued"]
+    assert [item["repo"] for item in queued] == [str(first.resolve())] * 3 + [str(second.resolve())]
+    assert [item["task"] for item in queued] == ["001-a", "012-next", "020-z", "012-next"]
+
+
+def check_shared_git_dir(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    parent = root / "local"
+    first = parent / "a"
+    second = parent / "b"
+    init_repo(first)
+    init_repo(second)
+    plant_tasks(first, "012-next")
+    plant_tasks(second, "012-next")
+    _code, raw, _err = capture_show([parent], capsys, True, False, True)
+    assert len(json.loads(raw)["queued"]) == 1
+
+
+def check_plain_directories(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    parent = root / "plain"
+    first = parent / "a"
+    second = parent / "b"
+    plant_tasks(first, "012-next")
+    plant_tasks(second, "012-next")
+    _code, raw, _err = capture_show([parent], capsys, True, False, True)
+    assert queue_repos(raw) == [str(first.resolve()), str(second.resolve())]

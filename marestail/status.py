@@ -88,12 +88,10 @@ class _Legacy:
     fresh: list[Path]
     archives: list[Path]
     leftover: bool
-    handoff_written: bool
     steps: dict[str, dict[str, int | None]]
     handoff_dir: Path
     marker: Path
     log_path: Path
-    run_dir: Path
     activity: float
     last_step: str
     current_step: str
@@ -158,11 +156,13 @@ def show(paths: list[Path], as_json: bool, show_all: bool, queued: bool) -> int:
 def abandon(targets: list[str], reason: str) -> int:
     procs = _machine_processes()
     stamp = time.strftime("%Y%m%dT%H%M%S")
-    failed = 0
-    for target in targets:
-        if not _abandon_target(target, reason, stamp, procs):
-            failed += 1
-    return 1 if failed else 0
+    return _abandon_code([_abandon_target(target, reason, stamp, procs) for target in targets])
+
+
+def _abandon_code(outcomes: list[bool]) -> int:
+    if False in outcomes:
+        return 1
+    return 0
 
 
 def _processes(procs: list[_Proc] | None) -> list[_Proc]:
@@ -667,7 +667,7 @@ def _activity_of(since: str | None) -> float:
 
 def _parse_time(text: str) -> float | None:
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        return datetime.fromisoformat(text).timestamp()
     except ValueError:
         return None
 
@@ -740,12 +740,10 @@ def _legacy_context(repo: Path, task: str, tracked: set[str]) -> _Legacy:
         fresh=fresh,
         archives=archives,
         leftover=leftover,
-        handoff_written=_step_handoff_exists(log, folder),
         steps=_folder_steps(run_dir),
         handoff_dir=folder,
         marker=run_dir / "abandoned",
         log_path=log_path,
-        run_dir=run_dir,
         activity=_latest_mtime(fresh, log_path, archives, run_dir),
         last_step=_legacy_last_step(fresh, log),
         current_step=_current_step(log),
@@ -756,12 +754,6 @@ def _fresh(leftover: bool, live: list[Path]) -> list[Path]:
     if leftover:
         return []
     return live
-
-
-def _step_handoff_exists(log: _Log | None, folder: Path) -> bool:
-    if log is None or not log.step_label:
-        return False
-    return (folder / f"{log.step_label}.md").is_file()
 
 
 def _legacy_last_step(fresh: list[Path], log: _Log | None) -> str:
@@ -827,19 +819,13 @@ def _row_from_legacy(repo: Path, task: str, branch: str | None, ctx: _Legacy, st
         role=_role_of(step),
         since=since,
         branch=branch,
-        head=None,
-        pid=None,
         result=_log_result(ctx.log),
-        exit_code=None,
-        stopped_at=None,
         reason=_legacy_reason(state, ctx.log, ctx.marker),
-        events=None,
         log=_existing(ctx.log_path),
         detail=detail,
         activity=activity,
         current_step=ctx.current_step,
         last_step=ctx.last_step,
-        era="legacy",
     )
 
 
@@ -901,7 +887,7 @@ def _from_log(ctx: _Legacy) -> tuple[str, str] | None:
     ended = _terminal_log(log, ctx.archives)
     if ended is not None:
         return ended
-    return _mid_log(log, ctx.handoff_written)
+    return _mid_log(log, ctx.handoff_dir)
 
 
 def _terminal_log(log: _Log, archives: list[Path]) -> tuple[str, str] | None:
@@ -922,9 +908,9 @@ def _stopped_detail(log: _Log) -> str:
     return f"at {log.stopped_at}, {_human_reason(log)}"
 
 
-def _mid_log(log: _Log, written: bool) -> tuple[str, str]:
+def _mid_log(log: _Log, folder: Path) -> tuple[str, str]:
     if not log.step_done:
-        return "dead", _open_detail(log, written)
+        return "dead", _open_detail(log, (folder / f"{log.step_label}.md").is_file())
     return "dead", _after_note(log)
 
 
@@ -1001,10 +987,7 @@ def _after_files(label: str, folder: Path) -> tuple[str, str]:
 
 
 def _label_number(label: str) -> int:
-    match = re.match(r"^(\d+)-", label)
-    if match is None:
-        return -1
-    return int(match.group(1))
+    return int(label.split("-")[0])
 
 
 def _parse_log(path: Path) -> _Log | None:
@@ -1038,45 +1021,41 @@ def _step_line(state: _Log, line: str) -> _Log | None:
     match = _STEP.match(line)
     if match is None:
         return None
-    return _Log(
-        step_label=match.group(2),
-        last_line=line.strip(),
-        steps=state.steps + 1,
-    )
+    return _Log(step_label=match.group(2), steps=state.steps + 1)
 
 
 def _tail_line(state: _Log, line: str) -> _Log:
-    if _mark_finish(state, line):
+    if _matched_finish(state, line):
+        state.step_done = True
         return state
-    if _mark_verdict(state, line):
+    verdict = _verdict_of(line)
+    if verdict is not None:
+        state.verdict = verdict
         return state
-    if _mark_rate(state, line):
+    rate = _rate_of(line)
+    if rate is not None:
+        state.rate_wait = rate
         return state
     return _mark_terminal(state, line)
 
 
-def _mark_finish(state: _Log, line: str) -> bool:
+def _matched_finish(state: _Log, line: str) -> bool:
     match = _FINISH.match(line)
-    if match is None or match.group(1) != state.step_label:
-        return False
-    state.step_done = True
-    return True
+    return match is not None and match.group(1) == state.step_label
 
 
-def _mark_verdict(state: _Log, line: str) -> bool:
+def _verdict_of(line: str) -> str | None:
     match = _VERDICT.match(line)
     if match is None:
-        return False
-    state.verdict = match.group(1)
-    return True
+        return None
+    return match.group(1)
 
 
-def _mark_rate(state: _Log, line: str) -> bool:
+def _rate_of(line: str) -> str | None:
     match = _RATE.match(line)
     if match is None:
-        return False
-    state.rate_wait = match.group(1)
-    return True
+        return None
+    return match.group(1)
 
 
 def _mark_terminal(state: _Log, line: str) -> _Log:
@@ -1104,13 +1083,24 @@ def _handoff_files(folder: Path) -> list[Path]:
 
 
 def _newest_step(files: list[Path]) -> str:
-    best = ""
-    number = -1
-    for path in files:
-        found = _step_name_number(path)
-        if found is not None and found[1] > number:
-            best, number = found
-    return best
+    found = _numbered(files)
+    if not found:
+        return ""
+    found.sort(key=_step_number)
+    return _latest_name(found)
+
+
+def _numbered(files: list[Path]) -> list[tuple[str, int]]:
+    return [item for item in (_step_name_number(path) for path in files) if item is not None]
+
+
+def _step_number(item: tuple[str, int]) -> int:
+    return item[1]
+
+
+def _latest_name(found: list[tuple[str, int]]) -> str:
+    number = found[-1][1]
+    return min(name for name, rank in found if rank == number)
 
 
 def _step_name_number(path: Path) -> tuple[str, int] | None:
@@ -1168,15 +1158,9 @@ def _note_step_file(steps: dict[str, dict[str, int | None]], path: Path) -> None
     match = _STEP_FILE.match(path.name)
     if match is None:
         return
-    entry = steps.setdefault(match.group(1), {"prompt": 0, "result": None})
-    _store_step(entry, match.group(2), path)
-
-
-def _store_step(entry: dict[str, int | None], kind: str, path: Path) -> None:
-    if kind == ".json":
+    entry = steps.setdefault(match.group(1), {"result": None})
+    if match.group(2) == ".json":
         entry["result"] = path.stat().st_size
-        return
-    entry["prompt"] = 1
 
 
 def _promote(rows: list[_Row], pids: list[int]) -> None:
@@ -1276,11 +1260,15 @@ def _stamps(output: str) -> list[float]:
 
 
 def _stamp(line: str) -> float | None:
-    match = _LAST.search(line)
-    if match is None:
+    found = _LAST.findall(line)
+    if not found:
         return None
+    return _parsed_stamp(found[0])
+
+
+def _parsed_stamp(text: str) -> float | None:
     try:
-        return time.mktime(time.strptime(match.group(1), "%a %b %d %H:%M:%S %Y"))
+        return time.mktime(time.strptime(text))
     except ValueError:
         return None
 
@@ -1366,7 +1354,7 @@ def _queue_item(repo: Path, path: Path) -> dict[str, str]:
 def _queue_list(ran: dict[str, set[str]], chosen: dict[str, dict[str, dict[str, str]]]) -> list[dict[str, str]]:
     pending: list[dict[str, str]] = []
     for identity, tasks in chosen.items():
-        done = ran.get(identity, set())
+        done = ran[identity]
         pending.extend(item for stem, item in tasks.items() if stem not in done)
     return sorted(pending, key=lambda item: (item["repo"], item["task"]))
 

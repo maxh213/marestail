@@ -159,6 +159,51 @@ def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.Captu
     assert "invalid choice: 'queue'" in capsys.readouterr().err
 
 
+def test_status_abandon_and_dash_help_is_exact() -> None:
+    check_status_choice_help()
+    check_status_option_help()
+    check_abandon_option_help()
+    check_dash_option_help()
+
+
+def check_status_choice_help() -> None:
+    helped = choice_help(cli.build_parser())
+    assert helped["status"] == "where every marestail run under a directory stands"
+    assert helped["abandon"] == "give up on a run without deleting it"
+    assert helped["dash"] == "the watch fleet, dandelion, the run table and host load as a web page"
+
+
+def check_status_option_help() -> None:
+    parser = subparser("status")
+    helped = option_help(parser)
+    assert helped["--json"] == "print every run as JSON"
+    assert helped["--all"] == "include complete, abandoned and leftover runs"
+    assert helped["--queued"] == "also list task files that never ran"
+    assert positional_help(parser)["paths"] == "directories to scan"
+
+
+def check_abandon_option_help() -> None:
+    parser = subparser("abandon")
+    targets = action_named(parser, "targets")
+    reason = action_named(parser, "reason")
+    assert targets.metavar == "TARGET"
+    assert targets.help == "REPO/TASK to give up on"
+    assert (reason.default, reason.metavar, reason.help) == ("", "TEXT", "recorded in the abandoned marker")
+
+
+def check_dash_option_help() -> None:
+    helped = option_help(subparser("dash"))
+    assert helped["--root"] == cli.HELP_DASH_ROOT
+    assert helped["--host"] == cli.HELP_DASH_HOST
+    assert helped["--port"] == cli.HELP_DASH_PORT
+    assert helped["--dandelion-every"] == cli.HELP_DASH_EVERY
+    assert helped["--runs-script"] == cli.HELP_DASH_RUNS
+
+
+def action_named(parser: argparse.ArgumentParser, dest: str) -> argparse.Action:
+    return next(action for action in parser._actions if action.dest == dest)
+
+
 def test_status_and_abandon_join_the_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     text = Path("marestail/cli.py").read_text()
     assert "\n    from marestail.status import show\n" in text
