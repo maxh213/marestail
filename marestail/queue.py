@@ -1080,7 +1080,7 @@ def _run_child_process(
 
 
 def _build_child_argv(task: TaskFile, root: Path, role: str | None, child: _ChildOptions) -> list[str]:
-    cli_file = getattr(sys.modules.get("marestail.cli"), "__file__", "") or ""
+    cli_file = getattr(sys.modules.get("marestail.cli"), "__file__", "")
     cli_path = str(Path(cli_file).resolve())
     rel_path = task.path.resolve().relative_to(root.resolve())
     argv = [sys.executable, "-u", cli_path, "run", str(rel_path), "--auto"]
