@@ -2232,3 +2232,40 @@ def test_commit_task_copy_creates_parents_and_commits(tmp_path: Path, monkeypatc
     assert (repo / "tasks" / "deep" / "deep.md").read_text() == "+++\ndepends = []\n+++\n# Deep\n"
     assert git(repo, "log", "-1", "--format=%s").strip() == "queue: task deep"
     assert git(repo, "status", "--porcelain").strip() == ""
+
+
+def test_accept_roles_passes_hyper_through_to_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str | None, str | None, str | None]] = []
+    real = queue.window
+
+    def spy(start: str | None, stop: str | None, mode: str | None = None, visual: bool = False) -> list[Any]:
+        calls.append((start, stop, mode))
+        return real(start, stop, mode, visual)
+
+    monkeypatch.setattr(queue, "window", spy)
+    assert queue._accept_roles("blast", "qa", "hyper") == 0
+    assert calls == [("blast", "qa", "hyper")]
+
+
+def test_branch_exists_locally_asks_git_in_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    git(repo, "switch", "-q", "-c", "marestail/a")
+    git(repo, "switch", "-q", "main")
+    monkeypatch.chdir(tmp_path)
+    calls: list[tuple[list[str], Path | None]] = []
+    real = queue._git_run
+
+    def spy(args: list[str], root: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((list(args), root))
+        return real(args, root)
+
+    monkeypatch.setattr(queue, "_git_run", spy)
+    assert queue._branch_exists_locally("marestail/a", repo) is True
+    assert calls == [(["rev-parse", "--verify", "--quiet", "refs/heads/marestail/a"], repo)]
+    assert queue._branch_exists_locally("marestail/missing", repo) is False
+
+
+def test_git_head_reads_the_given_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert queue._git_head(repo) == git(repo, "rev-parse", "HEAD").strip()
