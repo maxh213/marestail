@@ -1543,9 +1543,12 @@ def test_push_follows_a_task_that_ran(
     monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "1")
     monkeypatch.setenv("MARESTAIL_QUEUE_PR", "1")
     gh_calls: list[list[str]] = []
-    monkeypatch.setattr(
-        queue, "_run_gh", lambda args, _root, env=None: gh_calls.append(args) or subprocess.CompletedProcess(args, 0, "0\n", "")
-    )
+
+    def _record_gh(args: list[str], _root: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        gh_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "0\n", "")
+
+    monkeypatch.setattr(queue, "_run_gh", _record_gh)
     outcomes = {"a": (result, code, role, reason, stopped_at)}
     fake_start, _recorded = make_child_seam(repo, outcomes)
     monkeypatch.setattr(queue, "_start_child", fake_start)
