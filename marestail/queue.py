@@ -13,12 +13,13 @@ from typing import Any
 from marestail import config as config_module
 from marestail import status
 from marestail.context import DEFAULT_BASE
+from marestail.pipeline import HYPER, unknown_role, window
 from marestail.task_file import TaskFile, check, read
 
-MARESTAIL_DIR = ".marestail"
-QUEUE_LOG_NAME = "queue.log"
-BOOLEAN_ENV_TRUE = ("1", "true")
-BOOLEAN_ENV_FALSE = ("0", "false", "")
+_MARESTAIL_DIR = ".marestail"
+_QUEUE_LOG_NAME = "queue.log"
+_BOOLEAN_ENV_TRUE = ("1", "true")
+_BOOLEAN_ENV_FALSE = ("0", "false", "")
 
 
 @dataclass
@@ -28,11 +29,11 @@ class _SignalState:
     task_id: str = ""
 
 
-SIG_STATE = _SignalState()
+_SIG_STATE = _SignalState()
 
 
 @dataclass(frozen=True)
-class GitOptions:
+class _GitOptions:
     starting_branch: str
     remote: str
     base: str
@@ -42,7 +43,7 @@ class GitOptions:
 
 
 @dataclass(frozen=True)
-class ChildOptions:
+class _ChildOptions:
     agent: str | None
     model: str | None
     effort: str | None
@@ -53,14 +54,14 @@ class ChildOptions:
 
 
 @dataclass
-class QueueOptions:
+class _QueueOptions:
     root: Path
     queue_dir: Path
     log_path: Path
     state_file: Path
     retry: list[str]
-    git: GitOptions
-    child: ChildOptions
+    git: _GitOptions
+    child: _ChildOptions
     start_content: dict[Path, str] = field(default_factory=dict)
 
 
@@ -76,13 +77,21 @@ def run_queue(
     scope: str | None,
     focus: list[str],
 ) -> int:
-    from marestail.runner import role_window
-
     root = _find_root(Path.cwd())
-    code = role_window(start, stop, scope)
+    code = _accept_roles(start, stop, scope)
     if code != 0:
         return code
     return _run_with_lock(root, paths, start, stop, here, retry, agent, model, effort, scope, focus)
+
+
+def _accept_roles(start: str | None, stop: str | None, scope: str | None) -> int:
+    mode = HYPER if scope == HYPER else None
+    problem = unknown_role(start, mode) or unknown_role(stop, mode)
+    if problem is not None:
+        sys.stderr.write(f"{problem}\n")
+        return 2
+    window(start, stop, mode)
+    return 0
 
 
 def _find_root(start: Path) -> Path:
@@ -103,7 +112,7 @@ def _run_with_lock(
     scope: str | None,
     focus: list[str],
 ) -> int:
-    queue_dir = root / MARESTAIL_DIR / "queue"
+    queue_dir = root / _MARESTAIL_DIR / "queue"
     lock_code, lock_path = _acquire_lock(queue_dir)
     if lock_code != 0:
         return lock_code
@@ -176,9 +185,9 @@ def _execute_queue(
     pre_code, branch, push_on, pr_on, remote, base = _pre_flight(root, tasks, retry, state, here, queue_dir)
     if pre_code != 0:
         return pre_code
-    git_opts = GitOptions(branch, remote, base, push_on, pr_on, here)
-    child_opts = ChildOptions(agent, model, effort, scope, focus, start, stop)
-    opts = QueueOptions(root, queue_dir, queue_dir / QUEUE_LOG_NAME, state_file, retry, git_opts, child_opts)
+    git_opts = _GitOptions(branch, remote, base, push_on, pr_on, here)
+    child_opts = _ChildOptions(agent, model, effort, scope, focus, start, stop)
+    opts = _QueueOptions(root, queue_dir, queue_dir / _QUEUE_LOG_NAME, state_file, retry, git_opts, child_opts)
     return _run_pipeline_loop(tasks, opts, state)
 
 
@@ -286,7 +295,7 @@ def _pre_flight_push_base(root: Path, here: bool, queue_dir: Path, branch: str) 
     push_code, push_on, pr_on, remote, base = _check_push_pr(cfg, root)
     if push_code != 0:
         return push_code, "", False, False, "", ""
-    base_code = _check_base(root, base, here, queue_dir / QUEUE_LOG_NAME)
+    base_code = _check_base(root, base, here, queue_dir / _QUEUE_LOG_NAME)
     if base_code != 0:
         return base_code, "", False, False, "", ""
     return 0, branch, push_on, pr_on, remote, base
@@ -324,7 +333,7 @@ def _status_path(line: str) -> str:
 
 
 def _is_marestail_path(target: str) -> bool:
-    return target == MARESTAIL_DIR or target.startswith(f"{MARESTAIL_DIR}/")
+    return target == _MARESTAIL_DIR or target.startswith(f"{_MARESTAIL_DIR}/")
 
 
 def _check_no_running_run(root: Path) -> int:
@@ -483,9 +492,9 @@ def _env_flag(name: str) -> tuple[int, bool | None]:
     raw = os.environ.get(name)
     if raw is None:
         return 0, None
-    if raw.lower() in BOOLEAN_ENV_TRUE:
+    if raw.lower() in _BOOLEAN_ENV_TRUE:
         return 0, True
-    if raw.lower() in BOOLEAN_ENV_FALSE:
+    if raw.lower() in _BOOLEAN_ENV_FALSE:
         return 0, False
     sys.stderr.write(f"{name} must be 1, 0, true or false, got '{raw}'\n")
     return 2, None
@@ -616,7 +625,7 @@ def _deps_ordered(task: TaskFile, task_ids: set[str], ordered: list[TaskFile]) -
     return all(dep not in task_ids or any(o.id == dep for o in ordered) for dep in task.depends)
 
 
-def _run_pipeline_loop(tasks: list[TaskFile], opts: QueueOptions, state: dict[str, Any]) -> int:
+def _run_pipeline_loop(tasks: list[TaskFile], opts: _QueueOptions, state: dict[str, Any]) -> int:
     ordered = _order_tasks(tasks)
     opts.start_content.update({t.path.resolve(): t.path.read_text() for t in ordered})
     _clear_non_sticky(ordered, state, opts.retry)
@@ -643,18 +652,18 @@ def _should_clear_task(task_id: str, state: dict[str, Any], retry: list[str]) ->
 
 
 def _reset_signals() -> None:
-    SIG_STATE.received = None
-    SIG_STATE.proc = None
-    SIG_STATE.task_id = ""
+    _SIG_STATE.received = None
+    _SIG_STATE.proc = None
+    _SIG_STATE.task_id = ""
 
 
 def _install_signals(root: Path, log_path: Path) -> tuple[Any, Any]:
     _reset_signals()
 
     def _sig_handler(signum: int, _frame: Any) -> None:
-        SIG_STATE.received = signum
-        if SIG_STATE.proc is not None:
-            _terminate_child(SIG_STATE.proc, SIG_STATE.task_id, root, log_path, signum)
+        _SIG_STATE.received = signum
+        if _SIG_STATE.proc is not None:
+            _terminate_child(_SIG_STATE.proc, _SIG_STATE.task_id, root, log_path, signum)
             sys.exit(128 + signum)
 
     old_term = signal.signal(signal.SIGTERM, _sig_handler)
@@ -685,7 +694,7 @@ def _kill_child_process(proc: Any) -> None:
             proc.wait()
 
 
-def _process_all_tasks(ordered: list[TaskFile], state: dict[str, Any], opts: QueueOptions) -> int:
+def _process_all_tasks(ordered: list[TaskFile], state: dict[str, Any], opts: _QueueOptions) -> int:
     stop_code = _iterate_tasks(ordered, state, opts)
     if stop_code is not None:
         return stop_code
@@ -699,7 +708,7 @@ def _exit_verdict(ordered: list[TaskFile], state: dict[str, Any]) -> int:
     return 1
 
 
-def _iterate_tasks(ordered: list[TaskFile], state: dict[str, Any], opts: QueueOptions) -> int | None:
+def _iterate_tasks(ordered: list[TaskFile], state: dict[str, Any], opts: _QueueOptions) -> int | None:
     start_used = False
     for t in ordered:
         code, start_used, stop_now = _handle_task_in_loop(t, ordered, state, opts, start_used)
@@ -712,11 +721,11 @@ def _handle_task_in_loop(
     task: TaskFile,
     ordered: list[TaskFile],
     state: dict[str, Any],
-    opts: QueueOptions,
+    opts: _QueueOptions,
     start_used: bool,
 ) -> tuple[int, bool, bool]:
-    if SIG_STATE.received is not None:
-        sys.exit(128 + SIG_STATE.received)
+    if _SIG_STATE.received is not None:
+        sys.exit(128 + _SIG_STATE.received)
     if _is_done(task.id, state):
         _log_event(opts.log_path, f"skip {task.id} done")
         return 0, start_used, False
@@ -727,7 +736,7 @@ def _run_task_step(
     task: TaskFile,
     ordered: list[TaskFile],
     state: dict[str, Any],
-    opts: QueueOptions,
+    opts: _QueueOptions,
     start_used: bool,
 ) -> tuple[int, bool, bool]:
     res_code, new_used = _step_one_task(task, ordered, state, opts, start_used)
@@ -761,7 +770,7 @@ def _step_one_task(
     task: TaskFile,
     ordered: list[TaskFile],
     state: dict[str, Any],
-    opts: QueueOptions,
+    opts: _QueueOptions,
     start_used: bool,
 ) -> tuple[int, bool]:
     blocked_reason = _find_blocked_reason(task, state, opts.root, opts.git.here, opts.git.base, opts.log_path)
@@ -897,7 +906,7 @@ def _execute_child_flow(
     task: TaskFile,
     ordered: list[TaskFile],
     state: dict[str, Any],
-    opts: QueueOptions,
+    opts: _QueueOptions,
     start_used: bool,
 ) -> tuple[int, bool]:
     branch, where, switch_code = _prepare_branch_for_task(
@@ -1008,7 +1017,7 @@ def _run_child_process(
     branch: str,
     where: str,
     role: str | None,
-    child: ChildOptions,
+    child: _ChildOptions,
 ) -> tuple[int, dict[str, Any]]:
     argv = _build_child_argv(task, root, role, child)
     env = _build_child_env()
@@ -1016,15 +1025,15 @@ def _run_child_process(
     _log_event(log_path, f"start {task.id} {log_detail}")
     start_time = _now_utc()
     proc = _start_child(argv, root, env)
-    SIG_STATE.proc = proc
-    SIG_STATE.task_id = task.id
+    _SIG_STATE.proc = proc
+    _SIG_STATE.task_id = task.id
     code = proc.wait()
-    SIG_STATE.proc = None
+    _SIG_STATE.proc = None
     elapsed_min = int((_now_utc() - start_time).total_seconds() // 60)
     return _inspect_child_run(root, task.id, proc.pid, code, log_path, elapsed_min)
 
 
-def _build_child_argv(task: TaskFile, root: Path, role: str | None, child: ChildOptions) -> list[str]:
+def _build_child_argv(task: TaskFile, root: Path, role: str | None, child: _ChildOptions) -> list[str]:
     cli_file = getattr(sys.modules.get("marestail.cli"), "__file__", "") or ""
     cli_path = str(Path(cli_file).resolve())
     rel_path = task.path.resolve().relative_to(root.resolve())
@@ -1042,7 +1051,7 @@ def _append_role_flags(argv: list[str], role: str | None, stop: str | None) -> N
         argv.extend(["--to", stop])
 
 
-def _append_agent_flags(argv: list[str], child: ChildOptions) -> None:
+def _append_agent_flags(argv: list[str], child: _ChildOptions) -> None:
     _append_agent_model(argv, child.agent, child.model)
     _append_effort_scope(argv, child.effort, child.scope)
 
@@ -1159,7 +1168,7 @@ def _maybe_open_pr(
     res = _run_gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number", "--jq", "length"], root)
     if res.stdout.strip() != "0":
         return
-    pr_file = root / MARESTAIL_DIR / "queue" / f"pr-{task.id}.md"
+    pr_file = root / _MARESTAIL_DIR / "queue" / f"pr-{task.id}.md"
     pr_file.parent.mkdir(parents=True, exist_ok=True)
     pr_file.write_text(_format_pr_body(task.id, branch, ordered, state))
     base_branch = base.split("/", 1)[1] if "/" in base else base

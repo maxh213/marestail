@@ -1229,7 +1229,7 @@ def test_signals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _hanging_child(argv: list[str], cwd: Path, env: dict[str, str]) -> FakeChild:
         child = FakeChild(8888, 1, timeout_times=1)
-        queue.SIG_STATE.received = 15
+        queue._SIG_STATE.received = 15
         queue._terminate_child(child, "a", repo, repo / ".marestail" / "queue" / "queue.log", 15)
         sys.exit(143)
 
@@ -1466,20 +1466,20 @@ def test_signal_handler_and_early_exit(tmp_path: Path, monkeypatch: pytest.Monke
     try:
         sig_fn = signal.getsignal(signal.SIGTERM)
         assert callable(sig_fn)
-        monkeypatch.setattr(queue.SIG_STATE, "proc", FakeChild(4321))
+        monkeypatch.setattr(queue._SIG_STATE, "proc", FakeChild(4321))
         with pytest.raises(SystemExit) as exc1:
             sig_fn(15, None)
         assert exc1.value.code == 143
-        monkeypatch.setattr(queue.SIG_STATE, "proc", None)
+        monkeypatch.setattr(queue._SIG_STATE, "proc", None)
         sig_fn(15, None)
-        assert queue.SIG_STATE.received == 15
+        assert queue._SIG_STATE.received == 15
         assert signal.getsignal(signal.SIGINT) is sig_fn
         sig_fn(2, None)
-        assert queue.SIG_STATE.received == 2
+        assert queue._SIG_STATE.received == 2
         dummy_task = TaskFile("a", Path("a.md"), (), None, "", True)
-        git_opts = queue.GitOptions("main", "origin", "main", False, False, False)
-        child_opts = queue.ChildOptions(None, None, None, None, [], None, None)
-        dummy_opts = queue.QueueOptions(tmp_path, tmp_path, log_path, tmp_path / "state.json", [], git_opts, child_opts)
+        git_opts = queue._GitOptions("main", "origin", "main", False, False, False)
+        child_opts = queue._ChildOptions(None, None, None, None, [], None, None)
+        dummy_opts = queue._QueueOptions(tmp_path, tmp_path, log_path, tmp_path / "state.json", [], git_opts, child_opts)
         with pytest.raises(SystemExit) as exc2:
             queue._handle_task_in_loop(dummy_task, [], {}, dummy_opts, False)
         assert exc2.value.code == 130
@@ -1487,18 +1487,16 @@ def test_signal_handler_and_early_exit(tmp_path: Path, monkeypatch: pytest.Monke
         queue._restore_signals(old)
 
 
-def test_role_window_prints_pipeline_exit(capsys: pytest.CaptureFixture[str]) -> None:
-    from marestail.runner import role_window
-
-    assert role_window(None, "hardener", None) == 0
+def test_roles_are_checked_with_the_pipeline(capsys: pytest.CaptureFixture[str]) -> None:
+    assert queue._accept_roles(None, "hardener", None) == 0
     assert capsys.readouterr().err == ""
-    assert role_window("nope", None, None) == 2
+    assert queue._accept_roles("nope", None, None) == 2
     plain = "unknown role nope; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa\n"
     assert capsys.readouterr().err == plain
-    assert role_window(None, "cleaner", "hyper") == 2
+    assert queue._accept_roles(None, "cleaner", "hyper") == 2
     hyper = "unknown role cleaner; choose from specifier, critic, coder, architect, blast, hardener, qa\n"
     assert capsys.readouterr().err == hyper
-    assert role_window("coder", "qa", "hyper") == 0
+    assert queue._accept_roles("coder", "qa", "hyper") == 0
 
 
 def test_queue_default_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1657,3 +1655,22 @@ def test_task_with_no_heading_uses_id_as_title(tmp_path: Path, monkeypatch: pyte
     queue._maybe_open_pr(task, "marestail/fallback-id", "origin/main", [task], state, tmp_path, tmp_path / "queue.log")
     create = next(args for args in calls if args[1] == "create")
     assert create[create.index("--title") + 1] == "fallback-id"
+
+
+def test_queue_sits_under_the_cli_and_reads_the_role_list() -> None:
+    contracts = Path(".importlinter").read_text()
+    after_cli = contracts.split("    marestail.cli\n", 1)[1]
+    assert after_cli.startswith("    marestail.queue\n")
+    pipeline = contracts.split("[importlinter:contract:pipeline-belongs-to-orchestration]", 1)[1].split("\n[", 1)[0]
+    assert "name = The role list and how a scope reshapes it are known only to the runner, the prompt builder and the queue" in pipeline
+    allowed = pipeline.split("allowed_importers =", 1)[1]
+    assert "marestail.runner" in allowed
+    assert "marestail.prompts" in allowed
+    assert "marestail.queue" in allowed
+    ban = contracts.split("[importlinter:contract:queue-does-not-import-the-runner]", 1)[1].split("\n[", 1)[0]
+    assert "marestail.queue" in ban.split("forbidden_modules", 1)[0]
+    assert "marestail.runner" in ban.split("forbidden_modules", 1)[1]
+    source = Path("marestail/queue.py").read_text()
+    assert "from marestail.pipeline import HYPER, unknown_role, window" in source
+    assert "marestail.runner" not in source
+    assert "def role_window" not in Path("marestail/runner.py").read_text()

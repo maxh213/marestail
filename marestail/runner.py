@@ -44,7 +44,7 @@ from marestail.perf import review as perf_review
 from marestail.perf import samples as perf_samples
 from marestail.perf import settings as perf_settings
 from marestail.perf import trees as perf_trees
-from marestail.pipeline import HYPER, Judge, Step, Worker, find, names, unknown_role, window
+from marestail.pipeline import HYPER, Judge, Step, Worker, find, names, window
 from marestail.report import Result, elapsed, render
 from marestail.shell import ensure_dir, run
 
@@ -231,16 +231,6 @@ def _accept_task(task: Path) -> None:
         task_file.read(task)
     except task_file.TaskFileError as error:
         raise SystemExit("\n".join(f"{task}: {problem}" for problem in error.problems)) from error
-
-
-def role_window(start: str | None, stop: str | None, scope: str | None) -> int:
-    mode = HYPER if scope == HYPER else None
-    problem = unknown_role(start, mode) or unknown_role(stop, mode)
-    if problem is not None:
-        sys.stderr.write(f"{problem}\n")
-        return 2
-    window(start, stop, mode)
-    return 0
 
 
 def run_pipeline(
