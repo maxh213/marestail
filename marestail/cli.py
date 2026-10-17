@@ -104,6 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
+    add_status(commands.add_parser("status", help="where every marestail run under a directory stands"))
+    add_abandon(commands.add_parser("abandon", help="give up on a run without deleting it"))
     add_dash(commands.add_parser("dash", help="the watch fleet, dandelion, the run table and host load as a web page"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
     add_visual(commands.add_parser("visual", help="photograph and measure the page at the base commit and at HEAD"))
@@ -253,6 +255,20 @@ def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refresh", type=float, default=2.0, help=HELP_REFRESH)
     parser.add_argument("--all", action=STORE_TRUE, help=HELP_WATCH_ALL)
     parser.set_defaults(handler=watch_command)
+
+
+def add_status(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action=STORE_TRUE, help="print every run as JSON")
+    parser.add_argument("--all", action=STORE_TRUE, help="include complete, abandoned and leftover runs")
+    parser.add_argument("--queued", action=STORE_TRUE, help="also list task files that never ran")
+    parser.add_argument("paths", nargs="*", help="directories to scan")
+    parser.set_defaults(handler=status_command)
+
+
+def add_abandon(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("targets", nargs="+", metavar="TARGET", help="REPO/TASK to give up on")
+    parser.add_argument("--reason", default="", metavar="TEXT", help="recorded in the abandoned marker")
+    parser.set_defaults(handler=abandon_command)
 
 
 def add_dash(parser: argparse.ArgumentParser) -> None:
@@ -496,6 +512,18 @@ def watch_command(args: argparse.Namespace) -> int:
     paths = args.paths or default_watch_roots()
     code: int = importlib.import_module(TUI_APP).run([Path(p) for p in paths], args.refresh, args.all)
     return code
+
+
+def status_command(args: argparse.Namespace) -> int:
+    from marestail.status import show
+
+    return show([Path(path) for path in args.paths], args.json, args.all, args.queued)
+
+
+def abandon_command(args: argparse.Namespace) -> int:
+    from marestail.status import abandon
+
+    return abandon(args.targets, args.reason)
 
 
 def dash_command(args: argparse.Namespace) -> int:

@@ -224,6 +224,8 @@ def test_help_lists_every_subcommand() -> None:
         "install",
         "sonar",
         "watch",
+        "status",
+        "abandon",
         "dash",
         "perf",
         "visual",
