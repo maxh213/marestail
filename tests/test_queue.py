@@ -853,6 +853,7 @@ def test_existing_task_branch_not_reset(tmp_path: Path, monkeypatch: pytest.Monk
     assert code == 0
     parent_msg = git(repo, "log", "marestail/a~1", "-1", "--format=%s").strip()
     assert parent_msg == "keep me"
+    assert "branch marestail/a from existing" in (repo / ".marestail" / "queue" / "queue.log").read_text()
 
 
 def test_here_does_not_commit_task_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2380,3 +2381,128 @@ def test_update_state_record_handles_empty_state_and_passes_root(tmp_path: Path,
     queue._update_state_record("t1", "branch1", "critic", {"status": "stopped", "exit_code": 1, "reason": "why"}, state, state_path, repo)
     assert seen_roots == [repo]
     assert state["tasks"]["t1"]["status"] == "stopped"
+
+
+def _record_git(monkeypatch: pytest.MonkeyPatch, repo: Path) -> list[tuple[list[str], Path | None]]:
+    calls: list[tuple[list[str], Path | None]] = []
+    real = queue._git_run
+
+    def spy(args: list[str], root: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((list(args), root))
+        if root != repo:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        return real(args, root)
+
+    monkeypatch.setattr(queue, "_git_run", spy)
+    return calls
+
+
+def test_switch_task_branch_uses_the_repo_not_the_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    git(repo, "switch", "-q", "-c", "marestail/dep")
+    git(repo, "switch", "-q", "main")
+    git(repo, "switch", "-q", "-c", "marestail/old")
+    git(repo, "switch", "-q", "main")
+    calls = _record_git(monkeypatch, repo)
+    stacked = TaskFile("child", repo / "tasks" / "child.md", ("dep",), True, "", True)
+    state: dict[str, Any] = {"tasks": {"dep": {"branch": "marestail/dep"}}}
+    assert queue._switch_task_branch(stacked, state, "main", repo) == ("marestail/dep", "marestail/dep")
+    kept = TaskFile("old", repo / "tasks" / "old.md", (), None, "", True)
+    assert queue._switch_task_branch(kept, {}, "main", repo) == ("marestail/old", "existing")
+    fresh = TaskFile("fresh", repo / "tasks" / "fresh.md", (), None, "", True)
+    assert queue._switch_task_branch(fresh, {}, "main", repo) == ("marestail/fresh", "main")
+    assert calls == [
+        (["switch", "--quiet", "marestail/dep"], repo),
+        (["rev-parse", "--verify", "--quiet", "refs/heads/marestail/old"], repo),
+        (["switch", "--quiet", "marestail/old"], repo),
+        (["rev-parse", "--verify", "--quiet", "refs/heads/marestail/fresh"], repo),
+        (["switch", "--quiet", "--no-track", "--create", "marestail/fresh", "main"], repo),
+    ]
+    assert git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() == "marestail/fresh"
+
+
+def test_matching_task_file_does_not_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    task_path = repo / "tasks" / "a.md"
+    write_task_file(task_path, "a", [])
+    commit_all(repo, "commit a")
+    expected = task_path.read_text()
+    calls = _record_git(monkeypatch, repo)
+    task = TaskFile("a", task_path, (), None, expected, True)
+    queue._commit_task_file_if_needed(task, repo, expected)
+    assert calls == []
+    assert task_path.read_text() == expected
+    assert git(repo, "log", "--grep=queue: task a", "--format=%s").strip() == ""
+
+
+def test_a_rename_is_the_new_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (repo / "old.txt").write_text("keep\n")
+    commit_all(repo, "add old")
+    git(repo, "mv", "old.txt", "new.txt")
+    assert queue._get_dirty_paths(repo) == ["new.txt"]
+
+
+def test_bad_push_toml_returns_false_flags(tmp_path: Path) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    (repo / "marestail.toml").write_text('[queue]\npush = "yes"\n')
+    assert queue._read_push_pr_settings(config_module.load(repo)) == (2, False, False)
+
+
+def test_read_run_action_names_the_stop_and_otherwise_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    seen: dict[str, Any] = {"result": "stopped", "stopped_at": "critic", "reason": "not approved"}
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: dict(seen))
+    assert queue._read_run_action(repo, "a") == ("stopped", "stopped at critic: not approved")
+    seen.clear()
+    seen["result"] = "complete"
+    assert queue._read_run_action(repo, "a") == ("run", None)
+
+
+def test_a_stopped_run_keeps_where_it_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    commit_all(repo, "add a")
+    git(repo, "push", "-q", "origin", "main")
+    record = {"result": "stopped", "stopped_at": "critic", "reason": "not approved"}
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: record)
+    fake_start, recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    code = queue.run_queue(["tasks/a.md"], None, None, False, [], None, None, None, None, [])
+    assert code == 1
+    assert recorded == []
+    entry = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]["a"]
+    assert entry["status"] == "stopped"
+    assert entry["reason"] == "stopped at critic: not approved"
+
+
+def test_inspect_child_run_logs_from_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "queue.log"
+    records = [{"pid": 7, "result": "complete"}, {"pid": 7, "result": "failed", "reason": "build error"}]
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: records.pop(0))
+    done_code, done = queue._inspect_child_run(repo, "a", 7, 0, log, 4)
+    short = git(repo, "rev-parse", "--short", "HEAD").strip()
+    assert done_code == 0
+    assert done == {"status": "done", "reason": None, "exit_code": 0}
+    assert f"done a {short} 4" in log.read_text()
+    fail_code, failed = queue._inspect_child_run(repo, "a", 7, 1, log, 5)
+    assert fail_code == 0
+    assert failed == {"status": "failed", "reason": "build error", "exit_code": 1}
+    assert "failed a build error" in log.read_text()
+
+
+def test_switch_back_clean_uses_the_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    git(repo, "switch", "-q", "-c", "marestail/a")
+    calls = _record_git(monkeypatch, repo)
+    queue._switch_back_clean(repo, "main", False, tmp_path / "queue.log")
+    assert (["switch", "--quiet", "main"], repo) in calls
+    assert all(root == repo for _, root in calls)
+    assert git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() == "main"
