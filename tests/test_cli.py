@@ -1502,6 +1502,22 @@ def test_queue_parser_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "--retries" not in help_text
 
 
+def test_queue_parser_options_are_exact() -> None:
+    parser = subparser("queue")
+    paths = action_named(parser, "paths")
+    assert (paths.nargs, paths.metavar, paths.help) == ("*", "PATH", cli.HELP_TASKS)
+    retry = action_named(parser, "retry")
+    assert (retry.metavar, retry.default) == ("TASK-ID", [])
+    agent = action_named(parser, "agent")
+    assert (agent.choices, agent.help) == (cli.AGENT_CHOICES, cli.HELP_AGENT)
+    model = action_named(parser, "model")
+    assert model.help == cli.HELP_MODEL
+    effort = action_named(parser, "effort")
+    assert effort.help == cli.HELP_EFFORT
+    scope = action_named(parser, "scope")
+    assert (scope.choices, scope.help) == (cli.SCOPE_CHOICES, cli.HELP_RUN_SCOPE)
+
+
 def test_queue_command_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: dict[str, Any] = {}
 
