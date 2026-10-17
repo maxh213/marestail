@@ -4,63 +4,70 @@ import re
 from marestail.config import Config
 
 ENV = "MARESTAIL_JOBS"
-_KEY = "[run] jobs"
-_WHOLE = re.compile(r"[0-9]+")
+_RUN_JOBS = "[run] jobs"
+_WHOLE = re.compile(r"\d+", re.ASCII)
 
 
 def parse(raw: object, name: str) -> int:
-    value = _whole(raw)
+    value = _as_int(raw)
     if value is None or value < 1:
         raise SystemExit(f"{name} must be a whole number 1 or more, got {raw!r}")
     return value
 
 
-def _whole(raw: object) -> int | None:
+def _as_int(raw: object) -> int | None:
     if isinstance(raw, bool):
         return None
     if isinstance(raw, int):
         return raw
-    return _whole_text(raw)
+    return _digits(raw)
 
 
-def _whole_text(raw: object) -> int | None:
+def _digits(raw: object) -> int | None:
     if isinstance(raw, str) and _WHOLE.fullmatch(raw):
         return int(raw)
     return None
 
 
 def run_jobs(config: Config) -> int | None:
-    chosen = _variable()
-    configured = _run_key(config)
-    if chosen is not None:
-        return _capped(chosen)
-    return configured
+    from_env = _from_env()
+    from_file = _from_file(config)
+    return from_env if from_env is not None else from_file
+
+
+def worker_args(config: Config, flag: str) -> list[str]:
+    count = run_jobs(config)
+    return [] if count is None else [flag, str(count)]
 
 
 def pick(config: Config, section: str, key: str, default: int) -> int:
-    chosen = _variable()
-    if chosen is not None:
-        _run_key(config)
-        return _capped(chosen)
+    from_env = _from_env()
+    if from_env is not None:
+        _reject_bad_file(config)
+        return from_env
     if _present(config, section, key):
-        own: int = config.get(section, key)
-        return own
-    configured = _run_key(config)
-    return default if configured is None else configured
+        raw: int = config.get(section, key)
+        return raw
+    from_file = _from_file(config)
+    return default if from_file is None else from_file
 
 
-def _variable() -> int | None:
+def _from_env() -> int | None:
     raw = os.environ.get(ENV)
     if not raw:
         return None
-    return parse(raw, ENV)
+    return _capped(parse(raw, ENV))
 
 
-def _run_key(config: Config) -> int | None:
+def _from_file(config: Config) -> int | None:
     raw = config.get("run", "jobs")
     if raw is None:
         return None
-    return _capped(parse(raw, _KEY))
+    return _capped(parse(raw, _RUN_JOBS))
+
+
+def _reject_bad_file(config: Config) -> None:
+    _from_file(config)
 
 
 def _present(config: Config, section: str, key: str) -> bool:

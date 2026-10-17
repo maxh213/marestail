@@ -131,9 +131,9 @@ def mutation_command(ctx: Context, mutate: list[str], workers: int) -> list[str]
 
 
 def local_concurrency(ctx: Context) -> int:
-    chosen = jobs.run_jobs(ctx.config)
-    if chosen is not None:
-        return chosen
+    shared = jobs.run_jobs(ctx.config)
+    if shared is not None:
+        return shared
     configured = ctx.ts("mutation_concurrency")
     return int(configured) if configured else 0
 

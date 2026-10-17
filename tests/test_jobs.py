@@ -89,21 +89,24 @@ def test_run_jobs_an_empty_variable_falls_through_to_the_key(tmp_path: Path, mon
 
 def test_run_jobs_rejects_a_zero_variable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_JOBS", "0")
+    config = configured(tmp_path)
     with pytest.raises(SystemExit) as raised:
-        jobs.run_jobs(configured(tmp_path))
+        jobs.run_jobs(config)
     assert str(raised.value) == "MARESTAIL_JOBS must be a whole number 1 or more, got '0'"
 
 
 def test_run_jobs_rejects_a_zero_key(tmp_path: Path) -> None:
+    config = configured(tmp_path, {"run": {"jobs": 0}})
     with pytest.raises(SystemExit) as raised:
-        jobs.run_jobs(configured(tmp_path, {"run": {"jobs": 0}}))
+        jobs.run_jobs(config)
     assert str(raised.value) == "[run] jobs must be a whole number 1 or more, got 0"
 
 
 def test_run_jobs_validates_the_key_even_when_the_variable_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_JOBS", "5")
+    config = configured(tmp_path, {"run": {"jobs": 0}})
     with pytest.raises(SystemExit) as raised:
-        jobs.run_jobs(configured(tmp_path, {"run": {"jobs": 0}}))
+        jobs.run_jobs(config)
     assert str(raised.value) == "[run] jobs must be a whole number 1 or more, got 0"
 
 

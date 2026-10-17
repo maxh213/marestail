@@ -7,7 +7,7 @@ from typing import Any
 
 from marestail import jobs, rust
 from marestail.context import NO_CHANGED_MUTANTS, Context
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, finding_order
 from marestail.shell import tail
 
 GATE = "rs.mutation"
@@ -109,14 +109,13 @@ def judged(ctx: Context, viable: list[Outcome], started: float) -> Result:
     if not viable:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     survived = survivors(viable)
-    findings = sorted((describe(ctx, o) for o in survived), key=finding_key)
+    findings = sorted_findings(ctx, survived)
     return Result(GATE, not survived, mutation_summary(survived, viable), findings[:MAX_FINDINGS], elapsed(started))
 
 
-def finding_key(finding: str) -> tuple[str, int, str]:
-    path, _, rest = finding.partition(":")
-    line, _, _ = rest.partition(" ")
-    return path, int(line), finding
+def sorted_findings(ctx: Context, survived: list[Outcome]) -> list[str]:
+    described = [describe(ctx, outcome) for outcome in survived]
+    return sorted(described, key=finding_order)
 
 
 def describe(ctx: Context, outcome: Outcome) -> str:

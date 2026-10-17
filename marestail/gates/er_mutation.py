@@ -140,9 +140,17 @@ def baseline(job: Job) -> tuple[str, list[str]] | None:
 
 
 def run_mutants(job: Job, mutants: list[dict[str, Any]]) -> None:
-    per_mutant_timeout = max(60, min(1800, math.ceil(job.baseline_seconds * 10)))
-    with ThreadPoolExecutor(max_workers=jobs.run_jobs(job.ctx.config) or 1) as pool:
-        list(pool.map(partial(check_mutant, job, per_mutant_timeout=per_mutant_timeout), unskipped(mutants)))
+    timeout = mutant_timeout(job)
+    with ThreadPoolExecutor(max_workers=pool_size(job)) as pool:
+        list(pool.map(partial(check_mutant, job, per_mutant_timeout=timeout), unskipped(mutants)))
+
+
+def mutant_timeout(job: Job) -> int:
+    return max(60, min(1800, math.ceil(job.baseline_seconds * 10)))
+
+
+def pool_size(job: Job) -> int:
+    return jobs.run_jobs(job.ctx.config) or 1
 
 
 def unskipped(mutants: list[dict[str, Any]]) -> list[dict[str, Any]]:

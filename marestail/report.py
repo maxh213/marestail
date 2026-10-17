@@ -14,6 +14,12 @@ def capped(findings: list[str]) -> list[str]:
     return findings[:FINDING_CAP]
 
 
+def finding_order(finding: str) -> tuple[str, int, str]:
+    path, _, rest = finding.partition(":")
+    line, _, _ = rest.partition(" ")
+    return path, int(line), finding
+
+
 @dataclass
 class Result:
     gate: str

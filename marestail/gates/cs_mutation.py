@@ -179,14 +179,9 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "json",
         "-r",
         "progress",
-        *concurrency(ctx),
+        *jobs.worker_args(ctx.config, "--concurrency"),
         *mutate(excludes + includes),
     ]
-
-
-def concurrency(ctx: Context) -> list[str]:
-    chosen = jobs.run_jobs(ctx.config)
-    return [] if chosen is None else ["--concurrency", str(chosen)]
 
 
 def trim_slash_pattern(pattern: str, prefix: str) -> str:

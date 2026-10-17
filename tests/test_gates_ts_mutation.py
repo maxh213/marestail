@@ -514,7 +514,7 @@ def test_the_gate_offers_its_local_concurrency_and_builds_with_the_count_it_is_g
     assert fake.builds[0](10) == [*BASE, "--concurrency", "10"]
 
 
-def knob_raw(env: str | None, key: int | None, ts: dict[str, Any]) -> dict[str, Any]:
+def knob_raw(key: int | None, ts: dict[str, Any]) -> dict[str, Any]:
     raw: dict[str, Any] = {"ts": {"root": "web", **ts}}
     if key is not None:
         raw["run"] = {"jobs": key}
@@ -530,7 +530,7 @@ def test_the_knob_appends_concurrency(
     prepare(tmp_path)
     fake = offload(stryker(tmp_path, {"files": {}}, []))
 
-    ts_mutation.run_gate(make_context(tmp_path, knob_raw(env, key, {"mutation_scope": "all"})))
+    ts_mutation.run_gate(make_context(tmp_path, knob_raw(key, {"mutation_scope": "all"})))
 
     assert fake.calls == [[*BASE, "--concurrency", "3"]]
 
@@ -545,7 +545,7 @@ def test_the_knob_comes_before_the_mutate_targets(
         (tmp_path / "web").mkdir(exist_ok=True)
         (tmp_path / "web" / name).write_text("")
     fake = offload(stryker(tmp_path, {"files": {}}, []))
-    ctx = make_context(tmp_path, knob_raw(env, key, {}), scope_changed=True, changed={"web/a.ts", "web/b.ts"})
+    ctx = make_context(tmp_path, knob_raw(key, {}), scope_changed=True, changed={"web/a.ts", "web/b.ts"})
 
     ts_mutation.run_gate(ctx)
 
@@ -562,7 +562,7 @@ def test_the_knob_beats_a_configured_concurrency(
     (tmp_path / "web" / "a.ts").write_text("")
     fake = offload(stryker(tmp_path, {"files": {}}, []))
     section = {"mutation_concurrency": "9", "mutation_incremental": True}
-    ctx = make_context(tmp_path, knob_raw(env, key, section), scope_changed=True, changed={"web/a.ts"})
+    ctx = make_context(tmp_path, knob_raw(key, section), scope_changed=True, changed={"web/a.ts"})
 
     ts_mutation.run_gate(ctx)
 
@@ -584,7 +584,7 @@ def test_a_configured_concurrency_stays_when_jobs_are_unset(tmp_path: Path, offl
     (tmp_path / "web" / "a.ts").write_text("")
     fake = offload(stryker(tmp_path, {"files": {}}, []))
     section = {"mutation_concurrency": "9", "mutation_incremental": True}
-    ctx = make_context(tmp_path, knob_raw(None, None, section), scope_changed=True, changed={"web/a.ts"})
+    ctx = make_context(tmp_path, knob_raw(None, section), scope_changed=True, changed={"web/a.ts"})
 
     ts_mutation.run_gate(ctx)
 
