@@ -1465,9 +1465,12 @@ def test_queue_help() -> None:
 def test_run_accepts_file_with_no_front_matter(tmp_path: Path) -> None:
     (tmp_path / "marestail.toml").write_text("")
     (tmp_path / "plain.md").write_text("# plain")
+    env = dict(os.environ)
+    env.pop("MUTANT_UNDER_TEST", None)
     seen = subprocess.run(
         [sys.executable, "-u", str(Path(cli.__file__).resolve()), "run", "plain.md", "--to", "not-a-role"],
         cwd=tmp_path,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
