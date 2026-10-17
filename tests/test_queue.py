@@ -2462,6 +2462,21 @@ def test_read_run_action_names_the_stop_and_otherwise_runs(tmp_path: Path, monke
     assert queue._read_run_action(repo, "a") == ("run", None)
 
 
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ({"result": "stopped", "reason": "not approved"}, ("stopped", "not approved")),
+        ({"result": "failed", "reason": "build error"}, ("failed", "build error")),
+    ],
+)
+def test_read_run_action_keeps_the_reason_without_a_stop_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: dict[str, str], expected: tuple[str, str]
+) -> None:
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: record)
+
+    assert queue._read_run_action(tmp_path, "a") == expected
+
+
 def test_a_stopped_run_keeps_where_it_stopped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, _ = setup_bare_repo(tmp_path)
     monkeypatch.chdir(repo)
@@ -2519,6 +2534,65 @@ def test_a_later_bad_retry_is_rejected(tmp_path: Path, capsys: pytest.CaptureFix
     code = queue._check_retry_ids(["a", "b"], {"a", "b"}, state, repo)
     assert code == 2
     assert "--retry b: it is done, not stopped or failed\n" in capsys.readouterr().err
+
+
+def test_pre_flight_config_clears_settings_when_retry_validation_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    task = TaskFile("a", tmp_path / "tasks" / "a.md", (), None, "", True)
+    state = {"tasks": {"a": {"status": "done"}}}
+
+    result = queue._pre_flight_config(tmp_path, [task], ["a"], state, False, tmp_path / "queue", "main")
+
+    assert result == (2, "", False, False, "", "")
+    assert capsys.readouterr().err == "--retry a: it is done, not stopped or failed\n"
+
+
+@pytest.mark.parametrize(
+    ("codes", "expected", "steps"),
+    [((0, 0, 0), (0, "main"), 3), ((2, 0, 0), (2, ""), 1), ((0, 2, 0), (2, ""), 2), ((0, 0, 2), (2, ""), 3)],
+)
+def test_pre_flight_tree_checks_that_repo_and_clears_the_branch_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int, int], expected: tuple[int, str], steps: int
+) -> None:
+    calls: list[tuple[str, Path]] = []
+
+    def head(root: Path) -> tuple[int, str]:
+        calls.append(("head", root))
+        return codes[0], "main"
+
+    def clean(root: Path) -> int:
+        calls.append(("clean", root))
+        return codes[1]
+
+    def running(root: Path) -> int:
+        calls.append(("running", root))
+        return codes[2]
+
+    monkeypatch.setattr(queue, "_check_head_branch", head)
+    monkeypatch.setattr(queue, "_check_clean_tree", clean)
+    monkeypatch.setattr(queue, "_check_no_running_run", running)
+
+    assert queue._pre_flight_tree(tmp_path) == expected
+    assert calls == [("head", tmp_path), ("clean", tmp_path), ("running", tmp_path)][:steps]
+
+
+@pytest.mark.parametrize(
+    ("code", "expected", "error"),
+    [(0, (0, "main"), ""), (1, (2, ""), "HEAD is detached; check out a branch first\n")],
+)
+def test_check_head_branch_asks_that_repo_and_clears_a_detached_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], code: int, expected: tuple[int, str], error: str
+) -> None:
+    calls: list[tuple[list[str], Path]] = []
+
+    def git_run(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+        calls.append((args, root))
+        return subprocess.CompletedProcess(args, code, " main\n", "")
+
+    monkeypatch.setattr(queue, "_git_run", git_run)
+
+    assert queue._check_head_branch(tmp_path) == expected
+    assert calls == [(["symbolic-ref", "--quiet", "--short", "HEAD"], tmp_path)]
+    assert capsys.readouterr() == ("", error)
 
 
 def test_a_bad_push_value_stays_off(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
