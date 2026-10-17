@@ -139,6 +139,22 @@ Codex pipeline runs (`--agent codex`) use `codex exec --json --dangerously-bypas
 
 `install --gitignore-generated` exists for repos where not everyone runs marestail: the flag adds the marestail-only working files — `features/`, `qa/`, `tasks/`, `PERFORMANCE.md`, `perf/`, the Stop-hook configs — to the target's `.gitignore`. `install --scope hard` leaves `CLAUDE.md` and `AGENTS.md` alone (does not create or append them) and implies `--gitignore-generated`. On a full install, `marestail.toml`, `sonar-project.properties`, `CLAUDE.md` and `AGENTS.md` are shared configuration and documentation: they are never gitignored. Workers are told not to `git add -f`; if they do, the runner untracks those paths after the role (the files stay on disk for the next role).
 
+## Queue
+
+`marestail queue [PATH ...] [--to ROLE] [--from ROLE] [--here] [--retry TASK-ID ...] [--agent A] [--model M] [--effort E] [--scope S] [--focus PATH ...]` checks task files, orders them in dependency order, and runs them one child at a time through `marestail run --auto`. When no paths are given, it defaults to tasks/.
+
+Tasks run in topological order, breaking ties by file name. Without `--here`, independent tasks (`depends = []`) run on their own branch `marestail/<id>` created from `[git] base`. A stacked task (`stack = true`) continues on its dependency's branch once that dependency is done. A separate branch (`stack = false`) starts from base once every dependency's recorded head is merged into base (`git merge-base --is-ancestor`). Merge queue pull requests with a merge commit, because squash and rebase merges do not make the recorded head commit an ancestor.
+
+For example, given tasks a (`depends = []`), b (`depends = ["a"]`, `stack = true`), c (`depends = ["a"]`, `stack = false`), and d (`depends = []`), the queue orders them a, b, c, d. Task a runs on branch marestail/a, b runs on top of a on branch marestail/a, c blocks until a's head is merged into base, and d runs on branch marestail/d.
+
+With `--here`, all tasks run on the checked-out branch in queue order, ignoring stack flags and ancestor merge requirements. Under `--here`, the queue stops immediately at the first failed or stopped task.
+
+State is kept in `.marestail/queue/state.json` and events are logged to `.marestail/queue/queue.log` and stdout. Completed tasks are skipped on rerun. A failed or stopped task is sticky and holds back its dependants until resumed with `--retry <id>`. When `--retry` is passed, the task resumes from the role recorded by the run reader.
+
+`[queue] push = true` (or `MARESTAIL_QUEUE_PUSH=1`) pushes each branch to the remote after each run. `[queue] pr = true` (or `MARESTAIL_QUEUE_PR=1`) opens a pull request per branch using the `gh` CLI once the first task on that branch finishes done.
+
+The queue exits 0 when every task in the set is done, 1 if any task failed, stopped, or stayed blocked, 2 on pre-flight check refusals, and 128 + signal on interrupt.
+
 ## Installing into a repository that does not use marestail
 
 Use `marestail install --scope hyper` when nobody else on the team runs marestail and the pull request must hold the fix and its tests and nothing else:
@@ -265,7 +281,9 @@ Every variable marestail reads. The `docs` gate ignores common ones such as `HOM
 | `DANDELION_CODEX_ANIMUS_HOME` | Codex home for the `codex-animus` account (default `~/.codex-animus`) |
 | `CODEX_HOME` | set to the directory above for `codex-animus` sessions |
 | `MARESTAIL_LIMIT_WAIT_SECONDS` | seconds to wait after a rate limit (default 600) |
-| `MARESTAIL_LIMIT_WAITS` | rate-limit waits before giving up (default 12) |
+| `MARESTAIL_LIMIT_WAITS` | rate-limit waits before giving up (default 12; marestail queue sets 36 for its runs when it is unset) |
+| `MARESTAIL_QUEUE_PUSH` | `1`/`true` or `0`/`false`: push each branch after each queued task; wins over `[queue] push` |
+| `MARESTAIL_QUEUE_PR` | `1`/`true` or `0`/`false`: open a PR per queued branch; wins over `[queue] pr` |
 | `MARESTAIL_SCOPE`, `MARESTAIL_FOCUS` | scope and focus paths handed to the agents' Stop hooks |
 | `MARESTAIL_TASK` | task stem set by `marestail run`; the qa gate writes the app log under `.marestail/runs/<stem>/` when set, and the visual gate reads the task's `visual` block from `qa/<stem>.md` |
 | `MARESTAIL_QA_CMD_TIMEOUT` | seconds for `[qa] cmd` (default 3600) |

@@ -101,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_gate(commands.add_parser("gate", help="run the gates against the current repo"))
     add_run(commands.add_parser("run", help="run the role pipeline on a task"))
     add_tasks(commands.add_parser("tasks", help="check task files"))
+    add_queue(commands.add_parser("queue", help="run a folder of tasks in dependency order"))
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
@@ -222,6 +223,37 @@ def _check_verdict(problems: list[str]) -> int:
         return 0
     print("\n".join(problems))
     return 1
+
+
+def add_queue(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("paths", nargs="*", metavar="PATH", help=HELP_TASKS)
+    parser.add_argument("--to", dest="stop")
+    parser.add_argument("--from", dest="start")
+    parser.add_argument("--here", action=STORE_TRUE)
+    parser.add_argument("--retry", action="append", default=[], metavar="TASK-ID")
+    parser.add_argument("--agent", choices=AGENT_CHOICES, help=HELP_AGENT)
+    parser.add_argument("--model", help=HELP_MODEL)
+    parser.add_argument("--effort", help=HELP_EFFORT)
+    add_scope(parser, HELP_RUN_SCOPE)
+    add_focus(parser)
+    parser.set_defaults(handler=queue_command)
+
+
+def queue_command(args: argparse.Namespace) -> int:
+    from marestail.queue import run_queue
+
+    return run_queue(
+        args.paths,
+        args.start,
+        args.stop,
+        args.here,
+        args.retry,
+        args.agent,
+        args.model,
+        args.effort,
+        args.scope,
+        args.focus,
+    )
 
 
 def add_run(parser: argparse.ArgumentParser) -> None:

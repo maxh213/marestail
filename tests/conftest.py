@@ -152,6 +152,7 @@ FORBIDDEN_BINARIES = frozenset(
         "gcloud",
         "ssh",
         "rsync",
+        "gh",
     }
 )
 

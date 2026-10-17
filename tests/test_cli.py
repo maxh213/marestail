@@ -28,7 +28,7 @@ from tests.conftest import make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
-COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,status,abandon,dash,perf,visual,route,remote,graph,depth}"
+COMMAND_CHOICES = "{gate,run,tasks,queue,install,sonar,watch,status,abandon,dash,perf,visual,route,remote,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -155,8 +155,6 @@ def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.Captu
     )
     assert exit_code(["remote", "--help"]) == 0
     assert "    status    box state, uptime and estimated spend today and this month\n" in capsys.readouterr().out
-    assert exit_code(["queue"]) == 2
-    assert "invalid choice: 'queue'" in capsys.readouterr().err
 
 
 def test_status_abandon_and_dash_help_is_exact() -> None:
@@ -231,8 +229,6 @@ def test_status_and_abandon_join_the_cli(monkeypatch: pytest.MonkeyPatch, capsys
     abandon_help = capsys.readouterr().out
     assert "TARGET" in abandon_help
     assert "--reason" in abandon_help
-    assert exit_code(["queue"]) == 2
-    assert "invalid choice: 'queue'" in capsys.readouterr().err
     root_help = cli.build_parser().format_help()
     assert COMMAND_CHOICES in root_help
     assert "where every marestail run under a directory stands" in root_help
@@ -1052,6 +1048,7 @@ def test_root_parser_help_and_subcommands() -> None:
         "gate",
         "run",
         "tasks",
+        "queue",
         "install",
         "sonar",
         "watch",
@@ -1066,6 +1063,7 @@ def test_root_parser_help_and_subcommands() -> None:
         "depth",
     ]
     help_by_name = choice_help(parser)
+    assert help_by_name["queue"] == "run a folder of tasks in dependency order"
     assert help_by_name["gate"] == "run the gates against the current repo"
     assert help_by_name["run"] == "run the role pipeline on a task"
     assert help_by_name["tasks"] == "check task files"
@@ -1419,3 +1417,58 @@ def assert_run_layout(repo: Path, task_id: str, expected: str, stdout: str) -> N
     assert (folder / "pipeline.log").read_text() == stdout
     assert not (repo / ".marestail" / "handoffs" / task_id).exists()
     assert len(list(folder.glob("handoffs-*/01-critic.md"))) == 1
+
+
+def test_queue_parser_help(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit) as raised:
+        parser.parse_args(["queue", "--help"])
+    assert raised.value.code == 0
+    help_text = capsys.readouterr().out
+    for opt in ("--to", "--from", "--here", "--retry", "--agent", "--model", "--effort", "--scope", "--focus"):
+        assert opt in help_text
+    assert "--retries" not in help_text
+
+
+def test_queue_command_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: dict[str, Any] = {}
+
+    def fake_run_queue(*args: Any) -> int:
+        recorded["args"] = args
+        return 42
+
+    monkeypatch.setattr("marestail.queue.run_queue", fake_run_queue)
+    cmd = [
+        "queue",
+        "tasks/a.md",
+        "--to",
+        "hardener",
+        "--from",
+        "coder",
+        "--here",
+        "--retry",
+        "a",
+        "--agent",
+        "claude",
+        "--model",
+        "m",
+        "--effort",
+        "high",
+        "--scope",
+        "changed",
+        "--focus",
+        "x",
+    ]
+    assert cli.main(cmd) == 42
+    assert recorded["args"] == (
+        ["tasks/a.md"],
+        "coder",
+        "hardener",
+        True,
+        ["a"],
+        "claude",
+        "m",
+        "high",
+        "changed",
+        ["x"],
+    )

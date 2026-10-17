@@ -7,6 +7,7 @@ type = layers
 layers =
     marestail.tui
     marestail.cli
+    marestail.queue
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail._hyper
     marestail._install | marestail._tooling
@@ -500,13 +501,14 @@ forbidden_modules =
     marestail.timeline
 
 [importlinter:contract:pipeline-belongs-to-orchestration]
-name = The role list and how a scope reshapes it are known only to the runner and the prompt builder
+name = The role list and how a scope reshapes it are known only to the runner, the prompt builder and the queue
 type = protected
 protected_modules =
     marestail.pipeline
 allowed_importers =
     marestail.runner
     marestail.prompts
+    marestail.queue
 
 [importlinter:contract:nice-belongs-to-a-run]
 name = The run's priority, I/O class and OOM score are set only by the runner

@@ -221,6 +221,7 @@ def test_help_lists_every_subcommand() -> None:
         "gate",
         "run",
         "tasks",
+        "queue",
         "install",
         "sonar",
         "watch",
