@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -182,7 +182,8 @@ def _queue_tasks(repo: Path) -> dict[str, Any]:
     state_file = repo / ".marestail" / "queue" / "state.json"
     if not state_file.exists():
         return {}
-    return json.loads(state_file.read_text())["tasks"]
+    loaded = cast(dict[str, Any], json.loads(state_file.read_text()))
+    return cast(dict[str, Any], loaded["tasks"])
 
 
 def test_order_filename_breaks_ties_only_after_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -332,7 +333,7 @@ def test_merge_commit_unblocks_c(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert ancestor.returncode == 0
     state_dir = repo / ".marestail" / "queue"
     state_dir.mkdir(parents=True)
-    initial_state = {
+    initial_state: dict[str, Any] = {
         "v": 1,
         "tasks": {
             "z": _done_entry("marestail/z", "z" * 40, "2026-10-16T00:00:00Z"),
