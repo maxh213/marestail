@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import config as config_module
-from marestail import pipeline, status
+from marestail import status
 from marestail.context import DEFAULT_BASE
 from marestail.task_file import TaskFile, check, read
 
@@ -76,8 +76,10 @@ def run_queue(
     scope: str | None,
     focus: list[str],
 ) -> int:
+    from marestail.runner import role_window
+
     root = _find_root(Path.cwd())
-    code = _check_roles(start, stop, scope)
+    code = role_window(start, stop, scope)
     if code != 0:
         return code
     return _run_with_lock(root, paths, start, stop, here, retry, agent, model, effort, scope, focus)
@@ -86,23 +88,6 @@ def run_queue(
 def _find_root(start: Path) -> Path:
     cfg = config_module.load(start)
     return cfg.root.resolve()
-
-
-def _check_roles(start: str | None, stop: str | None, scope: str | None) -> int:
-    mode = "hyper" if scope == "hyper" else None
-    bad = _find_bad_role(start, stop, set(pipeline.names(mode)))
-    if bad is not None:
-        sys.stderr.write(f"unknown role {bad}; choose from {', '.join(pipeline.names(mode))}\n")
-        return 2
-    pipeline.window(start, stop, mode)
-    return 0
-
-
-def _find_bad_role(start: str | None, stop: str | None, valid: set[str]) -> str | None:
-    for name in (start, stop):
-        if name and name not in valid:
-            return name
-    return None
 
 
 def _run_with_lock(

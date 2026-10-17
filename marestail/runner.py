@@ -233,6 +233,15 @@ def _accept_task(task: Path) -> None:
         raise SystemExit("\n".join(f"{task}: {problem}" for problem in error.problems)) from error
 
 
+def role_window(start: str | None, stop: str | None, scope: str | None) -> int:
+    try:
+        window(start, stop, HYPER if scope == HYPER else None)
+    except SystemExit as err:
+        sys.stderr.write(f"{err.code}\n")
+        return 2
+    return 0
+
+
 def run_pipeline(
     task: Path,
     start: str | None,

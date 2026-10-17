@@ -996,14 +996,11 @@ def test_child_arguments_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     code = cli.main(cmd)
     assert code == 0
     assert len(recorded) == 2
-    a_argv = recorded[0]
-    assert "--from" in a_argv
-    assert a_argv[a_argv.index("--from") + 1] == "coder"
-    assert "--to" in a_argv
-    assert a_argv[a_argv.index("--to") + 1] == "hardener"
-    assert "--focus" in a_argv
-    d_argv = recorded[1]
-    assert "--from" not in d_argv
+    cli_path = str(Path(cli.__file__).resolve())
+    shared = ["--agent", "claude", "--model", "m", "--effort", "high", "--scope", "changed", "--focus", "x", "--focus", "y"]
+    assert recorded[0] == [sys.executable, "-u", cli_path, "run", "tasks/a.md", "--auto", "--from", "coder", "--to", "hardener", *shared]
+    assert recorded[1] == [sys.executable, "-u", cli_path, "run", "tasks/d.md", "--auto", "--to", "hardener", *shared]
+    assert "--retries" not in recorded[0]
     assert captured_envs[0]["MARESTAIL_LIMIT_WAITS"] == "36"
     monkeypatch.setenv("MARESTAIL_LIMIT_WAITS", "5")
     captured_envs.clear()
@@ -1192,11 +1189,28 @@ def test_push_and_pr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: py
     assert code == 0
     pr_creates = [c for c in gh_calls if c[0][:2] == ["pr", "create"]]
     assert len(pr_creates) == 1
-    assert "--title" in pr_creates[0][0]
-    assert "Task A" in pr_creates[0][0]
-    pr_body = (repo / ".marestail" / "queue" / "pr-a.md").read_text()
-    assert "`marestail queue` opened this pull request after task `a` finished on `marestail/a`." in pr_body
-    assert "- a: Task A" in pr_body
+    body_path = repo / ".marestail" / "queue" / "pr-a.md"
+    assert pr_creates[0][0] == [
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        "marestail/a",
+        "--title",
+        "Task A",
+        "--body-file",
+        str(body_path),
+    ]
+    assert pr_creates[0][1]["GH_PROMPT_DISABLED"] == "1"
+    pr_body = body_path.read_text()
+    assert pr_body == (
+        "`marestail queue` opened this pull request after task `a` finished on `marestail/a`.\n\n"
+        "Tasks done on this branch:\n"
+        "- a: Task A\n\n"
+        "Each commit is stamped with the role and model that made it.\n"
+    )
+    assert "pr-opened a marestail/a" in (repo / ".marestail" / "queue" / "queue.log").read_text()
 
 
 def test_signals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1304,6 +1318,25 @@ def test_read_toml_push_pr_invalid_pr(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "[queue] pr must be true or false, got 'yes'" in capsys.readouterr().err
 
 
+def test_fetch_failure_is_logged_and_the_queue_continues(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    write_task_file(repo / "tasks" / "c.md", "c", ["a"], stack=False)
+    commit_all(repo, "tasks")
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "remote", "set-url", "origin", str(tmp_path / "not-a-repo"))
+    fake_start, recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    assert queue.run_queue([], None, None, False, [], None, None, None, None, []) == 1
+    assert len(recorded) == 1
+    log = (repo / ".marestail" / "queue" / "queue.log").read_text()
+    assert "fetch origin failed: and the repository exists." in log
+    state = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]
+    assert state["a"]["status"] == "done"
+    assert state["c"]["status"] == "blocked"
+
+
 def test_maybe_fetch_base_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     log_path = tmp_path / "queue.log"
     queue._maybe_fetch_base(tmp_path, "main", log_path)
@@ -1352,9 +1385,12 @@ def test_start_child_wrapper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         return FakeChild(777)
 
     monkeypatch.setattr(subprocess, "Popen", _mock_popen)
-    proc = queue._start_child(["echo", "hi"], tmp_path, {})
+    proc = queue._start_child(["echo", "hi"], tmp_path, {"MARESTAIL_LIMIT_WAITS": "36"})
     assert proc.pid == 777
     assert recorded[0][0] == ["echo", "hi"]
+    assert recorded[0][1]["cwd"] == tmp_path
+    assert recorded[0][1]["start_new_session"] is True
+    assert recorded[0][1]["env"]["MARESTAIL_LIMIT_WAITS"] == "36"
 
 
 def test_last_stderr_line_empty() -> None:
@@ -1437,12 +1473,183 @@ def test_signal_handler_and_early_exit(tmp_path: Path, monkeypatch: pytest.Monke
         monkeypatch.setattr(queue.SIG_STATE, "proc", None)
         sig_fn(15, None)
         assert queue.SIG_STATE.received == 15
+        assert signal.getsignal(signal.SIGINT) is sig_fn
+        sig_fn(2, None)
+        assert queue.SIG_STATE.received == 2
         dummy_task = TaskFile("a", Path("a.md"), (), None, "", True)
         git_opts = queue.GitOptions("main", "origin", "main", False, False, False)
         child_opts = queue.ChildOptions(None, None, None, None, [], None, None)
         dummy_opts = queue.QueueOptions(tmp_path, tmp_path, log_path, tmp_path / "state.json", [], git_opts, child_opts)
         with pytest.raises(SystemExit) as exc2:
             queue._handle_task_in_loop(dummy_task, [], {}, dummy_opts, False)
-        assert exc2.value.code == 143
+        assert exc2.value.code == 130
     finally:
         queue._restore_signals(old)
+
+
+def test_role_window_prints_pipeline_exit(capsys: pytest.CaptureFixture[str]) -> None:
+    from marestail.runner import role_window
+
+    assert role_window(None, "hardener", None) == 0
+    assert capsys.readouterr().err == ""
+    assert role_window("nope", None, None) == 2
+    plain = "unknown role nope; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa\n"
+    assert capsys.readouterr().err == plain
+    assert role_window(None, "cleaner", "hyper") == 2
+    hyper = "unknown role cleaner; choose from specifier, critic, coder, architect, blast, hardener, qa\n"
+    assert capsys.readouterr().err == hyper
+    assert role_window("coder", "qa", "hyper") == 0
+
+
+def test_queue_default_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "bad.md").write_text("# bad\n")
+    (repo / "other").mkdir()
+    (repo / "other" / "bad.md").write_text("# bad\n")
+    code = cli.main(["queue"])
+    assert code == 2
+    seen = capsys.readouterr()
+    assert seen.out == "tasks/bad.md: no front matter: line 1 must be +++\n"
+    assert "other/bad.md" not in seen.out
+    assert seen.err == ""
+
+
+@pytest.mark.parametrize(
+    "result,code,role,reason,stopped_at,status",
+    [
+        ("complete", 0, "coder", None, None, "done"),
+        ("failed", 1, "coder", "tests failed", None, "failed"),
+        ("stopped", 1, "critic", "not approved", "critic", "stopped"),
+    ],
+)
+def test_push_follows_a_task_that_ran(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    result: str,
+    code: int,
+    role: str,
+    reason: str | None,
+    stopped_at: str | None,
+    status: str,
+) -> None:
+    repo, bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    write_task_file(repo / "tasks" / "b.md", "b", ["a"], stack=False)
+    commit_all(repo, "tasks")
+    git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "1")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PR", "1")
+    gh_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        queue, "_run_gh", lambda args, _root, env=None: gh_calls.append(args) or subprocess.CompletedProcess(args, 0, "0\n", "")
+    )
+    outcomes = {"a": (result, code, role, reason, stopped_at)}
+    fake_start, _recorded = make_child_seam(repo, outcomes)
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    exit_code = queue.run_queue(["tasks/a.md", "tasks/b.md"], None, None, False, [], None, None, None, None, [])
+    assert exit_code == 1
+    local = git(repo, "rev-parse", "marestail/a").strip()
+    assert git(bare, "rev-parse", "marestail/a").strip() == local
+    state = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]
+    assert state["a"]["status"] == status
+    assert state["a"]["head"] == local
+    assert state["b"]["status"] == "blocked"
+    missing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "marestail/b"], cwd=bare, capture_output=True, text=True, check=False
+    )
+    assert missing.returncode != 0
+    assert gh_calls == [] if status != "done" else gh_calls != []
+
+
+def test_push_off_does_not_push(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    (repo / "marestail.toml").write_text('[git]\nbase = "origin/main"\n[queue]\npush = true\n')
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    commit_all(repo, "task")
+    git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "0")
+    fake_start, _recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    assert queue.run_queue(["tasks/a.md"], None, None, False, [], None, None, None, None, []) == 0
+    missing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "marestail/a"], cwd=bare, capture_output=True, text=True, check=False
+    )
+    assert missing.returncode != 0
+
+
+def test_empty_push_variable_beats_the_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    (repo / "marestail.toml").write_text('[git]\nbase = "origin/main"\n[queue]\npush = true\npr = true\n')
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    commit_all(repo, "task")
+    git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "")
+    assert cli.main(["queue"]) == 2
+    assert capsys.readouterr() == ("", "[queue] pr needs [queue] push\n")
+
+
+def test_pr_env_beats_a_false_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    (repo / "marestail.toml").write_text('[git]\nbase = "origin/main"\n[queue]\npush = true\npr = false\n')
+    write_task_file(repo / "tasks" / "a.md", "a", [], title="Task A")
+    commit_all(repo, "task")
+    git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PR", "true")
+    created: list[list[str]] = []
+
+    def _mock_gh(args: list[str], root: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        if args[1] == "list":
+            return subprocess.CompletedProcess(args, 0, "0\n", "")
+        created.append(args)
+        return subprocess.CompletedProcess(args, 0, "https://example\n", "")
+
+    monkeypatch.setattr(queue, "_run_gh", _mock_gh)
+    fake_start, _recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    assert queue.run_queue(["tasks/a.md"], None, None, False, [], None, None, None, None, []) == 0
+    assert created and created[0][created[0].index("--title") + 1] == "Task A"
+
+
+def test_failed_push_keeps_the_done_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    commit_all(repo, "task")
+    git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "1")
+    fake_start, _recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    original = queue._git_run
+
+    def _git(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+        if args[0] == "push":
+            return subprocess.CompletedProcess(args, 1, "", "and the repository exists.\n")
+        return original(args, root)
+
+    monkeypatch.setattr(queue, "_git_run", _git)
+    assert queue.run_queue(["tasks/a.md"], None, None, False, [], None, None, None, None, []) == 0
+    state = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]["a"]
+    assert state["status"] == "done"
+    assert "push-failed a marestail/a: and the repository exists." in (repo / ".marestail" / "queue" / "queue.log").read_text()
+
+
+def test_task_with_no_heading_uses_id_as_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def _mock_gh(args: list[str], root: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        text = "0\n" if args[1] == "list" else "https://example\n"
+        return subprocess.CompletedProcess(args, 0, text, "")
+
+    monkeypatch.setattr(queue, "_run_gh", _mock_gh)
+    task = TaskFile("fallback-id", tmp_path / "fallback-id.md", (), None, "no heading here\n", True)
+    state = {"tasks": {"fallback-id": {"status": "done", "branch": "marestail/fallback-id"}}}
+    queue._maybe_open_pr(task, "marestail/fallback-id", "origin/main", [task], state, tmp_path, tmp_path / "queue.log")
+    create = next(args for args in calls if args[1] == "create")
+    assert create[create.index("--title") + 1] == "fallback-id"

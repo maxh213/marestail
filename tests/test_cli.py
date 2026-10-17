@@ -24,7 +24,7 @@ from marestail.gates import Gate, visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup
-from tests.conftest import make_context
+from tests.conftest import FORBIDDEN_BINARIES, make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
@@ -1417,6 +1417,75 @@ def assert_run_layout(repo: Path, task_id: str, expected: str, stdout: str) -> N
     assert (folder / "pipeline.log").read_text() == stdout
     assert not (repo / ".marestail" / "handoffs" / task_id).exists()
     assert len(list(folder.glob("handoffs-*/01-critic.md"))) == 1
+
+
+def test_queue_help() -> None:
+    text = cli.build_parser().format_help()
+    assert COMMAND_CHOICES in text
+    assert "    queue               run a folder of tasks in dependency order" in text
+    assert "tasks,queue" in Path("tests/test_cli.py").read_text()
+    green = Path("tests/test_green_repo.py").read_text()
+    assert green.index('"tasks",') < green.index('"queue",')
+    assert "tasks,queue" in Path("tests/test_events.py").read_text()
+    assert "gh" in FORBIDDEN_BINARIES
+    readme = Path("README.md").read_text()
+    overnight, _sep, after = readme.partition("## Overnight")
+    assert overnight
+    section, _sep, _rest = after.partition("\n## ")
+    assert section.startswith("\n\n`tools/overnight.sh")
+    assert _rest.startswith("Queue\n")
+    queue_section = _rest.split("\n## ", 1)[0]
+    for phrase in (
+        "marestail queue",
+        "--here",
+        "--retry",
+        "stack = true",
+        "merge commit",
+        "state.json",
+        "queue.log",
+        "exits 0",
+    ):
+        assert phrase in queue_section
+    assert "`tasks/" not in queue_section
+    assert "marestail queue sets 36 for its runs when it is unset" in readme
+    assert (
+        "| `MARESTAIL_QUEUE_PUSH` | `1`/`true` or `0`/`false`: push each branch after each queued task; wins over `[queue] push` |"
+        in readme
+    )
+    assert "| `MARESTAIL_QUEUE_PR` | `1`/`true` or `0`/`false`: open a PR per queued branch; wins over `[queue] pr` |" in readme
+    phases = subprocess.run(
+        ["git", "status", "--porcelain", "--", ".marestail/phases", "tools/overnight.sh"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert phases.stdout == ""
+
+
+def test_run_accepts_file_with_no_front_matter(tmp_path: Path) -> None:
+    (tmp_path / "marestail.toml").write_text("")
+    (tmp_path / "plain.md").write_text("# plain")
+    seen = subprocess.run(
+        [sys.executable, "-u", str(Path(cli.__file__).resolve()), "run", "plain.md", "--to", "not-a-role"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    message = "unknown role not-a-role; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa\n"
+    assert seen.returncode == 1
+    assert seen.stderr == message
+    assert "no front matter" not in seen.stdout
+    assert "no front matter" not in seen.stderr
+
+
+def test_tasks_check_rejects_file_with_no_front_matter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "plain.md").write_text("# plain")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["tasks", "check", "plain.md"]) == 1
+    assert capsys.readouterr() == ("plain.md: no front matter: line 1 must be +++\n", "")
 
 
 def test_queue_parser_help(capsys: pytest.CaptureFixture[str]) -> None:
