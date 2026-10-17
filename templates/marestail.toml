@@ -8,6 +8,7 @@ base = "origin/master"
 
 # [run]
 # nice = 19  # 0 leaves the process at the shell's priority; MARESTAIL_NICE overrides; children inherit
+# jobs = 4  # parallel workers for every mutation gate; MARESTAIL_JOBS wins over it
 
 # [practices]
 # enabled = true  # the practices judge runs between architect and perf unless false; skips repos with no guidance/*.md
@@ -42,7 +43,7 @@ root = "server"
 venv = ".venv"
 sources = ["."]
 crap_max = 4
-mutation_workers = 4
+# mutation_workers = 4  # wins over [run] jobs for mutmut
 
 [ts]
 root = "client/app"
@@ -82,7 +83,7 @@ crap_max = 4
 root = "."
 sources = ["src"]
 crap_max = 4
-mutation_jobs = 2
+# mutation_jobs = 2  # wins over [run] jobs for cargo-mutants
 # clippy_args = ["-D", "warnings", "-D", "clippy::pedantic"]
 # coverage_ignore_regex = "src/main\\.rs$"  # also skipped by rs.crap
 
@@ -92,7 +93,7 @@ sources = ["src/main/java"]
 tests = ["src/test/java"]
 coverage_exclude = []  # also skipped by java.mutation unless mutation_exclude is set, e.g. ["src/main/java/com/acme/Application.java"]
 crap_max = 4
-mutation_threads = 2
+# mutation_threads = 2  # wins over [run] jobs for PIT
 # mvn = "./mvnw"  # default: ./mvnw when it exists, else mvn
 # release = "21"  # default: maven.compiler.release from pom.xml
 # pmd_ruleset = "pmd-ruleset.xml"  # default: marestail's quickstart rules plus CyclomaticComplexity

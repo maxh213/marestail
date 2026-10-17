@@ -2,6 +2,7 @@ import time
 from functools import partial
 from typing import Any
 
+from marestail import jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.gates._stryker import (
     COMMAND_SUFFIXES,
@@ -130,6 +131,9 @@ def mutation_command(ctx: Context, mutate: list[str], workers: int) -> list[str]
 
 
 def local_concurrency(ctx: Context) -> int:
+    chosen = jobs.run_jobs(ctx.config)
+    if chosen is not None:
+        return chosen
     configured = ctx.ts("mutation_concurrency")
     return int(configured) if configured else 0
 

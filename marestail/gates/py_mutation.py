@@ -7,7 +7,7 @@ from operator import ne
 from pathlib import Path
 from typing import Any
 
-from marestail import remote
+from marestail import jobs, remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
 from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
@@ -62,7 +62,7 @@ def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Resu
         GATE,
         lambda workers: command(ctx, patterns, workers),
         ctx.python_root(),
-        ctx.python("mutation_workers", 4),
+        jobs.pick(ctx.config, "python", "mutation_workers", 4),
         timeout=7200,
         pull=(mutants_dir(ctx),),
     )

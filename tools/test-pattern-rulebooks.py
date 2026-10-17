@@ -413,11 +413,20 @@ TOML = (
 TOML_ADDED = [
     "# [run]",
     "# nice = 19  # 0 leaves the process at the shell's priority; MARESTAIL_NICE overrides; children inherit",
+    "# jobs = 4  # parallel workers for every mutation gate; MARESTAIL_JOBS wins over it",
     "# [design]",
     "# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md",
+    "# mutation_workers = 4  # wins over [run] jobs for mutmut",
     'runner = "vitest"  # or "jest" / "playwright"; then list sources = ["app", "components", "lib"]',
+    "# mutation_jobs = 2  # wins over [run] jobs for cargo-mutants",
+    "# mutation_threads = 2  # wins over [run] jobs for PIT",
 ]
-TOML_REMOVED = ['runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]']
+TOML_REMOVED = [
+    "mutation_workers = 4",
+    'runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]',
+    "mutation_jobs = 2",
+    "mutation_threads = 2",
+]
 README = (
     "<rule id> <file:line>",
     "bounces to the architect",

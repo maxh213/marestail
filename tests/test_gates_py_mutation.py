@@ -360,6 +360,42 @@ def test_the_gate_offers_four_workers_by_default(tmp_path: Path, offload: Any) -
     assert fake.workers == [4]
 
 
+@pytest.mark.parametrize(("env", "raw"), [(None, {"run": {"jobs": 3}}), ("3", {})])
+def test_the_knob_sets_the_workers(
+    tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, raw: dict[str, Any]
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    fake = offload([(1, "boom")])
+
+    py_mutation.run_gate(make_context(tmp_path, {"python": {"mutation_scope": "all"}, **raw}))
+
+    assert fake.workers == [3]
+    assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "3"]]
+    assert fake.builds[0](13)[-1] == "13"
+
+
+def test_a_language_key_beats_the_run_key(tmp_path: Path, offload: Any) -> None:
+    fake = offload([(1, "boom")])
+    raw = {"python": {"mutation_scope": "all", "mutation_workers": 8}, "run": {"jobs": 3}}
+
+    py_mutation.run_gate(make_context(tmp_path, raw))
+
+    assert fake.workers == [8]
+    assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "8"]]
+
+
+def test_the_variable_beats_a_language_key(tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "3")
+    fake = offload([(1, "boom")])
+    raw = {"python": {"mutation_scope": "all", "mutation_workers": 8}}
+
+    py_mutation.run_gate(make_context(tmp_path, raw))
+
+    assert fake.workers == [3]
+    assert fake.calls == [[f"{tmp_path}/.venv/bin/mutmut", "run", "--max-children", "3"]]
+
+
 def test_mutants_dir_is_relative_to_the_repo(tmp_path: Path) -> None:
     assert py_mutation.mutants_dir(make_context(tmp_path, {"python": {"root": "src"}})) == "src/mutants"
     assert py_mutation.mutants_dir(make_context(tmp_path)) == "mutants"

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,7 @@ from marestail import config as config_module
 from marestail import gates
 from marestail.context import Context
 from marestail.gates import Gate
-from marestail.report import Result
+from marestail.report import Result, render_one
 from tests.conftest import make_context
 
 LANGUAGES = [
@@ -211,6 +212,24 @@ def test_run_one_appends_the_file_level_count(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, file_level=5)
     result = gates.run_one(Gate("x", "fast", None, run), ctx)
     assert (result.summary, ctx.file_level) == ("1 problems; 2 file-level findings not gated under hyper", 0)
+
+
+def test_a_mutation_gate_crash_does_not_stop_the_next_one(tmp_path: Path) -> None:
+    def boom(_ctx: Context) -> Result:
+        raise SystemExit("MARESTAIL_JOBS must be a whole number 1 or more, got '0'")
+
+    def skipped(_ctx: Context) -> Result:
+        return Result.skipped("ts.mutation", "no changed typescript sources")
+
+    first = gates.run_one(Gate("py.mutation", "full", "python", boom), make_context(tmp_path))
+    second = gates.run_one(Gate("ts.mutation", "full", "ts", skipped), make_context(tmp_path))
+
+    summary = "py.mutation crashed: SystemExit MARESTAIL_JOBS must be a whole number 1 or more, got '0'"
+    assert (first.gate, first.ok, first.summary) == ("py.mutation", False, summary)
+    head = render_one(first).splitlines()[0]
+    assert re.fullmatch(rf"\[FAIL\] py\.mutation    {re.escape(summary)}  \(\d+\.\ds\)", head)
+    assert (second.ok, second.summary) == (True, "skipped: no changed typescript sources")
+    assert render_one(second) == "[ok  ] ts.mutation    skipped: no changed typescript sources  (0.0s)"
 
 
 def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:

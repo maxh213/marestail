@@ -2,12 +2,13 @@ import json
 import math
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from marestail import erlang
+from marestail import erlang, jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.report import Result, elapsed
 from marestail.shell import tail
@@ -140,9 +141,12 @@ def baseline(job: Job) -> tuple[str, list[str]] | None:
 
 def run_mutants(job: Job, mutants: list[dict[str, Any]]) -> None:
     per_mutant_timeout = max(60, min(1800, math.ceil(job.baseline_seconds * 10)))
-    for mutant in mutants:
-        if mutant.get("status") != SKIPPED:
-            check_mutant(job, mutant, per_mutant_timeout)
+    with ThreadPoolExecutor(max_workers=jobs.run_jobs(job.ctx.config) or 1) as pool:
+        list(pool.map(partial(check_mutant, job, per_mutant_timeout=per_mutant_timeout), unskipped(mutants)))
+
+
+def unskipped(mutants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [mutant for mutant in mutants if mutant.get("status") != SKIPPED]
 
 
 def check_mutant(job: Job, mutant: dict[str, Any], per_mutant_timeout: int) -> None:

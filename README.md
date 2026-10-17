@@ -69,6 +69,8 @@ In one line: `changed` gates the files the diff touches, `hard` gates the focus 
 
 Mutation testing always runs on the diff: even without `--scope changed`, each mutation gate defaults to the files changed against `[git] base` (an empty diff skips the gate), because a whole-repo mutation pass is too slow to run on every gate. Set `[<lang>] mutation_scope = "all"` (e.g. `[elixir] mutation_scope = "all"`) to opt back into whole-repo runs; any other value fails the gate. An explicit `--scope changed` / `--focus` still wins over the config, and a repo whose `[git] base` ref does not resolve falls back to a full run, noted in the gate summary.
 
+`[run] jobs` or `MARESTAIL_JOBS` sets the number of parallel mutation workers for every mutation gate. The variable wins, then `[python] mutation_workers` (mutmut `--max-children`), `[elixir] muex_concurrency` (muex `--concurrency`), `[rust] mutation_jobs` (cargo-mutants `--jobs`) and `[java] mutation_threads` (PIT `-Dthreads`) for their own language, then `[run] jobs`, then each tool's default: StrykerJS takes `--concurrency`, mutant takes `--jobs`, Stryker.NET takes `--concurrency`, and the Erlang gate sizes its own worker pool with it. A value from the variable or `[run] jobs` is capped at the CPU count, 0 is an error, and an empty `MARESTAIL_JOBS=` means unset; a per-language key is passed as written. Jobs never changes which mutants run or how they are judged: the mutant set and the verdict are the same for every worker count. One exception: cargo-mutants is passed no `--jobs` at all when `--in-place` is in `[rust] mutation_args`, because in-place mode has a single source tree. And a pom that sets `<threads>` in the pitest plugin's `<configuration>` beats any `-Dthreads`; `templates/java-pitest.xml` sets none.
+
 A mutant that times out counts as killed in every mutation gate, as Stryker, muex, PIT, cargo-mutants and mutant already count it: the mutant changed behaviour enough that the tests never finished. The summary still says how many were killed that way (`5 of 1973 mutants not killed (7 killed by timeout)`), so a jump in timeouts stays visible. `[<lang>] mutation_timeouts = "fail"` (e.g. `[ts]`, `[dotnet]`, `[python]`, `[elixir]`) counts them as survivors instead.
 
 `ex.mutation` kills any single muex test run that goes past `[elixir] muex_run_limit` seconds (default 300). muex's own `--timeout` resets whenever the tests print output, so a mutant that stops the app from starting while it keeps logging would otherwise hang the whole run. muex scores the killed run and moves on.
@@ -262,6 +264,7 @@ Every variable marestail reads. The `docs` gate ignores common ones such as `HOM
 |---|---|
 | `MARESTAIL_AGENT` | default backend for `marestail run` when `--agent` is not given |
 | `MARESTAIL_NICE` | priority for `marestail run`: 0 turns it off, 1–19 is the nice level (default 19); wins over `[run] nice` |
+| `MARESTAIL_JOBS` | parallel workers for every mutation gate (1 or more, capped at the CPU count; empty means unset); wins over [run] jobs and the per-language worker keys |
 | `MARESTAIL_CLAUDE` | claude binary (default `claude`) |
 | `MARESTAIL_AGY` | agy binary (default `agy`) |
 | `MARESTAIL_CURSOR` | Cursor agent binary (default `cursor-agent`) |

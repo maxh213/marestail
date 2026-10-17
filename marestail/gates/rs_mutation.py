@@ -5,7 +5,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from marestail import rust
+from marestail import jobs, rust
 from marestail.context import NO_CHANGED_MUTANTS, Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
@@ -46,7 +46,7 @@ def mutate(ctx: Context, files: list[Path], started: float) -> Result:
 
 def command(ctx: Context, files: list[Path]) -> list[str]:
     scoped = [arg for path in files for arg in ("--file", str(path.relative_to(ctx.rust_root())))] if ctx.scope_changed else []
-    jobs = str(ctx.rust("mutation_jobs", 2))
+    extra = rust.listify(ctx.rust("mutation_args"))
     return [
         "mutants",
         "--output",
@@ -54,11 +54,16 @@ def command(ctx: Context, files: list[Path]) -> list[str]:
         "--no-shuffle",
         "--colors",
         "never",
-        "--jobs",
-        jobs,
+        *worker_flag(ctx, extra),
         *scoped,
-        *rust.listify(ctx.rust("mutation_args")),
+        *extra,
     ]
+
+
+def worker_flag(ctx: Context, extra: list[str]) -> list[str]:
+    if "--in-place" in extra:
+        return []
+    return ["--jobs", str(jobs.pick(ctx.config, "rust", "mutation_jobs", 2))]
 
 
 IGNORE_MISSING = True
@@ -104,8 +109,14 @@ def judged(ctx: Context, viable: list[Outcome], started: float) -> Result:
     if not viable:
         return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
     survived = survivors(viable)
-    findings = [describe(ctx, o) for o in survived]
+    findings = sorted((describe(ctx, o) for o in survived), key=finding_key)
     return Result(GATE, not survived, mutation_summary(survived, viable), findings[:MAX_FINDINGS], elapsed(started))
+
+
+def finding_key(finding: str) -> tuple[str, int, str]:
+    path, _, rest = finding.partition(":")
+    line, _, _ = rest.partition(" ")
+    return path, int(line), finding
 
 
 def describe(ctx: Context, outcome: Outcome) -> str:

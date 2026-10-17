@@ -327,3 +327,48 @@ def test_hyper_passes_when_no_mutant_starts_on_a_changed_line(
     muex(fake_run, monkeypatch, 1, report(MUTATIONS[:1]))
     ctx = project(tmp_path, scope_changed=True, hyper=True, changed={"lib/a.ex"}, changed_lines_map={"lib/a.ex": {9}})
     assert shape(checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)) == ("ex.mutation", True, "no mutants on changed lines", [])
+
+
+def knob_project(root: Path, settings: dict[str, Any] | None, key: int | None) -> Context:
+    (root / "lib").mkdir()
+    (root / "lib" / "a.ex").write_text("")
+    raw: dict[str, Any] = {"elixir": {"mutation_scope": "all", **(settings or {})}}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    return make_context(root, raw)
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_sets_the_concurrency(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    fake = muex(fake_run, monkeypatch, 1, report(MUTATIONS))
+    ctx = knob_project(tmp_path, None, key)
+
+    checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)
+
+    assert fake.calls[0]["command"] == watched("--no-filter", "--concurrency", "3")
+    assert fake.calls[0]["remote_command"] == watched("--no-filter", "--concurrency", "16")
+
+
+def test_a_zero_language_key_drops_the_flag_even_with_the_run_key(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = muex(fake_run, monkeypatch, 1, report(MUTATIONS))
+    ctx = knob_project(tmp_path, {"muex_concurrency": 0}, 3)
+
+    checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)
+
+    assert fake.calls[0]["command"] == watched("--no-filter")
+
+
+def test_the_variable_beats_a_zero_language_key(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "3")
+    fake = muex(fake_run, monkeypatch, 1, report(MUTATIONS))
+    ctx = knob_project(tmp_path, {"muex_concurrency": 0}, None)
+
+    checked(ex_mutation.run_gate(ctx), ex_mutation.GATE)
+
+    assert fake.calls[0]["command"] == watched("--no-filter", "--concurrency", "3")

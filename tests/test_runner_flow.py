@@ -12,7 +12,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import hunks, nice, pipeline, prompts, ran_against, reported, runner, task_file
+from marestail import hunks, jobs, nice, pipeline, prompts, ran_against, reported, runner, task_file
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -176,6 +176,17 @@ def remember_pick(
     return pick_model
 
 
+def remember_jobs(order: list[str], calls: list[Config]) -> Callable[[Config], int | None]:
+    real = jobs.run_jobs
+
+    def run_jobs(loaded: Config) -> int | None:
+        order.append("jobs")
+        calls.append(loaded)
+        return real(loaded)
+
+    return run_jobs
+
+
 @pytest.fixture
 def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setenv("MARESTAIL_SCOPE", "unset")
@@ -186,6 +197,7 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     seen_load: list[Path] = []
     order: list[str] = []
     nice_calls: list[Config] = []
+    jobs_calls: list[Config] = []
 
     def load(start: Path) -> Config:
         seen_load.append(start)
@@ -202,6 +214,7 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     read_calls: list[Path] = []
     real_read = task_file.read
     monkeypatch.setattr(nice, "apply", remember_nice(order, nice_calls))
+    monkeypatch.setattr(jobs, "run_jobs", remember_jobs(order, jobs_calls))
     monkeypatch.setattr(task_file, "read", remember_read(order, read_calls))
     monkeypatch.setattr(runner, "pick_model", remember_pick(order, runner.pick_model))
 
@@ -214,6 +227,7 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     seen["load"] = seen_load
     seen["config"] = config
     seen["nice"] = nice_calls
+    seen["jobs"] = jobs_calls
     seen["order"] = order
     seen["read"] = read_calls
     seen["real_read"] = real_read
@@ -308,12 +322,46 @@ def test_run_pipeline_all_scope_without_focus(pipeline_env: dict[str, Any]) -> N
 def test_run_pipeline_applies_nice_once_before_pick_model(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
     assert pipeline_env["nice"] == [pipeline_env["config"]]
-    assert pipeline_env["order"] == ["nice", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
     assert pipeline_env["read"] == [Path("t.md")]
     captured = capsys.readouterr()
     assert "oom_score_adj" not in captured.out
     assert "ionice" not in captured.out
     assert "setpriority" not in captured.out
+
+
+def test_run_pipeline_reads_jobs_once_before_pick_model(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+    assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
+    assert pipeline_env["jobs"] == [pipeline_env["config"]]
+    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
+    assert capsys.readouterr().out == "\n"
+
+
+@pytest.mark.parametrize(
+    ("env", "raw", "message"),
+    [
+        ("0", {}, "MARESTAIL_JOBS must be a whole number 1 or more, got '0'"),
+        (None, {"run": {"jobs": 0}}, "[run] jobs must be a whole number 1 or more, got 0"),
+    ],
+)
+def test_run_pipeline_raises_a_bad_jobs_before_the_task_is_read(
+    pipeline_env: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    env: str | None,
+    raw: dict[str, Any],
+    message: str,
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    pipeline_env["config"].raw.update(raw)
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
+    assert str(raised.value) == message
+    assert pipeline_env["order"] == ["nice", "jobs"]
+    assert pipeline_env["read"] == []
+    assert "state" not in pipeline_env
+    assert capsys.readouterr().out == ""
 
 
 def test_run_pipeline_nice_follows_config_and_environment(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -380,7 +428,7 @@ def test_run_pipeline_reports_a_bad_model_when_nice_is_valid(pipeline_env: dict[
     with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(Path("t.md"), None, None, True, "dandelion/route", 1, agent="grok")
     assert str(raised.value) == ("--model dandelion/route picks the backend and effort before every session; drop --agent and --effort")
-    assert pipeline_env["order"] == ["nice", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
     assert "state" not in pipeline_env
     assert capsys.readouterr().out == ""
 
@@ -401,7 +449,7 @@ def test_run_pipeline_stops_on_a_broken_task_before_the_model(pipeline_env: dict
         runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
     assert str(raised.value) == "\n".join(f"t.md: {problem}" for problem in problems)
     assert not str(raised.value).endswith("\n")
-    assert pipeline_env["order"] == ["nice", "read"]
+    assert pipeline_env["order"] == ["nice", "jobs", "read"]
     assert pipeline_env["read"] == [Path("t.md")]
     assert "state" not in pipeline_env
 
@@ -418,7 +466,7 @@ def test_run_pipeline_accepts_a_valid_block_without_its_dependency(
     assert runner.run_pipeline(plain, "critic", "critic", True, None, 1) == 7
     assert runner.run_pipeline(absent, "critic", "critic", True, None, 1) == 7
     assert calls == [plain, absent]
-    assert pipeline_env["order"] == ["nice", "read", "pick_model", "nice", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model", "nice", "jobs", "read", "pick_model"]
     assert pipeline_env["state"].task_name == "019-absent"
     assert "does not exist" not in capsys.readouterr().out
     assert not (tmp_path / "099-missing.md").exists()
@@ -429,7 +477,7 @@ def test_run_pipeline_lets_a_missing_task_raise(pipeline_env: dict[str, Any], mo
     with pytest.raises(FileNotFoundError) as raised:
         runner.run_pipeline(Path("tasks/missing.md"), "critic", "critic", True, None, 1)
     assert "tasks/missing.md" in str(raised.value)
-    assert pipeline_env["order"] == ["nice"]
+    assert pipeline_env["order"] == ["nice", "jobs"]
     assert "state" not in pipeline_env
 
 

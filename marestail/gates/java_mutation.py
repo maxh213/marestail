@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from functools import partial
 from pathlib import Path
 
-from marestail import java, remote
+from marestail import java, jobs, remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
@@ -63,7 +63,7 @@ def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Resu
         GATE,
         lambda workers: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, workers)],
         ctx.java_root(),
-        ctx.java("mutation_threads", 2),
+        jobs.pick(ctx.config, "java", "mutation_threads", 2),
         timeout=int(ctx.java("mutation_timeout", 7200)),
         pull=(str(out.relative_to(ctx.root)),),
     )

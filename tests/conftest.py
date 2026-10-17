@@ -219,6 +219,7 @@ def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(socket.socket, "connect", refuse_network)
     monkeypatch.setattr(socket, "create_connection", refuse_network)
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
 
 
 def checked(result: Result, gate: str) -> Result:

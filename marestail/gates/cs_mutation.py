@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet
+from marestail import dotnet, jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context
 from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
@@ -179,8 +179,14 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "json",
         "-r",
         "progress",
+        *concurrency(ctx),
         *mutate(excludes + includes),
     ]
+
+
+def concurrency(ctx: Context) -> list[str]:
+    chosen = jobs.run_jobs(ctx.config)
+    return [] if chosen is None else ["--concurrency", str(chosen)]
 
 
 def trim_slash_pattern(pattern: str, prefix: str) -> str:

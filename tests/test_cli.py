@@ -501,6 +501,14 @@ def test_gate_reports_no_gates(gates: Callable[..., Recorder], capsys: pytest.Ca
     assert capsys.readouterr().err == "no gate ran: nothing in the full tier matches --only and marestail.toml\n"
 
 
+def test_gate_only_docs_without_a_docs_section_never_reads_jobs(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "0")
+    assert cli.main(["gate", "--only", "docs"]) == 2
+    assert capsys.readouterr().err == "no gate ran: nothing in the fast tier matches --only and marestail.toml\n"
+
+
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
