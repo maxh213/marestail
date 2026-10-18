@@ -34,15 +34,16 @@ def source(root: Path) -> Path:
 
 
 def test_scoring_uses_the_shared_crap_helpers() -> None:
-    assert go_crap.crap_score is _crap.crap_score
-    assert go_crap.describe is _crap.describe
-    assert go_crap.above is _crap.above
-    assert go_crap.KEY is _crap.KEY
-    assert go_crap.DEFAULT is _crap.DEFAULT
-    assert go_crap.judged is _hyper_crap.judged
-    assert go_crap.Hyper is _hyper_crap.Hyper
-    assert go_crap.unit is _hyper_crap.unit
-    assert go_crap.unhit_lines is _hyper_crap.unhit_lines
+    bound = go_crap.__dict__
+    assert bound["crap_score"] is _crap.crap_score
+    assert bound["describe"] is _crap.describe
+    assert bound["above"] is _crap.above
+    assert bound["KEY"] is _crap.KEY
+    assert bound["DEFAULT"] is _crap.DEFAULT
+    assert bound["judged"] is _hyper_crap.judged
+    assert bound["Hyper"] is _hyper_crap.Hyper
+    assert bound["unit"] is _hyper_crap.unit
+    assert bound["unhit_lines"] is _hyper_crap.unhit_lines
 
 
 def test_needs_coverage_before_preflight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
