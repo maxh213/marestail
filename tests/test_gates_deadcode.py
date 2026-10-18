@@ -504,24 +504,23 @@ def test_go_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source.parent.mkdir(parents=True)
     source.write_text("package store\n")
     test.write_text("package store\n")
+    records = [
+        {"file": str(source), "line": 23, "kind": "function", "name": "UnusedHelper"},
+        {"file": str(source), "line": 30, "kind": "type", "name": "Spare's"},
+    ]
     calls: list[tuple[str, list[Path], list[Path]]] = []
 
     def scan(ctx: object, mode: str, files: list[Path], uses: list[Path]) -> tuple[Any, Any]:
         calls.append((mode, files, uses))
-        return [{"file": str(source), "line": 23, "kind": "function", "name": "UnusedHelper"}], None
+        return records, None
 
     monkeypatch.setattr(golang, "scan", reject_none(scan))
-    assert deadcode.go_findings(make_context(tmp_path, {"go": {}})) == ["internal/store/store.go:23 unused function 'UnusedHelper'"]
-    assert calls == [("dead", [source], [test])]
-    monkeypatch.setattr(
-        golang,
-        "scan",
-        reject_none(lambda ctx, mode, files, uses: ([{"file": str(source), "line": 23, "kind": "function", "name": "UnusedHelper"}], None)),
-    )
-    assert deadcode.go_findings(make_context(tmp_path, {"go": {"deadcode_ignore": ["UnusedHelper"]}})) == []
-    monkeypatch.setattr(golang, "scan", reject_none(lambda ctx, mode, files, uses: (None, "boom")))
-    assert deadcode.go_findings(make_context(tmp_path, {"go": {"deadcode_ignore": ["UnusedHelper"]}})) == [
-        "go deadcode scanner failed: boom"
+    assert deadcode.go_findings(make_context(tmp_path, {"go": {}})) == [
+        "internal/store/store.go:23 unused function 'UnusedHelper'",
+        "internal/store/store.go:30 unused type 'Spare's'",
     ]
-    assert deadcode.kept_dead("a.go:1 unused function broken", {"broken"}) is True
-    assert deadcode.quoted_name("no quote") == "\n"
+    assert calls == [("dead", [source], [test])]
+    ignoring = make_context(tmp_path, {"go": {"deadcode_ignore": ["UnusedHelper", "Spare"]}})
+    assert deadcode.go_findings(ignoring) == ["internal/store/store.go:30 unused type 'Spare's'"]
+    monkeypatch.setattr(golang, "scan", reject_none(lambda ctx, mode, files, uses: (None, "boom")))
+    assert deadcode.go_findings(ignoring) == ["go deadcode scanner failed: boom"]

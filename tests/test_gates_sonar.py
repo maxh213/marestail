@@ -273,6 +273,8 @@ def test_go_properties_and_exclusions(tmp_path: Path) -> None:
     props = sonar.scanner_properties(ctx, KEY)
     assert props.index(report) > next(index for index, item in enumerate(props) if item.startswith("-Dsonar.java.binaries"))
     assert sonar.scanner_exclusions(ctx) == "perf/**,**/*_test.go,**/vendor/**,**/testdata/**"
+    (tmp_path / "sonar-project.properties").write_text("sonar.go.coverage.reportPaths=x\n")
+    assert sonar.go_properties(ctx) == [exclusions]
     (tmp_path / "sonar-project.properties").write_text(
         "sonar.go.coverage.reportPaths=x\nsonar.coverage.exclusions=y\nsonar.exclusions=**/*_test.go,perf/**\n"
     )
@@ -338,18 +340,7 @@ def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
     root = Path(__file__).resolve().parent.parent
     declared = declared_exclusions((root / "sonar-project.properties").read_text())
     assert "perf/**" in declared
-    expected = declared if sonar.BUNDLED_GO in declared else [*declared, sonar.BUNDLED_GO]
-    assert sonar.scanner_exclusions(make_context(root)).split(",") == expected
-
-
-def test_bundled_go_scanner_is_excluded_once(tmp_path: Path) -> None:
-    assert sonar.scanner_exclusions(make_context(tmp_path)) == "perf/**"
-    folder = tmp_path / "marestail" / "go" / "scan"
-    folder.mkdir(parents=True)
-    (folder / "main.go").write_text("package main\nfunc main() {}\n")
-    assert sonar.scanner_exclusions(make_context(tmp_path)) == "perf/**,marestail/go/**"
-    (tmp_path / "sonar-project.properties").write_text("sonar.exclusions=marestail/go/**\n")
-    assert sonar.scanner_exclusions(make_context(tmp_path)) == "marestail/go/**,perf/**"
+    assert sonar.scanner_exclusions(make_context(root)).split(",") == declared
 
 
 def test_properties_parsing() -> None:
@@ -558,49 +549,6 @@ def test_collect_unscoped() -> None:
     assert ("api/issues/search", {"componentKeys": KEY, "resolved": "false", "ps": 500}) in client.gets
     assert ("api/hotspots/search", {"project": KEY, "status": "TO_REVIEW", "ps": 500}) in client.gets
     assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage,duplicated_lines_density"})
-
-
-def test_scoped_go_coverage_follows_duplication(tmp_path: Path) -> None:
-    ctx = make_context(tmp_path, {"go": {}}, scope_changed=True, changed={"src/b.py"})
-    low: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "75.5"}]}})
-    assert sonar.go_scoped_coverage(ctx, low, KEY) == ["sonar coverage 75.5% (need 100)"]
-    full: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "100"}]}})
-    assert sonar.go_scoped_coverage(ctx, full, KEY) == []
-    absent = make_context(tmp_path, scope_changed=True, changed={"src/b.py"})
-    quiet: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "1"}]}})
-    assert sonar.go_scoped_coverage(absent, quiet, KEY) == []
-    assert quiet.gets == []
-    assert sonar.coverage_lines({}) == []
-    assert sonar.coverage_lines({"coverage": 0.0}) == ["sonar coverage 0.0% (need 100)"]
-    client: Any = FakeClient(collect_responder)
-    assert sonar.scoped_findings(ctx, client, KEY) == [
-        "src/b.py:1 sonar duplication 4.0% (need 0)",
-        "sonar coverage 0.0% (need 100)",
-    ]
-    assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage"})
-    findings, status = sonar.collect(ctx, client, KEY)
-    assert status == "ERROR"
-    assert findings[-1] == "sonar coverage 0.0% (need 100)"
-
-
-def test_scoped_go_coverage_needs_every_source(tmp_path: Path) -> None:
-    domain = tmp_path / "internal" / "domain"
-    store = tmp_path / "internal" / "store"
-    domain.mkdir(parents=True)
-    store.mkdir(parents=True)
-    (domain / "domain.go").write_text("package domain\n")
-    (store / "store.go").write_text("package store\n")
-    held: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "75.5"}]}})
-    partial = make_context(tmp_path, {"go": {}}, scope_changed=True, changed={"internal/store/store.go"})
-    assert sonar.go_scoped_coverage(partial, held, KEY) == []
-    assert held.gets == []
-    whole = make_context(
-        tmp_path,
-        {"go": {}},
-        scope_changed=True,
-        changed={"internal/domain/domain.go", "internal/store/store.go"},
-    )
-    assert sonar.go_scoped_coverage(whole, held, KEY) == ["sonar coverage 75.5% (need 100)"]
 
 
 def test_collect_scoped() -> None:

@@ -4,15 +4,8 @@ from typing import Any
 
 from marestail import golang
 from marestail.context import Context
-from marestail.gates._crap import DEFAULT as DEFAULT
-from marestail.gates._crap import KEY as KEY
-from marestail.gates._crap import above as above
-from marestail.gates._crap import crap_score as crap_score
-from marestail.gates._crap import describe as describe
-from marestail.gates._hyper_crap import Hyper as Hyper
-from marestail.gates._hyper_crap import judged as judged
-from marestail.gates._hyper_crap import unhit_lines as unhit_lines
-from marestail.gates._hyper_crap import unit as unit
+from marestail.gates._crap import DEFAULT, KEY, above, crap_score, describe
+from marestail.gates._hyper_crap import Hyper, judged, unhit_lines, unit
 from marestail.report import Result, elapsed
 
 GATE = "go.crap"
@@ -107,7 +100,7 @@ def covered_unit(found: dict[str, Any], file_cov: dict[str, Any]) -> dict[str, A
 
 
 def base_units(ctx: Context, copy: Path) -> list[dict[str, Any]] | None:
-    functions, error = golang.scan(ctx, "complexity", [copy])
-    if error or functions is None:
+    functions, _ = golang.scan(ctx, "complexity", [copy])
+    if functions is None:
         return None
     return [go_unit("", fn) for fn in functions]

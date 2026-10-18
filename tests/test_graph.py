@@ -8,7 +8,7 @@ import pytest
 from marestail import dotnet, erlang, golang, graph, java, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
-from tests.conftest import FakeRun, make_context, required_timeout
+from tests.conftest import FakeRun, make_context, reject_none, required_timeout
 
 EDGES = [{"from": "A", "to": "B", "symbol": "s", "fun": "f/1"}, {"from": "B", "to": "C", "symbol": "t", "fun": "g/0"}]
 
@@ -266,11 +266,18 @@ def test_go_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         {"file": str(tmp_path / "internal" / "store" / "store.go"), "line": 3, "path": "os"},
         {"file": str(domain), "line": 4, "path": "fmt"},
     ]
+    calls: list[tuple[str, list[Path]]] = []
+
+    def scan(ctx: object, mode: str, files: list[Path]) -> tuple[list[dict[str, Any]], None]:
+        calls.append((mode, files))
+        return records, None
+
     monkeypatch.setattr(golang, "sources", sources([domain]))
-    monkeypatch.setattr(golang, "scan", lambda ctx, mode, files: (records, None))
-    monkeypatch.setattr(golang, "module", lambda ctx: "example.com/marestail/sample")
+    monkeypatch.setattr(golang, "scan", reject_none(scan))
+    monkeypatch.setattr(golang, "module", reject_none(lambda ctx: "example.com/marestail/sample"))
     rendered = graph.go_graph(config(tmp_path, {"go": {}}))
     assert rendered == "## Go modules\ninternal/domain/domain.go -> internal/store (example.com/marestail/sample/internal/store)"
+    assert calls == [("imports", [domain])]
 
 
 def test_go_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -13,7 +14,8 @@ GATE = "go.mutation"
 REPORT = "go-mutation.json"
 NOT_READY = "go toolchain not ready"
 NO_MUTANTS = "no mutants were generated"
-KILLED = {"KILLED", "TIMED OUT"}
+TIMED_OUT = "TIMED OUT"
+KILLED = {"KILLED", TIMED_OUT}
 IGNORED = {"NOT VIABLE", "SKIPPED"}
 NOT_COVERED = "NOT COVERED"
 MAX_LINES = 60
@@ -72,10 +74,14 @@ def with_tool(ctx: Context, targets: list[Path], note: str, started: float) -> R
 def mutate(ctx: Context, binary: str, targets: list[Path], note: str, started: float) -> Result:
     report = ctx.work / REPORT
     report.unlink(missing_ok=True)
-    code, output = run(command(ctx, binary, targets), cwd=ctx.go_root(), timeout=int(ctx.go("mutation_timeout", 7200)))
+    code, output = run(command(ctx, binary, targets), cwd=ctx.go_root(), env=uncached(), timeout=int(ctx.go("mutation_timeout", 7200)))
     if not report.is_file():
         return Result(GATE, False, missing_report(code), tail(output), elapsed(started))
     return judged(ctx, mutants_of(json.loads(report.read_text())), note, started)
+
+
+def uncached() -> dict[str, str]:
+    return {"GOFLAGS": " ".join([*os.environ.get("GOFLAGS", "").split(), "-count=1"])}
 
 
 def command(ctx: Context, binary: str, targets: list[Path]) -> list[str]:
@@ -157,22 +163,23 @@ def viable_mutants(mutants: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def judged_viable(ctx: Context, viable: list[dict[str, Any]], note: str, started: float) -> Result:
     kept = ctx.on_changed_lines(viable, lambda mutant: describe(ctx, mutant))
-    return survivor_result(ctx, kept, surviving(kept), note, started)
+    if not kept:
+        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
+    return capped_survivors(ctx, kept, note, started)
 
 
 def surviving(kept: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [mutant for mutant in kept if status(mutant) not in KILLED]
 
 
-def survivor_result(ctx: Context, kept: list[dict[str, Any]], survivors: list[dict[str, Any]], note: str, started: float) -> Result:
-    if not survivors and ctx.hyper:
-        return Result(GATE, True, NO_CHANGED_MUTANTS, [], elapsed(started))
-    return capped_survivors(ctx, kept, survivors, note, started)
+def timed_out(kept: list[dict[str, Any]]) -> int:
+    return sum(1 for mutant in kept if status(mutant) == TIMED_OUT)
 
 
-def capped_survivors(ctx: Context, kept: list[dict[str, Any]], survivors: list[dict[str, Any]], note: str, started: float) -> Result:
-    findings = sorted((describe(ctx, mutant) for mutant in survivors), key=finding_order)
-    return Result(GATE, not findings, mutation_summary(len(findings), len(kept), note), findings[:MAX_LINES], elapsed(started))
+def capped_survivors(ctx: Context, kept: list[dict[str, Any]], note: str, started: float) -> Result:
+    findings = sorted((describe(ctx, mutant) for mutant in surviving(kept)), key=finding_order)
+    summary = mutation_summary(len(findings), len(kept), note, timed_out(kept))
+    return Result(GATE, not findings, summary, findings[:MAX_LINES], elapsed(started))
 
 
 def status(mutant: dict[str, Any]) -> str:

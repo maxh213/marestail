@@ -8,7 +8,7 @@ import pytest
 
 from marestail import golang
 from marestail.gates import go_deps
-from tests.conftest import checked, make_context, untimed
+from tests.conftest import checked, make_context, reject_none, untimed
 
 GATE = go_deps.GATE
 MODULE = "example.com/marestail/sample"
@@ -45,6 +45,14 @@ def record(path: Path, line: int, imported: str) -> dict[str, Any]:
     return {"file": str(path), "line": line, "path": imported}
 
 
+def scanner(calls: list[tuple[str, list[Path]]], reply: tuple[Any, Any]) -> Any:
+    def scan(ctx: object, mode: str, files: list[Path]) -> tuple[Any, Any]:
+        calls.append((mode, files))
+        return reply
+
+    return reject_none(scan)
+
+
 def test_missing_contract_wins_over_an_empty_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(golang, "sources", lambda ctx: (_ for _ in ()).throw(AssertionError("sources")))
     result = untimed(go_deps.run_gate(make_context(tmp_path, {"go": {}})), GATE)
@@ -71,10 +79,12 @@ def test_preflight_stops_before_the_scan(tmp_path: Path, monkeypatch: pytest.Mon
 
 def test_scanner_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layers(tmp_path)
-    plant(tmp_path, "a.go")
-    monkeypatch.setattr(golang, "scan", lambda ctx, mode, files: (None, "go scanner failed (imports): boom"))
+    source = plant(tmp_path, "a.go")
+    calls: list[tuple[str, list[Path]]] = []
+    monkeypatch.setattr(golang, "scan", scanner(calls, (None, "go scanner failed (imports): boom")))
     result = checked(go_deps.run_gate(ready(tmp_path)), GATE)
     assert (result.ok, result.summary, result.findings) == (False, "import scanner failed", ["go scanner failed (imports): boom"])
+    assert calls == [("imports", [source])]
 
 
 def test_internal_external_and_subfolders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,14 +100,17 @@ def test_internal_external_and_subfolders(tmp_path: Path, monkeypatch: pytest.Mo
         record(store, 9, "fmt"),
         record(domain, 2, "internal/storage"),
     ]
-    monkeypatch.setattr(golang, "scan", lambda ctx, mode, files: (records, None))
+    calls: list[tuple[str, list[Path]]] = []
+    monkeypatch.setattr(golang, "scan", scanner(calls, (records, None)))
     result = checked(go_deps.run_gate(ready(tmp_path)), GATE)
+    assert calls == [("imports", [domain, nested, store])]
     assert result.findings == [
         f"internal/domain/domain.go:6 internal/domain must not depend on internal/store ({MODULE}/internal/store)",
         f"internal/domain/web/web.go:4 internal/domain must not depend on internal/store ({MODULE}/internal/store/db)",
         "internal/domain/domain.go:8 internal/domain must not depend on github.com/jackc/pgx/* (github.com/jackc/pgx/v5)",
     ]
     assert result.summary == "3 layer breaks"
+    assert result.ok is False
 
 
 def test_clean_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

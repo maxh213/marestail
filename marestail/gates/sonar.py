@@ -30,7 +30,6 @@ LANGUAGES = "ncloc_language_distribution"
 PAGE = 500
 FINISHED = {"SUCCESS": None, "FAILED": "analysis FAILED", "CANCELED": "analysis CANCELED"}
 BENCHMARKS = "perf/**"
-BUNDLED_GO = "marestail/go/**"
 EQUALS = "="
 COLON = ":"
 SLASH = "/"
@@ -228,23 +227,13 @@ def declared_properties(ctx: Context) -> set[str]:
 
 
 def scanner_exclusions(ctx: Context) -> str:
-    return ",".join(with_bundled_go(ctx, with_go(ctx, with_benchmarks(project_exclusions(ctx)))))
+    return ",".join(with_go(ctx, with_benchmarks(project_exclusions(ctx))))
 
 
 def with_benchmarks(patterns: list[str]) -> list[str]:
     if BENCHMARKS in patterns:
         return patterns
     return [*patterns, BENCHMARKS]
-
-
-def with_bundled_go(ctx: Context, patterns: list[str]) -> list[str]:
-    if BUNDLED_GO in patterns or not bundled_scanner(ctx):
-        return patterns
-    return [*patterns, BUNDLED_GO]
-
-
-def bundled_scanner(ctx: Context) -> bool:
-    return (ctx.root / "marestail" / "go" / "scan" / "main.go").is_file()
 
 
 GO_EXCLUSIONS = ("**/*_test.go", "**/vendor/**", "**/testdata/**")
@@ -260,26 +249,15 @@ def go_properties(ctx: Context) -> list[str]:
     if ctx.config.section("go") is None:
         return []
     declared = declared_properties(ctx)
-    return [item for item in go_arguments(ctx) if argument_name(item) not in declared]
+    return [f"-D{name}={value}" for name, value in go_values(ctx).items() if name not in declared]
 
 
-def go_arguments(ctx: Context) -> list[str]:
-    report = f"-Dsonar.go.coverage.reportPaths={ctx.work}/go-sonar-cover.out"
-    extra = coverage_argument(ctx)
-    if extra is None:
-        return [report]
-    return [report, extra]
-
-
-def coverage_argument(ctx: Context) -> str | None:
+def go_values(ctx: Context) -> dict[str, str]:
+    values = {"sonar.go.coverage.reportPaths": str(ctx.work / "go-sonar-cover.out")}
     patterns = golang.listify(ctx.go("coverage_exclude"))
-    if not patterns:
-        return None
-    return "-Dsonar.coverage.exclusions=" + ",".join(patterns)
-
-
-def argument_name(item: str) -> str:
-    return item[2:].split("=", 1)[0]
+    if patterns:
+        values["sonar.coverage.exclusions"] = ",".join(patterns)
+    return values
 
 
 def project_exclusions(ctx: Context) -> list[str]:
@@ -629,31 +607,9 @@ def measures(ctx: Context, client: Client, key: str) -> list[str]:
     if ctx.hyper:
         return []
     if ctx.scoped:
-        return scoped_findings(ctx, client, key)
+        return scoped_duplication(ctx, client, key)
     data = client.get(MEASURES, component=key, metricKeys=f"{COVERAGE},{DUPLICATION}")
     return measure_findings(metric_values(data["component"]))
-
-
-def scoped_findings(ctx: Context, client: Client, key: str) -> list[str]:
-    return [*scoped_duplication(ctx, client, key), *go_scoped_coverage(ctx, client, key)]
-
-
-def go_scoped_coverage(ctx: Context, client: Client, key: str) -> list[str]:
-    if ctx.config.section("go") is None or partial_go_scope(ctx):
-        return []
-    data = client.get(MEASURES, component=key, metricKeys=COVERAGE)
-    return coverage_lines(metric_values(data["component"]))
-
-
-def partial_go_scope(ctx: Context) -> bool:
-    return any(not ctx.in_scope(golang.rel(ctx, path)) for path in golang.sources(ctx))
-
-
-def coverage_lines(values: dict[str, float]) -> list[str]:
-    coverage = coverage_score(values)
-    if coverage < FULL_COVERAGE:
-        return [f"sonar coverage {coverage:.1f}% (need 100)"]
-    return []
 
 
 def metric_values(holder: dict[str, Any]) -> dict[str, float]:
@@ -677,7 +633,10 @@ def duplication_score(values: dict[str, float]) -> float:
 
 
 def measure_findings(values: dict[str, float]) -> list[str]:
-    findings = coverage_lines(values)
+    findings = []
+    coverage = coverage_score(values)
+    if coverage < FULL_COVERAGE:
+        findings.append(f"sonar coverage {coverage:.1f}% (need 100)")
     density = duplication_score(values)
     if density > NO_DUPLICATION:
         findings.append(duplication(density))

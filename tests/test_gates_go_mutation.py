@@ -9,7 +9,7 @@ import pytest
 from marestail import golang
 from marestail.context import NO_CHANGED_MUTANTS, MutationScope
 from marestail.gates import go_mutation
-from tests.conftest import checked, make_context, untimed
+from tests.conftest import checked, make_context, reject_none, untimed
 
 GATE = go_mutation.GATE
 FLAGS = go_mutation.FLAGS
@@ -18,7 +18,8 @@ FLAGS = go_mutation.FLAGS
 @pytest.fixture(autouse=True)
 def clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", itertools.count(1.0, 0.25).__next__)
-    monkeypatch.setattr(golang, "tool", lambda ctx, name: "/bin/gremlins")
+    monkeypatch.setattr(golang, "tool", reject_none(lambda ctx, name: {"gremlins": "/bin/gremlins"}[name]))
+    monkeypatch.delenv("GOFLAGS", raising=False)
 
 
 def plant(root: Path, relative: str, text: str = "package p\n") -> Path:
@@ -89,7 +90,7 @@ def test_exclude_falls_back_until_it_is_set(tmp_path: Path) -> None:
     assert [path.name for path in go_mutation.mutation_targets(narrow, MutationScope("scoped", files=["b.go"]))] == ["b.go"]
 
 
-def test_command_flags_workers_tags_and_exclusions(tmp_path: Path, fake_run: Any) -> None:
+def test_command_flags_workers_tags_and_exclusions(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     plant(tmp_path, "a.go")
     plant(tmp_path, "a+b.go")
     plant(tmp_path, "b.go")
@@ -113,8 +114,11 @@ def test_command_flags_workers_tags_and_exclusions(tmp_path: Path, fake_run: Any
     assert "--integration" not in fake.calls[0]
     assert "--coverpkg" not in fake.calls[0]
     assert "--diff" not in fake.calls[0]
-    assert fake.options == [{"cwd": tmp_path, "timeout": 9}]
-    assert result.summary == "all 1 mutants killed"
+    assert fake.options == [{"cwd": tmp_path, "env": {"GOFLAGS": "-count=1"}, "timeout": 9}]
+    assert (result.ok, result.summary) == (True, "all 1 mutants killed")
+    monkeypatch.setenv("GOFLAGS", "-mod=mod  -buildvcs=false")
+    checked(go_mutation.run_gate(ctx), GATE)
+    assert fake.options[1]["env"] == {"GOFLAGS": "-mod=mod -buildvcs=false -count=1"}
 
 
 def test_workers_follow_the_knob(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,8 +131,9 @@ def test_workers_follow_the_knob(tmp_path: Path, fake_run: Any, monkeypatch: pyt
         return 0, ""
 
     ctx = ready(tmp_path, {"mutation_scope": "all", "mutation_workers": 0})
-    fake_run(go_mutation, reply)
+    fake = fake_run(go_mutation, reply)
     checked(go_mutation.run_gate(ctx), GATE)
+    assert fake.options[0]["timeout"] == 7200
     assert "--workers" in seen[0]
     assert seen[0][seen[0].index("--workers") + 1] == "0"
     capped = ready(
@@ -165,7 +170,7 @@ def test_missing_tool(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(golang, "tool", lambda ctx, name: f"{name} is not installed: {golang.INSTALL[name]}")
     fake = fake_run(go_mutation, [])
     result = checked(go_mutation.run_gate(ready(tmp_path, {"mutation_scope": "all"})), GATE)
-    assert result.summary == "gremlins missing"
+    assert (result.ok, result.summary) == (False, "gremlins missing")
     assert result.findings == [f"gremlins is not installed: {golang.INSTALL['gremlins']}"]
     assert fake.calls == []
 
@@ -185,7 +190,7 @@ def test_missing_report_and_no_viable_mutants(tmp_path: Path, fake_run: Any) -> 
     stale.write_text('{"files": []}')
     fake_run(go_mutation, [(3, "No results to report.\n")])
     missing = checked(go_mutation.run_gate(ctx), GATE)
-    assert missing.summary == go_mutation.missing_report(3)
+    assert (missing.ok, missing.summary) == (False, go_mutation.missing_report(3))
     assert missing.findings == ["No results to report."]
     assert not stale.exists()
     ctx = ready(tmp_path, {"mutation_scope": "all"})
@@ -217,7 +222,8 @@ def test_statuses_wording_and_scope_note(tmp_path: Path, fake_run: Any, monkeypa
         "a.go:7 INVERT_LOGICAL at column 2 not covered by its package's tests",
         "a.go:10 ARITHMETIC_BASE at column 3 survived",
     ]
-    assert result.summary == "4 of 6 mutants not killed (no base HEAD; full run)"
+    assert result.summary == "4 of 6 mutants not killed (1 killed by timeout) (no base HEAD; full run)"
+    assert result.ok is False
 
 
 def test_hyper_with_and_without_survivors(tmp_path: Path, fake_run: Any) -> None:
@@ -226,11 +232,23 @@ def test_hyper_with_and_without_survivors(tmp_path: Path, fake_run: Any) -> None
     fake_run(go_mutation, unleash(ctx, [mutant("LIVED", 3), mutant("LIVED", 9), mutant("KILLED", 3)]))
     kept = checked(go_mutation.run_gate(ctx), GATE)
     assert kept.findings == ["a.go:3 CONDITIONALS_BOUNDARY at column 1 survived"]
-    assert kept.summary == "1 of 2 mutants not killed"
+    assert (kept.ok, kept.summary) == (False, "1 of 2 mutants not killed")
     ctx = ready(tmp_path, scope_changed=True, hyper=True, changed={"a.go"}, changed_lines_map={"a.go": {4}})
+    fake_run(go_mutation, unleash(ctx, [mutant("KILLED", 4), mutant("LIVED", 9)]))
+    killed = checked(go_mutation.run_gate(ctx), GATE)
+    assert (killed.ok, killed.summary, killed.findings) == (True, "all 1 mutants killed", [])
+    ctx = ready(tmp_path, scope_changed=True, hyper=True, changed={"a.go"}, changed_lines_map={"a.go": {5}})
     fake_run(go_mutation, unleash(ctx, [mutant("KILLED", 4), mutant("LIVED", 9)]))
     clear = checked(go_mutation.run_gate(ctx), GATE)
     assert (clear.ok, clear.summary, clear.findings) == (True, NO_CHANGED_MUTANTS, [])
+
+
+def test_timed_out_mutants_are_killed_and_counted(tmp_path: Path, fake_run: Any) -> None:
+    plant(tmp_path, "a.go")
+    ctx = ready(tmp_path, {"mutation_scope": "all"})
+    fake_run(go_mutation, unleash(ctx, [mutant("TIMED OUT", 3), mutant("KILLED", 4), mutant("TIMED OUT", 5)]))
+    result = checked(go_mutation.run_gate(ctx), GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "all 3 mutants killed (2 killed by timeout)", [])
 
 
 def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
@@ -238,7 +256,7 @@ def test_findings_are_capped(tmp_path: Path, fake_run: Any) -> None:
     ctx = ready(tmp_path, {"mutation_scope": "all"})
     fake_run(go_mutation, unleash(ctx, [mutant("LIVED", number) for number in range(1, 62)]))
     result = checked(go_mutation.run_gate(ctx), GATE)
-    assert (result.summary, len(result.findings)) == ("61 of 61 mutants not killed", 60)
+    assert (result.ok, result.summary, len(result.findings)) == (False, "61 of 61 mutants not killed", 60)
 
 
 def test_mutant_helpers() -> None:

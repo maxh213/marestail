@@ -225,7 +225,7 @@ def tool(ctx: Context, name: str) -> str:
 
 
 def _tool_path(ctx: Context, name: str) -> str | None:
-    configured = ctx.go(name)
+    configured = ctx.go(name.replace("-", "_"))
     if configured:
         return str(configured)
     return shutil.which(name) or _installed_tool(ctx, name)
@@ -243,7 +243,15 @@ def _bin_dirs(ctx: Context) -> list[Path]:
     loaded = toolchain(ctx)
     if isinstance(loaded, str):
         return []
-    return [Path(str(loaded.get("GOBIN", ""))), *_gopath_bins(str(loaded.get("GOPATH", "")))]
+    return [*_folder(_env_text(loaded, "GOBIN")), *_gopath_bins(_env_text(loaded, "GOPATH"))]
+
+
+def _env_text(loaded: dict[str, Any], key: str) -> str:
+    return str(loaded.get(key) or "")
+
+
+def _folder(text: str) -> list[Path]:
+    return [Path(text)] if text else []
 
 
 def _gopath_bins(gopath: str) -> list[Path]:
@@ -389,12 +397,7 @@ def _bad_part(part: str) -> bool:
 
 def _nested_module(ctx: Context, path: Path) -> bool:
     root = ctx.go_root().resolve()
-    current = path.resolve().parent
-    while current != root and root in current.parents:
-        if (current / _GO_MOD).is_file():
-            return True
-        current = current.parent
-    return False
+    return any((folder / _GO_MOD).is_file() for folder in path.resolve().parents if root in folder.parents)
 
 
 def generated(path: Path) -> bool:

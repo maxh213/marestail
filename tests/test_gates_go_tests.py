@@ -60,6 +60,7 @@ def test_command_tags_and_args(tmp_path: Path, fake_run: Any) -> None:
     assert "-coverpkg" not in fake.calls[0]
     assert fake.options == [{"cwd": tmp_path, "timeout": 3600}]
     assert result.summary == "0 passed, statement coverage 100.0%, 0 gaps (need 0)"
+    assert result.ok is True
 
 
 def test_plain_command_and_stale_files(tmp_path: Path, fake_run: Any) -> None:
@@ -107,7 +108,7 @@ def test_failed_tests_keep_output_and_plain_lines(tmp_path: Path, fake_run: Any)
     output = '\n{"Action":"pass","Test":"Sub"}\nnot-json\n{not json\n{"Action":"fail","Test":"Bad","Output":"nope\\n"}\n{"Action":"pass","Output":1}\n'
     fake_run(go_tests, [(1, output)])
     result = checked(go_tests.run_gate(ctx), go_tests.GATE)
-    assert result.summary == "tests failed"
+    assert (result.ok, result.summary) == (False, "tests failed")
     assert result.findings == ["not-json", "{not json", "nope"]
 
 
@@ -135,7 +136,7 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
         {"coverage_exclude": ["skip.go"]},
         scope_changed=True,
         changed={"a.go", "b.go"},
-        changed_lines_map={"a.go": {3, 4, 5}, "b.go": set()},
+        changed_lines_map={"a.go": {2, 3, 4, 5}, "b.go": set()},
     )
     profile = "\n".join(
         [
@@ -148,7 +149,7 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
             f"{MODULE}/a.go:4.1,6.2 1 0",
             f"{MODULE}/a.go:8.1,8.2 1 0",
             f"{MODULE}/b.go:2.1,2.3 2 1",
-            f"{MODULE}/b.go:2.1,2.3 2 4",
+            f"{MODULE}/b.go:2.1,2.3 2 3",
             f"{MODULE}/b.go:2.1,2.3 2 2",
             f"{MODULE}/zero.go:9.1,9.2 0 0",
             f"{MODULE}/gen.go:1.1,1.2 1 0",
@@ -166,6 +167,7 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
     result = checked(go_tests.run_gate(ctx), go_tests.GATE)
     assert result.findings == ["a.go:3 not covered", "a.go:4 not covered"]
     assert result.summary == "2 passed, statement coverage 33.3%, 2 gaps on changed files (need 0)"
+    assert result.ok is False
     stored = json.loads((ctx.work / go_tests.COVERAGE).read_text())
     assert stored == {
         "files": {
@@ -180,7 +182,7 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
                 ],
                 "lines": {"1": 0, "3": 0, "4": 0, "8": 0},
             },
-            "b.go": {"blocks": [[2, 1, 2, 3, 2, 4]], "lines": {"2": 4}},
+            "b.go": {"blocks": [[2, 1, 2, 3, 2, 3]], "lines": {"2": 3}},
             "out.go": {"blocks": [[1, 1, 1, 2, 1, 0]], "lines": {"1": 0}},
             "zero.go": {"blocks": [[9, 1, 9, 2, 0, 0]], "lines": {"9": 0}},
         },
@@ -194,7 +196,7 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
         "a.go:3.4,3.8 1 0\n"
         "a.go:4.1,6.2 1 0\n"
         "a.go:8.1,8.2 1 0\n"
-        "b.go:2.1,2.3 2 4\n"
+        "b.go:2.1,2.3 2 3\n"
         "out.go:1.1,1.2 1 0\n"
         "zero.go:9.1,9.2 0 0\n"
     )
@@ -203,7 +205,14 @@ def test_profile_merge_reports_and_scope(tmp_path: Path, fake_run: Any) -> None:
 def test_zero_statements_are_zero_percent(tmp_path: Path) -> None:
     files = {"a.go": {"blocks": [[1, 1, 1, 2, 0, 0]], "lines": {"1": 0}}}
     assert go_tests.percent(files) == 0.0
-    assert go_tests.line_map([(1, 0, 1, 1, 1, 2), (1, 2, 1, 3, 1, 5)]) == {"1": 2}
+    assert go_tests.line_map([[1, 0, 1, 1, 1, 2], [1, 2, 1, 3, 1, 5], [2, 1, 2, 3, 4, 7]]) == {"1": 2, "2": 7}
+
+
+def test_percent_weighs_statements_not_counts() -> None:
+    files = {"a.go": {"blocks": [[1, 1, 1, 2, 3, 0], [2, 1, 2, 2, 1, 7]]}, "b.go": {"blocks": [[1, 1, 1, 2, 4, 2]]}}
+    assert go_tests.statement_total(files) == 8
+    assert go_tests.covered_total(files) == 5
+    assert go_tests.percent(files) == 62.5
 
 
 def test_unscoped_gap_omits_the_changed_phrase(tmp_path: Path, fake_run: Any) -> None:
@@ -217,6 +226,7 @@ def test_unscoped_gap_omits_the_changed_phrase(tmp_path: Path, fake_run: Any) ->
     result = checked(go_tests.run_gate(ctx), go_tests.GATE)
     assert result.findings == ["a.go:4 not covered"]
     assert result.summary == "0 passed, statement coverage 0.0%, 1 gaps (need 0)"
+    assert result.ok is False
 
 
 def test_mod_edit_exit_127_is_the_install_line(tmp_path: Path, fake_run: Any) -> None:

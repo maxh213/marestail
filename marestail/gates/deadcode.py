@@ -1,7 +1,7 @@
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from functools import partial
 from pathlib import Path
 from types import ModuleType
@@ -181,14 +181,20 @@ def ruby_report(code: int, output: str, ctx: Context) -> list[str]:
     return ctx.on_changed_lines(list(json.loads(output or "[]")))
 
 
-def structured(ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, **options: Any) -> list[str]:
+def structured(
+    ctx: Context, module: ModuleType, failure: str, relabel: Callable[[Any], str] = str, ignored: Collection[str] = (), **options: Any
+) -> list[str]:
     files = module.sources(ctx)
     if not files:
         return []
     data, error = module.scan(ctx, "dead", files, **options)
     if error:
         return [f"{failure}: {error}"]
-    return ctx.on_changed_lines([f"{relabel(e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in data])
+    return ctx.on_changed_lines([f"{relabel(e['file'])}:{e['line']} unused {e['kind']} '{e['name']}'" for e in reported(data, ignored)])
+
+
+def reported(data: list[dict[str, Any]], ignored: Collection[str]) -> list[dict[str, Any]]:
+    return [entry for entry in data if entry["name"] not in ignored]
 
 
 def dotnet_findings(ctx: Context) -> list[str]:
@@ -220,20 +226,8 @@ def go_findings(ctx: Context) -> list[str]:
         return []
     from marestail import golang
 
-    found = structured(ctx, golang, "go deadcode scanner failed", partial(golang.rel, ctx), uses=golang.tests(ctx))
-    return [item for item in found if kept_dead(item, set(golang.listify(ctx.go("deadcode_ignore"))))]
-
-
-def kept_dead(finding: str, ignored: set[str]) -> bool:
-    if "unused " not in finding:
-        return True
-    return quoted_name(finding) not in ignored
-
-
-def quoted_name(finding: str) -> str:
-    if "'" not in finding:
-        return "\n"
-    return finding.split("'", 2)[1]
+    ignored = set(golang.listify(ctx.go("deadcode_ignore")))
+    return structured(ctx, golang, "go deadcode scanner failed", partial(golang.rel, ctx), ignored, uses=golang.tests(ctx))
 
 
 def unused_function(label: str, entry: dict[str, Any]) -> str:

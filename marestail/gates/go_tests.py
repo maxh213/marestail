@@ -17,6 +17,7 @@ BLOCK = re.compile(r"^(.+):(\d+)\.(\d+),(\d+)\.(\d+) (\d+) (\d+)$")
 FILES = "files"
 BLOCKS = "blocks"
 MISSING = 127
+Counts = dict[tuple[int, ...], int]
 
 
 def run_gate(ctx: Context) -> Result:
@@ -113,7 +114,7 @@ def written(ctx: Context, merged: dict[str, Any], passed: int, started: float) -
 
 
 def merge_profile(ctx: Context, text: str, module: str) -> dict[str, Any]:
-    files: dict[str, dict[str, Any]] = {}
+    files: dict[str, Counts] = {}
     for line in text.splitlines():
         add_block(ctx, files, module, line)
     ready = finalise(files)
@@ -122,13 +123,13 @@ def merge_profile(ctx: Context, text: str, module: str) -> dict[str, Any]:
     return {FILES: ready, "totals": {"percent_covered": percent(ready)}}
 
 
-def add_block(ctx: Context, files: dict[str, dict[str, Any]], module: str, line: str) -> None:
+def add_block(ctx: Context, files: dict[str, Counts], module: str, line: str) -> None:
     parsed = BLOCK.match(line)
     if parsed is not None:
         keep_block(ctx, files, module, parsed)
 
 
-def keep_block(ctx: Context, files: dict[str, dict[str, Any]], module: str, parsed: re.Match[str]) -> None:
+def keep_block(ctx: Context, files: dict[str, Counts], module: str, parsed: re.Match[str]) -> None:
     relative = placed(ctx, module, parsed.group(1))
     if relative is not None:
         store_block(files, relative, numbers(parsed))
@@ -157,35 +158,24 @@ def numbers(parsed: re.Match[str]) -> tuple[int, int, int, int, int, int]:
     )
 
 
-def store_block(files: dict[str, dict[str, Any]], relative: str, block: tuple[int, int, int, int, int, int]) -> None:
-    entry = files.setdefault(relative, {BLOCKS: [], "index": {}})
-    key = block[:4]
-    previous = entry["index"].get(key)
-    if previous is None:
-        entry["index"][key] = block
-        entry[BLOCKS].append(block)
-        return
-    if block[5] > previous[5]:
-        replace_block(entry, previous, block)
+def store_block(files: dict[str, Counts], relative: str, block: tuple[int, int, int, int, int, int]) -> None:
+    counts = files.setdefault(relative, {})
+    counts[block[:5]] = max(counts.get(block[:5], 0), block[5])
 
 
-def replace_block(entry: dict[str, Any], previous: tuple[int, ...], block: tuple[int, ...]) -> None:
-    entry["index"][block[:4]] = block
-    entry[BLOCKS][entry[BLOCKS].index(previous)] = block
+def finalise(files: dict[str, Counts]) -> dict[str, dict[str, Any]]:
+    return {name: file_entry([[*place, count] for place, count in files[name].items()]) for name in sorted(files)}
 
 
-def finalise(files: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {
-        name: {BLOCKS: [list(block) for block in files[name][BLOCKS]], "lines": line_map(files[name][BLOCKS])} for name in sorted(files)
-    }
+def file_entry(blocks: list[list[int]]) -> dict[str, Any]:
+    return {BLOCKS: blocks, "lines": line_map(blocks)}
 
 
-def line_map(blocks: list[tuple[int, ...]]) -> dict[str, int]:
+def line_map(blocks: list[list[int]]) -> dict[str, int]:
     lines: dict[str, int] = {}
     for block in blocks:
         key = str(block[0])
-        if key not in lines or block[5] < lines[key]:
-            lines[key] = block[5]
+        lines[key] = min(lines.get(key, block[5]), block[5])
     return lines
 
 

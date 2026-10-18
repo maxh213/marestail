@@ -8,7 +8,7 @@ import pytest
 
 from marestail import golang
 from marestail.gates import go_lint
-from tests.conftest import checked, make_context, untimed
+from tests.conftest import checked, make_context, reject_none, untimed
 
 GATE = go_lint.GATE
 BUNDLED = golang.PACKAGE / "go" / "golangci.yml"
@@ -17,7 +17,7 @@ BUNDLED = golang.PACKAGE / "go" / "golangci.yml"
 @pytest.fixture(autouse=True)
 def clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "time", itertools.count(1.0, 0.25).__next__)
-    monkeypatch.setattr(golang, "tool", lambda ctx, name: "/bin/golangci-lint")
+    monkeypatch.setattr(golang, "tool", reject_none(lambda ctx, name: {"golangci-lint": "/bin/golangci-lint"}[name]))
 
 
 def plant(root: Path, relative: str = "a.go", text: str = "package a\n") -> Path:
@@ -64,7 +64,7 @@ def test_missing_tool_stops_before_gofmt(tmp_path: Path, fake_run: Any, monkeypa
     monkeypatch.setattr(golang, "tool", lambda ctx, name: f"{name} is not installed: {golang.INSTALL[name]}")
     fake = fake_run(go_lint, [])
     result = checked(go_lint.run_gate(ready(tmp_path)), GATE)
-    assert result.summary == "golangci-lint missing"
+    assert (result.ok, result.summary) == (False, "golangci-lint missing")
     assert result.findings == [f"golangci-lint is not installed: {golang.INSTALL['golangci-lint']}"]
     assert fake.calls == []
 
@@ -83,6 +83,7 @@ def test_bundled_config_is_the_pinned_file() -> None:
 
 def test_command_cache_tags_and_custom_config(tmp_path: Path, fake_run: Any) -> None:
     plant(tmp_path, "a.go")
+    plant(tmp_path, "a_test.go")
     ctx = ready(tmp_path, {"build_tags": ["a", "b"], "golangci_config": "mine.yml"})
     report = ctx.work / go_lint.REPORT
     report.parent.mkdir()
@@ -97,7 +98,7 @@ def test_command_cache_tags_and_custom_config(tmp_path: Path, fake_run: Any) -> 
 
     fake = fake_run(go_lint, reply)
     result = checked(go_lint.run_gate(ctx), GATE)
-    assert result.summary == "golangci-lint and gofmt clean"
+    assert (result.ok, result.summary) == (True, "golangci-lint and gofmt clean")
     assert fake.calls[0] == [
         "/bin/golangci-lint",
         "run",
@@ -117,7 +118,7 @@ def test_command_cache_tags_and_custom_config(tmp_path: Path, fake_run: Any) -> 
     ]
     assert fake.options[0] == {"cwd": tmp_path, "env": {"GOLANGCI_LINT_CACHE": str(ctx.work / "golangci-cache")}, "timeout": 1800}
     assert fake.calls[1][0] == "/usr/lib/go/bin/gofmt"
-    assert fake.calls[1][1:] == ["-l", str(tmp_path / "a.go")]
+    assert fake.calls[1][1:] == ["-l", str(tmp_path / "a.go"), str(tmp_path / "a_test.go")]
     assert fake.options[1] == {"cwd": tmp_path, "timeout": 300}
 
 
