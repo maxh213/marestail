@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet, erlang, java, run_suffix, rust
+from marestail import dotnet, erlang, golang, java, run_suffix, rust
 from marestail.context import Context
 from marestail.javascript import tooling_file
 from marestail.report import Result, elapsed
@@ -171,6 +171,7 @@ def scanner_properties(ctx: Context, key: str) -> list[str]:
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
         *settings_property(ctx),
         *java_properties(ctx),
+        *go_properties(ctx),
     ]
 
 
@@ -226,8 +227,48 @@ def declared_properties(ctx: Context) -> set[str]:
 
 
 def scanner_exclusions(ctx: Context) -> str:
-    patterns = project_exclusions(ctx)
-    return ",".join(patterns if BENCHMARKS in patterns else [*patterns, BENCHMARKS])
+    return ",".join(with_go(ctx, with_benchmarks(project_exclusions(ctx))))
+
+
+def with_benchmarks(patterns: list[str]) -> list[str]:
+    if BENCHMARKS in patterns:
+        return patterns
+    return [*patterns, BENCHMARKS]
+
+
+GO_EXCLUSIONS = ("**/*_test.go", "**/vendor/**", "**/testdata/**")
+
+
+def with_go(ctx: Context, patterns: list[str]) -> list[str]:
+    if ctx.config.section("go") is None:
+        return patterns
+    return [*patterns, *[item for item in GO_EXCLUSIONS if item not in patterns]]
+
+
+def go_properties(ctx: Context) -> list[str]:
+    if ctx.config.section("go") is None:
+        return []
+    declared = declared_properties(ctx)
+    return [item for item in go_arguments(ctx) if argument_name(item) not in declared]
+
+
+def go_arguments(ctx: Context) -> list[str]:
+    report = f"-Dsonar.go.coverage.reportPaths={ctx.work}/go-sonar-cover.out"
+    extra = coverage_argument(ctx)
+    if extra is None:
+        return [report]
+    return [report, extra]
+
+
+def coverage_argument(ctx: Context) -> str | None:
+    patterns = golang.listify(ctx.go("coverage_exclude"))
+    if not patterns:
+        return None
+    return "-Dsonar.coverage.exclusions=" + ",".join(patterns)
+
+
+def argument_name(item: str) -> str:
+    return item[2:].split("=", 1)[0]
 
 
 def project_exclusions(ctx: Context) -> list[str]:
@@ -390,6 +431,10 @@ def java_where(ctx: Context) -> str:
     return java.rel(ctx, ctx.java_root())
 
 
+def go_where(ctx: Context) -> str:
+    return golang.rel(ctx, ctx.go_root())
+
+
 LANGUAGE_CHECKS = (
     LanguageCheck(
         "dotnet",
@@ -422,6 +467,14 @@ LANGUAGE_CHECKS = (
         java_where,
         "; put the sources in sonar.sources",
         "marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists",
+    ),
+    LanguageCheck(
+        "go",
+        "go=",
+        "Go",
+        go_where,
+        "; put the module in sonar.sources",
+        "marestail.toml:1 SonarQube imported no go coverage; run go.tests first so .marestail/go-sonar-cover.out exists",
     ),
 )
 

@@ -22,10 +22,11 @@ PICK_SNIPPET = 'jobs.pick(ctx.config, "<section>", "<key>", <today\'s default>)'
 README_CLAUSE = "and names that flag in the README"
 PRECEDENCE_SENTENCE = (
     "The variable wins, then `[python] mutation_workers` (mutmut `--max-children`), "
-    "`[elixir] muex_concurrency` (muex `--concurrency`), `[rust] mutation_jobs` (cargo-mutants `--jobs`) and "
-    "`[java] mutation_threads` (PIT `-Dthreads`) for their own language, then `[run] jobs`, then each tool's default: "
-    "StrykerJS takes `--concurrency`, mutant takes `--jobs`, Stryker.NET takes `--concurrency`, and the Erlang gate "
-    "sizes its own worker pool with it, and a value from the variable or `[run] jobs` is capped at the CPU count."
+    "`[elixir] muex_concurrency` (muex `--concurrency`), `[rust] mutation_jobs` (cargo-mutants `--jobs`), "
+    "`[java] mutation_threads` (PIT `-Dthreads`) and `[go] mutation_workers` (gremlins `--workers`) for their own language, "
+    "then `[run] jobs`, then each tool's default: StrykerJS takes `--concurrency`, mutant takes `--jobs`, "
+    "Stryker.NET takes `--concurrency`, the Erlang gate sizes its own worker pool with it, and gremlins is passed "
+    "`--workers` only when that count is set, and a value from the variable or `[run] jobs` is capped at the CPU count."
 )
 PARAGRAPH_CLAUSES = [
     "`[run] jobs` or `MARESTAIL_JOBS` sets the number of parallel mutation workers",
@@ -236,7 +237,7 @@ def test_jobs_imports_only_config() -> None:
     }
     modules = {str(node.module) for node in tree.body if isinstance(node, ast.ImportFrom) if not str(node.module).startswith("mutmut")}
     assert plain == {"os", "re"}
-    assert modules == {"marestail.config"}
+    assert modules == {"marestail.config", "typing"}
 
 
 def test_jobs_sits_with_context_and_ran_against() -> None:

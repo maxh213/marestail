@@ -146,3 +146,35 @@ def test_frozen_paths_under_hyper_freeze_everything_but_source_and_tests() -> No
 
 def test_frozen_paths_under_hyper_keep_the_role_allow_list_and_the_freeze_list() -> None:
     assert freeze.frozen_paths(config(), "architect", ["pyproject.toml", "vite.config.js"], True) == ["vite.config.js"]
+
+
+def test_go_config_is_frozen_for_the_coder_and_allowed_for_the_architect() -> None:
+    added = [
+        "**/go.mod",
+        "**/go.sum",
+        "go.work",
+        "go.work.sum",
+        "**/.golangci.yml",
+        "**/.golangci.yaml",
+        "**/.golangci.toml",
+        "**/.golangci.json",
+        ".go-layers.json",
+    ]
+    start = freeze.GATE_CONFIG.index(".java-layers.json")
+    assert freeze.GATE_CONFIG[start + 1 : start + 1 + len(added)] == added
+    paths = [
+        "svc/go.mod",
+        "go.sum",
+        "go.work",
+        "nested/go.work",
+        "go.work.sum",
+        ".golangci.yml",
+        "a/.golangci.yaml",
+        ".golangci.toml",
+        "b/.golangci.json",
+        ".go-layers.json",
+        "main.go",
+    ]
+    kept = [path for path in paths if path not in {"nested/go.work", "main.go"}]
+    assert freeze.frozen_paths(config(), "coder", paths) == kept
+    assert freeze.frozen_paths(config(), "architect", [".go-layers.json", "vite.config.js"]) == ["vite.config.js"]

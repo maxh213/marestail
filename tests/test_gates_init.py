@@ -19,6 +19,7 @@ LANGUAGES = [
     ("er", "erlang"),
     ("rs", "rust"),
     ("java", "java"),
+    ("go", "go"),
 ]
 FAST_KINDS = ["tests", "crap", "lint", "deps"]
 
@@ -69,8 +70,8 @@ def test_tiers_for_unknown() -> None:
 
 def test_select_by_tier() -> None:
     assert [gate.name for gate in gates.select("qa", None) if gate.tier != "fast"] == ["qa", "visual"]
-    assert len(gates.select("fast", set())) == 37
-    assert len(gates.select("all", None)) == 48
+    assert len(gates.select("fast", set())) == 41
+    assert len(gates.select("all", None)) == 53
 
 
 def test_select_only() -> None:

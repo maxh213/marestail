@@ -262,6 +262,39 @@ def test_java_properties(tmp_path: Path) -> None:
     assert sonar.java_properties(ctx) == [f"-Dsonar.coverage.jacoco.xmlReportPaths={tmp_path}/.marestail/java-jacoco.xml"]
 
 
+def test_go_properties_and_exclusions(tmp_path: Path) -> None:
+    assert sonar.go_properties(make_context(tmp_path)) == []
+    ctx = make_context(tmp_path, {"go": {"root": "svc", "coverage_exclude": ["cmd/app/main.go", "gen.go"]}, "java": {}})
+    report = f"-Dsonar.go.coverage.reportPaths={tmp_path}/.marestail/go-sonar-cover.out"
+    exclusions = "-Dsonar.coverage.exclusions=cmd/app/main.go,gen.go"
+    assert sonar.go_properties(ctx) == [report, exclusions]
+    bare = make_context(tmp_path, {"go": {"root": "svc"}})
+    assert sonar.go_properties(bare) == [report]
+    props = sonar.scanner_properties(ctx, KEY)
+    assert props.index(report) > next(index for index, item in enumerate(props) if item.startswith("-Dsonar.java.binaries"))
+    assert sonar.scanner_exclusions(ctx) == "perf/**,**/*_test.go,**/vendor/**,**/testdata/**"
+    (tmp_path / "sonar-project.properties").write_text(
+        "sonar.go.coverage.reportPaths=x\nsonar.coverage.exclusions=y\nsonar.exclusions=**/*_test.go,perf/**\n"
+    )
+    assert sonar.go_properties(ctx) == []
+    assert sonar.scanner_exclusions(ctx) == "**/*_test.go,perf/**,**/vendor/**,**/testdata/**"
+    dotnet_only = make_context(tmp_path, {"dotnet": {}})
+    assert all("sonar.go." not in item for item in sonar.scanner_properties(dotnet_only, KEY))
+
+
+def test_go_language_check(tmp_path: Path) -> None:
+    names = [check.section for check in sonar.LANGUAGE_CHECKS]
+    assert names[names.index("java") + 1] == "go"
+    (tmp_path / "svc").mkdir()
+    ctx = make_context(tmp_path, {"go": {"root": "svc"}})
+    client: Any = FakeClient(languages("", coverage=False))
+    assert sonar.language_findings(ctx, client, KEY) == [
+        "svc:1 SonarQube received no Go lines (languages: none); put the module in sonar.sources",
+        "marestail.toml:1 SonarQube imported no go coverage; run go.tests first so .marestail/go-sonar-cover.out exists",
+    ]
+    assert sonar.go_where(make_context(tmp_path, {"go": {}})) == "."
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

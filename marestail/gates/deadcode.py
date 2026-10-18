@@ -215,6 +215,27 @@ def java_findings(ctx: Context) -> list[str]:
     return structured(ctx, java, "java deadcode scanner failed")
 
 
+def go_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("go") is None:
+        return []
+    from marestail import golang
+
+    found = structured(ctx, golang, "go deadcode scanner failed", partial(golang.rel, ctx), uses=golang.tests(ctx))
+    return [item for item in found if kept_dead(item, set(golang.listify(ctx.go("deadcode_ignore"))))]
+
+
+def kept_dead(finding: str, ignored: set[str]) -> bool:
+    if "unused " not in finding:
+        return True
+    return quoted_name(finding) not in ignored
+
+
+def quoted_name(finding: str) -> str:
+    if "'" not in finding:
+        return "\n"
+    return finding.split("'", 2)[1]
+
+
 def unused_function(label: str, entry: dict[str, Any]) -> str:
     return f"{label}:{entry['line']} unused function {entry['module']}.{entry['function']}/{entry['arity']}"
 
@@ -297,4 +318,5 @@ SCANNERS = [
     dotnet_findings,
     rust_findings,
     java_findings,
+    go_findings,
 ]

@@ -25,6 +25,11 @@ LEDGER_ROW = re.compile(r"^\|\s*`(/[^`]*)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 DOC_PATH = re.compile(r"`((?:[\w.-]+/)+[\w.-]+)`")
 GONE = {"retired", "removed", "gone"}
 SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".mjs", ".rb", ".rs", ".java")
+GO_ROUTE_PATTERNS = [
+    r'\.(?:HandleFunc|Handle)\(\s*"(?:[A-Z]+ )?(/[^"]*)"',
+    r'\.(?:GET|POST|PUT|DELETE|PATCH|Get|Post|Put|Delete|Patch)\(\s*"(/[^"]*)"',
+]
+GO_ENV_PATTERNS = [r'os\.(?:Getenv|LookupEnv)\(\s*"([A-Z][A-Z0-9_]+)"']
 SKIP_DIRS = {"node_modules", ".venv", "mutants", "dist", ".git", "tests", "test", "__pycache__", ".marestail", "target"}
 NEWLINE = "\n"
 
@@ -54,21 +59,51 @@ def source_files(ctx: Context) -> list[Path]:
 
 
 def documented_source(path: Path, ctx: Context) -> bool:
-    return path.suffix in SOURCE_SUFFIXES and not in_skipped_dir(path, ctx) and not under_benchmarks(ctx.root, path)
+    return kept_suffix(path, ctx) and not in_skipped_dir(path, ctx) and not under_benchmarks(ctx.root, path)
+
+
+def kept_suffix(path: Path, ctx: Context) -> bool:
+    if path.suffix == ".go":
+        return go_source(path, ctx)
+    return path.suffix in SOURCE_SUFFIXES
+
+
+def go_source(path: Path, ctx: Context) -> bool:
+    return ctx.config.section("go") is not None and not path.name.endswith("_test.go")
 
 
 def in_skipped_dir(path: Path, ctx: Context) -> bool:
     return any(part in SKIP_DIRS for part in path.relative_to(ctx.root).parts)
 
 
-def found(ctx: Context, patterns: list[str]) -> dict[str, str]:
+def found(ctx: Context, patterns: list[str], extra: list[str] | None = None) -> dict[str, str]:
     hits: dict[str, str] = {}
     for path in source_files(ctx):
-        text = path.read_text()
-        for pattern in patterns:
-            for match in re.finditer(pattern, text):
-                hits.setdefault(match.group(1), f"{path.relative_to(ctx.root)}:{line_at(text, match.start())}")
+        absorb(hits, path, active(path, patterns, extra or []), ctx)
     return hits
+
+
+def absorb(hits: dict[str, str], path: Path, patterns: list[str], ctx: Context) -> None:
+    text = path.read_text()
+    for pattern in patterns:
+        absorb_pattern(hits, text, pattern, path, ctx)
+
+
+def absorb_pattern(hits: dict[str, str], text: str, pattern: str, path: Path, ctx: Context) -> None:
+    for match in re.finditer(pattern, text):
+        hits.setdefault(match.group(1), f"{path.relative_to(ctx.root)}:{line_at(text, match.start())}")
+
+
+def active(path: Path, patterns: list[str], extra: list[str]) -> list[str]:
+    if path.suffix == ".go" and extra:
+        return [*patterns, *extra]
+    return patterns
+
+
+def go_extra(ctx: Context, patterns: list[str]) -> list[str]:
+    if ctx.config.section("go") is None:
+        return []
+    return patterns
 
 
 def line_at(text: str, at: int) -> int:
@@ -83,7 +118,7 @@ def route_findings(ctx: Context) -> list[str]:
     if not ledger_path.exists():
         return [f"{ledger_name} is missing; it must list every route with a status"]
     ledger = read_ledger(ledger_path)
-    in_code = found(ctx, ctx.config.get("docs", "route_patterns", ROUTE_PATTERNS))
+    in_code = found(ctx, ctx.config.get("docs", "route_patterns", ROUTE_PATTERNS), go_extra(ctx, GO_ROUTE_PATTERNS))
     return (
         unlisted_routes(ledger_name, ledger, in_code)
         + gone_routes(ledger_name, ledger, in_code)
@@ -117,7 +152,7 @@ def unserved_routes(ledger_name: str, ledger: dict[str, str], in_code: dict[str,
 
 def env_findings(ctx: Context, docs: str) -> list[str]:
     ignored = set(IGNORED_ENV) | set(ctx.config.get("docs", "ignore_env", []))
-    in_code = found(ctx, ctx.config.get("docs", "env_patterns", ENV_PATTERNS))
+    in_code = found(ctx, ctx.config.get("docs", "env_patterns", ENV_PATTERNS), go_extra(ctx, GO_ENV_PATTERNS))
     return [
         f"{where} environment variable {name} is not documented"
         for name, where in in_code.items()

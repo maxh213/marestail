@@ -1,0 +1,43 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: standard
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - forcetypeassert
+    - gocritic
+    - gocyclo
+    - gosec
+    - intrange
+    - makezero
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - predeclared
+    - reassign
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+  settings:
+    gocyclo:
+      min-complexity: 10
+    nakedret:
+      max-func-lines: 0
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

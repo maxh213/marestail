@@ -99,6 +99,16 @@ crap_max = 4
 # pmd_ruleset = "pmd-ruleset.xml"  # default: marestail's quickstart rules plus CyclomaticComplexity
 # jacoco_version = "0.8.15"
 
+[go]
+root = "."  # the folder that holds go.mod
+crap_max = 4
+coverage_exclude = []  # repo-relative globs, e.g. ["cmd/app/main.go"]; also skipped by go.crap, and by go.mutation unless mutation_exclude is set
+# build_tags = []  # passed to go test, golangci-lint and gremlins
+# test_args = []  # extra go test arguments
+# golangci_config = ""  # default: marestail's pinned marestail/go/golangci.yml
+# deadcode_ignore = []  # exported names deadcode never reports
+# mutation_timeout = 7200
+
 
 [sonar]
 project_key = "change-me"

@@ -1,0 +1,6 @@
+{
+  "layers": [
+    {"from": "internal/domain", "forbid": ["internal/store", "internal/web"], "forbid_external": ["net/http", "database/sql", "github.com/jackc/pgx/*"]},
+    {"from": "internal/store", "forbid": ["internal/web"], "forbid_external": ["net/http"]}
+  ]
+}

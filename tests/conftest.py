@@ -155,6 +155,10 @@ FORBIDDEN_BINARIES = frozenset(
         "ssh",
         "rsync",
         "gh",
+        "go",
+        "gofmt",
+        "golangci-lint",
+        "gremlins",
     }
 )
 

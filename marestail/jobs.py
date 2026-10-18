@@ -1,5 +1,6 @@
 import os
 import re
+from typing import overload
 
 from marestail.config import Config
 
@@ -40,7 +41,15 @@ def worker_args(config: Config, flag: str) -> list[str]:
     return [] if count is None else [flag, str(count)]
 
 
-def pick(config: Config, section: str, key: str, default: int) -> int:
+@overload
+def pick(config: Config, section: str, key: str, default: None) -> int | None: ...
+
+
+@overload
+def pick(config: Config, section: str, key: str, default: int) -> int: ...
+
+
+def pick(config: Config, section: str, key: str, default: int | None) -> int | None:
     from_env = _from_env()
     if from_env is not None:
         _reject_bad_file(config)

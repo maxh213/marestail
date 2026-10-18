@@ -169,3 +169,30 @@ def test_line_at_counts_newlines_in_the_prefix() -> None:
     assert docs.line_at("a\nb\nc", 0) == 1
     assert docs.line_at("a\nb\nc", 2) == 2
     assert docs.line_at("a\nb\nc", 4) == 3
+
+
+def test_go_routes_and_env_need_a_go_section(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "internal/web/routes.go",
+        'package web\nfunc routes() {\n\thttp.HandleFunc("/health", nil)\n\tmux.HandleFunc("GET /ready", nil)\n\tr.GET("/items", nil)\n\tr.Post("/other", nil)\n\tos.Getenv("SAMPLE_GREETING")\n\tos.LookupEnv("SAMPLE_PORT")\n}\n',
+    )
+    write(tmp_path, "internal/web/routes_test.go", 'package web\nfunc TestRoutes(t *testing.T) {\n\tos.Getenv("SAMPLE_TEST")\n}\n')
+    write(tmp_path, "internal/app.py", 'os.Getenv("SAMPLE_PY")\n')
+    write(tmp_path, "README.md", "nothing listed\n")
+    write(tmp_path, "ROUTES.md", "| Route | Status |\n|---|---|\n| `/old` | live |\n")
+    docs_raw = {"docs": {"sources": ["internal"], "files": ["README.md"], "routes_file": "ROUTES.md"}}
+    bare = checked(docs.run_gate(make_context(tmp_path, docs_raw)), "docs")
+    assert bare.findings == ["ROUTES.md lists /old as live but no code serves it"]
+    found = checked(docs.run_gate(make_context(tmp_path, {**docs_raw, "go": {}})), "docs")
+    assert found.findings == [
+        "internal/web/routes.go:3 route /health is not in ROUTES.md",
+        "internal/web/routes.go:4 route /ready is not in ROUTES.md",
+        "internal/web/routes.go:5 route /items is not in ROUTES.md",
+        "internal/web/routes.go:6 route /other is not in ROUTES.md",
+        "ROUTES.md lists /old as live but no code serves it",
+        "internal/web/routes.go:7 environment variable SAMPLE_GREETING is not documented",
+        "internal/web/routes.go:8 environment variable SAMPLE_PORT is not documented",
+    ]
+    names = [path.name for path in docs.source_files(make_context(tmp_path, {**docs_raw, "go": {}}))]
+    assert names == ["app.py", "routes.go"]

@@ -103,12 +103,15 @@ SCANNER_SOURCES = [
     "marestail/jvm/Scan.java",
     "marestail/rb/scan.rb",
     "marestail/rs/scan/main.rs",
+    "marestail/go/scan/main.go",
 ]
 FROZEN_SCANNER_PROJECTS = [
     "marestail/cs/scan/Scan.csproj",
     "marestail/jvm/pmd-ruleset.xml",
     "marestail/jvm/tools/pom.xml",
     "marestail/rs/scan/Cargo.toml",
+    "marestail/go/scan/go.mod",
+    "marestail/go/golangci.yml",
 ]
 HERMETIC_BINARIES = ("git", "sh")
 
@@ -750,6 +753,7 @@ def test_package_mutation_patterns_cover_every_module() -> None:
     assert "marestail.java.*" in patterns
     assert "marestail.ruby.*" in patterns
     assert "marestail.rust.*" in patterns
+    assert "marestail.golang.*" in patterns
     assert "marestail.javascript.*" in patterns
     assert "marestail.perf.db.*" in patterns
     assert "marestail.tui.app.*" in patterns

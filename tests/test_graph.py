@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from marestail import dotnet, erlang, graph, java, ruby, rust
+from marestail import dotnet, erlang, golang, graph, java, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
 from tests.conftest import FakeRun, make_context, required_timeout
@@ -257,3 +257,35 @@ def test_erlang_graph_failures(
 def test_erlang_graph_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(erlang, "source_files", sources([]))
     assert graph.erlang_graph(config(tmp_path, {"erlang": {}})) == ""
+
+
+def test_go_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    domain = tmp_path / "internal" / "domain" / "domain.go"
+    records = [
+        {"file": str(domain), "line": 6, "path": "example.com/marestail/sample/internal/store"},
+        {"file": str(tmp_path / "internal" / "store" / "store.go"), "line": 3, "path": "os"},
+        {"file": str(domain), "line": 4, "path": "fmt"},
+    ]
+    monkeypatch.setattr(golang, "sources", sources([domain]))
+    monkeypatch.setattr(golang, "scan", lambda ctx, mode, files: (records, None))
+    monkeypatch.setattr(golang, "module", lambda ctx: "example.com/marestail/sample")
+    rendered = graph.go_graph(config(tmp_path, {"go": {}}))
+    assert rendered == "## Go modules\ninternal/domain/domain.go -> internal/store (example.com/marestail/sample/internal/store)"
+
+
+def test_go_graph_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(golang, "sources", sources([tmp_path / "a.go"]))
+    monkeypatch.setattr(golang, "scan", lambda ctx, mode, files: (None, "scanner broke"))
+    assert graph.go_graph(config(tmp_path, {"go": {}})) == "## Go modules\nscanner broke"
+
+
+def test_go_graph_without_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(golang, "sources", sources([]))
+    assert graph.go_graph(config(tmp_path, {"go": {}})) == ""
+
+
+def test_render_puts_go_after_java(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(graph, "java_graph", lambda config: "## Java modules\nJ")
+    monkeypatch.setattr(graph, "go_graph", lambda config: "## Go modules\nG")
+    rendered = graph.render(config(tmp_path, {"java": {}, "go": {}}))
+    assert rendered.index("## Java modules") < rendered.index("## Go modules")
