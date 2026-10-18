@@ -4,8 +4,7 @@ from typing import Any
 
 from marestail import golang
 from marestail.context import Context
-from marestail.gates._crap import DEFAULT, KEY, above, crap_score, describe
-from marestail.gates._hyper_crap import Hyper, judged, unhit_lines, unit
+from marestail.gates.rs_crap import DEFAULT, KEY, Hyper, above, crap_score, describe, judged, unhit_lines, unit
 from marestail.report import Result, elapsed
 
 GATE = "go.crap"

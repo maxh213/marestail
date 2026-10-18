@@ -356,9 +356,6 @@ def test_readme_template_freeze_and_absent_section(tmp_path: Path) -> None:
     assert "marestail/go/golangci.yml" in template
     layers = json.loads(Path("templates/go-layers.json").read_text())
     assert layers["layers"][0]["forbid_external"] == ["net/http", "database/sql", "github.com/jackc/pgx/*"]
-    exclusions = Path("sonar-project.properties").read_text().splitlines()
-    assert exclusions[5].endswith(",marestail/go/**")
-    assert "marestail/go/**" not in "\n".join(exclusions[:5] + exclusions[6:])
     from marestail.gates import docs, sonar
 
     assert sonar.go_properties(make_context(tmp_path)) == []

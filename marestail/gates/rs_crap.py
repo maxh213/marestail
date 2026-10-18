@@ -8,9 +8,12 @@ from marestail.context import Context
 from marestail.gates._crap import DEFAULT as DEFAULT
 from marestail.gates._crap import KEY as KEY
 from marestail.gates._crap import above as above
-from marestail.gates._crap import crap_score
+from marestail.gates._crap import crap_score as crap_score
 from marestail.gates._crap import describe as describe
-from marestail.gates._hyper_crap import Hyper, judged, unhit_lines, unit
+from marestail.gates._hyper_crap import Hyper as Hyper
+from marestail.gates._hyper_crap import judged as judged
+from marestail.gates._hyper_crap import unhit_lines as unhit_lines
+from marestail.gates._hyper_crap import unit as unit
 from marestail.report import Result, elapsed
 
 GATE = "rs.crap"

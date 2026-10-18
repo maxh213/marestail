@@ -9,7 +9,7 @@ import pytest
 from marestail import golang
 from marestail.config import Config
 from marestail.context import build
-from marestail.gates import go_crap
+from marestail.gates import _crap, _hyper_crap, go_crap
 from marestail.gates._crap import crap_score, describe
 from tests.conftest import checked, commit_all, make_context, untimed
 
@@ -31,6 +31,18 @@ def source(root: Path) -> Path:
     path = root / "a.go"
     path.write_text("package a\n")
     return path
+
+
+def test_scoring_uses_the_shared_crap_helpers() -> None:
+    assert go_crap.crap_score is _crap.crap_score
+    assert go_crap.describe is _crap.describe
+    assert go_crap.above is _crap.above
+    assert go_crap.KEY is _crap.KEY
+    assert go_crap.DEFAULT is _crap.DEFAULT
+    assert go_crap.judged is _hyper_crap.judged
+    assert go_crap.Hyper is _hyper_crap.Hyper
+    assert go_crap.unit is _hyper_crap.unit
+    assert go_crap.unhit_lines is _hyper_crap.unhit_lines
 
 
 def test_needs_coverage_before_preflight(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
