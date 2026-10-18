@@ -361,7 +361,6 @@ def test_task_file_is_listed_with_the_foundations() -> None:
         "marestail._location",
         "marestail.task_file",
         "marestail.events",
-        "marestail.run_suffix",
     ]
     foundations = contracts.split("[importlinter:contract:foundations-import-nothing-above]", 1)[1]
     assert "marestail.task_file" in foundations.split("forbidden_modules", 1)[0].split()
