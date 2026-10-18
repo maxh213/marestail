@@ -447,7 +447,7 @@ def test_plain_rerun_does_not_start_failed_task(tmp_path: Path, monkeypatch: pyt
     git(repo, "push", "-q", "origin", "main")
     state_dir = repo / ".marestail" / "queue"
     state_dir.mkdir(parents=True)
-    initial_state = {
+    initial_state: dict[str, Any] = {
         "v": 1,
         "tasks": {
             "a": _failed_entry(),
@@ -2469,7 +2469,20 @@ def test_execute_queue_uses_the_repo_base_and_remote_from_another_cwd(
     fake_start, recorded = make_child_seam(repo, {})
     monkeypatch.setattr(queue, "_start_child", fake_start)
     directory = repo / ".marestail" / "queue"
-    arguments = (repo, directory, [str(task)], None, None, False, [], None, None, None, None, [])
+    arguments: tuple[
+        Path,
+        Path,
+        list[str],
+        str | None,
+        str | None,
+        bool,
+        list[str],
+        str | None,
+        str | None,
+        str | None,
+        str | None,
+        list[str],
+    ] = (repo, directory, [str(task)], None, None, False, [], None, None, None, None, [])
 
     assert queue._execute_queue(*arguments) == 0
 
