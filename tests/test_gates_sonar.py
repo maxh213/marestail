@@ -760,7 +760,7 @@ def test_scanner_name_comes_from_properties(tmp_path: Path, fake_run: Any, monke
     monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
     (tmp_path / "sonar-project.properties").write_text("sonar.projectName=Props\n")
     command = sonar.scanner_command(make_context(tmp_path), CREDS, KEY)
-    assert "-Dsonar.projectName=Props (a1)" in command
+    assert name_arguments(command) == ["-Dsonar.projectName=Props (a1)"]
     assert "-Dsonar.projectKey=proj_a1" in command
 
 
@@ -769,7 +769,7 @@ def test_scanner_name_prefers_the_config(tmp_path: Path, fake_run: Any, monkeypa
     monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
     (tmp_path / "sonar-project.properties").write_text("sonar.projectName=Props\n")
     command = sonar.scanner_command(make_context(tmp_path, {"sonar": {"project_name": "Nice"}}), CREDS, KEY)
-    assert "-Dsonar.projectName=Nice (a1)" in command
+    assert name_arguments(command) == ["-Dsonar.projectName=Nice (a1)"]
 
 
 def test_scanner_name_falls_back_to_the_key(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -777,7 +777,7 @@ def test_scanner_name_falls_back_to_the_key(tmp_path: Path, fake_run: Any, monke
     monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
     (tmp_path / "sonar-project.properties").write_text("sonar.sources=src\n")
     command = sonar.scanner_command(make_context(tmp_path), CREDS, KEY)
-    assert "-Dsonar.projectName=proj (a1)" in command
+    assert name_arguments(command) == ["-Dsonar.projectName=proj (a1)"]
 
 
 def test_scanner_without_a_suffix_ignores_the_properties_name(tmp_path: Path, fake_run: Any) -> None:

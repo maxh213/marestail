@@ -1738,7 +1738,7 @@ def test_sonar_setup_requires_a_key_when_suffixed(repo: Path, monkeypatch: pytes
     fake = Recorder(None)
     monkeypatch.setattr(setup, "setup", fake)
     raised = suffix_exit(["sonar", "setup"])
-    assert str(raised.value) == cli.SUFFIX_KEY
+    assert str(raised.value) == "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
     assert fake.calls == []
 
 
@@ -1762,7 +1762,9 @@ def test_sonar_prune_needs_a_suffix(repo: Path, monkeypatch: pytest.MonkeyPatch)
     fake = Recorder(None)
     monkeypatch.setattr(setup, "prune", fake)
     raised = suffix_exit(["sonar", "prune"])
-    assert str(raised.value) == cli.PRUNE_SUFFIX
+    assert str(raised.value) == (
+        "sonar prune needs a run suffix: pass --run-suffix or set MARESTAIL_RUN_SUFFIX; it never deletes the unsuffixed project"
+    )
     assert fake.calls == []
 
 
@@ -1789,7 +1791,7 @@ def test_sonar_prune_requires_a_key(repo: Path, monkeypatch: pytest.MonkeyPatch)
     (repo / "marestail.toml").write_text("[sonar]\n")
     monkeypatch.setenv(run_suffix.ENV, "a1")
     raised = suffix_exit(["sonar", "prune"])
-    assert str(raised.value) == cli.SUFFIX_KEY
+    assert str(raised.value) == "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
 
 
 def test_commands_that_never_read_the_suffix_ignore_a_bad_value(
