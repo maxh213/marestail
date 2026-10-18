@@ -284,10 +284,12 @@ def test_parse_output_splits_records_from_passthrough() -> None:
     )
 
 
-def test_run_without_db_ignores_a_bad_suffix(root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_run_without_db_ignores_a_bad_suffix(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    start_session(root)
+    bench(root, f"echo '{GOOD}'")
     monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
-    assert samples.run_command(BENCH, "head", 1, False) == 2
-    assert capsys.readouterr().err == "no perf run in progress\n"
+    assert samples.run_command(BENCH, "head", 1, False) == 0
+    assert saved(root)[0]["db"] is False
 
 
 def test_run_with_db_and_no_migrate_ignores_a_bad_suffix(

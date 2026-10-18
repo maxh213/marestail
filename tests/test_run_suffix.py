@@ -1,5 +1,6 @@
 import argparse
 import ast
+import itertools
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,61 @@ DB_SENTENCE = (
     "reused; two suffixes that hash to the same port fail at `docker run` because the port is already allocated, "
     "and `MARESTAIL_PERF_DB_PORT` is the way out."
 )
+DB_START = "A bench that touches a database runs with `--db`"
+JOBS_ENV = "MARESTAIL_JOBS"
+SUFFIX_ENV = "MARESTAIL_RUN_SUFFIX"
+ADJACENT = """
+import pytest
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
+"""
+REVERSED = """
+import pytest
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+"""
+OUTSIDE = """
+import pytest
+
+def other(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch):
+    return None
+"""
+SEPARATED = """
+import pytest
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.setattr(object, "nothing", None)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
+"""
+NOT_AUTOUSE = """
+import pytest
+
+@pytest.fixture(autouse=False)
+def hermetic(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
+"""
+RAISED = """
+import pytest
+
+@pytest.fixture(autouse=True)
+def hermetic(monkeypatch):
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=True)
+"""
 LONG = "a" * 32
 VALID = [
     ("a1", "k_a1", "K (a1)"),
@@ -55,9 +111,7 @@ def test_unset_suffix_leaves_names_alone(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv(run_suffix.ENV)
     assert run_suffix.current() is None
     assert run_suffix.named("k") == "k"
-    source = (ROOT / "tests" / "conftest.py").read_text()
-    assert 'monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)' in source
-    assert 'monkeypatch.delenv("MARESTAIL_JOBS", raising=False)' in source
+    assert clears_suffix_beside_jobs((ROOT / "tests" / "conftest.py").read_text())
 
 
 @pytest.mark.parametrize(("suffix", "named", "titled"), VALID)
@@ -76,6 +130,15 @@ def test_bad_suffix_is_a_system_exit(monkeypatch: pytest.MonkeyPatch, raw: str) 
         run_suffix.current()
     assert str(raised.value) == rejected(raw)
     assert "\n" not in str(raised.value)
+
+
+def test_hermetic_clears_the_suffix_beside_jobs() -> None:
+    assert clears_suffix_beside_jobs(ADJACENT)
+    assert clears_suffix_beside_jobs(REVERSED)
+    assert not clears_suffix_beside_jobs(OUTSIDE)
+    assert not clears_suffix_beside_jobs(SEPARATED)
+    assert not clears_suffix_beside_jobs(NOT_AUTOUSE)
+    assert not clears_suffix_beside_jobs(RAISED)
 
 
 @pytest.mark.parametrize("raw", BAD)
@@ -135,7 +198,10 @@ def test_readme_and_layer_say_where_the_suffix_lives() -> None:
     paragraphs = use_paragraphs(readme)
     assert paragraphs[0] == PARAGRAPH
     assert paragraphs[1].startswith(NICE)
-    assert DB_SENTENCE in readme
+    paragraph = db_paragraph(readme)
+    assert paragraph.startswith(DB_START)
+    assert paragraph.endswith(DB_SENTENCE)
+    assert not db_paragraph(f"{DB_START} stays.\n\n{DB_SENTENCE}").endswith(DB_SENTENCE)
     layer = layer_line()
     assert "marestail.run_suffix" in layer
     assert "marestail.run_suffix" not in jobs_line()
@@ -211,6 +277,88 @@ def body_imports_argparse(node: ast.FunctionDef) -> bool:
         if isinstance(child, ast.Import):
             return any(alias.name == "argparse" for alias in child.names)
     return False
+
+
+def clears_suffix_beside_jobs(source: str) -> bool:
+    tree = ast.parse(source)
+    assert isinstance(tree, ast.Module)
+    return suffix_beside_jobs(hermetic_body(tree))
+
+
+def hermetic_body(tree: ast.Module) -> list[ast.stmt]:
+    for node in tree.body:
+        found = hermetic_function(node)
+        if found is not None:
+            return found.body
+    return []
+
+
+def hermetic_function(node: ast.stmt) -> ast.FunctionDef | None:
+    if isinstance(node, ast.FunctionDef) and node.name == "hermetic" and autouse(node):
+        return node
+    return None
+
+
+def autouse(node: ast.FunctionDef) -> bool:
+    return any(autouse_decorator(item) for item in node.decorator_list)
+
+
+def autouse_decorator(item: ast.expr) -> bool:
+    if not isinstance(item, ast.Call):
+        return False
+    return any(keyword_is(keyword, "autouse", True) for keyword in item.keywords)
+
+
+def keyword_is(keyword: ast.keyword, name: str, expected: object) -> bool:
+    value = keyword.value
+    return keyword.arg == name and isinstance(value, ast.Constant) and value.value is expected
+
+
+def suffix_beside_jobs(body: list[ast.stmt]) -> bool:
+    names = [delenv_target(statement) for statement in body]
+    pairs = list(itertools.pairwise(names))
+    return (JOBS_ENV, SUFFIX_ENV) in pairs or (SUFFIX_ENV, JOBS_ENV) in pairs
+
+
+def delenv_target(statement: ast.stmt) -> str | None:
+    call = called(statement)
+    if call is None or not env_delete(call) or not raising_false(call):
+        return None
+    return text_arg(call)
+
+
+def called(statement: ast.stmt) -> ast.Call | None:
+    if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+        return statement.value
+    return None
+
+
+def env_delete(call: ast.Call) -> bool:
+    func = call.func
+    if not isinstance(func, ast.Attribute) or func.attr != "delenv":
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id == "monkeypatch"
+
+
+def raising_false(call: ast.Call) -> bool:
+    return any(keyword_is(keyword, "raising", False) for keyword in call.keywords)
+
+
+def text_arg(call: ast.Call) -> str | None:
+    if not call.args:
+        return None
+    arg = call.args[0]
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    return None
+
+
+def db_paragraph(readme: str) -> str:
+    for chunk in readme.split("\n\n"):
+        text = chunk.strip()
+        if text.startswith(DB_START):
+            return text
+    raise AssertionError(DB_START)
 
 
 def line_index(lines: list[str], prefix: str) -> int:

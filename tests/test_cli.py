@@ -1660,18 +1660,16 @@ def test_gate_flag_exports_the_suffix_before_the_gates(gates: Callable[..., Reco
 def test_gate_rejects_a_bad_suffix_before_the_hook(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(run_suffix.ENV, "A1")
     stdin(monkeypatch, {})
-    hooked: list[int] = []
-
-    def refuse_hook() -> int:
-        hooked.append(1)
-        return 0
-
-    monkeypatch.setattr(cli, "hook_command", refuse_hook)
+    hooked = Recorder(0)
+    gated = Recorder(([], make_context(Path("."))))
+    monkeypatch.setattr(cli, "hook_command", hooked)
+    monkeypatch.setattr(cli, "run_gates_with_context", gated)
     raised = suffix_exit(["gate", "--tier", "fast"])
     assert str(raised.value) == SUFFIX
+    assert gated.calls == []
     raised = suffix_exit(["gate", "--hook"])
     assert str(raised.value) == SUFFIX
-    assert hooked == []
+    assert hooked.calls == []
 
 
 def test_gate_bad_suffix_beats_the_focus_clash(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
