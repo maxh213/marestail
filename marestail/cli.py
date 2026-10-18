@@ -79,7 +79,7 @@ HELP_AUTO = "skip the approval pause after the critic"
 HELP_PERF_DB = "reset the tree's performance database before every sample"
 HELP_WAIT = "block until the build finishes instead of detaching"
 SONAR_ACTIONS = ("up", "down", "setup", "prune")
-SUFFIX_KEY = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
+SUFFIX_KEY = run_suffix.SONAR_KEY_REQUIRED
 PRUNE_SUFFIX = "sonar prune needs a run suffix: pass --run-suffix or set MARESTAIL_RUN_SUFFIX; it never deletes the unsuffixed project"
 
 Payload = dict[str, Any]
@@ -613,7 +613,7 @@ def sonar_command(args: argparse.Namespace) -> int:
     elif args.action == "setup":
         setup.setup(*_sonar_identity())
     else:
-        _server(setup, args.action)
+        _up_or_down(setup, args.action)
     return 0
 
 
@@ -622,7 +622,7 @@ def _publish_suffix(args: argparse.Namespace) -> None:
         os.environ[run_suffix.ENV] = args.run_suffix
 
 
-def _server(setup: Any, action: str) -> None:
+def _up_or_down(setup: Any, action: str) -> None:
     if action == "up":
         setup.up()
         return
@@ -630,9 +630,7 @@ def _server(setup: Any, action: str) -> None:
 
 
 def _sonar_identity() -> tuple[Any, Any]:
-    config = config_module.load(Path.cwd())
-    key = config.get("sonar", "project_key")
-    name = config.get("sonar", "project_name", config.root.name)
+    key, name = _sonar_pair()
     _require_key(key)
     return _suffixed_key(key), _titled_name(name)
 
@@ -640,11 +638,14 @@ def _sonar_identity() -> tuple[Any, Any]:
 def _prune_key() -> str:
     if run_suffix.current() is None:
         raise SystemExit(PRUNE_SUFFIX)
+    key, _name = _sonar_pair()
+    _require_key(key)
+    return str(_suffixed_key(key))
+
+
+def _sonar_pair() -> tuple[Any, Any]:
     config = config_module.load(Path.cwd())
-    key = config.get("sonar", "project_key")
-    if not key:
-        raise SystemExit(SUFFIX_KEY)
-    return run_suffix.named(str(key))
+    return config.get("sonar", "project_key"), config.get("sonar", "project_name", config.root.name)
 
 
 def _require_key(key: Any) -> None:

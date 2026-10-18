@@ -39,6 +39,7 @@ __all__ = [
 ]
 
 DEFAULT_PREFIX = "marestail-perf-"
+RUN_SUFFIX_LABEL = "marestail.run-suffix"
 DEFAULT_VOLUME = "marestail-perf-pgdata"
 DEFAULT_PORT = 55432
 DEFAULT_MIN_FREE_GB = 50
@@ -154,13 +155,18 @@ def _host_port(section: dict[str, Any], suffix: str | None) -> int:
 def _port_slot(suffix: str | None) -> int:
     if suffix is None:
         return 0
-    return 1 + int(hashlib.sha256(suffix.encode()).hexdigest()[:8], 16) % 1000
+    hashed = int(hashlib.sha256(suffix.encode()).hexdigest()[:8], 16)
+    return 1 + (hashed % 1000)
 
 
 def _run_label(database: Database) -> list[str]:
     if database.suffix is None:
         return []
-    return ["--label", f"marestail.run-suffix={database.suffix}"]
+    return ["--label", _suffix_label(database)]
+
+
+def _suffix_label(database: Database) -> str:
+    return f"{RUN_SUFFIX_LABEL}={database.suffix}"
 
 
 MILLISECONDS = 1000
@@ -756,9 +762,17 @@ def down(database: Database) -> list[str]:
 
 def _down_names(database: Database) -> list[str]:
     if database.suffix is None:
-        _, output = docker(database, "ps", "-a", "--format", "{{.Names}}")
-        return [name for name in output.split() if name.startswith(database.prefix)]
-    _, output = docker(database, "ps", "-a", "--filter", f"label=marestail.run-suffix={database.suffix}", "--format", "{{.Names}}")
+        return _prefixed_names(database)
+    return _labelled_names(database)
+
+
+def _prefixed_names(database: Database) -> list[str]:
+    _, output = docker(database, "ps", "-a", "--format", "{{.Names}}")
+    return [name for name in output.split() if name.startswith(database.prefix)]
+
+
+def _labelled_names(database: Database) -> list[str]:
+    _, output = docker(database, "ps", "-a", "--filter", f"label={_suffix_label(database)}", "--format", "{{.Names}}")
     return output.split()
 
 

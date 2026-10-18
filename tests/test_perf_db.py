@@ -1423,8 +1423,9 @@ def test_start_build_argv_has_no_run_suffix(
 
 
 def test_tree_port_control_stays_a_key_error(tmp_path: Path) -> None:
+    database = make_db(tmp_path)
     with pytest.raises(KeyError):
-        make_db(tmp_path).tree_port("control")
+        database.tree_port("control")
 
 
 def built_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, section: dict[str, Any]) -> int:

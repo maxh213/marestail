@@ -2,6 +2,7 @@ import os
 import re
 
 ENV = "MARESTAIL_RUN_SUFFIX"
+SONAR_KEY_REQUIRED = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
 _PATTERN = re.compile(r"[a-z0-9-]{1,32}")
 
 

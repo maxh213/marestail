@@ -40,7 +40,6 @@ PATH_KEY = "path"
 KEY = "key"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
-_KEY_REQUIRED = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
 
 
 DOTNET_EXCLUSIONS = [
@@ -82,7 +81,7 @@ def run_gate(ctx: Context) -> Result:
 def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
     raw = ctx.config.get(SECTION, "project_key")
     if _suffix_blocks(raw):
-        return Result(GATE, False, "no project key", [_KEY_REQUIRED], 0.0)
+        return Result(GATE, False, "no project key", [run_suffix.SONAR_KEY_REQUIRED], 0.0)
     client = Client(creds["url"], creds["token"])
     code, output, task_file = scan(ctx, creds, raw)
     if code != 0:
@@ -299,7 +298,6 @@ def build_target(ctx: Context, product: Path | None) -> Path | None:
 
 
 def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, build: Path | None) -> Path:
-    name = ctx.config.get(SECTION, "project_name", key)
     script = ctx.work / "sonar-dotnet.sh"
     script.write_text(
         "\n".join(
@@ -307,7 +305,7 @@ def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, b
                 "set -e",
                 f'export PATH="$PATH:{tools}"',
                 f'cd "{ctx.root}" && rm -rf .sonarqube',
-                f'{DOTNET_SCANNER} begin /k:"{run_suffix.named(key)}" /n:"{run_suffix.titled(str(name))}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
+                _begin_scan(ctx, creds, key),
                 f'dotnet build "{build}" -t:Rebuild --nologo',
                 f'{DOTNET_SCANNER} end /d:sonar.token="$SONAR_TOKEN"',
                 "",
@@ -315,6 +313,21 @@ def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, b
         )
     )
     return script
+
+
+def _begin_scan(ctx: Context, creds: Credentials, key: str) -> str:
+    name = ctx.config.get(SECTION, "project_name", key)
+    flags = " ".join(
+        [
+            f'/k:"{run_suffix.named(key)}"',
+            f'/n:"{run_suffix.titled(str(name))}"',
+            f'/s:"{write_settings(ctx)}"',
+            f'/d:sonar.host.url="{creds["url"]}"',
+            '/d:sonar.token="$SONAR_TOKEN"',
+            f'/d:sonar.projectBaseDir="{ctx.root}"',
+        ]
+    )
+    return f"{DOTNET_SCANNER} begin {flags}"
 
 
 def write_settings(ctx: Context) -> Path:
