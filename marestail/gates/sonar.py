@@ -618,9 +618,31 @@ def measures(ctx: Context, client: Client, key: str) -> list[str]:
     if ctx.hyper:
         return []
     if ctx.scoped:
-        return scoped_duplication(ctx, client, key)
+        return scoped_findings(ctx, client, key)
     data = client.get(MEASURES, component=key, metricKeys=f"{COVERAGE},{DUPLICATION}")
     return measure_findings(metric_values(data["component"]))
+
+
+def scoped_findings(ctx: Context, client: Client, key: str) -> list[str]:
+    return [*scoped_duplication(ctx, client, key), *go_scoped_coverage(ctx, client, key)]
+
+
+def go_scoped_coverage(ctx: Context, client: Client, key: str) -> list[str]:
+    if ctx.config.section("go") is None or partial_go_scope(ctx):
+        return []
+    data = client.get(MEASURES, component=key, metricKeys=COVERAGE)
+    return coverage_lines(metric_values(data["component"]))
+
+
+def partial_go_scope(ctx: Context) -> bool:
+    return any(not ctx.in_scope(golang.rel(ctx, path)) for path in golang.sources(ctx))
+
+
+def coverage_lines(values: dict[str, float]) -> list[str]:
+    coverage = coverage_score(values)
+    if coverage < FULL_COVERAGE:
+        return [f"sonar coverage {coverage:.1f}% (need 100)"]
+    return []
 
 
 def metric_values(holder: dict[str, Any]) -> dict[str, float]:
@@ -644,10 +666,7 @@ def duplication_score(values: dict[str, float]) -> float:
 
 
 def measure_findings(values: dict[str, float]) -> list[str]:
-    findings = []
-    coverage = coverage_score(values)
-    if coverage < FULL_COVERAGE:
-        findings.append(f"sonar coverage {coverage:.1f}% (need 100)")
+    findings = coverage_lines(values)
     density = duplication_score(values)
     if density > NO_DUPLICATION:
         findings.append(duplication(density))

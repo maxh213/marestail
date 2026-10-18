@@ -549,6 +549,49 @@ def test_collect_unscoped() -> None:
     assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage,duplicated_lines_density"})
 
 
+def test_scoped_go_coverage_follows_duplication(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"go": {}}, scope_changed=True, changed={"src/b.py"})
+    low: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "75.5"}]}})
+    assert sonar.go_scoped_coverage(ctx, low, KEY) == ["sonar coverage 75.5% (need 100)"]
+    full: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "100"}]}})
+    assert sonar.go_scoped_coverage(ctx, full, KEY) == []
+    absent = make_context(tmp_path, scope_changed=True, changed={"src/b.py"})
+    quiet: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "1"}]}})
+    assert sonar.go_scoped_coverage(absent, quiet, KEY) == []
+    assert quiet.gets == []
+    assert sonar.coverage_lines({}) == []
+    assert sonar.coverage_lines({"coverage": 0.0}) == ["sonar coverage 0.0% (need 100)"]
+    client: Any = FakeClient(collect_responder)
+    assert sonar.scoped_findings(ctx, client, KEY) == [
+        "src/b.py:1 sonar duplication 4.0% (need 0)",
+        "sonar coverage 0.0% (need 100)",
+    ]
+    assert client.gets[-1] == ("api/measures/component", {"component": KEY, "metricKeys": "coverage"})
+    findings, status = sonar.collect(ctx, client, KEY)
+    assert status == "ERROR"
+    assert findings[-1] == "sonar coverage 0.0% (need 100)"
+
+
+def test_scoped_go_coverage_needs_every_source(tmp_path: Path) -> None:
+    domain = tmp_path / "internal" / "domain"
+    store = tmp_path / "internal" / "store"
+    domain.mkdir(parents=True)
+    store.mkdir(parents=True)
+    (domain / "domain.go").write_text("package domain\n")
+    (store / "store.go").write_text("package store\n")
+    held: Any = FakeClient(lambda path, params: {"component": {"measures": [{"metric": "coverage", "value": "75.5"}]}})
+    partial = make_context(tmp_path, {"go": {}}, scope_changed=True, changed={"internal/store/store.go"})
+    assert sonar.go_scoped_coverage(partial, held, KEY) == []
+    assert held.gets == []
+    whole = make_context(
+        tmp_path,
+        {"go": {}},
+        scope_changed=True,
+        changed={"internal/domain/domain.go", "internal/store/store.go"},
+    )
+    assert sonar.go_scoped_coverage(whole, held, KEY) == ["sonar coverage 75.5% (need 100)"]
+
+
 def test_collect_scoped() -> None:
     client: Any = FakeClient(collect_responder)
     ctx = make_context(Path("/tmp"), scope_changed=True, changed={"src/b.py"})

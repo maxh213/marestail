@@ -6,7 +6,7 @@ from typing import Any
 
 from marestail import golang, jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
-from marestail.report import Result, elapsed, mutation_summary
+from marestail.report import Result, elapsed, finding_order, mutation_summary
 from marestail.shell import run, tail
 
 GATE = "go.mutation"
@@ -171,7 +171,7 @@ def survivor_result(ctx: Context, kept: list[dict[str, Any]], survivors: list[di
 
 
 def capped_survivors(ctx: Context, kept: list[dict[str, Any]], survivors: list[dict[str, Any]], note: str, started: float) -> Result:
-    findings = [describe(ctx, mutant) for mutant in survivors]
+    findings = sorted((describe(ctx, mutant) for mutant in survivors), key=finding_order)
     return Result(GATE, not findings, mutation_summary(len(findings), len(kept), note), findings[:MAX_LINES], elapsed(started))
 
 

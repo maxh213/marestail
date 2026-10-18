@@ -212,10 +212,10 @@ def test_statuses_wording_and_scope_note(tmp_path: Path, fake_run: Any, monkeypa
     fake_run(go_mutation, unleash(ctx, mutants))
     result = checked(go_mutation.run_gate(ctx), GATE)
     assert result.findings == [
+        ".:1 None at column 1 survived",
         "a.go:3 CONDITIONALS_BOUNDARY at column 4 survived",
         "a.go:7 INVERT_LOGICAL at column 2 not covered by its package's tests",
         "a.go:10 ARITHMETIC_BASE at column 3 survived",
-        ".:1 None at column 1 survived",
     ]
     assert result.summary == "4 of 6 mutants not killed (no base HEAD; full run)"
 

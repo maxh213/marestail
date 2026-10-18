@@ -177,7 +177,7 @@ def test_a_shell_string_naming_a_box_binary_is_refused() -> None:
 
 
 def test_the_box_binaries_stay_forbidden() -> None:
-    assert {"gcloud", "ssh", "rsync"} <= conftest.FORBIDDEN_BINARIES
+    assert {"gcloud", "ssh", "rsync", "go", "gofmt", "golangci-lint", "gremlins"} <= conftest.FORBIDDEN_BINARIES
 
 
 def test_the_suite_switches_the_remote_off() -> None:
