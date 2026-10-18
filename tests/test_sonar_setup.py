@@ -36,6 +36,7 @@ class FakeClient:
         self.replies = replies or {}
         self.gets: list[tuple[str, dict[str, Any]]] = []
         self.posts: list[tuple[str, dict[str, Any]]] = []
+        self.constructed: list[tuple[Any, ...]] = []
 
     def get(self, path: str, **params: Any) -> Any:
         self.gets.append((path, params))
@@ -380,6 +381,7 @@ def test_prune_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_prune_deletes_a_found_project(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     client = install_prune(monkeypatch, {"components": [{"key": "key_a1"}]})
     setup.prune("key_a1")
+    assert client.constructed == [("http://sonar", "tok")]
     assert client.gets == [("api/projects/search", {"projects": "key_a1"})]
     assert client.posts == [("api/projects/delete", {"project": "key_a1"})]
     assert capsys.readouterr().out == "deleted sonar project key_a1\n"
@@ -388,6 +390,7 @@ def test_prune_deletes_a_found_project(monkeypatch: pytest.MonkeyPatch, capsys: 
 def test_prune_reports_a_missing_project(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     client = install_prune(monkeypatch, {"components": []})
     setup.prune("key_a1")
+    assert client.constructed == [("http://sonar", "tok")]
     assert client.gets == [("api/projects/search", {"projects": "key_a1"})]
     assert client.posts == []
     assert capsys.readouterr().out == "no sonar project key_a1\n"
@@ -431,6 +434,11 @@ def test_server_names_ignore_the_suffix(monkeypatch: pytest.MonkeyPatch) -> None
 
 def install_prune(monkeypatch: pytest.MonkeyPatch, components: dict[str, Any]) -> FakeClient:
     client = FakeClient({"api/projects/search": components})
+
+    def client_of(*args: Any) -> FakeClient:
+        client.constructed.append(args)
+        return client
+
     monkeypatch.setattr(setup, "credentials", lambda: {"url": "http://sonar", "token": "tok"})
-    monkeypatch.setattr(setup, "Client", lambda *args: client)
+    monkeypatch.setattr(setup, "Client", client_of)
     return client

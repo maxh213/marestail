@@ -90,6 +90,9 @@ def test_module_imports_only_os_and_re() -> None:
     assert isinstance(tree, ast.Module)
     assert module_imports(tree) == {"os", "re"}
     assert argument_imports_argparse(tree)
+    planted = ast.parse("import os\nimport re\nfrom pathlib import Path\n")
+    assert isinstance(planted, ast.Module)
+    assert module_imports(planted) == {"os", "re", "pathlib"}
 
 
 def test_setup_does_not_import_run_suffix() -> None:
@@ -127,8 +130,8 @@ def module_imports(tree: ast.Module) -> set[str]:
 
 
 def top_import(node: ast.AST) -> set[str]:
-    if isinstance(node, ast.Import):
-        return {alias.name for alias in node.names}
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return import_node(node)
     return set()
 
 

@@ -81,7 +81,7 @@ def run_gate(ctx: Context) -> Result:
 def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
     raw = ctx.config.get(SECTION, "project_key")
     if _suffix_blocks(raw):
-        return Result(GATE, False, "no project key", [run_suffix.SONAR_KEY_REQUIRED], 0.0)
+        return Result(GATE, False, "no project key", [run_suffix.SONAR_KEY_REQUIRED])
     client = Client(creds["url"], creds["token"])
     code, output, task_file = scan(ctx, creds, raw)
     if code != 0:
