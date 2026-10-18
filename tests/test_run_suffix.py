@@ -33,6 +33,7 @@ DB_SENTENCE = (
 DB_START = "A bench that touches a database runs with `--db`"
 JOBS_ENV = "MARESTAIL_JOBS"
 SUFFIX_ENV = "MARESTAIL_RUN_SUFFIX"
+MUTMUT_TRAMPOLINE = "mutmut.mutation.trampoline"
 ADJACENT = """
 import pytest
 
@@ -214,7 +215,7 @@ def module_imports(tree: ast.Module) -> set[str]:
     names: set[str] = set()
     for node in tree.body:
         names.update(top_import(node))
-    return names
+    return names - {MUTMUT_TRAMPOLINE}
 
 
 def top_import(node: ast.AST) -> set[str]:
