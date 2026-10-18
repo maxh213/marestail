@@ -189,6 +189,21 @@ def test_time_budget(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypat
     assert result.seconds == 7090
 
 
+def test_findings_keep_survived_then_not_checked_in_manifest_order(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(er_mutation, "time", Clock(0, 10, 110, 6900, 7090))
+    mutants = [mutant(tmp_path, 1, 10), mutant(tmp_path, 2, 2), mutant(tmp_path, 3, 1)]
+    fake_run(erlang, toolchain(mutants, [(0, "")] * 6))
+    result = checked(er_mutation.run_gate(project(tmp_path)), er_mutation.GATE)
+    findings = [
+        "src/a.erl:10 comparison mutant survived: < -> >=",
+        "src/a.erl:2 comparison mutant not checked (time budget): < -> >=",
+        "src/a.erl:1 comparison mutant not checked (time budget): < -> >=",
+    ]
+    assert shape(result) == ("er.mutation", False, "1 of 3 mutants not killed (2 unchecked (time budget))", findings)
+
+
 @pytest.mark.parametrize(("baseline", "expected"), [(1, 60), (100, 1000), (500, 1800)])
 def test_per_mutant_timeout(
     tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, baseline: float, expected: int

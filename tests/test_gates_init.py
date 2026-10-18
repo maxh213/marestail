@@ -214,15 +214,20 @@ def test_run_one_appends_the_file_level_count(tmp_path: Path) -> None:
     assert (result.summary, ctx.file_level) == ("1 problems; 2 file-level findings not gated under hyper", 0)
 
 
-def test_a_mutation_gate_crash_does_not_stop_the_next_one(tmp_path: Path) -> None:
+def test_a_mutation_gate_crash_does_not_stop_the_next_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "marestail.toml").write_text("[python]\n")
+    monkeypatch.chdir(tmp_path)
+
     def boom(_ctx: Context) -> Result:
         raise SystemExit("MARESTAIL_JOBS must be a whole number 1 or more, got '0'")
 
     def skipped(_ctx: Context) -> Result:
         return Result.skipped("ts.mutation", "no changed typescript sources")
 
-    first = gates.run_one(Gate("py.mutation", "full", "python", boom), make_context(tmp_path))
-    second = gates.run_one(Gate("ts.mutation", "full", "ts", skipped), make_context(tmp_path))
+    planned = [Gate("py.mutation", "full", "python", boom), Gate("ts.mutation", "full", "ts", skipped)]
+    monkeypatch.setattr(gates, "configured_gates", lambda *args: planned)
+    results, _ = gates.run_gates_with_context("full", False, None)
+    first, second = results
 
     summary = "py.mutation crashed: SystemExit MARESTAIL_JOBS must be a whole number 1 or more, got '0'"
     assert (first.gate, first.ok, first.summary) == ("py.mutation", False, summary)

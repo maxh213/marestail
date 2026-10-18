@@ -30,7 +30,7 @@ PRECEDENCE_SENTENCE = (
 PARAGRAPH_CLAUSES = [
     "`[run] jobs` or `MARESTAIL_JOBS` sets the number of parallel mutation workers",
     "0 is an error",
-    "the mutant set and the verdict",
+    "the mutant set and the verdict are the same for every worker count",
     "cargo-mutants is passed no `--jobs` at all when `--in-place` is in `[rust] mutation_args`",
     "a pom that sets `<threads>` in the pitest plugin's `<configuration>` beats any `-Dthreads`",
     "`templates/java-pitest.xml` sets none",

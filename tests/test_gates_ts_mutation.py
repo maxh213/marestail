@@ -135,6 +135,25 @@ def test_full_run_reports_survivors(tmp_path: Path, offload: Any) -> None:
     assert not (tmp_path / "web" / ".stryker-tmp").exists()
 
 
+def test_findings_keep_the_report_order(tmp_path: Path, offload: Any) -> None:
+    prepare(tmp_path)
+    report = {
+        "files": {
+            "src/b.ts": {"mutants": [mutant("Survived", 2)]},
+            "src/a.ts": {"mutants": [mutant("Survived", 10), mutant("Survived", 9)]},
+        }
+    }
+    offload(stryker(tmp_path, report, []))
+
+    result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
+
+    assert result.findings == [
+        "web/src/b.ts:2 BooleanLiteral Survived: x",
+        "web/src/a.ts:10 BooleanLiteral Survived: x",
+        "web/src/a.ts:9 BooleanLiteral Survived: x",
+    ]
+
+
 def test_missing_report_fails_and_cleans_up(tmp_path: Path, offload: Any) -> None:
     prepare(tmp_path)
     offload(stryker(tmp_path, None, []))

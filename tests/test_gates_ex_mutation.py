@@ -133,6 +133,23 @@ def test_reports_survivors(tmp_path: Path, fake_run: Callable[..., FakeRun], mon
     }
 
 
+def test_findings_keep_the_report_order(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    mutations = [
+        {"location": {"file": "lib/b.ex", "line": 2}, "mutator": "Muex.Mutator.Arithmetic", "status": "Survived", "description": "+ -> -"},
+        {"location": {"file": "lib/a.ex", "line": 10}, "mutator": "Muex.Mutator.Arithmetic", "status": "Survived", "description": "+ -> -"},
+        {"location": {"file": "lib/a.ex", "line": 9}, "mutator": "Muex.Mutator.Arithmetic", "status": "Survived", "description": "+ -> -"},
+    ]
+    muex(fake_run, monkeypatch, 1, report(mutations))
+
+    result = checked(ex_mutation.run_gate(project(tmp_path)), ex_mutation.GATE)
+
+    assert result.findings == [
+        "lib/b.ex:2 Arithmetic Survived: + -> -",
+        "lib/a.ex:10 Arithmetic Survived: + -> -",
+        "lib/a.ex:9 Arithmetic Survived: + -> -",
+    ]
+
+
 def test_reports_timeouts_when_the_section_says_fail(
     tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch
 ) -> None:
