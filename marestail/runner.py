@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from marestail import audit, backends, freeze, hunks, jobs, nice, practices, prompts, ran_against, reported, task_file, timeline
+from marestail import audit, backends, freeze, hunks, jobs, nice, practices, prompts, ran_against, reported, run_suffix, task_file, timeline
 from marestail import config as config_module
 from marestail import events as events_module
 from marestail import route as dandelion
@@ -247,6 +247,7 @@ def run_pipeline(
 ) -> int:
     config = config_module.load(Path.cwd())
     nice.apply(config)
+    run_suffix.current()
     jobs.run_jobs(config)
     _accept_task(task)
     picked = pick_model(config, model, agent, effort)

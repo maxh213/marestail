@@ -253,6 +253,7 @@ def test_add_notes_keeps_existing(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_add_tree_uses_the_temp_prefix(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
     seen: list[str] = []
     original = tempfile.mkdtemp
 

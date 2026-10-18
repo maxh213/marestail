@@ -1,5 +1,6 @@
 import contextlib
 import itertools
+import json
 import os
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from typing import Any, cast
 import pytest
 
 from marestail import config as config_module
-from marestail import hunks, jobs, nice, pipeline, prompts, ran_against, reported, runner, task_file
+from marestail import hunks, jobs, nice, pipeline, prompts, ran_against, reported, run_suffix, runner, task_file
 from marestail import route as dandelion
 from marestail.config import Config
 from marestail.perf import db as perf_db
@@ -176,6 +177,14 @@ def remember_pick(
     return pick_model
 
 
+def remember_suffix(order: list[str], real: Callable[[], str | None]) -> Callable[[], str | None]:
+    def current() -> str | None:
+        order.append("suffix")
+        return real()
+
+    return current
+
+
 def remember_jobs(order: list[str], calls: list[Config]) -> Callable[[Config], int | None]:
     real = jobs.run_jobs
 
@@ -214,6 +223,7 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, A
     read_calls: list[Path] = []
     real_read = task_file.read
     monkeypatch.setattr(nice, "apply", remember_nice(order, nice_calls))
+    monkeypatch.setattr(run_suffix, "current", remember_suffix(order, run_suffix.current))
     monkeypatch.setattr(jobs, "run_jobs", remember_jobs(order, jobs_calls))
     monkeypatch.setattr(task_file, "read", remember_read(order, read_calls))
     monkeypatch.setattr(runner, "pick_model", remember_pick(order, runner.pick_model))
@@ -322,7 +332,7 @@ def test_run_pipeline_all_scope_without_focus(pipeline_env: dict[str, Any]) -> N
 def test_run_pipeline_applies_nice_once_before_pick_model(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
     assert pipeline_env["nice"] == [pipeline_env["config"]]
-    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read", "pick_model"]
     assert pipeline_env["read"] == [Path("t.md")]
     captured = capsys.readouterr()
     assert "oom_score_adj" not in captured.out
@@ -333,7 +343,7 @@ def test_run_pipeline_applies_nice_once_before_pick_model(pipeline_env: dict[str
 def test_run_pipeline_reads_jobs_once_before_pick_model(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
     assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
     assert pipeline_env["jobs"] == [pipeline_env["config"]]
-    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read", "pick_model"]
     assert capsys.readouterr().out == "\n"
 
 
@@ -358,7 +368,7 @@ def test_run_pipeline_raises_a_bad_jobs_before_the_task_is_read(
     with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
     assert str(raised.value) == message
-    assert pipeline_env["order"] == ["nice", "jobs"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs"]
     assert pipeline_env["read"] == []
     assert "state" not in pipeline_env
     assert capsys.readouterr().out == ""
@@ -428,7 +438,7 @@ def test_run_pipeline_reports_a_bad_model_when_nice_is_valid(pipeline_env: dict[
     with pytest.raises(SystemExit) as raised:
         runner.run_pipeline(Path("t.md"), None, None, True, "dandelion/route", 1, agent="grok")
     assert str(raised.value) == ("--model dandelion/route picks the backend and effort before every session; drop --agent and --effort")
-    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read", "pick_model"]
     assert "state" not in pipeline_env
     assert capsys.readouterr().out == ""
 
@@ -449,7 +459,7 @@ def test_run_pipeline_stops_on_a_broken_task_before_the_model(pipeline_env: dict
         runner.run_pipeline(Path("t.md"), "critic", "critic", True, None, 1)
     assert str(raised.value) == "\n".join(f"t.md: {problem}" for problem in problems)
     assert not str(raised.value).endswith("\n")
-    assert pipeline_env["order"] == ["nice", "jobs", "read"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read"]
     assert pipeline_env["read"] == [Path("t.md")]
     assert "state" not in pipeline_env
 
@@ -466,7 +476,7 @@ def test_run_pipeline_accepts_a_valid_block_without_its_dependency(
     assert runner.run_pipeline(plain, "critic", "critic", True, None, 1) == 7
     assert runner.run_pipeline(absent, "critic", "critic", True, None, 1) == 7
     assert calls == [plain, absent]
-    assert pipeline_env["order"] == ["nice", "jobs", "read", "pick_model", "nice", "jobs", "read", "pick_model"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read", "pick_model", "nice", "suffix", "jobs", "read", "pick_model"]
     assert pipeline_env["state"].task_name == "019-absent"
     assert "does not exist" not in capsys.readouterr().out
     assert not (tmp_path / "099-missing.md").exists()
@@ -477,7 +487,7 @@ def test_run_pipeline_lets_a_missing_task_raise(pipeline_env: dict[str, Any], mo
     with pytest.raises(FileNotFoundError) as raised:
         runner.run_pipeline(Path("tasks/missing.md"), "critic", "critic", True, None, 1)
     assert "tasks/missing.md" in str(raised.value)
-    assert pipeline_env["order"] == ["nice", "jobs"]
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs"]
     assert "state" not in pipeline_env
 
 
@@ -498,6 +508,67 @@ def test_run_pipeline_finishes_when_ionice_exits_nonzero(pipeline_env: dict[str,
     monkeypatch.setattr(nice, "apply", pipeline_env["real_apply"])
     assert runner.run_pipeline(Path("t.md"), "coder", "coder", True, None, 1) == 7
     assert (root / "oom_score_adj").read_bytes() == b"500"
+
+
+SUFFIX = "MARESTAIL_RUN_SUFFIX must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'"
+
+
+def run_start_event(root: Path) -> dict[str, Any]:
+    events = (root / ".marestail" / "runs" / "t" / "events.jsonl").read_text().splitlines()
+    for line in events:
+        payload = json.loads(line)
+        if payload["event"] == "run-start":
+            return dict(payload)
+    raise AssertionError(events)
+
+
+def test_run_pipeline_checks_the_suffix_after_nice(pipeline_env: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+    assert runner.run_pipeline(Path("t.md"), None, None, True, None, 1) == 7
+    assert pipeline_env["order"] == ["nice", "suffix", "jobs", "read", "pick_model"]
+    assert "MARESTAIL_RUN_SUFFIX" not in capsys.readouterr().out
+    assert "suffix" not in run_start_event(pipeline_env["config"].root)
+
+
+def test_run_pipeline_bad_nice_beats_a_bad_suffix(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_NICE", "high")
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, None, 1)
+    assert str(raised.value) == "nice must be an integer 0-19, got 'high'"
+    assert pipeline_env["order"] == ["nice"]
+
+
+def test_run_pipeline_rejects_a_bad_suffix_after_nice(
+    pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, None, 1)
+    assert str(raised.value) == SUFFIX
+    assert pipeline_env["order"] == ["nice", "suffix"]
+    assert pipeline_env["jobs"] == []
+    assert pipeline_env["read"] == []
+    assert capsys.readouterr().out == ""
+
+
+def test_run_pipeline_suffix_beats_a_bad_jobs_value(pipeline_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "0")
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, None, 1)
+    assert str(raised.value) == SUFFIX
+    assert pipeline_env["order"] == ["nice", "suffix"]
+    assert pipeline_env["jobs"] == []
+
+
+def test_run_pipeline_outside_a_repo_raises_before_a_bad_suffix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        runner.run_pipeline(Path("t.md"), None, None, True, None, 1)
+    message = str(raised.value)
+    assert message.startswith("no marestail.toml found above")
+    assert "MARESTAIL_RUN_SUFFIX must be" not in message
 
 
 def test_run_pipeline_missing_toml_raises_before_nice(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

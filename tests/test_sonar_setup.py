@@ -1,6 +1,8 @@
+import io
 import shutil
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -363,3 +365,72 @@ def test_existing_credentials_are_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     admin: Any = FakeClient()
     setup.ensure_credentials(admin)
     assert admin.posts == []
+
+
+def test_prune_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(setup, "credentials", lambda: None)
+    made: list[Any] = []
+    monkeypatch.setattr(setup, "Client", lambda *args: made.append(args))
+    with pytest.raises(SystemExit) as raised:
+        setup.prune("key_a1")
+    assert str(raised.value) == "sonar is not set up; run: marestail sonar setup"
+    assert made == []
+
+
+def test_prune_deletes_a_found_project(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    client = install_prune(monkeypatch, {"components": [{"key": "key_a1"}]})
+    setup.prune("key_a1")
+    assert client.gets == [("api/projects/search", {"projects": "key_a1"})]
+    assert client.posts == [("api/projects/delete", {"project": "key_a1"})]
+    assert capsys.readouterr().out == "deleted sonar project key_a1\n"
+
+
+def test_prune_reports_a_missing_project(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    client = install_prune(monkeypatch, {"components": []})
+    setup.prune("key_a1")
+    assert client.gets == [("api/projects/search", {"projects": "key_a1"})]
+    assert client.posts == []
+    assert capsys.readouterr().out == "no sonar project key_a1\n"
+
+
+def test_prune_does_not_read_the_suffix(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    install_prune(monkeypatch, {"components": []})
+    setup.prune("key_a1")
+    assert capsys.readouterr().out == "no sonar project key_a1\n"
+
+
+def test_prune_reports_an_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def urlopen(request: urllib.request.Request, timeout: Any) -> Any:
+        headers: Any = {}
+        raise urllib.error.HTTPError(request.full_url, 401, "no", headers, io.BytesIO(b"no"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(setup, "credentials", lambda: {"url": "http://sonar", "token": "tok"})
+    with pytest.raises(SystemExit) as raised:
+        setup.prune("key_a1")
+    assert str(raised.value) == "sonar GET api/projects/search?projects=key_a1: 401 no"
+
+
+def test_prune_does_not_start_or_stop_the_server(
+    commands: list[tuple[list[str], dict[str, Any]]], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_prune(monkeypatch, {"components": [{"key": "key_a1"}]})
+    setup.prune("key_a1")
+    assert commands == []
+    assert capsys.readouterr().out == "deleted sonar project key_a1\n"
+
+
+def test_server_names_ignore_the_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    text = setup.COMPOSE.read_text()
+    assert "container_name: marestail-sonarqube" in text
+    assert '"9000:9000"' in text
+    assert setup.DEFAULT_URL == "http://localhost:9000"
+
+
+def install_prune(monkeypatch: pytest.MonkeyPatch, components: dict[str, Any]) -> FakeClient:
+    client = FakeClient({"api/projects/search": components})
+    monkeypatch.setattr(setup, "credentials", lambda: {"url": "http://sonar", "token": "tok"})
+    monkeypatch.setattr(setup, "Client", lambda *args: client)
+    return client

@@ -589,7 +589,7 @@ def test_readme_documents_every_environment_variable() -> None:
 def test_readme_documents_junie() -> None:
     text = (ROOT / "README.md").read_text()
     assert "`MARESTAIL_JUNIE`" in text
-    run_line = text.split("marestail run tasks/001.md", 1)[1].splitlines()[0]
+    run_line = text.split("marestail run tasks/001.md   # Claude (default)", 1)[1].splitlines()[0]
     assert "junie" in run_line
     assert "Junie as `--effort` (`low`, `medium`, `high`)" in text
     assert "`agy`, `kimi`, `grok`, `cursor`, `junie` and `hermes` run their own CLIs" in text
@@ -601,7 +601,7 @@ def test_readme_documents_junie() -> None:
 def test_readme_documents_hermes() -> None:
     text = (ROOT / "README.md").read_text()
     assert "`MARESTAIL_HERMES`" in text
-    run_line = text.split("marestail run tasks/001.md", 1)[1].splitlines()[0]
+    run_line = text.split("marestail run tasks/001.md   # Claude (default)", 1)[1].splitlines()[0]
     assert "hermes" in run_line
     assert "Hermes as `--reasoning`" in text
     assert "`agy`, `kimi`, `grok`, `cursor`, `junie` and `hermes` run their own CLIs" in text

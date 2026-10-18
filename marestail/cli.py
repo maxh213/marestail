@@ -9,7 +9,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import backends
+from marestail import backends, run_suffix
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -78,7 +78,9 @@ HELP_DASH_RUNS = "the marestail-runs script that lists every run (default ~/.cla
 HELP_AUTO = "skip the approval pause after the critic"
 HELP_PERF_DB = "reset the tree's performance database before every sample"
 HELP_WAIT = "block until the build finishes instead of detaching"
-SONAR_ACTIONS = ("up", "down", "setup")
+SONAR_ACTIONS = ("up", "down", "setup", "prune")
+SUFFIX_KEY = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
+PRUNE_SUFFIX = "sonar prune needs a run suffix: pass --run-suffix or set MARESTAIL_RUN_SUFFIX; it never deletes the unsuffixed project"
 
 Payload = dict[str, Any]
 
@@ -143,9 +145,10 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     db_actions.add_parser("prune", help="delete this repo's goldens the current perf run does not need").set_defaults(
         handler=perf_db_command
     )
-    db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(
-        handler=perf_db_command
-    )
+    db_actions.add_parser(
+        "down",
+        help="remove this run's performance database containers (every one when MARESTAIL_RUN_SUFFIX is unset), keeping the volume",
+    ).set_defaults(handler=perf_db_command)
 
 
 def add_visual(parser: argparse.ArgumentParser) -> None:
@@ -184,6 +187,7 @@ def add_gate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--only", help=HELP_ONLY)
     parser.add_argument("--json", action=STORE_TRUE)
     parser.add_argument("--hook", action=STORE_TRUE, help=HELP_HOOK)
+    add_run_suffix(parser)
     parser.set_defaults(handler=gate_command)
 
 
@@ -267,6 +271,7 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--retries", type=int, default=0, metavar="N", help=HELP_RETRIES)
     parser.add_argument("--effort", help=HELP_EFFORT)
     parser.add_argument("--agent", choices=AGENT_CHOICES, help=HELP_AGENT)
+    add_run_suffix(parser)
     parser.set_defaults(handler=run_command)
 
 
@@ -277,8 +282,13 @@ def add_install(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=install_command)
 
 
+def add_run_suffix(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--run-suffix", type=run_suffix.argument)
+
+
 def add_sonar(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=SONAR_ACTIONS)
+    add_run_suffix(parser)
     parser.set_defaults(handler=sonar_command)
 
 
@@ -319,6 +329,8 @@ def remote_status_command(args: argparse.Namespace) -> int:
 
 
 def gate_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
+    run_suffix.current()
     if args.hook:
         return hook_command()
     return focused_gate_command(args, {path for path in args.focus if path.strip()})
@@ -533,6 +545,7 @@ def sweep_counters(work: Path, keep: Path) -> None:
 
 
 def run_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
     from marestail.runner import run_pipeline
 
     return run_pipeline(
@@ -592,16 +605,65 @@ def depth_command(args: argparse.Namespace) -> int:
 
 
 def sonar_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
     from marestail.sonar import setup
 
-    if args.action == "up":
-        setup.up()
-    elif args.action == "down":
-        setup.down()
+    if args.action == "prune":
+        setup.prune(_prune_key())
+    elif args.action == "setup":
+        setup.setup(*_sonar_identity())
     else:
-        config = config_module.load(Path.cwd())
-        setup.setup(config.get("sonar", "project_key"), config.get("sonar", "project_name", config.root.name))
+        _server(setup, args.action)
     return 0
+
+
+def _publish_suffix(args: argparse.Namespace) -> None:
+    if args.run_suffix is not None:
+        os.environ[run_suffix.ENV] = args.run_suffix
+
+
+def _server(setup: Any, action: str) -> None:
+    if action == "up":
+        setup.up()
+        return
+    setup.down()
+
+
+def _sonar_identity() -> tuple[Any, Any]:
+    config = config_module.load(Path.cwd())
+    key = config.get("sonar", "project_key")
+    name = config.get("sonar", "project_name", config.root.name)
+    _require_key(key)
+    return _suffixed_key(key), _titled_name(name)
+
+
+def _prune_key() -> str:
+    if run_suffix.current() is None:
+        raise SystemExit(PRUNE_SUFFIX)
+    config = config_module.load(Path.cwd())
+    key = config.get("sonar", "project_key")
+    if not key:
+        raise SystemExit(SUFFIX_KEY)
+    return run_suffix.named(str(key))
+
+
+def _require_key(key: Any) -> None:
+    if run_suffix.current() is None:
+        return
+    if not key:
+        raise SystemExit(SUFFIX_KEY)
+
+
+def _suffixed_key(key: Any) -> Any:
+    if not key:
+        return key
+    return run_suffix.named(str(key))
+
+
+def _titled_name(name: Any) -> Any:
+    if run_suffix.current() is None:
+        return name
+    return run_suffix.titled(str(name))
 
 
 if __name__ == "__main__":

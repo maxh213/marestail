@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from marestail import cli, depth, graph, install, nice, remote, route, runner
+from marestail import cli, depth, events, graph, install, nice, queue, remote, route, run_suffix, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -24,6 +24,7 @@ from marestail.gates import Gate, visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup
+from marestail.task_file import TaskFile
 from tests.conftest import FORBIDDEN_BINARIES, make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
@@ -1195,7 +1196,9 @@ def test_perf_parser_defaults_and_help() -> None:
     assert helped["status"] == "print the golden status of every tree in the perf run"
     assert helped["url"] == "print the database URL for one tree"
     assert helped["prune"] == "delete this repo's goldens the current perf run does not need"
-    assert helped["down"] == "remove every performance database container, keeping the volume"
+    assert helped["down"] == (
+        "remove this run's performance database containers (every one when MARESTAIL_RUN_SUFFIX is unset), keeping the volume"
+    )
     assert helped["golden"] == "build the seeded golden data directory for one tree"
 
 
@@ -1568,3 +1571,249 @@ def test_queue_command_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
         "changed",
         ["x"],
     )
+
+
+SUFFIX = "MARESTAIL_RUN_SUFFIX must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'"
+FLAG_ERROR = "argument --run-suffix: must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'\n"
+RUN_ARGV = [
+    "run",
+    "t.md",
+    "--from",
+    "coder",
+    "--to",
+    "qa",
+    "--auto",
+    "--model",
+    "m",
+    "--retries",
+    "2",
+    "--agent",
+    "grok",
+    "--effort",
+    "high",
+    "--scope",
+    "hard",
+    "--focus",
+    "a",
+    "--focus",
+    "b",
+]
+RUN_EXPECTED = (Path("t.md"), "coder", "qa", True, "m", 2, "grok", "high", "hard", ["a", "b"])
+
+
+def test_run_suffix_flag_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    seen: list[tuple[tuple[Any, ...], str]] = []
+
+    def pipeline(*args: Any) -> int:
+        seen.append((args, os.environ[run_suffix.ENV]))
+        return 0
+
+    monkeypatch.setattr(runner, "run_pipeline", pipeline)
+    assert cli.main([*RUN_ARGV, "--run-suffix", "a1"]) == 0
+    assert cli.main(RUN_ARGV) == 0
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    assert cli.main(RUN_ARGV) == 0
+    assert seen[0] == (RUN_EXPECTED, "a1")
+    assert seen[1] == (RUN_EXPECTED, "a1")
+    assert seen[2] == (RUN_EXPECTED, "zz")
+
+
+def test_bad_run_suffix_flag_exits_2(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(runner, "run_pipeline", Recorder(0))
+    exit_2(["run", "t.md", "--run-suffix", "A1"], capsys)
+    exit_2(["gate", "--run-suffix", "A1"], capsys)
+    exit_2(["sonar", "setup", "--run-suffix", "A1"], capsys)
+
+
+def exit_2(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    assert str(raised.value) == "2"
+    assert raised.value.code == 2
+    assert capsys.readouterr().err.endswith(FLAG_ERROR)
+
+
+def test_run_suffix_help(capsys: pytest.CaptureFixture[str]) -> None:
+    for name in ("run", "gate", "sonar"):
+        assert "--run-suffix" in help_text(capsys, name)
+    for name in ("perf", "queue", "status"):
+        assert "--run-suffix" not in help_text(capsys, name)
+
+
+def test_gate_flag_exports_the_suffix_before_the_gates(gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = gates(PASS)
+    seen: list[str] = []
+    original = cli.run_gates_with_context
+
+    def wrapped(*args: Any) -> Any:
+        seen.append(os.environ[run_suffix.ENV])
+        return original(*args)
+
+    monkeypatch.setattr(cli, "run_gates_with_context", wrapped)
+    assert cli.main(["gate", "--run-suffix", "a1", "--tier", "fast"]) == 0
+    assert seen == ["a1"]
+    assert fake.calls[0][0] == "fast"
+
+
+def test_gate_rejects_a_bad_suffix_before_the_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    stdin(monkeypatch, {})
+    hooked: list[int] = []
+    monkeypatch.setattr(cli, "hook_command", lambda: hooked.append(1) or 0)
+    raised = suffix_exit(["gate", "--tier", "fast"])
+    assert str(raised.value) == SUFFIX
+    raised = suffix_exit(["gate", "--hook"])
+    assert str(raised.value) == SUFFIX
+    assert hooked == []
+
+
+def test_gate_bad_suffix_beats_the_focus_clash(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["gate", "--scope", "all", "--focus", "a.py"])
+    assert str(raised.value) == SUFFIX
+    assert capsys.readouterr().err == ""
+
+
+def test_gate_valid_suffix_still_rejects_focus_with_scope_all(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["gate", "--scope", "all", "--focus", "a.py", "--run-suffix", "a1"]) == 2
+    assert capsys.readouterr().err == "--focus cannot be combined with --scope all\n"
+
+
+def test_gate_bad_tier_beats_a_bad_suffix(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["gate", "--tier", "nope"])
+    assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice: 'nope'" in err
+    assert SUFFIX not in err
+
+
+def test_gate_outside_a_repo_rejects_the_suffix_first(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["gate"])
+    assert str(raised.value) == SUFFIX
+    assert "marestail.toml" not in str(raised.value)
+
+
+def suffix_exit(argv: list[str]) -> pytest.ExceptionInfo[SystemExit]:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    return raised
+
+
+def test_sonar_actions_include_prune() -> None:
+    assert cli.SONAR_ACTIONS == ("up", "down", "setup", "prune")
+
+
+def test_sonar_setup_suffixes_the_key_and_name(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    assert cli.main(["sonar", "setup"]) == 0
+    (repo / "marestail.toml").write_text('[sonar]\nproject_key = "key"\nproject_name = "N"\n')
+    assert cli.main(["sonar", "setup"]) == 0
+    assert fake.calls == [("key_a1", "repo (a1)"), ("key_a1", "N (a1)")]
+
+
+def test_sonar_setup_flag_beats_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    assert cli.main(["sonar", "--run-suffix", "a1", "setup"]) == 0
+    assert cli.main(["sonar", "setup", "--run-suffix", "a1"]) == 0
+    assert fake.calls == [("key_a1", "repo (a1)"), ("key_a1", "repo (a1)")]
+    assert os.environ[run_suffix.ENV] == "a1"
+
+
+def test_sonar_setup_requires_a_key_when_suffixed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (repo / "marestail.toml").write_text("[sonar]\n")
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    raised = suffix_exit(["sonar", "setup"])
+    assert str(raised.value) == cli.SUFFIX_KEY
+    assert fake.calls == []
+
+
+def test_sonar_up_and_down_ignore_the_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    fakes = {name: Recorder(None) for name in ("up", "down", "setup")}
+    for name, fake in fakes.items():
+        monkeypatch.setattr(setup, name, fake)
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    assert cli.main(["sonar", "up"]) == 0
+    assert cli.main(["sonar", "down"]) == 0
+    assert cli.main(["sonar", "up", "--run-suffix", "a1"]) == 0
+    assert cli.main(["sonar", "--run-suffix", "a1", "down"]) == 0
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    assert cli.main(["sonar", "up"]) == 0
+    assert fakes["up"].calls == [(), (), ()]
+    assert fakes["down"].calls == [(), ()]
+    assert fakes["setup"].calls == []
+
+
+def test_sonar_prune_needs_a_suffix(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "prune", fake)
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == cli.PRUNE_SUFFIX
+    assert fake.calls == []
+
+
+def test_sonar_prune_rejects_a_bad_suffix(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == SUFFIX
+
+
+def test_sonar_prune_uses_the_flag_or_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "prune", fake)
+    monkeypatch.setattr(setup, "setup", Recorder(None))
+    assert cli.main(["sonar", "prune", "--run-suffix", "a1"]) == 0
+    monkeypatch.setenv(run_suffix.ENV, "b2")
+    assert cli.main(["sonar", "prune"]) == 0
+    assert fake.calls == [("key_a1",), ("key_b2",)]
+
+
+def test_sonar_prune_requires_a_key(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (repo / "marestail.toml").write_text("[sonar]\n")
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == cli.SUFFIX_KEY
+
+
+def test_commands_that_never_read_the_suffix_ignore_a_bad_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    (tmp_path / "marestail.toml").write_text("")
+    (tmp_path / "plain.md").write_text("# plain")
+    assert cli.main(["tasks", "check", "plain.md"]) == 1
+    assert cli.main(["status"]) == 0
+    assert cli.main(["graph"]) == 0
+    assert cli.main(["depth"]) == 0
+    for name in ("abandon", "watch", "dash", "visual", "remote", "install", "queue"):
+        assert help_text(capsys, name)
+    monkeypatch.setattr(route, "installed", lambda: False)
+    assert cli.main(["route", "--help"]) == 127
+    assert "suffix" not in events._FIELDS["run-start"]
+    assert "suffix" not in status_module._KEYS
+    assert_queue_child(monkeypatch, tmp_path)
+
+
+def assert_queue_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    task = TaskFile("a", tmp_path / "tasks" / "a.md", (), None, "", True)
+    child = queue._ChildOptions(None, None, None, None, [], None, None)
+    argv = queue._build_child_argv(task, tmp_path, None, child)
+    assert "run" in argv
+    assert "--run-suffix" not in argv
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    assert queue._build_child_env()[run_suffix.ENV] == "a1"
+    monkeypatch.delenv(run_suffix.ENV)
+    assert run_suffix.ENV not in queue._build_child_env()

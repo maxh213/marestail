@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet, erlang, java, rust
+from marestail import dotnet, erlang, java, run_suffix, rust
 from marestail.context import Context
 from marestail.javascript import tooling_file
 from marestail.report import Result, elapsed
@@ -40,6 +40,7 @@ PATH_KEY = "path"
 KEY = "key"
 EMPTY = ""
 EMPTY_LIST: list[str] = []
+_KEY_REQUIRED = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
 
 
 DOTNET_EXCLUSIONS = [
@@ -79,18 +80,33 @@ def run_gate(ctx: Context) -> Result:
 
 
 def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
+    raw = ctx.config.get(SECTION, "project_key")
+    if _suffix_blocks(raw):
+        return Result(GATE, False, "no project key", [_KEY_REQUIRED], 0.0)
     client = Client(creds["url"], creds["token"])
-    key = ctx.config.get(SECTION, "project_key")
-    code, output, task_file = scan(ctx, creds, key)
+    code, output, task_file = scan(ctx, creds, raw)
     if code != 0:
         return Result(GATE, False, "scanner failed", tail(output), elapsed(started))
     error = wait_for_analysis(client, task_file)
     if error:
         return Result(GATE, False, "analysis did not complete", [error, *analysis_tail(output)], elapsed(started))
+    key = _api_key(raw)
     collected, status = collect(ctx, client, key)
     extra = language_findings(ctx, client, key)
     findings = collected + extra
     return Result(GATE, not findings, summarize(ctx, findings, status), findings, elapsed(started))
+
+
+def _suffix_blocks(raw: Any) -> bool:
+    if raw:
+        return False
+    return run_suffix.current() is not None
+
+
+def _api_key(raw: Any) -> Any:
+    if not raw:
+        return raw
+    return run_suffix.named(str(raw))
 
 
 def analysis_tail(output: str) -> list[str]:
@@ -149,13 +165,34 @@ def docker_arguments(ctx: Context, creds: Credentials) -> list[str]:
 def scanner_properties(ctx: Context, key: str) -> list[str]:
     root = str(ctx.root)
     return [
-        f"-Dsonar.projectKey={key}",
+        f"-Dsonar.projectKey={run_suffix.named(str(key))}",
+        *_project_name_argument(ctx, key),
         f"-Dsonar.projectBaseDir={root}",
         f"-Dsonar.working.directory={root}/.marestail/scannerwork",
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
         *settings_property(ctx),
         *java_properties(ctx),
     ]
+
+
+def _project_name_argument(ctx: Context, key: str) -> list[str]:
+    if run_suffix.current() is None:
+        return []
+    return [f"-Dsonar.projectName={run_suffix.titled(_project_title(ctx, key))}"]
+
+
+def _project_title(ctx: Context, key: str) -> str:
+    configured = ctx.config.get(SECTION, "project_name")
+    if configured:
+        return str(configured)
+    return _properties_name(ctx) or str(key)
+
+
+def _properties_name(ctx: Context) -> str:
+    for name, value in project_properties(ctx):
+        if name == "sonar.projectName":
+            return value
+    return ""
 
 
 def settings_property(ctx: Context) -> list[str]:
@@ -270,7 +307,7 @@ def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, b
                 "set -e",
                 f'export PATH="$PATH:{tools}"',
                 f'cd "{ctx.root}" && rm -rf .sonarqube',
-                f'{DOTNET_SCANNER} begin /k:"{key}" /n:"{name}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
+                f'{DOTNET_SCANNER} begin /k:"{run_suffix.named(key)}" /n:"{run_suffix.titled(str(name))}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
                 f'dotnet build "{build}" -t:Rebuild --nologo',
                 f'{DOTNET_SCANNER} end /d:sonar.token="$SONAR_TOKEN"',
                 "",

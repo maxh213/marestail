@@ -729,3 +729,157 @@ def test_hyper_language_diagnostics_still_fail(tmp_path: Path, monkeypatch: pyte
         ["marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists"],
     )
     assert "file-level" not in result.summary
+
+
+PROJECT_PARAMS = ("projectKey", "componentKeys", "project", "component")
+KEY_REQUIRED = "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
+
+
+def test_suffix_blocks_only_a_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert sonar._suffix_blocks("proj") is False
+    assert sonar._suffix_blocks(None) is False
+    assert sonar._suffix_blocks("") is False
+    assert sonar._api_key(None) is None
+    assert sonar._api_key("") == ""
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    assert sonar._suffix_blocks(None) is True
+    assert sonar._suffix_blocks("") is True
+    assert sonar._suffix_blocks("proj") is False
+    assert sonar._api_key("proj") == "proj_a1"
+    assert sonar._api_key(None) is None
+
+
+def test_scanner_command_suffixes_the_key_and_name(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_run(sonar, [(0, "")])
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    assert sonar.scanner_command(make_context(tmp_path), CREDS, KEY) == suffixed_scanner(tmp_path, "proj (a1)")
+
+
+def test_scanner_name_comes_from_properties(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_run(sonar, [(0, "")])
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    (tmp_path / "sonar-project.properties").write_text("sonar.projectName=Props\n")
+    command = sonar.scanner_command(make_context(tmp_path), CREDS, KEY)
+    assert "-Dsonar.projectName=Props (a1)" in command
+    assert "-Dsonar.projectKey=proj_a1" in command
+
+
+def test_scanner_name_prefers_the_config(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_run(sonar, [(0, "")])
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    (tmp_path / "sonar-project.properties").write_text("sonar.projectName=Props\n")
+    command = sonar.scanner_command(make_context(tmp_path, {"sonar": {"project_name": "Nice"}}), CREDS, KEY)
+    assert "-Dsonar.projectName=Nice (a1)" in command
+
+
+def test_scanner_name_falls_back_to_the_key(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_run(sonar, [(0, "")])
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    (tmp_path / "sonar-project.properties").write_text("sonar.sources=src\n")
+    command = sonar.scanner_command(make_context(tmp_path), CREDS, KEY)
+    assert "-Dsonar.projectName=proj (a1)" in command
+
+
+def test_scanner_without_a_suffix_ignores_the_properties_name(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(sonar, [(0, "")])
+    (tmp_path / "sonar-project.properties").write_text("sonar.projectName=Props\nsonar.sources=src\n")
+    command = sonar.scanner_command(make_context(tmp_path), CREDS, KEY)
+    assert name_arguments(command) == []
+
+
+def test_clean_analysis_uses_the_suffixed_key_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any, sleeps: list[float]
+) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    made = install_client(monkeypatch, healthy)
+    fake = fake_run(sonar, scanner(tmp_path))
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "sonar clean", [])
+    assert "-Dsonar.projectKey=proj_a1" in fake.calls[1]
+    assert "proj_a1_a1" not in " ".join(fake.calls[1])
+    assert made[0].gets[0] == ("api/ce/task", {"id": "T1"})
+    values = project_values(made[0].gets)
+    assert values
+    assert set(values) == {"proj_a1"}
+    assert sleeps == []
+
+
+def test_suffix_without_a_project_key_skips_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    made = install_client(monkeypatch, healthy)
+    fake = fake_run(sonar, scanner(tmp_path))
+    result = untimed(sonar.run_gate(make_context(tmp_path, {"sonar": {}})), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "no project key", [KEY_REQUIRED])
+    assert fake.calls == []
+    assert made == []
+
+
+def test_missing_credentials_stay_not_set_up_with_a_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    monkeypatch.setattr(sonar, "credentials", lambda: None)
+    result = untimed(sonar.run_gate(make_context(tmp_path)), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "not set up", ["run: marestail sonar setup"])
+
+
+@pytest.mark.parametrize(("raw", "name"), [({}, "proj"), ({"sonar": {"project_name": "Nice"}}, "Nice")])
+def test_dotnet_scan_script_uses_the_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: dict[str, Any], name: str) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    product = tmp_path / "App.csproj"
+    monkeypatch.setattr(dotnet, "projects", reject_none(lambda ctx: (product, product, None)))
+    dotnet_calls(monkeypatch, [(0, "installed"), (0, "scanned")])
+    (tmp_path / "One.sln").write_text("")
+    (tmp_path / ".marestail").mkdir()
+    assert sonar.dotnet_scan(make_context(tmp_path, raw), CREDS, KEY) == (0, "scanned")
+    script = (tmp_path / ".marestail" / "sonar-dotnet.sh").read_text()
+    assert '/k:"proj_a1"' in script
+    assert f'/n:"{name} (a1)"' in script
+    assert "proj_a1_a1" not in script
+    assert "proj_a1 (a1)" not in script
+
+
+def suffixed_scanner(tmp_path: Path, name: str) -> list[str]:
+    root = str(tmp_path)
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "-u",
+        f"{os.getuid()}:{os.getgid()}",
+        "-e",
+        "SONAR_HOST_URL=http://sonar:9000",
+        "-e",
+        "SONAR_TOKEN=tok",
+        "-e",
+        f"SONAR_USER_HOME={root}/.marestail/sonar-cache",
+        "-v",
+        f"{root}:{root}",
+        "-w",
+        root,
+        "sonarsource/sonar-scanner-cli",
+        "-Dsonar.projectKey=proj_a1",
+        f"-Dsonar.projectName={name}",
+        f"-Dsonar.projectBaseDir={root}",
+        f"-Dsonar.working.directory={root}/.marestail/scannerwork",
+        "-Dsonar.exclusions=perf/**",
+    ]
+
+
+def name_arguments(command: list[str]) -> list[str]:
+    found: list[str] = []
+    for item in command:
+        if "sonar.projectName" in item:
+            found.append(item)
+    return found
+
+
+def project_values(gets: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    values: list[str] = []
+    for _path, params in gets:
+        values.extend(matched_params(params))
+    return values
+
+
+def matched_params(params: dict[str, Any]) -> list[str]:
+    return [str(params[name]) for name in PROJECT_PARAMS if name in params]

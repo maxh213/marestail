@@ -1,0 +1,194 @@
+import argparse
+import ast
+from pathlib import Path
+
+import pytest
+
+from marestail import run_suffix
+
+ROOT = Path(__file__).resolve().parents[1]
+FLAG = "must be 1 to 32 characters from a-z, 0-9 and -, got {raw!r}"
+ROW = (
+    "| `MARESTAIL_RUN_SUFFIX` | per-run suffix (`[a-z0-9-]{1,32}`) for the names a run shares with the machine: "
+    "Sonar project `<key>_<suffix>`, perf containers `…_<suffix>` and their ports; `--run-suffix` on `run`, `gate` and `sonar` sets it |"
+)
+SETUP_LINE = "marestail sonar setup        # local SonarQube in docker, token in ~/.config/marestail"
+RUN_LINE = "marestail run tasks/001.md --run-suffix a1   # a second run of this repo on this machine, in its own checkout"
+PRUNE_LINE = "marestail sonar prune --run-suffix a1   # delete the Sonar project that suffix created"
+PARAGRAPH = (
+    "`MARESTAIL_RUN_SUFFIX`, or `--run-suffix` on `run`, `gate` and `sonar`, lets two runs of one repo share a machine, "
+    "each in its own checkout, without editing a tracked file. The suffix is added to the Sonar project key (`<key>_<suffix>`) "
+    "and name (`<name> (<suffix>)`), and to the perf containers and their ports. It is not added to the SonarQube server, "
+    "the perf volume, or anything under `.marestail/`. The gate creates the suffixed project on its first analysis, "
+    "and `marestail sonar prune` deletes that project."
+)
+NICE = "`marestail run` starts at nice 19"
+DB_SENTENCE = (
+    "With `MARESTAIL_RUN_SUFFIX` set, the containers end in `_<suffix>`, the ports move by a per-suffix offset unless "
+    "`MARESTAIL_PERF_DB_PORT` is set, `down` removes only that run's containers, and goldens in the shared volume are still "
+    "reused; two suffixes that hash to the same port fail at `docker run` because the port is already allocated, "
+    "and `MARESTAIL_PERF_DB_PORT` is the way out."
+)
+LONG = "a" * 32
+VALID = [
+    ("a1", "k_a1", "K (a1)"),
+    ("a", "k_a", "K (a)"),
+    ("0", "k_0", "K (0)"),
+    ("-", "k_-", "K (-)"),
+    ("a-1-b", "k_a-1-b", "K (a-1-b)"),
+    (LONG, "k_" + LONG, "K (" + LONG + ")"),
+]
+BAD = ["", "A1", "a_1", "a.1", "a/b", "a 1", "a1\n", "é", "a" * 33]
+
+
+def rejected(raw: str) -> str:
+    return f"{run_suffix.ENV} {FLAG.format(raw=raw)}"
+
+
+def test_unset_suffix_leaves_names_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert run_suffix.current() is None
+    assert run_suffix.named("k") == "k"
+    assert run_suffix.titled("K") == "K"
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    assert run_suffix.current() == "a1"
+    assert run_suffix.named("k") == "k_a1"
+    monkeypatch.delenv(run_suffix.ENV)
+    assert run_suffix.current() is None
+    assert run_suffix.named("k") == "k"
+    source = (ROOT / "tests" / "conftest.py").read_text()
+    assert 'monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)' in source
+    assert 'monkeypatch.delenv("MARESTAIL_JOBS", raising=False)' in source
+
+
+@pytest.mark.parametrize(("suffix", "named", "titled"), VALID)
+def test_valid_suffix_is_appended_once(monkeypatch: pytest.MonkeyPatch, suffix: str, named: str, titled: str) -> None:
+    monkeypatch.setenv(run_suffix.ENV, suffix)
+    assert run_suffix.current() == suffix
+    assert run_suffix.argument(suffix) == suffix
+    assert run_suffix.named("k") == named
+    assert run_suffix.titled("K") == titled
+
+
+@pytest.mark.parametrize("raw", BAD)
+def test_bad_suffix_is_a_system_exit(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setenv(run_suffix.ENV, raw)
+    with pytest.raises(SystemExit) as raised:
+        run_suffix.current()
+    assert str(raised.value) == rejected(raw)
+    assert "\n" not in str(raised.value)
+
+
+@pytest.mark.parametrize("raw", BAD)
+def test_bad_suffix_is_an_argument_error(raw: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError) as raised:
+        run_suffix.argument(raw)
+    assert str(raised.value) == FLAG.format(raw=raw)
+
+
+def test_module_imports_only_os_and_re() -> None:
+    tree = ast.parse((ROOT / "marestail" / "run_suffix.py").read_text())
+    assert isinstance(tree, ast.Module)
+    assert module_imports(tree) == {"os", "re"}
+    assert argument_imports_argparse(tree)
+
+
+def test_setup_does_not_import_run_suffix() -> None:
+    tree = ast.parse((ROOT / "marestail" / "sonar" / "setup.py").read_text())
+    assert isinstance(tree, ast.Module)
+    assert "run_suffix" not in imported(tree)
+
+
+def test_readme_and_layer_say_where_the_suffix_lives() -> None:
+    readme = (ROOT / "README.md").read_text()
+    lines = readme.splitlines()
+    task = line_index(lines, "| `MARESTAIL_TASK` |")
+    assert lines[task + 1] == ROW
+    assert lines[task + 2].startswith("| `MARESTAIL_QA_CMD_TIMEOUT` |")
+    setup = line_index(lines, SETUP_LINE)
+    assert lines[setup + 1] == RUN_LINE
+    assert lines[setup + 2] == PRUNE_LINE
+    paragraphs = use_paragraphs(readme)
+    assert paragraphs[0] == PARAGRAPH
+    assert paragraphs[1].startswith(NICE)
+    assert DB_SENTENCE in readme
+    layer = layer_line()
+    assert "marestail.run_suffix" in layer
+    assert "marestail.run_suffix" not in jobs_line()
+    text = (ROOT / ".importlinter").read_text()
+    assert "marestail.run_suffix" in contract_block(text, "foundations-import-nothing-above")
+    assert text.count("[importlinter:contract:") == 38
+
+
+def module_imports(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        names.update(top_import(node))
+    return names
+
+
+def top_import(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    return set()
+
+
+def imported(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        names.update(import_node(node))
+    return names
+
+
+def import_node(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if isinstance(node, ast.ImportFrom):
+        return {node.module or ""}
+    return set()
+
+
+def argument_imports_argparse(tree: ast.Module) -> bool:
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "argument":
+            return body_imports_argparse(node)
+    return False
+
+
+def body_imports_argparse(node: ast.FunctionDef) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Import):
+            return any(alias.name == "argparse" for alias in child.names)
+    return False
+
+
+def line_index(lines: list[str], prefix: str) -> int:
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            return index
+    raise AssertionError(prefix)
+
+
+def layer_line() -> str:
+    for line in (ROOT / ".importlinter").read_text().splitlines():
+        if "marestail.report" in line and "marestail._location" in line:
+            return line
+    raise AssertionError("layer")
+
+
+def jobs_line() -> str:
+    for line in (ROOT / ".importlinter").read_text().splitlines():
+        if "marestail.jobs" in line:
+            return line
+    raise AssertionError("jobs")
+
+
+def use_paragraphs(readme: str) -> list[str]:
+    after = readme.split("## Use", 1)[1].split("```", 2)[2]
+    return [chunk.strip() for chunk in after.split("\n\n") if chunk.strip()]
+
+
+def contract_block(text: str, name: str) -> str:
+    start = text.index(f"[importlinter:contract:{name}]")
+    rest = text[start:]
+    end = rest.index("\n[importlinter:contract:", 1)
+    return rest[:end]

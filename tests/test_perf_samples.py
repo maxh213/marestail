@@ -282,3 +282,29 @@ def test_parse_output_splits_records_from_passthrough() -> None:
         [{"target": "t", "unit": "ms", "better": "lower", "value": 3}],
         ["a", "b"],
     )
+
+
+def test_run_without_db_ignores_a_bad_suffix(root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    assert samples.run_command(BENCH, "head", 1, False) == 2
+    assert capsys.readouterr().err == "no perf run in progress\n"
+
+
+def test_run_with_db_and_no_migrate_ignores_a_bad_suffix(
+    root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    start_session(root)
+    bench(root, "true")
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    assert samples.run_command(BENCH, "head", 1, True) == 2
+    assert capsys.readouterr().err == "configure [perf.db] migrate in marestail.toml\n"
+
+
+def test_run_with_db_rejects_a_bad_suffix(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    start_session(root)
+    bench(root, "true")
+    (root / "marestail.toml").write_text('[perf.db]\nmigrate = "m"\nrows = 0\nimage = "postgres:16"\n')
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        samples.run_command(BENCH, "head", 1, True)
+    assert str(raised.value) == "MARESTAIL_RUN_SUFFIX must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'"

@@ -1268,3 +1268,172 @@ def test_count_rows_uses_the_label(tmp_path: Path, fake_run: Callable[..., FakeR
     fake_run(db, [(0, "7\n")])
     assert db.count_rows(make_db(tmp_path), "box", "public.a") == 7
     assert labels == ["counting public.a"]
+
+
+SUFFIX = "MARESTAIL_RUN_SUFFIX must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'"
+
+
+def test_suffixed_database_names(tmp_path: Path) -> None:
+    database = make_db(tmp_path, suffix="a1")
+    key = database.repo_key
+    assert database.helper == "mp-files_a1"
+    assert database.tree_container("head") == f"mp-db-{key}-head_a1"
+    assert database.golden_container("g") == "mp-golden-g_a1"
+    assert database.work_dir("head") == f"/perf/work/{key}-head_a1"
+    assert database.volume == "vol"
+
+
+def test_build_database_offsets_the_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_PERF_DB_PORT", raising=False)
+    assert built_port(tmp_path, monkeypatch, "a1", {}) == 57376
+    assert built_port(tmp_path, monkeypatch, "b2", {}) == 58003
+    assert built_port(tmp_path, monkeypatch, "slot-1", {}) == 56743
+    assert built_port(tmp_path, monkeypatch, "a1", {"port": "6000"}) == 7944
+    monkeypatch.setenv("MARESTAIL_PERF_DB_PORT", "7000")
+    assert built_port(tmp_path, monkeypatch, "a1", {"port": "6000"}) == 7000
+
+
+def test_high_base_port_does_not_raise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_PERF_DB_PORT", raising=False)
+    assert built_port(tmp_path, monkeypatch, "a1", {"port": "65535"}) == 67479
+
+
+def test_tree_ports_follow_the_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_PERF_DB_PORT", raising=False)
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    database = db.build_database(Config(root=tmp_path, raw={}), {}, 5, "rs", "img", "is")
+    assert database.suffix == "a1"
+    assert database.tree_port("head") == 57376
+    assert database.tree_port("baseline") == 57377
+    assert database.tree_port("pre-marestail") == 57378
+
+
+def test_golden_name_ignores_the_suffix(tmp_path: Path) -> None:
+    head = tree(tmp_path)
+    assert db.golden_name(make_db(tmp_path), head) == db.golden_name(make_db(tmp_path, suffix="a1"), head)
+
+
+def test_start_postgres_labels_the_run(tmp_path: Path, fake_run: Callable[..., FakeRun], frozen: None) -> None:
+    fake = fake_run(db, rules({}))
+    database = make_db(tmp_path, suffix="a1")
+    name = database.tree_container("head")
+    db.start_postgres(database, name, "/perf/x", 57376, 9)
+    command = docker_run(fake.calls)
+    at = command.index("--name")
+    assert command[at + 1] == name
+    assert command[at + 2 : at + 4] == ["--label", "marestail.run-suffix=a1"]
+
+
+def test_ensure_helper_labels_the_run(tmp_path: Path, fake_run: Callable[..., FakeRun], capsys: pytest.CaptureFixture[str]) -> None:
+    fake = fake_run(db, rules({RUNNING: (1, ""), "image inspect": (1, "")}))
+    database = make_db(tmp_path, suffix="a1")
+    db.ensure_helper(database)
+    command = docker_run(fake.calls)
+    at = command.index("--name")
+    assert command[at + 1] == "mp-files_a1"
+    assert command[at + 2 : at + 4] == ["--label", "marestail.run-suffix=a1"]
+    assert capsys.readouterr().out == "   pulling postgres:16\n"
+
+
+def test_a_taken_port_fails_the_start(tmp_path: Path, fake_run: Callable[..., FakeRun], frozen: None) -> None:
+    fake_run(db, rules({"run -d": (125, "port is already allocated")}))
+    database = make_db(tmp_path, suffix="a1")
+    name = database.tree_container("head")
+    with pytest.raises(db.DatabaseError, match=rf"^starting {name} failed \(exit 125\): port is already allocated$"):
+        db.start_postgres(database, name, "/perf/x", 57376, 9)
+
+
+def test_down_removes_only_labelled_containers(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(db, [(0, "mp-files_a1\nmp-db-abc-head_a1\n")])
+    assert db.down(make_db(tmp_path, suffix="a1")) == ["mp-files_a1", "mp-db-abc-head_a1"]
+    assert joined(fake) == [
+        "docker ps -a --filter label=marestail.run-suffix=a1 --format {{.Names}}",
+        "docker rm -f -v mp-files_a1",
+        "docker rm -f -v mp-db-abc-head_a1",
+    ]
+
+
+def test_down_without_a_suffix_still_removes_prefixed_names(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(db, [(0, "mp-files\nmp-files_a1\nother\n")])
+    assert db.down(make_db(tmp_path)) == ["mp-files", "mp-files_a1"]
+    assert joined(fake) == [
+        "docker ps -a --format {{.Names}}",
+        "docker rm -f -v mp-files",
+        "docker rm -f -v mp-files_a1",
+    ]
+
+
+def test_url_uses_the_suffixed_port(project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    activate(monkeypatch, {})
+    assert db.command("url", "head", False) == 0
+    assert capsys.readouterr().out == "postgresql://postgres:pw24@127.0.0.1:57376/bench\n"
+
+
+def test_release_removes_suffixed_containers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun]) -> None:
+    monkeypatch.setenv("MARESTAIL_PERF_DB_PREFIX", "mp-")
+    monkeypatch.setenv("MARESTAIL_PERF_DB_ROWS", "0")
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    monkeypatch.delenv("MARESTAIL_PERF_DB_PORT", raising=False)
+    fake = fake_run(db, rules({RUNNING: (0, "true")}))
+    session = trees.Session("t", [tree(tmp_path), tree(tmp_path, "baseline")], image="postgres:16")
+    db.release(perf_config(tmp_path), session)
+    key = make_db(tmp_path, root=tmp_path).repo_key
+    assert fake.calls[0] == ["docker", "rm", "-f", "-v", f"mp-db-{key}-head_a1"]
+    assert fake.calls[1] == ["docker", "rm", "-f", "-v", f"mp-db-{key}-baseline_a1"]
+    assert fake.calls[3] == [
+        "docker",
+        "exec",
+        "mp-files_a1",
+        "rm",
+        "-rf",
+        f"/perf/work/{key}-head_a1",
+        f"/perf/work/{key}-baseline_a1",
+    ]
+
+
+def test_unconfigured_db_ignores_a_bad_suffix(project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    (project / "marestail.toml").write_text("[perf]\n")
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    assert db.command("status", None, False) == 2
+    assert capsys.readouterr().err == "configure [perf.db] migrate in marestail.toml\n"
+
+
+def test_configured_url_rejects_a_bad_suffix(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    with pytest.raises(SystemExit) as raised:
+        db.command("url", "head", False)
+    assert str(raised.value) == SUFFIX
+
+
+def test_start_build_argv_has_no_run_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Callable[..., FakeRun], frozen: None
+) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "A1")
+    fake_run(db, rules({"test -f": (1, "")}))
+    launched: list[list[str]] = []
+
+    def popen(command: list[str], **options: Any) -> FakeChild:
+        launched.append(command)
+        return FakeChild()
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    db.start_build(make_db(tmp_path, suffix="a1"), tree(tmp_path))
+    assert launched[0] == [sys.executable, str(db.CLI), "perf", "db", "golden", "--tree", "head", "--wait"]
+
+
+def test_tree_port_control_stays_a_key_error(tmp_path: Path) -> None:
+    with pytest.raises(KeyError):
+        make_db(tmp_path).tree_port("control")
+
+
+def built_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, section: dict[str, Any]) -> int:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", suffix)
+    return db.build_database(Config(root=tmp_path, raw={}), section, 5, "rs", "img", "is").port
+
+
+def docker_run(calls: list[list[str]]) -> list[str]:
+    for command in calls:
+        if command[1] == "run":
+            return command
+    raise AssertionError(calls)
