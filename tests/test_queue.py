@@ -674,6 +674,30 @@ def test_squash_merge_leaves_c_blocked(tmp_path: Path, monkeypatch: pytest.Monke
     assert state["c"]["reason"] == f"waiting for a ({short}) to be merged into origin/main"
 
 
+def _unmerged_commit(tmp_path: Path) -> tuple[Path, str, str]:
+    repo, _ = setup_bare_repo(tmp_path)
+    git(repo, "switch", "-q", "-c", "marestail/a")
+    (repo / "only-here.txt").write_text("only here\n")
+    git(repo, "add", "only-here.txt")
+    git(repo, "commit", "-q", "-m", "unmerged")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    short = git(repo, "rev-parse", "--short", "HEAD").strip()
+    return repo, head, short
+
+
+def test_waiting_for_merge_uses_the_repo_when_cwd_is_outside(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, head, short = _unmerged_commit(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    discovered = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True, check=False)
+    assert discovered.returncode != 0
+    task = TaskFile("c", Path("tasks/c.md"), ("a",), False, "", True)
+    state: dict[str, Any] = {"tasks": {"a": {"head": head, "status": "done"}}}
+    reason = queue._check_ancestor_merges(task, state, repo, "origin/main", tmp_path / "queue.log")
+    assert reason == f"waiting for a ({short}) to be merged into origin/main"
+
+
 def _checkout(repo: Path) -> tuple[str, str]:
     branch = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip()
     tip = git(repo, "rev-parse", "HEAD").strip()
