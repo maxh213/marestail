@@ -1661,7 +1661,12 @@ def test_gate_rejects_a_bad_suffix_before_the_hook(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv(run_suffix.ENV, "A1")
     stdin(monkeypatch, {})
     hooked: list[int] = []
-    monkeypatch.setattr(cli, "hook_command", lambda: hooked.append(1) or 0)
+
+    def refuse_hook() -> int:
+        hooked.append(1)
+        return 0
+
+    monkeypatch.setattr(cli, "hook_command", refuse_hook)
     raised = suffix_exit(["gate", "--tier", "fast"])
     assert str(raised.value) == SUFFIX
     raised = suffix_exit(["gate", "--hook"])
