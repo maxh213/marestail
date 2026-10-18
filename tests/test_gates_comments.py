@@ -449,7 +449,7 @@ def test_go_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write(tmp_path, "testdata/b.go", "package b\n")
     calls: list[tuple[str, list[str]]] = []
 
-    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[list[dict[str, str]], None]:
+    def scan(ctx: object, mode: str, paths: list[Path]) -> tuple[list[dict[str, Any]], None]:
         calls.append((mode, [path.name for path in paths]))
         return [{"file": str(source), "line": 1, "text": "//nolint"}], None
 

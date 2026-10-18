@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +117,7 @@ def test_preflight_accepts_module_then_toolchain(tmp_path: Path, fake_run: Any) 
 
 
 def test_tool_configured_pin(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(golang.shutil, "which", lambda name: "/unused")
+    monkeypatch.setattr(shutil, "which", lambda name: "/unused")
     text = "\tmod\tgithub.com/go-gremlins/gremlins\tv0.6.0\th1:abc\n"
     fake = fake_run(golang, [(0, text)])
     ctx = make_context(tmp_path, {"go": {"gremlins": "/opt/gremlins"}})
@@ -125,14 +126,14 @@ def test_tool_configured_pin(tmp_path: Path, fake_run: Any, monkeypatch: pytest.
 
 
 def test_tool_on_path(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(golang.shutil, "which", lambda name: "/usr/bin/golangci-lint")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/golangci-lint")
     text = "\tmod\tgithub.com/golangci/golangci-lint/v2\tv2.13.2\n"
     fake_run(golang, [(0, text)])
     assert golang.tool(make_context(tmp_path, {"go": {}}), "golangci-lint") == "/usr/bin/golangci-lint"
 
 
 def test_tool_gobin_and_gopath(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(golang.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     gobin = tmp_path / "gobin"
     gobin.mkdir()
     gopath = tmp_path / "gopath"
@@ -149,7 +150,7 @@ def test_tool_gobin_and_gopath(tmp_path: Path, fake_run: Any, monkeypatch: pytes
 
 
 def test_tool_missing_and_bad_pins(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(golang.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     ctx = make_context(tmp_path, {"go": {}})
     ctx.memo[golang.TOOLCHAIN] = {"GOBIN": "", "GOPATH": "", "GOVERSION": "go1.25.0"}
     assert golang.tool(ctx, "gremlins") == f"gremlins is not installed: {golang.INSTALL['gremlins']}"
