@@ -111,6 +111,12 @@ def test_readme_and_layer_say_where_the_suffix_lives() -> None:
     assert paragraphs[0] == PARAGRAPH
     assert paragraphs[1].startswith(NICE)
     assert DB_SENTENCE in readme
+    layer = layer_line()
+    assert "marestail.run_suffix" in layer
+    assert "marestail.run_suffix" not in jobs_line()
+    text = (ROOT / ".importlinter").read_text()
+    assert "marestail.run_suffix" in contract_block(text, "foundations-import-nothing-above")
+    assert text.count("[importlinter:contract:") == 38
 
 
 def module_imports(tree: ast.Module) -> set[str]:
@@ -162,6 +168,27 @@ def line_index(lines: list[str], prefix: str) -> int:
     raise AssertionError(prefix)
 
 
+def layer_line() -> str:
+    for line in (ROOT / ".importlinter").read_text().splitlines():
+        if "marestail.report" in line and "marestail._location" in line:
+            return line
+    raise AssertionError("layer")
+
+
+def jobs_line() -> str:
+    for line in (ROOT / ".importlinter").read_text().splitlines():
+        if "marestail.jobs" in line:
+            return line
+    raise AssertionError("jobs")
+
+
 def use_paragraphs(readme: str) -> list[str]:
     after = readme.split("## Use", 1)[1].split("```", 2)[2]
     return [chunk.strip() for chunk in after.split("\n\n") if chunk.strip()]
+
+
+def contract_block(text: str, name: str) -> str:
+    start = text.index(f"[importlinter:contract:{name}]")
+    rest = text[start:]
+    end = rest.index("\n[importlinter:contract:", 1)
+    return rest[:end]
