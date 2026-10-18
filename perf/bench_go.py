@@ -394,6 +394,8 @@ def gate_calls() -> None:
     emit("go_tests.run_gate", lambda: go_tests.run_gate(ctx))
     emit("go_crap.statement_share", lambda: go_crap.statement_share(state["blocks"], 10, 40))
     emit("go_crap.run_gate", lambda: go_crap.run_gate(ctx))
+    emit("go_crap.run_gate hyper", lambda: go_crap.run_gate(state["hyper"]))
+    emit("go_crap.base_units", lambda: go_crap.base_units(ctx, state["domain"]))
     emit("go_lint.lint_command", lambda: go_lint.lint_command(ctx, str(state["lint"]), state["work"] / "go-lint.json"))
     emit("go_lint.issue_findings", lambda: go_lint.issue_findings(state["issue_report"], ctx))
     emit("go_lint.run_gate", lambda: go_lint.run_gate(ctx))
@@ -460,6 +462,8 @@ def absent_go() -> None:
         "go_tests.run_gate",
         "go_crap.statement_share",
         "go_crap.run_gate",
+        "go_crap.run_gate hyper",
+        "go_crap.base_units",
         "go_lint.lint_command",
         "go_lint.issue_findings",
         "go_lint.run_gate",
