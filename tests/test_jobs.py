@@ -19,28 +19,21 @@ ENV_ROW = (
     "wins over [run] jobs and the per-language worker keys |"
 )
 PICK_SNIPPET = 'jobs.pick(ctx.config, "<section>", "<key>", <today\'s default>)'
-PARAGRAPH_PHRASES = [
-    "MARESTAIL_JOBS",
-    "[python] mutation_workers",
-    "--max-children",
-    "[elixir] muex_concurrency",
-    "--concurrency",
-    "[rust] mutation_jobs",
-    "--jobs",
-    "[java] mutation_threads",
-    "-Dthreads",
-    "[run] jobs",
-    "StrykerJS",
-    "Stryker.NET",
-    "Erlang",
-    "CPU",
+README_CLAUSE = "and names that flag in the README"
+PRECEDENCE_SENTENCE = (
+    "The variable wins, then `[python] mutation_workers` (mutmut `--max-children`), "
+    "`[elixir] muex_concurrency` (muex `--concurrency`), `[rust] mutation_jobs` (cargo-mutants `--jobs`) and "
+    "`[java] mutation_threads` (PIT `-Dthreads`) for their own language, then `[run] jobs`, then each tool's default: "
+    "StrykerJS takes `--concurrency`, mutant takes `--jobs`, Stryker.NET takes `--concurrency`, and the Erlang gate "
+    "sizes its own worker pool with it, and a value from the variable or `[run] jobs` is capped at the CPU count."
+)
+PARAGRAPH_CLAUSES = [
+    "`[run] jobs` or `MARESTAIL_JOBS` sets the number of parallel mutation workers",
     "0 is an error",
-    "mutant set",
-    "verdict",
-    "default",
-    "--in-place",
-    "<threads>",
-    "templates/java-pitest.xml",
+    "the mutant set and the verdict",
+    "cargo-mutants is passed no `--jobs` at all when `--in-place` is in `[rust] mutation_args`",
+    "a pom that sets `<threads>` in the pitest plugin's `<configuration>` beats any `-Dthreads`",
+    "`templates/java-pitest.xml` sets none",
 ]
 
 
@@ -216,7 +209,10 @@ def jobs_paragraph() -> str:
 
 def test_readme_paragraph_states_the_rule() -> None:
     paragraph = jobs_paragraph()
-    assert [phrase for phrase in PARAGRAPH_PHRASES if phrase not in paragraph] == []
+    pieces = [piece.strip() for piece in paragraph.split(". ") if piece.strip()]
+    closed = [piece if piece.endswith(".") else f"{piece}." for piece in pieces]
+    assert PRECEDENCE_SENTENCE in closed
+    assert [clause for clause in PARAGRAPH_CLAUSES if clause not in paragraph] == []
 
 
 def test_readme_env_table_lists_the_variable() -> None:
@@ -230,7 +226,7 @@ def test_both_add_language_skills_carry_the_rule() -> None:
     assert first == second
     contract = first.split("## The gate contract", 1)[1].split("\n## ", 1)[0]
     bullets = [line for line in contract.splitlines() if line.startswith("- ")]
-    assert any(PICK_SNIPPET in line and "jobs.run_jobs(ctx.config)" in line for line in bullets)
+    assert any(PICK_SNIPPET in line and "jobs.run_jobs(ctx.config)" in line and README_CLAUSE in line for line in bullets)
 
 
 def test_jobs_imports_only_config() -> None:
