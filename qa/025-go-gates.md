@@ -89,14 +89,14 @@ GATE FAILED: go.tests, go.crap, go.lint, go.deps, comments, depth, deadcode, doc
 
 When Sonar has not been set up, sonar's summary is `not set up`, its only finding is `run: marestail sonar setup`, and the line above lists sonar in that same place. The other gates do not change.
 
-A missing `go` fails before any of that. With `PATH` reduced to the venv `bin` and `/bin` (no `/usr/bin`, so no `go`):
+A missing `go` fails before any of that. The sample's `go.mod` is present, so preflight runs `<go> mod edit -json` and that command exits 127. `go env` does not run. With `PATH` reduced to the venv `bin` and `/bin` (no `/usr/bin`, so no `go`):
 
 ```
 [FAIL] go.tests       go toolchain not ready  (0.0s)
        go is not installed: install Go 1.25 or newer from https://go.dev/dl or your package manager, or set [go] go
 ```
 
-The seconds can be larger than 0.0. `go.lint`, `go.deps` and `go.mutation` use that same summary and that same finding when they are not skipped.
+The seconds can be larger than 0.0. `go.lint`, `go.deps` and `go.mutation` use that same summary and that same finding when they are not skipped. A non-127 failure of `go mod edit -json` is the finding `go mod edit -json failed: <last 300 characters>` instead, and `go env` still does not run. A missing `go.mod` wins over both and is not this PATH case: `go.mod:1 missing; [go] root must name the folder that holds go.mod`.
 
 ## Steps
 
@@ -110,7 +110,7 @@ The seconds can be larger than 0.0. `go.lint`, `go.deps` and `go.mutation` use t
    Expected: the Go graph section and the Label hard-rules line above.
 
 4. Copy `SAMPLE` to a second folder. Apply the green edits from the feature's "the same sample passes" scenario. Run `marestail gate --tier full --focus internal`.
-   Expected: every gate that prints is `[ok  ]`, and the report ends `GATE PASSED`. `README.md` now contains `SAMPLE_GREETING`.
+   Expected: `README.md` now contains `SAMPLE_GREETING`. When Sonar has not been set up, sonar's summary is `not set up`, its only finding is `run: marestail sonar setup`, every other printed gate is `[ok  ]`, and the report ends `GATE FAILED: sonar`. When Sonar has been set up, every gate that prints is `[ok  ]`, the report ends `GATE PASSED`, and no finding contains `imported no go coverage`.
 
 5. Back in the red `SAMPLE`, change only `internal/store/store.go` and run `marestail gate --tier full --scope changed`. Restore the file afterwards.
    Expected: every finding path is `internal/store/store.go`. Domain lines from the red list are absent.

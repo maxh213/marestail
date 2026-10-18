@@ -86,8 +86,8 @@ Feature: marestail gate measures a Go module
     And the store test asserts `New([]int{0, 1}).Label()` equals `box 2`
     And `README.md` documents `SAMPLE_GREETING`
     When `marestail gate --tier full --focus internal` runs in that copy
-    Then every gate that runs is ok and the report ends `GATE PASSED`
-    And Sonar, when it has been set up, does not report `imported no go coverage`
+    Then when Sonar has not been set up, sonar's summary is `not set up`, its only finding is `run: marestail sonar setup`, every other gate that runs is ok, and the report ends `GATE FAILED: sonar`
+    And when Sonar has been set up, every gate that runs is ok, the report ends `GATE PASSED`, and no finding contains `imported no go coverage`
 
   Scenario: scope keeps only the file the user touched
     Given the committed red sample
@@ -105,6 +105,7 @@ Feature: marestail gate measures a Go module
   Scenario: a missing tool or a missing report fails closed
     When `go` is not on `PATH`, `go.tests` deletes `.marestail/go-cover.out`, `.marestail/go-coverage.json` and `.marestail/go-sonar-cover.out`, then fails
     And the summary is `go toolchain not ready` and the only finding is `go is not installed: install Go 1.25 or newer from https://go.dev/dl or your package manager, or set [go] go`
+    And on this sample that finding is `<go> mod edit -json` exiting 127, because `go.mod` is present, and `go env` does not run
     And `go.lint`, `go.deps` and `go.mutation` fail the same way when they get past their earlier skip
     And `go.crap` with no `.marestail/go-coverage.json` still fails `no coverage data; go.tests must run first` and does not call preflight
     And `go.deps` with no `.go-layers.json` still fails `no .go-layers.json; copy templates/go-layers.json and name the layers` with finding `.go-layers.json:1 missing`
@@ -121,15 +122,20 @@ Feature: marestail gate measures a Go module
     Then the summary is `no mutants were generated`
 
   Scenario: the toolchain and the two pinned tools
-    When `<go> env -json GOVERSION GOROOT GOBIN GOPATH` exits 127
+    When `<root>/go.mod` is missing
+    Then the problem is `<rel>/go.mod:1 missing; [go] root must name the folder that holds go.mod`, which for root `.` is `go.mod:1 missing; [go] root must name the folder that holds go.mod`
+    And neither `<go> mod edit` nor `<go> env` runs
+    When `go.mod` is present and `<go> mod edit -json` exits 127
+    Then the problem is the go install line, and `<go> env` does not run
+    When `go.mod` is present and `<go> mod edit -json` exits with any other non-zero code, or the combined output is not one JSON object, or `Module.Path` is not a string
+    Then the problem is `go mod edit -json failed: <last 300 characters>`, and `<go> env` does not run
+    When that command returns `Module.Path` and `<go> env -json GOVERSION GOROOT GOBIN GOPATH` exits 127
     Then the problem is the go install line
-    When the exit is anything else non-zero, or the combined output is not one JSON object
+    When that env command's exit is any other non-zero code, or its combined output is not one JSON object
     Then the problem is `go env failed: <last 300 characters>`
     And `go1.24.9` is `go 1.25 or newer is required, found go1.24.9: <go install line>`
     And `go1.25.0` and `go1.27.0-X:nodwarf5` are accepted
-    And a missing `<root>/go.mod` is `<rel>/go.mod:1 missing; [go] root must name the folder that holds go.mod`, which for root `.` is `go.mod:1 missing; [go] root must name the folder that holds go.mod`
-    And preflight reports the module problem before the toolchain problem
-    And `go mod edit -json` supplies `Module.Path`, or `go mod edit -json failed: <last 300 characters>`
+    And preflight stops at the first of these problems, so a missing `go.mod` or a `go mod edit` problem is never replaced by a `go env` problem
     When `golangci-lint` or `gremlins` is configured, else on `PATH`, else in `GOBIN`, else in the first `GOPATH` `bin`
     Then `<go> version -m <path>` must show a tab-separated `mod` line for the pinned module and version
     And any other module, version, `(devel)`, or no `mod` line fails `<name> at <path> is <found>; the gate is pinned to <module> <version>: <install line>`
