@@ -30,6 +30,7 @@ LANGUAGES = "ncloc_language_distribution"
 PAGE = 500
 FINISHED = {"SUCCESS": None, "FAILED": "analysis FAILED", "CANCELED": "analysis CANCELED"}
 BENCHMARKS = "perf/**"
+BUNDLED_GO = "marestail/go/**"
 EQUALS = "="
 COLON = ":"
 SLASH = "/"
@@ -227,13 +228,23 @@ def declared_properties(ctx: Context) -> set[str]:
 
 
 def scanner_exclusions(ctx: Context) -> str:
-    return ",".join(with_go(ctx, with_benchmarks(project_exclusions(ctx))))
+    return ",".join(with_bundled_go(ctx, with_go(ctx, with_benchmarks(project_exclusions(ctx)))))
 
 
 def with_benchmarks(patterns: list[str]) -> list[str]:
     if BENCHMARKS in patterns:
         return patterns
     return [*patterns, BENCHMARKS]
+
+
+def with_bundled_go(ctx: Context, patterns: list[str]) -> list[str]:
+    if BUNDLED_GO in patterns or not bundled_scanner(ctx):
+        return patterns
+    return [*patterns, BUNDLED_GO]
+
+
+def bundled_scanner(ctx: Context) -> bool:
+    return (ctx.root / "marestail" / "go" / "scan" / "main.go").is_file()
 
 
 GO_EXCLUSIONS = ("**/*_test.go", "**/vendor/**", "**/testdata/**")

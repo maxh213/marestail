@@ -338,7 +338,18 @@ def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
     root = Path(__file__).resolve().parent.parent
     declared = declared_exclusions((root / "sonar-project.properties").read_text())
     assert "perf/**" in declared
-    assert sonar.scanner_exclusions(make_context(root)).split(",") == declared
+    expected = declared if sonar.BUNDLED_GO in declared else [*declared, sonar.BUNDLED_GO]
+    assert sonar.scanner_exclusions(make_context(root)).split(",") == expected
+
+
+def test_bundled_go_scanner_is_excluded_once(tmp_path: Path) -> None:
+    assert sonar.scanner_exclusions(make_context(tmp_path)) == "perf/**"
+    folder = tmp_path / "marestail" / "go" / "scan"
+    folder.mkdir(parents=True)
+    (folder / "main.go").write_text("package main\nfunc main() {}\n")
+    assert sonar.scanner_exclusions(make_context(tmp_path)) == "perf/**,marestail/go/**"
+    (tmp_path / "sonar-project.properties").write_text("sonar.exclusions=marestail/go/**\n")
+    assert sonar.scanner_exclusions(make_context(tmp_path)) == "marestail/go/**,perf/**"
 
 
 def test_properties_parsing() -> None:

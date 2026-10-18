@@ -21,8 +21,9 @@ INSTALL = {
     "golangci-lint": "go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2",
     "gremlins": "go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0",
 }
+GO_MOD = "go.mod"
 SCAN_DIR = PACKAGE / "go" / "scan"
-SCAN_INPUTS = ("main.go", "go.mod")
+SCAN_INPUTS = ("main.go", GO_MOD)
 SCAN_ENV = {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOFLAGS": "", "CGO_ENABLED": "0"}
 SKIP_NAMES = {"vendor", "testdata", ".marestail", ".git", "node_modules"}
 GENERATED = re.compile(r"^// Code generated .* DO NOT EDIT\.$")
@@ -129,14 +130,14 @@ def module(ctx: Context) -> str:
 
 
 def read_module(ctx: Context) -> str:
-    if not (ctx.go_root() / "go.mod").is_file():
+    if not (ctx.go_root() / GO_MOD).is_file():
         return missing_mod(ctx)
     code, output = run([*go_bin(ctx), "mod", "edit", "-json"], cwd=ctx.go_root(), timeout=60)
     return module_result(code, output)
 
 
 def missing_mod(ctx: Context) -> str:
-    return f"{root_prefix(ctx)}go.mod:1 missing; [go] root must name the folder that holds go.mod"
+    return f"{root_prefix(ctx)}{GO_MOD}:1 missing; [go] root must name the folder that holds {GO_MOD}"
 
 
 def module_result(code: int, output: str) -> str:
@@ -355,7 +356,7 @@ def nested_module(ctx: Context, path: Path) -> bool:
     root = ctx.go_root().resolve()
     current = path.resolve().parent
     while current != root and root in current.parents:
-        if (current / "go.mod").is_file():
+        if (current / GO_MOD).is_file():
             return True
         current = current.parent
     return False
