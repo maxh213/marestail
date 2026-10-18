@@ -1777,12 +1777,14 @@ def test_sonar_prune_rejects_a_bad_suffix(repo: Path, monkeypatch: pytest.Monkey
 def test_sonar_prune_uses_the_flag_or_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(run_suffix.ENV, "zz")
     fake = Recorder(None)
+    created = Recorder(None)
     monkeypatch.setattr(setup, "prune", fake)
-    monkeypatch.setattr(setup, "setup", Recorder(None))
+    monkeypatch.setattr(setup, "setup", created)
     assert cli.main(["sonar", "prune", "--run-suffix", "a1"]) == 0
     monkeypatch.setenv(run_suffix.ENV, "b2")
     assert cli.main(["sonar", "prune"]) == 0
     assert fake.calls == [("key_a1",), ("key_b2",)]
+    assert created.calls == []
 
 
 def test_sonar_prune_requires_a_key(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:

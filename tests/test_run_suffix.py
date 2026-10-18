@@ -95,10 +95,32 @@ def test_module_imports_only_os_and_re() -> None:
     assert module_imports(planted) == {"os", "re", "pathlib"}
 
 
+CAUGHT = [
+    "import run_suffix",
+    "import marestail.run_suffix",
+    "import marestail.run_suffix as other",
+    "from run_suffix import current",
+    "from marestail import run_suffix",
+    "from marestail import run_suffix as other",
+    "from marestail.run_suffix import current",
+    "from . import run_suffix",
+]
+MISSED = [
+    "import marestail.run_suffix_tool",
+    "from marestail import run_suffix_tool",
+    "from marestail.run_suffix_tool import current",
+    "from marestail.run_suffix.extra import current",
+]
+
+
 def test_setup_does_not_import_run_suffix() -> None:
     tree = ast.parse((ROOT / "marestail" / "sonar" / "setup.py").read_text())
     assert isinstance(tree, ast.Module)
     assert "run_suffix" not in imported(tree)
+    for source in CAUGHT:
+        assert "run_suffix" in imported(parsed(source))
+    for source in MISSED:
+        assert "run_suffix" not in imported(parsed(source))
 
 
 def test_readme_and_layer_say_where_the_suffix_lives() -> None:
@@ -130,8 +152,10 @@ def module_imports(tree: ast.Module) -> set[str]:
 
 
 def top_import(node: ast.AST) -> set[str]:
-    if isinstance(node, ast.Import | ast.ImportFrom):
-        return import_node(node)
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if isinstance(node, ast.ImportFrom):
+        return {node.module or ""}
     return set()
 
 
@@ -144,10 +168,35 @@ def imported(tree: ast.Module) -> set[str]:
 
 def import_node(node: ast.AST) -> set[str]:
     if isinstance(node, ast.Import):
-        return {alias.name for alias in node.names}
+        return imported_modules(node.names)
     if isinstance(node, ast.ImportFrom):
-        return {node.module or ""}
+        return imported_from(node)
     return set()
+
+
+def imported_modules(aliases: list[ast.alias]) -> set[str]:
+    found: set[str] = set()
+    for alias in aliases:
+        found |= module_name(alias.name)
+    return found
+
+
+def imported_from(node: ast.ImportFrom) -> set[str]:
+    found = module_name(node.module or "")
+    return found | {alias.name for alias in node.names}
+
+
+def module_name(module: str) -> set[str]:
+    found = {module}
+    if module.rsplit(".", 1)[-1] == "run_suffix":
+        found.add("run_suffix")
+    return found
+
+
+def parsed(source: str) -> ast.Module:
+    tree = ast.parse(source)
+    assert isinstance(tree, ast.Module)
+    return tree
 
 
 def argument_imports_argparse(tree: ast.Module) -> bool:
