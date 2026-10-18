@@ -607,8 +607,10 @@ def test_here_runs_all_on_checked_out_branch(tmp_path: Path, monkeypatch: pytest
     assert "fetch " not in out
     state = json.loads((repo / ".marestail" / "queue" / "state.json").read_text())["tasks"]
     assert state["c"]["status"] == "done"
+    log = (repo / ".marestail" / "queue" / "queue.log").read_text()
     for task_id in ("a", "b", "c", "d"):
         assert state[task_id]["branch"] == "marestail/green-the-repo"
+        assert f"start {task_id} branch marestail/green-the-repo from here" in log
     assert _ref_missing(repo, "marestail/a")
 
 
@@ -1678,6 +1680,21 @@ def test_validated_dependency_records_are_checked_in_the_given_repo(tmp_path: Pa
     monkeypatch.chdir(tmp_path)
 
     assert queue._find_blocked_reason(task, state, repo, False, "main", tmp_path / "queue.log") is None
+
+
+def test_ancestor_check_fetches_that_repo_while_the_cwd_is_elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    stale = git(repo, "rev-parse", "origin/main").strip()
+    (repo / "updated.txt").write_text("new remote commit\n")
+    commit_all(repo, "advance main")
+    git(repo, "push", "-q", "origin", "main")
+    head = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", stale)
+    task = TaskFile("child", repo / "tasks" / "child.md", ("dep",), False, "", True)
+    state = {"tasks": {"dep": {"status": "done", "branch": "main", "head": head}}}
+    monkeypatch.chdir(tmp_path)
+
+    assert queue._find_blocked_reason(task, state, repo, False, "origin/main", tmp_path / "queue.log") is None
 
 
 def test_queue_clock_returns_an_aware_utc_time() -> None:
