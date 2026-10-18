@@ -178,9 +178,10 @@ def _execute_queue(
     tasks, check_code = _prepare_tasks(paths, root)
     if check_code != 0:
         return check_code
-    pre_code, branch, push_on, pr_on, remote, base, state = _pre_flight(root, tasks, retry, here, queue_dir)
-    if pre_code != 0:
-        return pre_code
+    flight = _pre_flight(root, tasks, retry, here, queue_dir)
+    if isinstance(flight, int):
+        return flight
+    branch, push_on, pr_on, remote, base, state = flight
     state_file = queue_dir / "state.json"
     git_opts = _GitOptions(branch, remote, base, push_on, pr_on, here)
     child_opts = _ChildOptions(agent, model, effort, scope, focus, start, stop)
@@ -258,67 +259,59 @@ def _is_gitignored(path: Path, root: Path) -> bool:
 
 def _pre_flight(
     root: Path, tasks: list[TaskFile], retry: list[str], here: bool, queue_dir: Path
-) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
-    code, branch = _pre_flight_tree(root)
-    if code != 0:
-        return _failed_flight(code)
+) -> int | tuple[str, bool, bool, str, str, dict[str, Any]]:
+    branch = _pre_flight_tree(root)
+    if isinstance(branch, int):
+        return branch
     state_code, state = _check_load_state(queue_dir / "state.json", root)
     if state_code != 0:
-        return _failed_flight(state_code)
+        return state_code
     ready = _pre_flight_config(root, tasks, retry, state, here, queue_dir, branch)
-    return _flight_ready(ready, state)
+    if isinstance(ready, int):
+        return ready
+    return *ready, state
 
 
-def _failed_flight(code: int) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
-    return code, "", False, False, "", "", {}
-
-
-def _flight_ready(
-    ready: tuple[int, str, bool, bool, str, str], state: dict[str, Any]
-) -> tuple[int, str, bool, bool, str, str, dict[str, Any]]:
-    code, branch, push_on, pr_on, remote, base = ready
-    return code, branch, push_on, pr_on, remote, base, state
-
-
-def _pre_flight_tree(root: Path) -> tuple[int, str]:
-    branch_code, branch = _check_head_branch(root)
-    if branch_code != 0:
-        return branch_code, ""
+def _pre_flight_tree(root: Path) -> int | str:
+    branch = _check_head_branch(root)
+    if isinstance(branch, int):
+        return branch
     clean_code = _check_clean_tree(root)
     if clean_code != 0:
-        return clean_code, ""
+        return clean_code
     run_code = _check_no_running_run(root)
     if run_code != 0:
-        return run_code, ""
-    return 0, branch
+        return run_code
+    return branch
 
 
 def _pre_flight_config(
     root: Path, tasks: list[TaskFile], retry: list[str], state: dict[str, Any], here: bool, queue_dir: Path, branch: str
-) -> tuple[int, str, bool, bool, str, str]:
+) -> int | tuple[str, bool, bool, str, str]:
     retry_code = _check_retry_ids(retry, {t.id for t in tasks}, state, root)
     if retry_code != 0:
-        return retry_code, "", False, False, "", ""
+        return retry_code
     return _pre_flight_push_base(root, here, queue_dir, branch)
 
 
-def _pre_flight_push_base(root: Path, here: bool, queue_dir: Path, branch: str) -> tuple[int, str, bool, bool, str, str]:
+def _pre_flight_push_base(root: Path, here: bool, queue_dir: Path, branch: str) -> int | tuple[str, bool, bool, str, str]:
     cfg = config_module.load(root)
-    push_code, push_on, pr_on, remote, base = _check_push_pr(cfg, root)
-    if push_code != 0:
-        return push_code, "", False, False, "", ""
+    settings = _check_push_pr(cfg, root)
+    if isinstance(settings, int):
+        return settings
+    push_on, pr_on, remote, base = settings
     base_code = _check_base(root, base, here, queue_dir / _QUEUE_LOG_NAME)
     if base_code != 0:
-        return base_code, "", False, False, "", ""
-    return 0, branch, push_on, pr_on, remote, base
+        return base_code
+    return branch, push_on, pr_on, remote, base
 
 
-def _check_head_branch(root: Path) -> tuple[int, str]:
+def _check_head_branch(root: Path) -> int | str:
     res = _git_run(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
     if res.returncode != 0:
         sys.stderr.write("HEAD is detached; check out a branch first\n")
-        return 2, ""
-    return 0, res.stdout.strip()
+        return 2
+    return res.stdout.strip()
 
 
 def _check_clean_tree(root: Path) -> int:
@@ -427,16 +420,17 @@ def _classify_rec_status(rec: dict[str, Any]) -> str | None:
     return None
 
 
-def _check_push_pr(cfg: config_module.Config, root: Path) -> tuple[int, bool, bool, str, str]:
-    code, push_val, pr_val = _read_push_pr_settings(cfg)
-    if code != 0:
-        return code, False, False, "", ""
+def _check_push_pr(cfg: config_module.Config, root: Path) -> int | tuple[bool, bool, str, str]:
+    settings = _read_push_pr_settings(cfg)
+    if isinstance(settings, int):
+        return settings
+    push_val, pr_val = settings
     base = cfg.get("git", "base", DEFAULT_BASE)
     remote = _find_target_remote(base, root)
     val_code = _validate_push_pr_settings(push_val, pr_val, remote, root)
     if val_code != 0:
-        return val_code, False, False, "", ""
-    return 0, push_val, pr_val, remote, base
+        return val_code
+    return push_val, pr_val, remote, base
 
 
 def _validate_push_pr_settings(push_val: bool, pr_val: bool, remote: str, root: Path) -> int:
@@ -474,52 +468,51 @@ def _validate_pr_gh(pr_val: bool) -> int:
     return 0
 
 
-def _read_push_pr_settings(cfg: config_module.Config) -> tuple[int, bool, bool]:
-    code_t, push_toml, pr_toml = _read_toml_push_pr(cfg)
-    if code_t != 0:
-        return code_t, False, False
-    code_e, push_env, pr_env = _read_env_push_pr()
-    if code_e != 0:
-        return code_e, False, False
-    return 0, _pick_setting(push_env, push_toml), _pick_setting(pr_env, pr_toml)
+def _read_push_pr_settings(cfg: config_module.Config) -> int | tuple[bool, bool]:
+    from_file = _read_toml_push_pr(cfg)
+    if isinstance(from_file, int):
+        return from_file
+    from_env = _read_env_push_pr()
+    if isinstance(from_env, int):
+        return from_env
+    push_toml, pr_toml = from_file
+    push_env, pr_env = from_env
+    return _pick_setting(push_env, push_toml), _pick_setting(pr_env, pr_toml)
 
 
 def _pick_setting(env_val: bool | None, toml_val: bool) -> bool:
     return env_val if env_val is not None else toml_val
 
 
-def _read_toml_push_pr(cfg: config_module.Config) -> tuple[int, bool, bool]:
+def _read_toml_push_pr(cfg: config_module.Config) -> int | tuple[bool, bool]:
     push_raw = cfg.raw.get("queue", {}).get("push", False)
     if not isinstance(push_raw, bool):
         sys.stderr.write(f"[queue] push must be true or false, got {push_raw!r}\n")
-        return 2, False, False
+        return 2
     pr_raw = cfg.raw.get("queue", {}).get("pr", False)
     if not isinstance(pr_raw, bool):
         sys.stderr.write(f"[queue] pr must be true or false, got {pr_raw!r}\n")
-        return 2, False, False
-    return 0, push_raw, pr_raw
+        return 2
+    return push_raw, pr_raw
 
 
-def _env_flag(name: str) -> tuple[int, bool | None]:
+def _env_flag(name: str) -> bool | None:
     raw = os.environ.get(name)
     if raw is None:
-        return 0, None
+        return None
     if raw.lower() in _BOOLEAN_ENV_TRUE:
-        return 0, True
+        return True
     if raw.lower() in _BOOLEAN_ENV_FALSE:
-        return 0, False
-    sys.stderr.write(f"{name} must be 1, 0, true or false, got '{raw}'\n")
-    return 2, None
+        return False
+    raise ValueError(f"{name} must be 1, 0, true or false, got '{raw}'")
 
 
-def _read_env_push_pr() -> tuple[int, bool | None, bool | None]:
-    push_code, push_val = _env_flag("MARESTAIL_QUEUE_PUSH")
-    if push_code != 0:
-        return push_code, None, None
-    pr_code, pr_val = _env_flag("MARESTAIL_QUEUE_PR")
-    if pr_code != 0:
-        return pr_code, None, None
-    return 0, push_val, pr_val
+def _read_env_push_pr() -> int | tuple[bool | None, bool | None]:
+    try:
+        return _env_flag("MARESTAIL_QUEUE_PUSH"), _env_flag("MARESTAIL_QUEUE_PR")
+    except ValueError as error:
+        sys.stderr.write(f"{error}\n")
+        return 2
 
 
 def _find_target_remote(base: str, root: Path) -> str:
@@ -912,7 +905,7 @@ def _check_stack_ancestor_blocked(task: TaskFile, state: dict[str, Any], root: P
         return None
     if task.stack is True:
         dep = task.depends[0]
-        if not state.get("tasks", {}).get(dep, {}).get("branch"):
+        if not state["tasks"][dep].get("branch"):
             return f"{dep} has no recorded branch; run it with --here or rerun it through the queue"
         return None
     return _check_ancestor_merges(task, state, root, base, log_path)
@@ -920,7 +913,7 @@ def _check_stack_ancestor_blocked(task: TaskFile, state: dict[str, Any], root: P
 
 def _check_ancestor_merges(task: TaskFile, state: dict[str, Any], root: Path, base: str, log_path: Path) -> str | None:
     for dep in task.depends:
-        head = state.get("tasks", {}).get(dep, {}).get("head")
+        head = state["tasks"][dep].get("head")
         if not head:
             return f"{dep} has no recorded branch; run it with --here or rerun it through the queue"
         _maybe_fetch_base(root, base, log_path)
@@ -1080,7 +1073,7 @@ def _run_child_process(
 
 
 def _build_child_argv(task: TaskFile, root: Path, role: str | None, child: _ChildOptions) -> list[str]:
-    cli_file = getattr(sys.modules.get("marestail.cli"), "__file__", "")
+    cli_file = getattr(sys.modules.get("marestail.cli"), "__file__", None) or ""
     cli_path = str(Path(cli_file).resolve())
     rel_path = task.path.resolve().relative_to(root.resolve())
     argv = [sys.executable, "-u", cli_path, "run", str(rel_path), "--auto"]

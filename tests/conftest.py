@@ -216,6 +216,7 @@ def guarded_signal(real: Callable[[int, int], None]) -> Callable[[int, int], Non
 
 @pytest.fixture(autouse=True)
 def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
     monkeypatch.setattr(os, "kill", guarded_signal(os.kill))
     monkeypatch.setattr(os, "killpg", guarded_signal(os.killpg))
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)

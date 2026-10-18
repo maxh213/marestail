@@ -434,7 +434,8 @@ def _blocked_entry() -> dict[str, Any]:
     }
 
 
-def test_plain_rerun_does_not_start_failed_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("action", ["failed", "stopped"])
+def test_plain_rerun_does_not_start_failed_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str) -> None:
     repo, _ = setup_bare_repo(tmp_path)
     monkeypatch.chdir(repo)
     write_task_file(repo / "tasks" / "a.md", "a", [])
@@ -456,6 +457,7 @@ def test_plain_rerun_does_not_start_failed_task(tmp_path: Path, monkeypatch: pyt
             "e": _blocked_entry(),
         },
     }
+    initial_state["tasks"]["a"]["status"] = action
     (state_dir / "state.json").write_text(json.dumps(initial_state))
     before = json.loads((state_dir / "state.json").read_text())["tasks"]
     fake_start, recorded = make_child_seam(repo, {})
@@ -467,9 +469,10 @@ def test_plain_rerun_does_not_start_failed_task(tmp_path: Path, monkeypatch: pyt
     assert after["a"] == before["a"]
     assert after["d"] == before["d"]
     assert after["b"]["status"] == "blocked"
-    assert after["b"]["reason"] == "a failed"
-    assert after["c"]["reason"] == "a failed"
-    assert after["e"]["reason"] == "a failed"
+    assert after["b"]["reason"] == f"a {action}"
+    assert after["c"]["reason"] == f"a {action}"
+    assert after["e"]["reason"] == f"a {action}"
+    assert f"{action} a tests failed" in (state_dir / "queue.log").read_text()
 
 
 def test_retry_resumes_and_unblocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1582,25 +1585,20 @@ def test_stored_status_reader_delegation(tmp_path: Path, monkeypatch: pytest.Mon
 def test_read_env_push_pr_false_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARESTAIL_QUEUE_PUSH", "0")
     monkeypatch.setenv("MARESTAIL_QUEUE_PR", "false")
-    code, push_val, pr_val = queue._read_env_push_pr()
-    assert code == 0
-    assert push_val is False
-    assert pr_val is False
+    assert queue._read_env_push_pr() == (False, False)
 
 
 def test_read_env_pr_invalid(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.delenv("MARESTAIL_QUEUE_PUSH", raising=False)
     monkeypatch.setenv("MARESTAIL_QUEUE_PR", "maybe")
-    code, _, _ = queue._read_env_push_pr()
-    assert code == 2
+    assert queue._read_env_push_pr() == 2
     assert "MARESTAIL_QUEUE_PR must be 1, 0, true or false, got 'maybe'" in capsys.readouterr().err
 
 
 def test_read_toml_push_pr_invalid_pr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / "marestail.toml").write_text('[queue]\npush = true\npr = "yes"\n')
     cfg = config_module.load(tmp_path)
-    code, _, _ = queue._read_toml_push_pr(cfg)
-    assert code == 2
+    assert queue._read_toml_push_pr(cfg) == 2
     assert "[queue] pr must be true or false, got 'yes'" in capsys.readouterr().err
 
 
@@ -1641,6 +1639,49 @@ def test_maybe_fetch_base_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(queue, "_git_run", _mock_git)
     queue._maybe_fetch_base(tmp_path, "origin/main", log_path)
     assert "fetch origin failed: fatal: could not read from remote" in log_path.read_text()
+
+
+def test_fetch_updates_the_given_repo_while_the_cwd_is_elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    old = git(repo, "rev-parse", "origin/main").strip()
+    (repo / "updated.txt").write_text("new remote commit\n")
+    commit_all(repo, "advance main")
+    git(repo, "push", "-q", "origin", "main")
+    expected = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "update-ref", "refs/remotes/origin/main", old)
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "queue.log"
+
+    queue._maybe_fetch_base(repo, "origin/main", log)
+
+    assert git(repo, "rev-parse", "origin/main").strip() == expected
+    assert not log.exists()
+
+
+def test_a_local_base_with_a_slash_does_not_fetch_an_unknown_remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    git(repo, "branch", "feature/local")
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "queue.log"
+
+    assert queue._check_base(repo, "feature/local", False, log) == 0
+
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("stack", [False, True])
+def test_validated_dependency_records_are_checked_in_the_given_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stack: bool) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    task = TaskFile("child", repo / "tasks" / "child.md", ("dep",), stack, "", True)
+    state = {"tasks": {"dep": {"status": "done", "branch": "main", "head": head}}}
+    monkeypatch.chdir(tmp_path)
+
+    assert queue._find_blocked_reason(task, state, repo, False, "main", tmp_path / "queue.log") is None
+
+
+def test_queue_clock_returns_an_aware_utc_time() -> None:
+    assert queue._now_utc().tzinfo is UTC
 
 
 def test_count_statuses_with_unknown_status() -> None:
@@ -2048,10 +2089,6 @@ def test_is_missing_dep_problem() -> None:
     assert queue._is_missing_dep_problem("tasks/e.md: zzz does not exist") is False
 
 
-def test_failed_flight_returns_an_empty_bundle() -> None:
-    assert queue._failed_flight(2) == (2, "", False, False, "", "", {})
-
-
 def test_parse_state_file_outside_the_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     state_file = tmp_path / "state.json"
     state_file.write_text("{")
@@ -2383,6 +2420,83 @@ def test_update_state_record_handles_empty_state_and_passes_root(tmp_path: Path,
     assert state["tasks"]["t1"]["status"] == "stopped"
 
 
+def test_child_flow_records_the_commit_from_its_repo_while_the_cwd_is_elsewhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    task_path = repo / "tasks" / "a.md"
+    write_task_file(task_path, "a", [])
+    commit_all(repo, "add a")
+    monkeypatch.chdir(tmp_path)
+    fake_start, recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    task = TaskFile("a", task_path, (), None, "", True)
+    directory = repo / ".marestail" / "queue"
+    opts = queue._QueueOptions(
+        repo,
+        directory,
+        directory / "queue.log",
+        directory / "state.json",
+        [],
+        queue._GitOptions("main", "origin", "main", False, False, False),
+        queue._ChildOptions(None, None, None, None, [], None, None),
+        {task_path.resolve(): task_path.read_text()},
+    )
+    state: dict[str, Any] = {}
+
+    assert queue._execute_child_flow(task, [task], state, opts, False) == (0, False)
+
+    assert len(recorded) == 1
+    saved = json.loads(opts.state_file.read_text())["tasks"]["a"]
+    assert saved["status"] == "done"
+    assert saved["head"] == git(repo, "rev-parse", "HEAD").strip()
+
+
+@pytest.mark.parametrize(
+    ("remote", "base_branch", "raw"),
+    [("origin", "master", ""), ("upstream", "main", '[git]\nbase = "upstream/main"\n[queue]\npush = true\n')],
+)
+def test_execute_queue_uses_the_repo_base_and_remote_from_another_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: str, base_branch: str, raw: str
+) -> None:
+    repo, bare = setup_bare_repo(tmp_path)
+    if remote != "origin":
+        git(repo, "remote", "rename", "origin", remote)
+    (repo / "marestail.toml").write_text(raw)
+    task = repo / "tasks" / "a.md"
+    write_task_file(task, "a", [])
+    commit_all(repo, "add a")
+    git(repo, "push", "-q", remote, f"main:{base_branch}")
+    monkeypatch.chdir(tmp_path)
+    fake_start, recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    directory = repo / ".marestail" / "queue"
+    arguments = (repo, directory, [str(task)], None, None, False, [], None, None, None, None, [])
+
+    assert queue._execute_queue(*arguments) == 0
+
+    assert len(recorded) == 1
+    saved = json.loads((directory / "state.json").read_text())["tasks"]["a"]
+    assert saved["head"] == git(repo, "rev-parse", "marestail/a").strip()
+    assert git(repo, "symbolic-ref", "--short", "HEAD").strip() == "main"
+    if remote == "upstream":
+        assert git(bare, "rev-parse", "marestail/a").strip() == saved["head"]
+    assert queue._execute_queue(*arguments) == 0
+    assert len(recorded) == 1
+
+
+def test_running_run_check_scans_the_requested_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    records = {(repo,): [{"state": "running", "task": "a", "pid": 42}]}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(status_module, "scan", lambda roots: (records.get(tuple(roots), []), []))
+
+    assert queue._check_no_running_run(repo) == 2
+
+    assert capsys.readouterr().err == "a marestail run is running here (a, pid 42); the queue would change the tree under it\n"
+
+
 def _record_git(monkeypatch: pytest.MonkeyPatch, repo: Path) -> list[tuple[list[str], Path | None]]:
     calls: list[tuple[list[str], Path | None]] = []
     real = queue._git_run
@@ -2446,10 +2560,11 @@ def test_a_rename_is_the_new_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert queue._get_dirty_paths(repo) == ["new.txt"]
 
 
-def test_bad_push_toml_returns_false_flags(tmp_path: Path) -> None:
+def test_bad_push_toml_is_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo, _ = setup_bare_repo(tmp_path)
     (repo / "marestail.toml").write_text('[queue]\npush = "yes"\n')
-    assert queue._read_push_pr_settings(config_module.load(repo)) == (2, False, False)
+    assert queue._read_push_pr_settings(config_module.load(repo)) == 2
+    assert capsys.readouterr().err == "[queue] push must be true or false, got 'yes'\n"
 
 
 def test_read_run_action_names_the_stop_and_otherwise_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2516,6 +2631,23 @@ def test_a_retry_absent_from_state_runs() -> None:
     assert queue._state_or_retry_action("a", {"tasks": {}}, ["a"]) == ("run", None)
 
 
+@pytest.mark.parametrize("state", [{}, {"tasks": {}}, {"tasks": {"other": {"status": "failed"}}}])
+def test_missing_task_state_reads_that_tasks_run(tmp_path: Path, state: dict[str, Any]) -> None:
+    append_events(tmp_path, "a", 424242, "failed", 1, reason="a tests failed")
+    append_events(tmp_path, "other", 424243, "stopped", 0, reason="other reason")
+    assert queue._determine_initial_action("a", state, [], tmp_path) == ("failed", "a tests failed")
+
+
+@pytest.mark.parametrize("state", [{}, {"tasks": {}}, {"tasks": {"a": {}}}])
+def test_summary_does_not_count_tasks_without_a_recorded_status(tmp_path: Path, state: dict[str, Any]) -> None:
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    log = tmp_path / "queue.log"
+
+    queue._log_summary([task], state, log)
+
+    assert "end done 0 failed 0 stopped 0 blocked 0" in log.read_text()
+
+
 def test_gitignored_is_asked_in_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, _ = setup_bare_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -2536,28 +2668,42 @@ def test_a_later_bad_retry_is_rejected(tmp_path: Path, capsys: pytest.CaptureFix
     assert "--retry b: it is done, not stopped or failed\n" in capsys.readouterr().err
 
 
-def test_pre_flight_config_clears_settings_when_retry_validation_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    task = TaskFile("a", tmp_path / "tasks" / "a.md", (), None, "", True)
-    state = {"tasks": {"a": {"status": "done"}}}
+def test_bad_retry_stops_before_branch_or_child_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    write_task_file(repo / "tasks" / "a.md", "a", [])
+    commit_all(repo, "add a")
+    state_dir = repo / ".marestail" / "queue"
+    state_dir.mkdir(parents=True)
+    state = {"v": 1, "tasks": {"a": {"status": "done"}}}
+    (state_dir / "state.json").write_text(json.dumps(state))
+    fake_start, recorded = make_child_seam(repo, {})
+    monkeypatch.setattr(queue, "_start_child", fake_start)
+    before = git(repo, "show-ref")
 
-    result = queue._pre_flight_config(tmp_path, [task], ["a"], state, False, tmp_path / "queue", "main")
-
-    assert result == (2, "", False, False, "", "")
+    assert queue.run_queue(["tasks/a.md"], None, None, False, ["a"], None, None, None, None, []) == 2
     assert capsys.readouterr().err == "--retry a: it is done, not stopped or failed\n"
+    assert recorded == []
+    assert git(repo, "show-ref") == before
+    assert git(repo, "symbolic-ref", "--short", "HEAD").strip() == "main"
+    assert json.loads((state_dir / "state.json").read_text()) == state
+    assert not (state_dir / "queue.log").exists()
 
 
 @pytest.mark.parametrize(
     ("codes", "expected", "steps"),
-    [((0, 0, 0), (0, "main"), 3), ((2, 0, 0), (2, ""), 1), ((0, 2, 0), (2, ""), 2), ((0, 0, 2), (2, ""), 3)],
+    [((0, 0, 0), "main", 3), ((2, 0, 0), 2, 1), ((0, 2, 0), 2, 2), ((0, 0, 2), 2, 3)],
 )
-def test_pre_flight_tree_checks_that_repo_and_clears_the_branch_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int, int], expected: tuple[int, str], steps: int
+def test_pre_flight_tree_checks_that_repo_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codes: tuple[int, int, int], expected: int | str, steps: int
 ) -> None:
     calls: list[tuple[str, Path]] = []
 
-    def head(root: Path) -> tuple[int, str]:
+    def head(root: Path) -> int | str:
         calls.append(("head", root))
-        return codes[0], "main"
+        return codes[0] or "main"
 
     def clean(root: Path) -> int:
         calls.append(("clean", root))
@@ -2577,10 +2723,10 @@ def test_pre_flight_tree_checks_that_repo_and_clears_the_branch_on_failure(
 
 @pytest.mark.parametrize(
     ("code", "expected", "error"),
-    [(0, (0, "main"), ""), (1, (2, ""), "HEAD is detached; check out a branch first\n")],
+    [(0, "main", ""), (1, 2, "HEAD is detached; check out a branch first\n")],
 )
-def test_check_head_branch_asks_that_repo_and_clears_a_detached_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], code: int, expected: tuple[int, str], error: str
+def test_check_head_branch_asks_that_repo_and_rejects_a_detached_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], code: int, expected: int | str, error: str
 ) -> None:
     calls: list[tuple[list[str], Path]] = []
 
@@ -2595,14 +2741,14 @@ def test_check_head_branch_asks_that_repo_and_clears_a_detached_branch(
     assert capsys.readouterr() == ("", error)
 
 
-def test_a_bad_push_value_stays_off(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_bad_push_value_is_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / "marestail.toml").write_text('[queue]\npush = "yes"\n')
-    assert queue._read_toml_push_pr(config_module.load(tmp_path)) == (2, False, False)
+    assert queue._read_toml_push_pr(config_module.load(tmp_path)) == 2
     assert capsys.readouterr().err == "[queue] push must be true or false, got 'yes'\n"
 
 
 def test_write_state_indents_with_two_spaces(tmp_path: Path) -> None:
-    path = tmp_path / "queue" / "state.json"
+    path = tmp_path / "nested" / "queue" / "state.json"
     state = {"v": 1, "tasks": {"a": {"status": "done"}}}
     queue._write_state(path, state)
     assert path.read_text() == json.dumps(state, indent=2)
@@ -2624,8 +2770,11 @@ def test_an_interrupted_run_resumes_from_qa(tmp_path: Path, monkeypatch: pytest.
     assert recorded[0][recorded[0].index("--from") + 1] == "qa"
 
 
-def test_child_argv_without_a_cli_file_resolves_the_empty_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delattr(sys.modules["marestail.cli"], "__file__")
+@pytest.mark.parametrize("missing", [True, False])
+def test_child_argv_without_a_cli_file_resolves_the_empty_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: bool) -> None:
+    monkeypatch.setattr(sys.modules["marestail.cli"], "__file__", None)
+    if missing:
+        monkeypatch.delattr(sys.modules["marestail.cli"], "__file__")
     task = TaskFile("a", tmp_path / "tasks" / "a.md", (), None, "", True)
     child = queue._ChildOptions(None, None, None, None, [], None, None)
     argv = queue._build_child_argv(task, tmp_path, None, child)
@@ -2641,3 +2790,18 @@ def test_switch_back_clean_uses_the_repo(tmp_path: Path, monkeypatch: pytest.Mon
     assert (["switch", "--quiet", "main"], repo) in calls
     assert all(root == repo for _, root in calls)
     assert git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() == "main"
+
+
+def test_switch_back_leaves_a_dirty_branch_and_logs_its_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _ = setup_bare_repo(tmp_path)
+    git(repo, "switch", "-q", "-c", "marestail/a")
+    dirty = repo / "uncommitted.txt"
+    dirty.write_text("keep this work\n")
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "queue.log"
+
+    queue._switch_back_clean(repo, "main", False, log)
+
+    assert git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() == "marestail/a"
+    assert dirty.read_text() == "keep this work\n"
+    assert "left on marestail/a: the working tree has uncommitted changes\n" in log.read_text()
