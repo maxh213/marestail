@@ -156,7 +156,6 @@ allowed_importers =
     marestail.gates.java_crap
     marestail.gates.ex_crap
     marestail.gates.er_crap
-    marestail.gates.go_crap
 
 [importlinter:contract:hyper-crap-above-crap]
 name = Hyper CRAP builds on CRAP scoring, never the other way
