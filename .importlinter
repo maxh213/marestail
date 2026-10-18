@@ -16,7 +16,7 @@ layers =
     marestail.gates
     marestail.remote
     marestail.depth : marestail.graph
-    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
+    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.golang : marestail.javascript : marestail.elixir
     marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice : marestail.status : marestail.jobs
     marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events : marestail.run_suffix
     marestail.shell
@@ -90,6 +90,7 @@ forbidden_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
     marestail.sonar.setup
@@ -104,6 +105,7 @@ source_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
 forbidden_modules =
@@ -156,6 +158,7 @@ allowed_importers =
     marestail.gates.java_crap
     marestail.gates.ex_crap
     marestail.gates.er_crap
+    marestail.gates.go_crap
 
 [importlinter:contract:hyper-crap-above-crap]
 name = Hyper CRAP builds on CRAP scoring, never the other way
@@ -197,6 +200,11 @@ modules =
     marestail.gates.ex_lint
     marestail.gates.ex_mutation
     marestail.gates.ex_tests
+    marestail.gates.go_crap
+    marestail.gates.go_deps
+    marestail.gates.go_lint
+    marestail.gates.go_mutation
+    marestail.gates.go_tests
     marestail.gates.java_crap
     marestail.gates.java_deps
     marestail.gates.java_lint
@@ -622,6 +630,7 @@ forbidden_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
     marestail.depth

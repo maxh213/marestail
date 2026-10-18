@@ -13,6 +13,40 @@ from tests.conftest import make_context
 INSTALL = golang.INSTALL["go"]
 PIN = "github.com/go-gremlins/gremlins v0.6.0"
 ENV_KEYS = ["GOVERSION", "GOROOT", "GOBIN", "GOPATH"]
+SURFACE = [
+    "INSTALL",
+    "MINIMUM",
+    "MODULE_KEY",
+    "PACKAGE",
+    "PINS",
+    "SCAN_DIR",
+    "SCAN_ENV",
+    "SCAN_INPUTS",
+    "TOOLCHAIN",
+    "build_scanner",
+    "excluded",
+    "files",
+    "generated",
+    "go_bin",
+    "go_missing",
+    "import_folder",
+    "in_scope",
+    "kept",
+    "listify",
+    "load_coverage",
+    "module",
+    "mutation_excluded",
+    "preflight",
+    "rel",
+    "scan",
+    "scanner_digest",
+    "scanner_paths",
+    "sources",
+    "tags",
+    "tests",
+    "tool",
+    "toolchain",
+]
 
 
 def plant(root: Path, relative: str, text: str = "package p\n") -> Path:
@@ -202,9 +236,9 @@ def test_file_selection(tmp_path: Path) -> None:
     assert golang.files(make_context(tmp_path, {"go": {"root": "missing"}})) == []
     assert golang.generated(tmp_path) is False
     assert golang.kept(ctx, Path("/etc/passwd")) is False
-    assert golang.generated_text(generated) is True
-    assert golang.generated_text("package p\n") is False
-    assert golang.generated_text("// note\n") is False
+    assert golang._generated_text(generated) is True
+    assert golang._generated_text("package p\n") is False
+    assert golang._generated_text("// note\n") is False
 
 
 def test_rel_excluded_tags_and_scope(tmp_path: Path) -> None:
@@ -362,3 +396,19 @@ def test_readme_template_freeze_and_absent_section(tmp_path: Path) -> None:
     assert docs.go_extra(make_context(tmp_path), ["x"]) == []
     assert comments.go_findings(make_context(tmp_path)) == []
     assert deadcode.go_findings(make_context(tmp_path)) == []
+
+
+def test_the_adapter_surface_and_where_go_sits() -> None:
+    assert golang.__all__ == SURFACE
+    text = Path(".importlinter").read_text()
+    assert text.count("[importlinter:contract:") == 38
+    assert "marestail.rust : marestail.golang :" in text
+    assert text.count("marestail.rust\n    marestail.golang\n") == 3
+    independent = text.split("[importlinter:contract:gates-are-independent]", 1)[1].split("\n[", 1)[0]
+    assert all(f"marestail.gates.{name}\n" in independent for name in ("go_crap", "go_deps", "go_lint", "go_mutation", "go_tests"))
+    allowed = text.split("[importlinter:contract:crap-belongs-to-crap-gates]", 1)[1].split("\n[", 1)[0]
+    assert "marestail.gates.go_crap\n" in allowed
+    source = Path("marestail/gates/go_crap.py").read_text()
+    assert "rs_crap" not in source
+    assert "marestail.gates._crap" in source
+    assert "marestail.gates._hyper_crap" in source
