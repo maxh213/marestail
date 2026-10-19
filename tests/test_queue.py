@@ -2992,18 +2992,16 @@ def test_restore_puts_sigterm_back_and_clears_the_child(monkeypatch: pytest.Monk
     def fake_signal(sig: int, handler: object) -> None:
         recorded.append((sig, handler))
 
+    child = object()
     monkeypatch.setattr(signal, "signal", fake_signal)
-    queue._SIG_STATE.proc = object()
-    queue._SIG_STATE.task_id = "a"
-    queue._SIG_STATE.received = signal.SIGTERM
-    try:
-        queue._restore_signals(("term", "intr"))
-        assert (signal.SIGTERM, "term") in recorded
-        assert queue._SIG_STATE.proc is None
-        assert queue._SIG_STATE.task_id == ""
-        assert queue._SIG_STATE.received is None
-    finally:
-        _clear_sig()
+    monkeypatch.setattr(queue._SIG_STATE, "proc", child)
+    monkeypatch.setattr(queue._SIG_STATE, "task_id", "a")
+    monkeypatch.setattr(queue._SIG_STATE, "received", signal.SIGTERM)
+    queue._restore_signals(("term", "intr"))
+    assert (signal.SIGTERM, "term") in recorded
+    assert queue._SIG_STATE.proc is None
+    assert queue._SIG_STATE.task_id == ""
+    assert queue._SIG_STATE.received is None
 
 
 def test_iteration_starts_with_start_unused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
