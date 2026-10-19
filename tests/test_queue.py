@@ -2921,8 +2921,8 @@ def test_execute_queue_keeps_the_given_directory(tmp_path: Path, monkeypatch: py
         return 0
 
     monkeypatch.setattr(queue, "_run_pipeline_loop", stop)
-    arguments = (tmp_path, directory, ["a.md"], None, None, False, [], None, None, None, None, [])
-    assert queue._execute_queue(*arguments) == 0
+    code = queue._execute_queue(tmp_path, directory, ["a.md"], None, None, False, [], None, None, None, None, [])
+    assert code == 0
     assert seen == [directory]
 
 
@@ -2992,7 +2992,7 @@ def test_restore_puts_sigterm_back_and_clears_the_child(monkeypatch: pytest.Monk
     def fake_signal(sig: int, handler: object) -> None:
         recorded.append((sig, handler))
 
-    monkeypatch.setattr(queue.signal, "signal", fake_signal)
+    monkeypatch.setattr(signal, "signal", fake_signal)
     queue._SIG_STATE.proc = object()
     queue._SIG_STATE.task_id = "a"
     queue._SIG_STATE.received = signal.SIGTERM
@@ -3087,14 +3087,14 @@ def test_a_dead_or_interrupted_run_ors_the_role_into_start_used(tmp_path: Path, 
 
 def test_the_start_log_includes_the_role(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _logged_child(monkeypatch, 0)
-    running = FakeChild(7)
 
-    def wait(timeout: float | None = None) -> int:
-        assert queue._SIG_STATE.task_id == "a"
-        assert queue._SIG_STATE.proc is running
-        return FakeChild.wait(running, timeout)
+    class Watching(FakeChild):
+        def wait(self, timeout: float | None = None) -> int:
+            assert queue._SIG_STATE.task_id == "a"
+            assert queue._SIG_STATE.proc is self
+            return super().wait(timeout)
 
-    running.wait = wait
+    running = Watching(7)
     monkeypatch.setattr(queue, "_start_child", lambda *_args: running)
     task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
     log = tmp_path / "queue.log"
