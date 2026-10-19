@@ -556,7 +556,7 @@ def _git_remotes(root: Path) -> list[str]:
 
 
 def _git_run(args: list[str], root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
 
 
 def _git_short(rev: str, root: Path) -> str:
@@ -584,8 +584,8 @@ def _log_event(log_path: Path, msg: str, now_dt: datetime | None = None) -> None
     ts = _format_iso(now_dt or _now_utc())
     line = f"{ts} {msg}"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{line}\n")
+    with log_path.open("ab") as handle:
+        handle.write(f"{line}\n".encode())
     print(f"queue: {line}")
     sys.stdout.flush()
 
@@ -1068,7 +1068,7 @@ def _run_child_process(
     _SIG_STATE.task_id = task.id
     code = proc.wait()
     _SIG_STATE.proc = None
-    elapsed_min = int((_now_utc() - start_time).total_seconds() // 60)
+    elapsed_min, _remainder = divmod(int((_now_utc() - start_time).total_seconds()), 60)
     return _inspect_child_run(root, task.id, proc.pid, code, log_path, elapsed_min)
 
 

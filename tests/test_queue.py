@@ -2859,3 +2859,262 @@ def test_switch_back_leaves_a_dirty_branch_and_logs_its_name(tmp_path: Path, mon
     assert git(repo, "symbolic-ref", "--quiet", "--short", "HEAD").strip() == "marestail/a"
     assert dirty.read_text() == "keep this work\n"
     assert "left on marestail/a: the working tree has uncommitted changes\n" in log.read_text()
+
+
+def _queue_options(root: Path, here: bool = False) -> queue._QueueOptions:
+    git_opts = queue._GitOptions("main", "origin", "main", False, False, here)
+    child = queue._ChildOptions(None, None, None, None, [], None, None)
+    return queue._QueueOptions(root, root / "queue", root / "queue.log", root / "state.json", [], git_opts, child)
+
+
+def _logged_child(monkeypatch: pytest.MonkeyPatch, seconds: int) -> None:
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    end = base + timedelta(seconds=seconds)
+    stamps = iter((base, base, end, end))
+    monkeypatch.setattr(queue, "_now_utc", lambda: next(stamps))
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: {"pid": 7, "result": "complete"})
+    monkeypatch.setattr(queue, "_git_head", lambda _root: "deadbeef")
+    monkeypatch.setattr(queue, "_git_short", lambda _rev, _root: "abc1234")
+    monkeypatch.setattr(queue, "_start_child", lambda *_args: FakeChild(7))
+
+
+def _clear_sig() -> None:
+    queue._SIG_STATE.received = None
+    queue._SIG_STATE.proc = None
+    queue._SIG_STATE.task_id = ""
+
+
+def test_acquire_lock_creates_missing_parents_and_returns_no_path(tmp_path: Path) -> None:
+    nested = tmp_path / "missing" / "queue"
+    code, path = queue._acquire_lock(nested)
+    assert code == 0
+    assert path == nested / "lock"
+    assert path is not None
+    assert path.read_text() == f"{os.getpid()}\n"
+    failed, failed_path = queue._acquire_lock(nested)
+    assert failed == 2
+    assert failed_path is None
+
+
+def test_remove_lock_ignores_an_unlink_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    flags: list[object] = []
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        flags.append(missing_ok)
+        raise OSError("busy")
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    queue._remove_lock(tmp_path / "lock")
+    assert flags == [True]
+
+
+def test_execute_queue_keeps_the_given_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = tmp_path / "queue"
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    flight = ("main", False, False, "origin", "main", {"v": 1, "tasks": {}})
+    seen: list[Path] = []
+    monkeypatch.setattr(queue, "_prepare_tasks", lambda *_args: ([task], 0))
+    monkeypatch.setattr(queue, "_pre_flight", lambda *_args: flight)
+
+    def stop(_tasks: list[TaskFile], opts: queue._QueueOptions, _state: dict[str, Any]) -> int:
+        seen.append(opts.queue_dir)
+        return 0
+
+    monkeypatch.setattr(queue, "_run_pipeline_loop", stop)
+    arguments = (tmp_path, directory, ["a.md"], None, None, False, [], None, None, None, None, [])
+    assert queue._execute_queue(*arguments) == 0
+    assert seen == [directory]
+
+
+def test_task_problems_print_one_per_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    first = tmp_path / "a.md"
+    second = tmp_path / "b.md"
+    assert queue._check_task_problems([second, first]) == 2
+    expected = f"{first}: no such file or folder\n{second}: no such file or folder\n"
+    assert capsys.readouterr().out == expected
+
+
+def test_gitignore_is_checked_in_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (repo / ".gitignore").write_text("secret.md\n")
+    commit_all(repo, "gitignore")
+    ignored = repo / "secret.md"
+    ignored.write_text("hidden\n")
+    assert queue._validate_task_paths([ignored], repo) == 2
+    assert f"{ignored} is ignored by git" in capsys.readouterr().err
+
+
+def test_check_base_fetches_and_verifies_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    calls = _record_git(monkeypatch, repo)
+    assert queue._check_base(repo, "origin/main", False, tmp_path / "queue.log") == 0
+    assert (["fetch", "--quiet", "origin"], repo) in calls
+    assert (["rev-parse", "--verify", "--quiet", "origin/main^{commit}"], repo) in calls
+
+
+def test_a_log_line_is_utf8(tmp_path: Path) -> None:
+    log = tmp_path / "a" / "b" / "queue.log"
+    when = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    queue._log_event(log, "café", when)
+    queue._log_event(log, "café", when)
+    assert log.read_bytes() == b"2026-01-02T03:04:05Z caf\xc3\xa9\n" * 2
+
+
+@pytest.mark.parametrize("here", [False, True])
+def test_switch_back_receives_here(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, here: bool) -> None:
+    task_path = tmp_path / "a.md"
+    task_path.write_text("task\n")
+    seen: list[bool] = []
+    monkeypatch.setattr(queue, "_process_all_tasks", lambda *_args: 0)
+    monkeypatch.setattr(queue, "_install_signals", lambda *_args: (None, None))
+    monkeypatch.setattr(queue, "_restore_signals", lambda *_args: None)
+
+    def capture(_root: Path, _branch: str, flag: bool, _log: Path) -> None:
+        seen.append(flag)
+
+    monkeypatch.setattr(queue, "_switch_back_clean", capture)
+    assert queue._run_pipeline_loop([TaskFile("a", task_path, (), None, "", True)], _queue_options(tmp_path, here), {"tasks": {}}) == 0
+    assert seen == [here]
+    assert seen[0] is here
+
+
+def test_a_missing_task_map_or_other_status_is_not_cleared() -> None:
+    assert queue._should_clear_task("a", {}, []) is False
+    assert queue._should_clear_task("a", {"tasks": {"a": {"status": "done"}}}, []) is False
+    assert queue._should_clear_task("a", {"tasks": {"a": {"status": "blocked"}}}, []) is True
+
+
+def test_restore_puts_sigterm_back_and_clears_the_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[tuple[int, object]] = []
+
+    def fake_signal(sig: int, handler: object) -> None:
+        recorded.append((sig, handler))
+
+    monkeypatch.setattr(queue.signal, "signal", fake_signal)
+    queue._SIG_STATE.proc = object()
+    queue._SIG_STATE.task_id = "a"
+    queue._SIG_STATE.received = signal.SIGTERM
+    try:
+        queue._restore_signals(("term", "intr"))
+        assert (signal.SIGTERM, "term") in recorded
+        assert queue._SIG_STATE.proc is None
+        assert queue._SIG_STATE.task_id == ""
+        assert queue._SIG_STATE.received is None
+    finally:
+        _clear_sig()
+
+
+def test_iteration_starts_with_start_unused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    def handle(*args: object) -> tuple[int, object, bool]:
+        seen.append(args[-1])
+        return 0, args[-1], True
+
+    monkeypatch.setattr(queue, "_stop_if_signalled", lambda: None)
+    monkeypatch.setattr(queue, "_handle_task_in_loop", handle)
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    assert queue._iterate_tasks([task], {"tasks": {}}, _queue_options(tmp_path)) == 0
+    assert seen[0] is False
+
+
+def test_a_skipped_done_task_returns_zero(tmp_path: Path) -> None:
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    state = {"tasks": {"a": {"status": "done"}}}
+    assert queue._handle_task_in_loop(task, [task], state, _queue_options(tmp_path), False) == (0, False, False)
+
+
+def test_done_is_the_recorded_task_status() -> None:
+    assert queue._is_done("a", {"tasks": {"a": {"status": "done"}}}) is True
+    assert queue._is_done("a", {"tasks": {"a": {"status": "blocked"}}}) is False
+    assert queue._is_done("a", {}) is False
+
+
+def test_a_blocked_task_returns_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(queue, "_find_blocked_reason", lambda *_args: "waiting")
+    monkeypatch.setattr(queue, "_record_persisted_state", lambda *_args: None)
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    assert queue._step_one_task(task, [task], {"tasks": {}}, _queue_options(tmp_path), False) == (0, False)
+
+
+def test_a_sticky_failure_returns_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(queue, "_find_blocked_reason", lambda *_args: None)
+    monkeypatch.setattr(queue, "_determine_initial_action", lambda *_args: ("failed", "no"))
+    monkeypatch.setattr(queue, "_keep_sticky", lambda *_args: None)
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    assert queue._step_one_task(task, [task], {"tasks": {}}, _queue_options(tmp_path), False) == (0, False)
+
+
+def test_here_names_the_branch_in_that_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    git(repo, "switch", "-q", "-c", "feature")
+    task = TaskFile("a", repo / "tasks" / "a.md", (), None, "", True)
+    assert queue._prepare_branch_for_task(task, True, {}, "main", repo, tmp_path / "log", {}) == ("feature", "here", 0)
+
+
+def test_a_dirty_tree_stops_and_names_the_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    git(repo, "switch", "-q", "-c", "feature")
+    (repo / "dirty.txt").write_text("x\n")
+    task = TaskFile("a", repo / "tasks" / "a.md", (), None, "", True)
+    log = tmp_path / "queue.log"
+    assert queue._prepare_branch_for_task(task, False, {}, "main", repo, log, {}) == ("", "", 1)
+    text = log.read_text()
+    assert "stopped before a: the working tree has uncommitted changes" in text
+    assert "left on feature: the working tree has uncommitted changes" in text
+
+
+def test_a_missing_start_file_is_committed_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, _bare = setup_bare_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    task_path = repo / "tasks" / "a.md"
+    task = TaskFile("a", task_path, (), None, "", True)
+    prepared = queue._prepare_branch_for_task(task, False, {"tasks": {}}, "main", repo, tmp_path / "log", {})
+    assert prepared == ("marestail/a", "main", 0)
+    assert task_path.read_text() == ""
+    assert git(repo, "log", "-1", "--format=%s").strip() == "queue: task a"
+
+
+@pytest.mark.parametrize("state_name", ["dead", "interrupted"])
+def test_a_dead_or_interrupted_run_ors_the_role_into_start_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_name: str) -> None:
+    monkeypatch.setattr(status_module, "read_run", lambda _root, _task: {"state": state_name, "role": "qa"})
+    assert queue._reader_start_role(tmp_path, "a", [], False) == ("qa", True)
+
+
+def test_the_start_log_includes_the_role(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _logged_child(monkeypatch, 0)
+    running = FakeChild(7)
+
+    def wait(timeout: float | None = None) -> int:
+        assert queue._SIG_STATE.task_id == "a"
+        assert queue._SIG_STATE.proc is running
+        return FakeChild.wait(running, timeout)
+
+    running.wait = wait
+    monkeypatch.setattr(queue, "_start_child", lambda *_args: running)
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    log = tmp_path / "queue.log"
+    child = queue._ChildOptions(None, None, None, None, [], None, None)
+    try:
+        queue._run_child_process(task, tmp_path, log, "marestail/a", "main", "qa", child)
+        assert queue._SIG_STATE.task_id == "a"
+        assert queue._SIG_STATE.proc is None
+    finally:
+        _clear_sig()
+    assert "start a branch marestail/a from main --from qa" in log.read_text()
+
+
+def test_elapsed_time_counts_whole_minutes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _logged_child(monkeypatch, 60)
+    task = TaskFile("a", tmp_path / "a.md", (), None, "", True)
+    log = tmp_path / "queue.log"
+    child = queue._ChildOptions(None, None, None, None, [], None, None)
+    try:
+        queue._run_child_process(task, tmp_path, log, "marestail/a", "main", None, child)
+    finally:
+        _clear_sig()
+    assert "done a abc1234 1" in log.read_text()
