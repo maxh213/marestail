@@ -111,8 +111,12 @@ def exclusions(ctx: Context, targets: list[Path]) -> list[str]:
 
 
 def outside_targets(ctx: Context, targets: list[Path]) -> list[str]:
-    chosen = {path.resolve() for path in targets}
-    return [rel_of(ctx, path) for path in golang.sources(ctx) if path.resolve() not in chosen]
+    chosen = set(targets)
+    return [rel_of(ctx, path) for path in gremlins_walk(ctx) if path not in chosen]
+
+
+def gremlins_walk(ctx: Context) -> list[Path]:
+    return [path for path in ctx.go_root().rglob("*.go") if not path.name.endswith("_test.go")]
 
 
 def excluded_flags(relative: list[str]) -> list[str]:
@@ -127,7 +131,7 @@ def flag_pair(item: str) -> list[str]:
 
 
 def rel_of(ctx: Context, path: Path) -> str:
-    return path.resolve().relative_to(ctx.go_root().resolve()).as_posix()
+    return path.relative_to(ctx.go_root()).as_posix()
 
 
 def anchored(relative: str) -> str:

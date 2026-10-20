@@ -2,6 +2,7 @@ import re
 import time
 from pathlib import Path
 
+from marestail import golang
 from marestail.context import Context, under_benchmarks
 from marestail.report import Result, elapsed
 
@@ -69,7 +70,7 @@ def kept_suffix(path: Path, ctx: Context) -> bool:
 
 
 def go_source(path: Path, ctx: Context) -> bool:
-    return ctx.config.section("go") is not None and not path.name.endswith("_test.go")
+    return ctx.config.section("go") is not None and not path.name.endswith("_test.go") and golang.kept(ctx, path)
 
 
 def in_skipped_dir(path: Path, ctx: Context) -> bool:
