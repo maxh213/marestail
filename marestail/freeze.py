@@ -107,9 +107,14 @@ TEST_SEGMENTS = {"tests", "test", "spec", "__tests__"}
 TEST_NAMES = ["test_*", "*_test.*", "*.test.*", "*.spec.*"]
 
 
+def allowed_paths(config: Config, role: str) -> list[str]:
+    allowed: dict[str, list[str]] = {**ALLOWED, **config.get("freeze", "allow", {})}
+    return allowed.get(role, [])
+
+
 def frozen_paths(config: Config, role: str, paths: list[str], hyper: bool = False) -> list[str]:
     frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
-    allowed = {**ALLOWED, **config.get("freeze", "allow", {})}.get(role, [])
+    allowed = allowed_paths(config, role)
     return [path for path in paths if frozen_under(path, frozen, hyper) and not matches_any(path, allowed)]
 
 

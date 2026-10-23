@@ -57,6 +57,21 @@ def test_frozen_paths_follow_configuration() -> None:
     assert freeze.frozen_paths(config(raw), "coder", paths) == ["src/a.py", "docs/x.md"]
 
 
+@pytest.mark.parametrize(
+    ("role", "raw", "expected"),
+    [
+        ("specifier", None, ["features/**", "qa/**"]),
+        ("coder", None, []),
+        ("qa", {"freeze": {"allow": {"qa": ["qa/**"]}}}, ["qa/**"]),
+        ("specifier", {"freeze": {"allow": {"specifier": ["features/**"]}}}, ["features/**"]),
+    ],
+)
+def test_allowed_paths_take_a_role_list_from_the_config_in_place_of_the_default(
+    role: str, raw: dict[str, object] | None, expected: list[str]
+) -> None:
+    assert freeze.allowed_paths(config(raw), role) == expected
+
+
 def test_every_spec_pattern_freezes_a_path_for_a_coder() -> None:
     paths = ["features/a.feature", "qa/a.md", "tasks/a.md", "perf/bench_a.py", "PERFORMANCE.md", "guidance/a.md"]
     assert freeze.frozen_paths(config(), "coder", paths) == paths

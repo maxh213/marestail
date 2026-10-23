@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from marestail import audit, prompts, shell
+from marestail import audit, freeze, prompts, shell
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker, find
 from tests.conftest import FakeRun, make_context
@@ -15,11 +15,14 @@ COMMIT = (
     "the next role still reads them. The runner drops any gitignored path you force-add."
 )
 REPORT = "what you did, what is left, what the next role must know. Under 40 lines, plus the audit section if one is required."
-CONFIG_STEP = (
-    "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
+CONFIG_TAIL = (
     "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
     "sees it after the run. Then find a way within the current configuration."
 )
+FROZEN_RULE = "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
+CONFIG_STEP = FROZEN_RULE + CONFIG_TAIL
+OTHERS = "Do not change any other gate configuration, feature file or QA procedure; the runner reverts such changes. "
+SPECIFIER_STEP = "You may change `features/**`, `qa/**`; the runner keeps those changes. " + OTHERS + CONFIG_TAIL
 CSPROJ = (
     ' The one frozen edit that is kept: adding `<PackageReference Include="..." Version="..." />` or '
     '`<InternalsVisibleTo Include="..." />` lines to a `.csproj`. Any other csproj change, including removing or '
@@ -134,7 +137,7 @@ def test_worker_prompt_with_hard_scope_and_no_feedback(repo: Path) -> None:
         + "\n2. Write .marestail/handoffs/t/01.md: "
         + REPORT
         + "\n3. "
-        + CONFIG_STEP
+        + SPECIFIER_STEP
     )
 
 
@@ -152,6 +155,44 @@ def test_finishing_steps(repo: Path, worker: Worker, expected: list[str]) -> Non
     assert [head.startswith(prefix) for head, prefix in zip(heads, expected, strict=True)] == [True] * len(expected)
     assert len(lines) == len(expected) + 2
     assert lines[-1] == f"{len(lines)}. {CONFIG_STEP}"
+
+
+ARCHITECT_PATTERNS = (
+    "`pyproject.toml`, `.importlinter`, `**/.dependency-cruiser.cjs`, `mix.exs`, `.ruby-layers.json`, "
+    "`.dotnet-layers.json`, `.rust-layers.json`, `.java-layers.json`"
+)
+ROLE_RULES = [
+    ("specifier", None, "You may change `features/**`, `qa/**`; the runner keeps those changes. " + OTHERS),
+    ("architect", None, f"You may change {ARCHITECT_PATTERNS}; the runner keeps those changes. " + OTHERS),
+    ("coder", None, FROZEN_RULE),
+    ("qa", {"freeze": {"allow": {"qa": ["qa/**"]}}}, "You may change `qa/**`; the runner keeps those changes. " + OTHERS),
+    (
+        "specifier",
+        {"freeze": {"allow": {"specifier": ["features/**"]}}},
+        "You may change `features/**`; the runner keeps those changes. " + OTHERS,
+    ),
+]
+
+
+@pytest.mark.parametrize(("role", "raw", "rule"), ROLE_RULES)
+def test_finishing_names_what_the_role_may_change(repo: Path, role: str, raw: dict[str, Any] | None, rule: str) -> None:
+    lines = prompts.finishing(config(repo, raw), Worker(role, None), "t", report(repo, "x")).split("\n")
+    assert lines[-1] == f"{len(lines)}. {rule}{CONFIG_TAIL}"
+
+
+@pytest.mark.parametrize(("role", "raw", "rule"), ROLE_RULES)
+def test_every_pattern_a_prompt_names_is_writable_for_that_role(repo: Path, role: str, raw: dict[str, Any] | None, rule: str) -> None:
+    named = rule.split("; the runner keeps")[0].removeprefix("You may change ").split(", ") if rule.startswith("You may") else []
+    paths = [pattern.strip("`").replace("**/", "").replace("**", "x") for pattern in named]
+    assert freeze.frozen_paths(config(repo, raw), role, paths) == []
+    assert len(paths) == rule.count("`") // 2
+
+
+def test_a_specifier_with_only_features_allowed_does_not_name_qa(repo: Path) -> None:
+    text = prompts.finishing(
+        config(repo, {"freeze": {"allow": {"specifier": ["features/**"]}}}), Worker("specifier", None), "t", report(repo, "x")
+    )
+    assert "`qa/**`" not in text
 
 
 def test_finishing_mentions_csproj_for_dotnet(repo: Path) -> None:

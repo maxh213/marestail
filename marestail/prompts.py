@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from marestail import audit, task_file
+from marestail import audit, freeze, task_file
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 
@@ -240,11 +240,22 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
         "the next role still reads them. The runner drops any gitignored path you force-add.",
         f"Write {report.relative_to(config.root)}: what you did, what is left, what the next role must know. "
         "Under 40 lines, plus the audit section if one is required.",
-        "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
-        "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
+        change_rule(config, worker)
+        + "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
         "sees it after the run. Then find a way within the current configuration." + csproj_note(config),
     ]
     return "\n".join(f"{number}. {step}" for number, step in enumerate(steps, start=1))
+
+
+def change_rule(config: Config, worker: Worker) -> str:
+    allowed = freeze.allowed_paths(config, worker.name)
+    if not allowed:
+        return "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
+    patterns = ", ".join(f"`{pattern}`" for pattern in allowed)
+    return (
+        f"You may change {patterns}; the runner keeps those changes. "
+        "Do not change any other gate configuration, feature file or QA procedure; the runner reverts such changes. "
+    )
 
 
 def audit_step(config: Config, worker: Worker, task_name: str) -> list[str]:
