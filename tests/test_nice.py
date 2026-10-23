@@ -279,7 +279,8 @@ def test_readme_documents_run_priority() -> None:
     text = (ROOT / "README.md").read_text()
     after = text.split("## Use", 1)[1].split("```", 2)[2]
     table = text.split("## Environment variables", 1)[1].split("## ", 1)[0]
-    assert after.lstrip("\n").startswith(PARAGRAPH)
+    nice = after.lstrip("\n").split("\n\n", 1)[1].lstrip("\n")
+    assert nice.startswith(PARAGRAPH)
     assert ROW in table
     assert "\u2013" in PARAGRAPH
     assert "\u2013" in ROW

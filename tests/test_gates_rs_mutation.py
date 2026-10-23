@@ -1,4 +1,5 @@
 import json
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -89,7 +90,7 @@ def test_full_run(tmp_path: Path, fake_run: Any) -> None:
         rs_mutation.GATE,
     )
     work = str(tmp_path / ".marestail")
-    assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--jobs", "2", "--in-place"]
+    assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--in-place"]
     assert fake.options[1] == {"cwd": tmp_path, "env": {}, "timeout": 99}
     assert (result.ok, result.summary) == (False, "3 of 5 mutants not killed")
     assert result.findings == [
@@ -97,6 +98,72 @@ def test_full_run(tmp_path: Path, fake_run: Any) -> None:
         "src/main.rs:8 ?: delete ! Failure",
         "src/x.rs:0 ?:  ?",
     ]
+
+
+def test_the_default_jobs_is_two(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake = fake_run(rust, writes(tmp_path, outcomes()))
+
+    checked(rs_mutation.run_gate(make_context(tmp_path)), rs_mutation.GATE)
+
+    work = str(tmp_path / ".marestail")
+    assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--jobs", "2"]
+
+
+def knob_raw(key: int | None, rust_section: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw: dict[str, Any] = {"rust": rust_section or {}}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    return raw
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_sets_the_jobs(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    setup_crate(tmp_path)
+    fake = fake_run(rust, writes(tmp_path, outcomes()))
+
+    checked(rs_mutation.run_gate(make_context(tmp_path, knob_raw(key))), rs_mutation.GATE)
+
+    work = str(tmp_path / ".marestail")
+    assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--jobs", "3"]
+
+
+def test_a_language_key_beats_the_run_key(tmp_path: Path, fake_run: Any) -> None:
+    setup_crate(tmp_path)
+    fake = fake_run(rust, writes(tmp_path, outcomes()))
+    raw = knob_raw(3, {"mutation_jobs": 4})
+    ctx = make_context(tmp_path, raw, scope_changed=True, changed={"src/lib.rs"})
+
+    checked(rs_mutation.run_gate(ctx), rs_mutation.GATE)
+
+    assert fake.calls[1][-3:] == ["4", "--file", "src/lib.rs"]
+
+
+def test_the_variable_beats_a_language_key(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "3")
+    setup_crate(tmp_path)
+    fake = fake_run(rust, writes(tmp_path, outcomes()))
+    ctx = make_context(tmp_path, knob_raw(None, {"mutation_jobs": 4}), scope_changed=True, changed={"src/lib.rs"})
+
+    checked(rs_mutation.run_gate(ctx), rs_mutation.GATE)
+
+    assert fake.calls[1][-3:] == ["3", "--file", "src/lib.rs"]
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, None), ("3", None), (None, 3)])
+def test_in_place_passes_no_jobs(tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    setup_crate(tmp_path)
+    fake = fake_run(rust, writes(tmp_path, outcomes()))
+    ctx = make_context(tmp_path, knob_raw(key, {"mutation_args": ["--in-place"]}))
+
+    checked(rs_mutation.run_gate(ctx), rs_mutation.GATE)
+
+    work = str(tmp_path / ".marestail")
+    assert fake.calls[1] == ["cargo", "mutants", "--output", work, "--no-shuffle", "--colors", "never", "--in-place"]
 
 
 def test_scoped_run_passes(tmp_path: Path, fake_run: Any) -> None:
@@ -165,6 +232,27 @@ def test_verdict_caps_findings(tmp_path: Path) -> None:
     report = {"outcomes": [mutant("a.rs", n, "f", "n", "MissedMutant") for n in range(70)]}
     result = rs_mutation.verdict(make_context(tmp_path), report, "", 0.0)
     assert (result.summary, len(result.findings)) == ("70 of 70 mutants not killed", 60)
+
+
+def test_findings_are_sorted_before_the_cut(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"rust": {}})
+    survivors = [mutant("src/a.rs", n, "add", "swap", "MissedMutant") for n in range(1, 41)]
+    survivors += [mutant("src/b.rs", n, "add", "swap", "MissedMutant") for n in range(1, 31)]
+    baseline = {"scenario": "Baseline", "summary": "Success"}
+
+    def judge(order: list[dict[str, Any]]) -> Any:
+        return rs_mutation.verdict(ctx, {"outcomes": [baseline, *order]}, "", 0.0)
+
+    shuffled = survivors.copy()
+    random.Random(0).shuffle(shuffled)
+    first, second = judge(survivors), judge(shuffled)
+    assert len(first.findings) == 60
+    assert first.findings == second.findings
+    assert first.findings[0] == "src/a.rs:1 add: swap survived"
+    assert first.findings.index("src/a.rs:9 add: swap survived") < first.findings.index("src/a.rs:10 add: swap survived")
+    assert first.findings[59] == "src/b.rs:20 add: swap survived"
+    assert "src/b.rs:21 add: swap survived" not in first.findings
+    assert first.summary == "70 of 70 mutants not killed"
 
 
 def test_verdict_hyper_counts_only_mutants_on_changed_lines(tmp_path: Path) -> None:

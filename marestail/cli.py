@@ -9,7 +9,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from marestail import backends
+from marestail import backends, run_suffix
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -78,7 +78,9 @@ HELP_DASH_RUNS = "the marestail-runs script that lists every run (default ~/.cla
 HELP_AUTO = "skip the approval pause after the critic"
 HELP_PERF_DB = "reset the tree's performance database before every sample"
 HELP_WAIT = "block until the build finishes instead of detaching"
-SONAR_ACTIONS = ("up", "down", "setup")
+SONAR_ACTIONS = ("up", "down", "setup", "prune")
+SUFFIX_KEY = run_suffix.SONAR_KEY_REQUIRED
+PRUNE_SUFFIX = "sonar prune needs a run suffix: pass --run-suffix or set MARESTAIL_RUN_SUFFIX; it never deletes the unsuffixed project"
 
 Payload = dict[str, Any]
 
@@ -101,9 +103,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_gate(commands.add_parser("gate", help="run the gates against the current repo"))
     add_run(commands.add_parser("run", help="run the role pipeline on a task"))
     add_tasks(commands.add_parser("tasks", help="check task files"))
+    add_queue(commands.add_parser("queue", help="run a folder of tasks in dependency order"))
     add_install(commands.add_parser("install", help="install thin config into a target repo"))
     add_sonar(commands.add_parser("sonar", help="manage the local SonarQube"))
     add_watch(commands.add_parser("watch", help="live TUI of every marestail pipeline on this machine"))
+    add_status(commands.add_parser("status", help="where every marestail run under a directory stands"))
+    add_abandon(commands.add_parser("abandon", help="give up on a run without deleting it"))
     add_dash(commands.add_parser("dash", help="the watch fleet, dandelion, the run table and host load as a web page"))
     add_perf(commands.add_parser("perf", help="take performance samples during a perf run"))
     add_visual(commands.add_parser("visual", help="photograph and measure the page at the base commit and at HEAD"))
@@ -140,9 +145,10 @@ def add_perf(parser: argparse.ArgumentParser) -> None:
     db_actions.add_parser("prune", help="delete this repo's goldens the current perf run does not need").set_defaults(
         handler=perf_db_command
     )
-    db_actions.add_parser("down", help="remove every performance database container, keeping the volume").set_defaults(
-        handler=perf_db_command
-    )
+    db_actions.add_parser(
+        "down",
+        help="remove this run's performance database containers (every one when MARESTAIL_RUN_SUFFIX is unset), keeping the volume",
+    ).set_defaults(handler=perf_db_command)
 
 
 def add_visual(parser: argparse.ArgumentParser) -> None:
@@ -181,6 +187,7 @@ def add_gate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--only", help=HELP_ONLY)
     parser.add_argument("--json", action=STORE_TRUE)
     parser.add_argument("--hook", action=STORE_TRUE, help=HELP_HOOK)
+    add_run_suffix(parser)
     parser.set_defaults(handler=gate_command)
 
 
@@ -222,6 +229,37 @@ def _check_verdict(problems: list[str]) -> int:
     return 1
 
 
+def add_queue(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("paths", nargs="*", metavar="PATH", help=HELP_TASKS)
+    parser.add_argument("--to", dest="stop")
+    parser.add_argument("--from", dest="start")
+    parser.add_argument("--here", action=STORE_TRUE)
+    parser.add_argument("--retry", action="append", default=[], metavar="TASK-ID")
+    parser.add_argument("--agent", choices=AGENT_CHOICES, help=HELP_AGENT)
+    parser.add_argument("--model", help=HELP_MODEL)
+    parser.add_argument("--effort", help=HELP_EFFORT)
+    add_scope(parser, HELP_RUN_SCOPE)
+    add_focus(parser)
+    parser.set_defaults(handler=queue_command)
+
+
+def queue_command(args: argparse.Namespace) -> int:
+    from marestail.queue import run_queue
+
+    return run_queue(
+        args.paths,
+        args.start,
+        args.stop,
+        args.here,
+        args.retry,
+        args.agent,
+        args.model,
+        args.effort,
+        args.scope,
+        args.focus,
+    )
+
+
 def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("task", help=HELP_TASK)
     parser.add_argument("--from", dest="start")
@@ -233,6 +271,7 @@ def add_run(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--retries", type=int, default=0, metavar="N", help=HELP_RETRIES)
     parser.add_argument("--effort", help=HELP_EFFORT)
     parser.add_argument("--agent", choices=AGENT_CHOICES, help=HELP_AGENT)
+    add_run_suffix(parser)
     parser.set_defaults(handler=run_command)
 
 
@@ -243,8 +282,13 @@ def add_install(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=install_command)
 
 
+def add_run_suffix(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--run-suffix", type=run_suffix.argument)
+
+
 def add_sonar(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=SONAR_ACTIONS)
+    add_run_suffix(parser)
     parser.set_defaults(handler=sonar_command)
 
 
@@ -253,6 +297,20 @@ def add_watch(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refresh", type=float, default=2.0, help=HELP_REFRESH)
     parser.add_argument("--all", action=STORE_TRUE, help=HELP_WATCH_ALL)
     parser.set_defaults(handler=watch_command)
+
+
+def add_status(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action=STORE_TRUE, help="print every run as JSON")
+    parser.add_argument("--all", action=STORE_TRUE, help="include complete, abandoned and leftover runs")
+    parser.add_argument("--queued", action=STORE_TRUE, help="also list task files that never ran")
+    parser.add_argument("paths", nargs="*", help="directories to scan")
+    parser.set_defaults(handler=status_command)
+
+
+def add_abandon(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("targets", nargs="+", metavar="TARGET", help="REPO/TASK to give up on")
+    parser.add_argument("--reason", default="", metavar="TEXT", help="recorded in the abandoned marker")
+    parser.set_defaults(handler=abandon_command)
 
 
 def add_dash(parser: argparse.ArgumentParser) -> None:
@@ -271,6 +329,8 @@ def remote_status_command(args: argparse.Namespace) -> int:
 
 
 def gate_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
+    run_suffix.current()
     if args.hook:
         return hook_command()
     return focused_gate_command(args, {path for path in args.focus if path.strip()})
@@ -485,6 +545,7 @@ def sweep_counters(work: Path, keep: Path) -> None:
 
 
 def run_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
     from marestail.runner import run_pipeline
 
     return run_pipeline(
@@ -496,6 +557,18 @@ def watch_command(args: argparse.Namespace) -> int:
     paths = args.paths or default_watch_roots()
     code: int = importlib.import_module(TUI_APP).run([Path(p) for p in paths], args.refresh, args.all)
     return code
+
+
+def status_command(args: argparse.Namespace) -> int:
+    from marestail.status import show
+
+    return show([Path(path) for path in args.paths], args.json, args.all, args.queued)
+
+
+def abandon_command(args: argparse.Namespace) -> int:
+    from marestail.status import abandon
+
+    return abandon(args.targets, args.reason)
 
 
 def dash_command(args: argparse.Namespace) -> int:
@@ -532,16 +605,66 @@ def depth_command(args: argparse.Namespace) -> int:
 
 
 def sonar_command(args: argparse.Namespace) -> int:
+    _publish_suffix(args)
     from marestail.sonar import setup
 
-    if args.action == "up":
-        setup.up()
-    elif args.action == "down":
-        setup.down()
+    if args.action == "prune":
+        setup.prune(_prune_key())
+    elif args.action == "setup":
+        setup.setup(*_sonar_identity())
     else:
-        config = config_module.load(Path.cwd())
-        setup.setup(config.get("sonar", "project_key"), config.get("sonar", "project_name", config.root.name))
+        _up_or_down(setup, args.action)
     return 0
+
+
+def _publish_suffix(args: argparse.Namespace) -> None:
+    if args.run_suffix is not None:
+        os.environ[run_suffix.ENV] = args.run_suffix
+
+
+def _up_or_down(setup: Any, action: str) -> None:
+    if action == "up":
+        setup.up()
+        return
+    setup.down()
+
+
+def _sonar_identity() -> tuple[Any, Any]:
+    key, name = _sonar_pair()
+    _require_key(key)
+    return _suffixed_key(key), _titled_name(name)
+
+
+def _prune_key() -> str:
+    if run_suffix.current() is None:
+        raise SystemExit(PRUNE_SUFFIX)
+    key, _name = _sonar_pair()
+    _require_key(key)
+    return str(_suffixed_key(key))
+
+
+def _sonar_pair() -> tuple[Any, Any]:
+    config = config_module.load(Path.cwd())
+    return config.get("sonar", "project_key"), config.get("sonar", "project_name", config.root.name)
+
+
+def _require_key(key: Any) -> None:
+    if run_suffix.current() is None:
+        return
+    if not key:
+        raise SystemExit(SUFFIX_KEY)
+
+
+def _suffixed_key(key: Any) -> Any:
+    if not key:
+        return key
+    return run_suffix.named(str(key))
+
+
+def _titled_name(name: Any) -> Any:
+    if run_suffix.current() is None:
+        return name
+    return run_suffix.titled(str(name))
 
 
 if __name__ == "__main__":

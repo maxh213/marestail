@@ -15,6 +15,7 @@ A gate is one module in `marestail/gates/` exposing `run_gate(ctx: Context) -> R
 - `Result` (`marestail/report.py`) is `Result(gate, ok, summary, findings, seconds)`. Findings are strings starting with a repo-relative `path:line`, one problem per line, so an agent can act on each without reading anything else. Use `Result.skipped(gate, why)` when the gate does not apply.
 - Register it in `registry()` in `marestail/gates/__init__.py` with a tier: `FAST` for anything under a minute, `SONAR` for the Sonar gate, `FULL` for mutation testing, `QA` for end-to-end. The `section` argument names the `marestail.toml` section that must exist for the gate to run, or `None` to run whenever any language applies.
 - Run tools with `marestail.shell.run(command, cwd, env, timeout, stdin)`; it returns `(exit_code, cleaned_output)` and never raises on a missing binary (exit 127).
+- A mutation gate passes its tool's parallel flag from `jobs.pick(ctx.config, "<section>", "<key>", <today's default>)`, or from `jobs.run_jobs(ctx.config)` when the language has no key of its own, and names that flag in the README.
 
 ## Rules that keep gates trustworthy
 

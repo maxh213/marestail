@@ -245,6 +245,50 @@ def test_the_gate_offers_two_threads_by_default(tmp_path: Path, monkeypatch: pyt
     assert [(args, remote_args) for args, _timeout, remote_args, _ctx in calls] == [(pit(out, "2"), pit(out, "16"))]
 
 
+def knob_java(key: int | None, threads: int | None = None) -> dict[str, Any]:
+    section: dict[str, Any] = {"mutation_scope": "all"}
+    if threads is not None:
+        section["mutation_threads"] = threads
+    raw: dict[str, Any] = {"java": section}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    return raw
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_sets_the_threads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    project(tmp_path)
+    calls = fake_mvn(monkeypatch, [mutation("KILLED")])
+
+    java_mutation.run_gate(make_context(tmp_path, knob_java(key)))
+
+    out = tmp_path / ".marestail" / "pit"
+    assert [(args, remote_args) for args, _timeout, remote_args, _ctx in calls] == [(pit(out, "3"), pit(out, "16"))]
+
+
+def test_a_language_key_beats_the_run_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project(tmp_path)
+    calls = fake_mvn(monkeypatch, [mutation("KILLED")])
+
+    java_mutation.run_gate(make_context(tmp_path, knob_java(3, 8)))
+
+    out = tmp_path / ".marestail" / "pit"
+    assert [args for args, _timeout, _remote_args, _ctx in calls] == [pit(out, "8")]
+
+
+def test_the_variable_beats_a_language_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "3")
+    project(tmp_path)
+    calls = fake_mvn(monkeypatch, [mutation("KILLED")])
+
+    java_mutation.run_gate(make_context(tmp_path, knob_java(None, 8)))
+
+    out = tmp_path / ".marestail" / "pit"
+    assert [args for args, _timeout, _remote_args, _ctx in calls] == [pit(out, "3")]
+
+
 def test_command_without_tests(tmp_path: Path) -> None:
     write(tmp_path / APP)
     ctx = make_context(tmp_path)

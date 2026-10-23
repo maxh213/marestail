@@ -1,7 +1,9 @@
 import json
+import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -187,6 +189,21 @@ def test_time_budget(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypat
     assert result.seconds == 7090
 
 
+def test_findings_keep_survived_then_not_checked_in_manifest_order(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(er_mutation, "time", Clock(0, 10, 110, 6900, 7090))
+    mutants = [mutant(tmp_path, 1, 10), mutant(tmp_path, 2, 2), mutant(tmp_path, 3, 1)]
+    fake_run(erlang, toolchain(mutants, [(0, "")] * 6))
+    result = checked(er_mutation.run_gate(project(tmp_path)), er_mutation.GATE)
+    findings = [
+        "src/a.erl:10 comparison mutant survived: < -> >=",
+        "src/a.erl:2 comparison mutant not checked (time budget): < -> >=",
+        "src/a.erl:1 comparison mutant not checked (time budget): < -> >=",
+    ]
+    assert shape(result) == ("er.mutation", False, "1 of 3 mutants not killed (2 unchecked (time budget))", findings)
+
+
 @pytest.mark.parametrize(("baseline", "expected"), [(1, 60), (100, 1000), (500, 1800)])
 def test_per_mutant_timeout(
     tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, baseline: float, expected: int
@@ -297,3 +314,81 @@ def test_erlang_timeout_is_killed_without_a_phrase(tmp_path: Path, fake_run: Cal
     assert len(fake.calls) == 6
     report = json.loads((tmp_path / ".marestail" / "er-mutation.json").read_text())
     assert [entry["status"] for entry in report["mutants"]] == ["timeout"]
+
+
+class RecordingPool:
+    workers: ClassVar[list[int | None]] = []
+    sizes: ClassVar[list[int]] = []
+
+    def __init__(self, max_workers: int | None = None, *args: Any, **kwargs: Any) -> None:
+        RecordingPool.workers.append(max_workers)
+        self.pool = ThreadPoolExecutor(max_workers, *args, **kwargs)
+
+    def map(self, fn: Any, items: Any, *args: Any, **kwargs: Any) -> Any:
+        listed = list(items)
+        RecordingPool.sizes.append(len(listed))
+        return self.pool.map(fn, listed, *args, **kwargs)
+
+    def __enter__(self) -> "RecordingPool":
+        self.pool.__enter__()
+        return self
+
+    def __exit__(self, *exc: Any) -> Any:
+        return self.pool.__exit__(*exc)
+
+
+def by_command(mutants: list[dict[str, Any]]) -> Callable[[list[str]], Reply]:
+    def reply(command: list[str]) -> Reply:
+        if command[2:3] == ["mutants"]:
+            (Path(command[3]) / "mutants.json").write_text(json.dumps({"mutants": mutants}))
+            return 0, ""
+        found = re.search(r"ebin-(\d+)", " ".join(command))
+        if found is None:
+            return 0, ""
+        return mutant_reply(command[0], int(found.group(1)))
+
+    return reply
+
+
+def mutant_reply(tool: str, ident: int) -> Reply:
+    if tool == "erlc":
+        return (1, "bad") if ident == 1 else (0, "")
+    return {2: (0, ""), 3: (1, ""), 4: (124, ""), 5: (3, "")}[ident]
+
+
+def knob_project(root: Path, key: int | None) -> Context:
+    for name in ("src/a.erl", "test/a_tests.erl"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("")
+    (root / ".marestail").mkdir()
+    raw: dict[str, Any] = {"erlang": {"erlc": "erlc", "escript": "escript", "mutation_scope": "all"}}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    return make_context(root, raw)
+
+
+def run_five(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None) -> Any:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    RecordingPool.workers, RecordingPool.sizes = [], []
+    mutants = [mutant(tmp_path, ident, ident) for ident in range(1, 6)]
+    fake_run(erlang, by_command(mutants))
+    monkeypatch.setattr(er_mutation, "ThreadPoolExecutor", RecordingPool)
+    result = checked(er_mutation.run_gate(knob_project(tmp_path, key)), er_mutation.GATE)
+    report = json.loads((tmp_path / ".marestail" / "er-mutation.json").read_text())
+    statuses = [entry["status"] for entry in report["mutants"]]
+    return result.ok, result.summary, result.findings, statuses
+
+
+EXPECTED_FIVE = (False, "1 of 4 mutants not killed (1 failed to compile)", ["src/a.erl:2 comparison mutant survived: < -> >="])
+
+
+@pytest.mark.parametrize(("env", "key", "workers"), [(None, None, 1), ("3", None, 3), (None, 3, 3)])
+def test_the_pool_scales_with_the_knob_and_keeps_the_result(
+    tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None, workers: int
+) -> None:
+    outcome = run_five(tmp_path, fake_run, monkeypatch, env, key)
+
+    assert RecordingPool.workers == [workers]
+    assert RecordingPool.sizes == [5]
+    assert outcome == (*EXPECTED_FIVE, ["invalid", "survived", "killed", "timeout", "error"])

@@ -451,6 +451,15 @@ def test_run_logged_leads_its_own_session(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("bash_calls")
+def test_preferred_port_ignores_the_suffix(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MARESTAIL_RUN_SUFFIX", "a1")
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    calls = recorded_app(monkeypatch, None, 3400)
+    fake_run(qa, [(0, "")])
+    checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "yarn dev"}})), "qa")
+    assert calls[0][2] == 3400
+
+
 def test_run_logged_times_out_and_kills_the_group(tmp_path: Path) -> None:
     log = tmp_path / "setup.log"
     pid_file = tmp_path / "pid"

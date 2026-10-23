@@ -167,3 +167,10 @@ def test_window_keeps_design_between_the_architect_and_practices() -> None:
     assert [step.name for step in pipeline.window("architect", "practices")] == ["architect", "design", "practices"]
     assert [step.name for step in pipeline.window("coder", "architect")] == ["coder", "cleaner", "architect"]
     assert "design" not in [step.name for step in pipeline.window("coder", "architect", "hyper")]
+
+
+def test_unknown_role_keeps_visual_in_the_choose_from_list() -> None:
+    assert pipeline.unknown_role("visual", visual=True) is None
+    assert pipeline.unknown_role("bogus", visual=True) == (
+        "unknown role bogus; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, visual, qa"
+    )

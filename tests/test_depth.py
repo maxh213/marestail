@@ -6,13 +6,13 @@ from typing import Any
 
 import pytest
 
-from marestail import depth, dotnet, elixir, erlang, java, javascript, ruby, rust
+from marestail import depth, dotnet, elixir, erlang, golang, java, javascript, ruby, rust
 from marestail.config import Config
 from marestail.context import Context
 from marestail.depth import Module
 from tests.conftest import FakeRun, required_timeout
 
-SCANNERS = ["python", "ts", "elixir", "erlang", "ruby", "dotnet", "rust", "java"]
+SCANNERS = ["python", "ts", "elixir", "erlang", "ruby", "dotnet", "rust", "java", "go"]
 
 
 def write(root: Path, files: dict[str, str]) -> None:
@@ -439,6 +439,23 @@ def test_java_modules_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(SystemExit) as raised:
         depth.java_modules(config)
     assert str(raised.value) == "java depth analysis failed: no jdk"
+
+
+def test_go_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = Config(root=tmp_path, raw={"go": {}})
+    calls = fake_scanner(monkeypatch, golang, [Path("a.go")], ([ITEM], None))
+    assert depth.go_modules(config) == [TARGETED]
+    assert calls == [Context(config=config), (Context(config=config), "depth", [Path("a.go")])]
+    fake_scanner(monkeypatch, golang, [], ([ITEM], None))
+    assert depth.go_modules(config) == []
+
+
+def test_go_modules_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_scanner(monkeypatch, golang, [Path("a.go")], (None, "go scanner failed (depth): tail"))
+    config = Config(root=tmp_path, raw={"go": {}})
+    with pytest.raises(SystemExit) as raised:
+        depth.go_modules(config)
+    assert str(raised.value) == "go depth analysis failed: go scanner failed (depth): tail"
 
 
 def test_rule_breaks() -> None:

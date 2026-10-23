@@ -28,6 +28,8 @@ MUTMUT_COPIES = (
     "AGENTS.md",
     "tools",
     "bin",
+    ".claude",
+    ".agents",
 )
 
 
@@ -152,6 +154,11 @@ FORBIDDEN_BINARIES = frozenset(
         "gcloud",
         "ssh",
         "rsync",
+        "gh",
+        "go",
+        "gofmt",
+        "golangci-lint",
+        "gremlins",
     }
 )
 
@@ -213,11 +220,14 @@ def guarded_signal(real: Callable[[int, int], None]) -> Callable[[int, int], Non
 
 @pytest.fixture(autouse=True)
 def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
     monkeypatch.setattr(os, "kill", guarded_signal(os.kill))
     monkeypatch.setattr(os, "killpg", guarded_signal(os.killpg))
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(socket.socket, "connect", refuse_network)
     monkeypatch.setattr(socket, "create_connection", refuse_network)
+    monkeypatch.delenv("MARESTAIL_JOBS", raising=False)
+    monkeypatch.delenv("MARESTAIL_RUN_SUFFIX", raising=False)
 
 
 def checked(result: Result, gate: str) -> Result:

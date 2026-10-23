@@ -1,5 +1,6 @@
 import json
 import os
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -95,10 +96,21 @@ def test_session_report(tmp_path: Path, fake_run: Any) -> None:
     assert fake.options[1] == {"cwd": tmp_path, "timeout": 7200}
     assert (result.ok, result.summary) == (False, "5 of 6 mutants not killed")
     assert result.findings == [
-        "app/models/user.rb:3 User#name: 3 mutants survived",
         "app/models/user.rb:3 User#name: 1 neutral mutant failed, tests do not pass unmutated",
+        "app/models/user.rb:3 User#name: 3 mutants survived",
         "lib/x.rb:0 weird: 1 noop mutant failed",
     ]
+
+
+@pytest.mark.parametrize(("env", "raw"), [(None, {"run": {"jobs": 3}}), ("3", {})])
+def test_the_knob_puts_jobs_before_the_subjects(
+    tmp_path: Path, fake_run: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, raw: dict[str, Any]
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    fake = fake_run(rb_mutation, writes_session(tmp_path, json.dumps(session(tmp_path))))
+    checked(rb_mutation.run_gate(scoped(tmp_path, {"ruby": {"exec": ["bundle", "exec"]}, **raw})), rb_mutation.GATE)
+    assert fake.calls == [INFO, ["bundle", "exec", "mutant", "run", "--jobs", "3", "Admin::Boss*", "Named*", "User*"]]
 
 
 def test_unreadable_session(tmp_path: Path, fake_run: Any) -> None:
@@ -161,6 +173,42 @@ def test_findings_capped() -> None:
     result = rb_mutation.verdict(100, failures, "", 0.0, "")
     assert (result.summary, len(result.findings)) == ("70 of 100 mutants not killed", 60)
     assert result.findings[0] == "f0.rb:0 X: 1 mutant survived"
+
+
+def seventy_subjects(root: Path) -> list[dict[str, Any]]:
+    return [*_subjects(root, "lib/a.rb", "A#m", 40), *_subjects(root, "lib/b.rb", "B#m", 30)]
+
+
+def _subjects(root: Path, path: str, syntax: str, lines: int) -> list[dict[str, Any]]:
+    return [evil_subject(root, path, syntax, line) for line in range(1, lines + 1)]
+
+
+def evil_subject(root: Path, path: str, syntax: str, line: int) -> dict[str, Any]:
+    return {
+        "identification": f"{syntax}:{path}:{line}",
+        "source_path": str(root / path),
+        "coverage_results": [{"mutation_result": {"mutation_type": "evil"}, "criteria_result": {"test_result": False}}],
+    }
+
+
+def test_findings_are_sorted_before_the_cut(tmp_path: Path) -> None:
+    subjects = seventy_subjects(tmp_path)
+    ctx = make_context(tmp_path)
+
+    def judge(order: list[dict[str, Any]]) -> Any:
+        total, failures = rb_mutation.session_failures(order, ctx)
+        return rb_mutation.verdict(total, failures, "", 0.0)
+
+    shuffled = subjects.copy()
+    random.Random(0).shuffle(shuffled)
+    first, second = judge(subjects), judge(shuffled)
+    assert len(first.findings) == 60
+    assert first.findings == second.findings
+    assert first.findings[0] == "lib/a.rb:1 A#m: 1 mutant survived"
+    assert first.findings.index("lib/a.rb:9 A#m: 1 mutant survived") < first.findings.index("lib/a.rb:10 A#m: 1 mutant survived")
+    assert first.findings[59] == "lib/b.rb:20 B#m: 1 mutant survived"
+    assert "lib/b.rb:21 B#m: 1 mutant survived" not in first.findings
+    assert first.summary == "70 of 70 mutants not killed"
 
 
 @pytest.mark.parametrize(("value", "expected"), [(["bundle", "exec"], ["bundle"]), (["exec"], ["bundle"]), ("bin/x", ["bundle"])])
@@ -286,8 +334,8 @@ def test_session_hyper_counts_only_subjects_on_changed_lines(tmp_path: Path, fak
     result = checked(rb_mutation.run_gate(ctx), rb_mutation.GATE)
     assert (result.ok, result.summary) == (False, "4 of 5 mutants not killed")
     assert result.findings == [
-        "app/models/user.rb:3 User#name: 3 mutants survived",
         "app/models/user.rb:3 User#name: 1 neutral mutant failed, tests do not pass unmutated",
+        "app/models/user.rb:3 User#name: 3 mutants survived",
     ]
 
 

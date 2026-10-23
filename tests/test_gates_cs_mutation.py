@@ -173,6 +173,37 @@ def test_reports_surviving_mutants(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert fake.calls[1][0][7:9] == ["-O", str(tmp_path / ".marestail" / cs_mutation.OUTPUT_DIR)]
 
 
+def test_findings_keep_the_report_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    later = str(tmp_path / "App" / "B.cs")
+    earlier = str(tmp_path / "App" / "A.cs")
+    data = {"files": {later: {"mutants": [mutant("Survived", 2)]}, earlier: {"mutants": [mutant("Survived", 10), mutant("Survived", 9)]}}}
+    install(monkeypatch, FakeDotnet((0, ""), data))
+
+    result = checked(cs_mutation.run_gate(project(tmp_path, section={"mutation_scope": "all"})), cs_mutation.GATE)
+
+    assert result.findings == [
+        "App/B.cs:2 Equality Survived: a != b",
+        "App/A.cs:10 Equality Survived: a != b",
+        "App/A.cs:9 Equality Survived: a != b",
+    ]
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_inserts_concurrency_into_the_full_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    fake = install(monkeypatch, FakeDotnet((0, ""), report(tmp_path, mutant("Killed"))))
+    ctx = project(tmp_path, section={"mutation_scope": "all", "coverage_exclude": ["App/Gen"]})
+    if key is not None:
+        ctx.config.raw["run"] = {"jobs": key}
+
+    checked(cs_mutation.run_gate(ctx), cs_mutation.GATE)
+
+    assert fake.calls[1][0][-6:] == ["-r", "progress", "--concurrency", "3", "-m", "!**/App/Gen"]
+
+
 @pytest.mark.parametrize(
     ("status", "section", "verdict"),
     [
@@ -240,6 +271,47 @@ def test_command(tmp_path: Path) -> None:
         "json",
         "-r",
         "progress",
+        "-m",
+        "!**/Gen",
+        "-m",
+        "!**/Migr",
+        "-m",
+        "**/A.cs",
+        "-m",
+        "**/other/B.cs",
+    ]
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_command_inserts_concurrency_before_the_first_mutate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    raw: dict[str, Any] = {"dotnet": {"root": "cs", "mutation_exclude": ["/cs/Gen/", "Migr"]}}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    ctx = make_context(tmp_path, raw)
+    product, tests, out = tmp_path / "cs" / "App.csproj", tmp_path / "cs" / "T" / "T.csproj", tmp_path / "out"
+
+    argv = cs_mutation.command(ctx, product, tests, out, ["cs/A.cs", "other/B.cs"])
+
+    assert argv == [
+        "stryker",
+        "--skip-version-check",
+        "--break-on-initial-test-failure",
+        "--test-project",
+        str(tests),
+        "--project",
+        "App.csproj",
+        "-O",
+        str(out),
+        "-r",
+        "json",
+        "-r",
+        "progress",
+        "--concurrency",
+        "3",
         "-m",
         "!**/Gen",
         "-m",

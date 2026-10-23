@@ -1,0 +1,24 @@
+# Shipped red on purpose, like the rust and java samples: a // comment above domain.Classify,
+# Classify at complexity 5 with its big, mid and small arms uncovered and boundary mutants no
+# test kills, the untested default arm of domain.Tag, a pass-through domain.Label forwarding to
+# describe, domain -> store breaking .go-layers.json, a wasted assignment in store.Size, an
+# unformatted composite literal in store.New, an unused exported store.UnusedHelper, and
+# SAMPLE_GREETING read but not documented in README.md.
+
+[git]
+base = "HEAD"
+
+[go]
+root = "."
+crap_max = 4
+
+[comments]
+paths = ["internal"]
+
+[docs]
+files = ["README.md"]
+sources = ["internal"]
+
+[sonar]
+project_key = "marestail-go-sample"
+project_name = "marestail go sample"

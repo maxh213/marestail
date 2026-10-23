@@ -13,21 +13,23 @@ from typing import Any
 
 import pytest
 
-from marestail import cli, depth, graph, install, nice, remote, route, runner
+from marestail import cli, depth, events, graph, install, nice, queue, remote, route, run_suffix, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
+from marestail import status as status_module
 from marestail.config import Config
 from marestail.context import Context
 from marestail.gates import Gate, visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup
-from tests.conftest import make_context
+from marestail.task_file import TaskFile
+from tests.conftest import FORBIDDEN_BINARIES, make_context
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
-COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,dash,perf,visual,route,remote,graph,depth}"
+COMMAND_CHOICES = "{gate,run,tasks,queue,install,sonar,watch,status,abandon,dash,perf,visual,route,remote,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -154,9 +156,84 @@ def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.Captu
     )
     assert exit_code(["remote", "--help"]) == 0
     assert "    status    box state, uptime and estimated spend today and this month\n" in capsys.readouterr().out
-    for absent in ("status", "queue"):
-        assert exit_code([absent]) == 2
-        assert f"invalid choice: '{absent}'" in capsys.readouterr().err
+
+
+def test_status_abandon_and_dash_help_is_exact() -> None:
+    check_status_choice_help()
+    check_status_option_help()
+    check_abandon_option_help()
+    check_dash_option_help()
+
+
+def check_status_choice_help() -> None:
+    helped = choice_help(cli.build_parser())
+    assert helped["status"] == "where every marestail run under a directory stands"
+    assert helped["abandon"] == "give up on a run without deleting it"
+    assert helped["dash"] == "the watch fleet, dandelion, the run table and host load as a web page"
+
+
+def check_status_option_help() -> None:
+    parser = subparser("status")
+    helped = option_help(parser)
+    assert helped["--json"] == "print every run as JSON"
+    assert helped["--all"] == "include complete, abandoned and leftover runs"
+    assert helped["--queued"] == "also list task files that never ran"
+    assert positional_help(parser)["paths"] == "directories to scan"
+
+
+def check_abandon_option_help() -> None:
+    parser = subparser("abandon")
+    targets = action_named(parser, "targets")
+    reason = action_named(parser, "reason")
+    assert targets.metavar == "TARGET"
+    assert targets.help == "REPO/TASK to give up on"
+    assert (reason.default, reason.metavar, reason.help) == ("", "TEXT", "recorded in the abandoned marker")
+
+
+def check_dash_option_help() -> None:
+    helped = option_help(subparser("dash"))
+    assert helped["--root"] == cli.HELP_DASH_ROOT
+    assert helped["--host"] == cli.HELP_DASH_HOST
+    assert helped["--port"] == cli.HELP_DASH_PORT
+    assert helped["--dandelion-every"] == cli.HELP_DASH_EVERY
+    assert helped["--runs-script"] == cli.HELP_DASH_RUNS
+
+
+def action_named(parser: argparse.ArgumentParser, dest: str) -> argparse.Action:
+    return next(action for action in parser._actions if action.dest == dest)
+
+
+def test_status_and_abandon_join_the_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    text = Path("marestail/cli.py").read_text()
+    assert "\n    from marestail.status import show\n" in text
+    assert "\n    from marestail.status import abandon\n" in text
+    assert "\nfrom marestail.status import" not in text
+    seen: dict[str, Any] = {}
+
+    def fake_show(paths: list[Path], as_json: bool, show_all: bool, queued: bool) -> int:
+        seen["show"] = (paths, as_json, show_all, queued)
+        return 0
+
+    def fake_abandon(targets: list[str], reason: str) -> int:
+        seen["abandon"] = (targets, reason)
+        return 3
+
+    monkeypatch.setattr(status_module, "show", fake_show)
+    monkeypatch.setattr(status_module, "abandon", fake_abandon)
+    assert cli.main(["status", "--json", "--all", "--queued", "fleet", "other"]) == 0
+    assert seen["show"] == ([Path("fleet"), Path("other")], True, True, True)
+    assert cli.main(["abandon", "a/b", "c/d", "--reason", "later"]) == 3
+    assert seen["abandon"] == (["a/b", "c/d"], "later")
+    assert exit_code(["status", "--help"]) == 0
+    capsys.readouterr()
+    assert exit_code(["abandon", "--help"]) == 0
+    abandon_help = capsys.readouterr().out
+    assert "TARGET" in abandon_help
+    assert "--reason" in abandon_help
+    root_help = cli.build_parser().format_help()
+    assert COMMAND_CHOICES in root_help
+    assert "where every marestail run under a directory stands" in root_help
+    assert "give up on a run without deleting it" in root_help
 
 
 def test_remote_status_hands_the_arguments_to_the_remote_module(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -423,6 +500,14 @@ def test_gate_reports_no_gates(gates: Callable[..., Recorder], capsys: pytest.Ca
     gates()
     assert cli.main(["gate", "--tier", "full", "--only", "x"]) == 2
     assert capsys.readouterr().err == "no gate ran: nothing in the full tier matches --only and marestail.toml\n"
+
+
+def test_gate_only_docs_without_a_docs_section_never_reads_jobs(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MARESTAIL_JOBS", "0")
+    assert cli.main(["gate", "--only", "docs"]) == 2
+    assert capsys.readouterr().err == "no gate ran: nothing in the fast tier matches --only and marestail.toml\n"
 
 
 @pytest.mark.parametrize(
@@ -972,9 +1057,12 @@ def test_root_parser_help_and_subcommands() -> None:
         "gate",
         "run",
         "tasks",
+        "queue",
         "install",
         "sonar",
         "watch",
+        "status",
+        "abandon",
         "dash",
         "perf",
         "visual",
@@ -984,6 +1072,7 @@ def test_root_parser_help_and_subcommands() -> None:
         "depth",
     ]
     help_by_name = choice_help(parser)
+    assert help_by_name["queue"] == "run a folder of tasks in dependency order"
     assert help_by_name["gate"] == "run the gates against the current repo"
     assert help_by_name["run"] == "run the role pipeline on a task"
     assert help_by_name["tasks"] == "check task files"
@@ -1107,7 +1196,9 @@ def test_perf_parser_defaults_and_help() -> None:
     assert helped["status"] == "print the golden status of every tree in the perf run"
     assert helped["url"] == "print the database URL for one tree"
     assert helped["prune"] == "delete this repo's goldens the current perf run does not need"
-    assert helped["down"] == "remove every performance database container, keeping the volume"
+    assert helped["down"] == (
+        "remove this run's performance database containers (every one when MARESTAIL_RUN_SUFFIX is unset), keeping the volume"
+    )
     assert helped["golden"] == "build the seeded golden data directory for one tree"
 
 
@@ -1337,3 +1428,399 @@ def assert_run_layout(repo: Path, task_id: str, expected: str, stdout: str) -> N
     assert (folder / "pipeline.log").read_text() == stdout
     assert not (repo / ".marestail" / "handoffs" / task_id).exists()
     assert len(list(folder.glob("handoffs-*/01-critic.md"))) == 1
+
+
+def test_queue_help() -> None:
+    text = cli.build_parser().format_help()
+    assert COMMAND_CHOICES in text
+    assert "    queue               run a folder of tasks in dependency order" in text
+    assert "tasks,queue" in Path("tests/test_cli.py").read_text()
+    green = Path("tests/test_green_repo.py").read_text()
+    assert green.index('"tasks",') < green.index('"queue",')
+    assert "tasks,queue" in Path("tests/test_events.py").read_text()
+    assert "gh" in FORBIDDEN_BINARIES
+    readme = Path("README.md").read_text()
+    overnight, _sep, after = readme.partition("## Overnight")
+    assert overnight
+    section, _sep, _rest = after.partition("\n## ")
+    assert section.startswith("\n\n`tools/overnight.sh")
+    assert _rest.startswith("Queue\n")
+    queue_section = _rest.split("\n## ", 1)[0]
+    for phrase in (
+        "marestail queue",
+        "--here",
+        "--retry",
+        "stack = true",
+        "merge commit",
+        "state.json",
+        "queue.log",
+        "exits 0",
+    ):
+        assert phrase in queue_section
+    assert "`tasks/" not in queue_section
+    assert "marestail queue sets 36 for its runs when it is unset" in readme
+    assert (
+        "| `MARESTAIL_QUEUE_PUSH` | `1`/`true` or `0`/`false`: push each branch after each queued task; wins over `[queue] push` |"
+        in readme
+    )
+    assert "| `MARESTAIL_QUEUE_PR` | `1`/`true` or `0`/`false`: open a PR per queued branch; wins over `[queue] pr` |" in readme
+    phases = subprocess.run(
+        ["git", "status", "--porcelain", "--", ".marestail/phases", "tools/overnight.sh"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert phases.stdout == ""
+
+
+def test_run_accepts_file_with_no_front_matter(tmp_path: Path) -> None:
+    (tmp_path / "marestail.toml").write_text("")
+    (tmp_path / "plain.md").write_text("# plain")
+    env = dict(os.environ)
+    env.pop("MUTANT_UNDER_TEST", None)
+    seen = subprocess.run(
+        [sys.executable, "-u", str(Path(cli.__file__).resolve()), "run", "plain.md", "--to", "not-a-role"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    message = "unknown role not-a-role; choose from specifier, critic, coder, cleaner, architect, design, practices, perf, hardener, qa\n"
+    assert seen.returncode == 1
+    assert seen.stderr == message
+    assert "no front matter" not in seen.stdout
+    assert "no front matter" not in seen.stderr
+
+
+def test_tasks_check_rejects_file_with_no_front_matter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "plain.md").write_text("# plain")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["tasks", "check", "plain.md"]) == 1
+    assert capsys.readouterr() == ("plain.md: no front matter: line 1 must be +++\n", "")
+
+
+def test_queue_parser_help(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit) as raised:
+        parser.parse_args(["queue", "--help"])
+    assert raised.value.code == 0
+    help_text = capsys.readouterr().out
+    for opt in ("--to", "--from", "--here", "--retry", "--agent", "--model", "--effort", "--scope", "--focus"):
+        assert opt in help_text
+    assert "--retries" not in help_text
+
+
+def test_queue_parser_options_are_exact() -> None:
+    parser = subparser("queue")
+    paths = action_named(parser, "paths")
+    assert (paths.nargs, paths.metavar, paths.help) == ("*", "PATH", cli.HELP_TASKS)
+    retry = action_named(parser, "retry")
+    assert (retry.metavar, retry.default) == ("TASK-ID", [])
+    agent = action_named(parser, "agent")
+    assert (agent.choices, agent.help) == (cli.AGENT_CHOICES, cli.HELP_AGENT)
+    model = action_named(parser, "model")
+    assert model.help == cli.HELP_MODEL
+    effort = action_named(parser, "effort")
+    assert effort.help == cli.HELP_EFFORT
+    scope = action_named(parser, "scope")
+    assert (scope.choices, scope.help) == (cli.SCOPE_CHOICES, cli.HELP_RUN_SCOPE)
+
+
+def test_queue_command_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: dict[str, Any] = {}
+
+    def fake_run_queue(*args: Any) -> int:
+        recorded["args"] = args
+        return 42
+
+    monkeypatch.setattr("marestail.queue.run_queue", fake_run_queue)
+    cmd = [
+        "queue",
+        "tasks/a.md",
+        "--to",
+        "hardener",
+        "--from",
+        "coder",
+        "--here",
+        "--retry",
+        "a",
+        "--agent",
+        "claude",
+        "--model",
+        "m",
+        "--effort",
+        "high",
+        "--scope",
+        "changed",
+        "--focus",
+        "x",
+    ]
+    assert cli.main(cmd) == 42
+    assert recorded["args"] == (
+        ["tasks/a.md"],
+        "coder",
+        "hardener",
+        True,
+        ["a"],
+        "claude",
+        "m",
+        "high",
+        "changed",
+        ["x"],
+    )
+
+
+SUFFIX = "MARESTAIL_RUN_SUFFIX must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'"
+FLAG_ERROR = "argument --run-suffix: must be 1 to 32 characters from a-z, 0-9 and -, got 'A1'\n"
+RUN_ARGV = [
+    "run",
+    "t.md",
+    "--from",
+    "coder",
+    "--to",
+    "qa",
+    "--auto",
+    "--model",
+    "m",
+    "--retries",
+    "2",
+    "--agent",
+    "grok",
+    "--effort",
+    "high",
+    "--scope",
+    "hard",
+    "--focus",
+    "a",
+    "--focus",
+    "b",
+]
+RUN_EXPECTED = (Path("t.md"), "coder", "qa", True, "m", 2, "grok", "high", "hard", ["a", "b"])
+
+
+def test_run_suffix_flag_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    seen: list[tuple[tuple[Any, ...], str]] = []
+
+    def pipeline(*args: Any) -> int:
+        seen.append((args, os.environ[run_suffix.ENV]))
+        return 0
+
+    monkeypatch.setattr(runner, "run_pipeline", pipeline)
+    assert cli.main([*RUN_ARGV, "--run-suffix", "a1"]) == 0
+    assert cli.main(RUN_ARGV) == 0
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    assert cli.main(RUN_ARGV) == 0
+    assert seen[0] == (RUN_EXPECTED, "a1")
+    assert seen[1] == (RUN_EXPECTED, "a1")
+    assert seen[2] == (RUN_EXPECTED, "zz")
+
+
+def test_bad_run_suffix_flag_exits_2(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(runner, "run_pipeline", Recorder(0))
+    exit_2(["run", "t.md", "--run-suffix", "A1"], capsys)
+    exit_2(["gate", "--run-suffix", "A1"], capsys)
+    exit_2(["sonar", "setup", "--run-suffix", "A1"], capsys)
+
+
+def exit_2(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    assert str(raised.value) == "2"
+    assert raised.value.code == 2
+    assert capsys.readouterr().err.endswith(FLAG_ERROR)
+
+
+def test_run_suffix_help(capsys: pytest.CaptureFixture[str]) -> None:
+    for name in ("run", "gate", "sonar"):
+        assert "--run-suffix" in help_text(capsys, name)
+    for name in ("perf", "queue", "status"):
+        assert "--run-suffix" not in help_text(capsys, name)
+
+
+def test_gate_flag_exports_the_suffix_before_the_gates(gates: Callable[..., Recorder], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = gates(PASS)
+    seen: list[str] = []
+    original = cli.run_gates_with_context
+
+    def wrapped(*args: Any) -> Any:
+        seen.append(os.environ[run_suffix.ENV])
+        return original(*args)
+
+    monkeypatch.setattr(cli, "run_gates_with_context", wrapped)
+    assert cli.main(["gate", "--run-suffix", "a1", "--tier", "fast"]) == 0
+    assert seen == ["a1"]
+    assert fake.calls[0][0] == "fast"
+
+
+def test_gate_rejects_a_bad_suffix_before_the_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    stdin(monkeypatch, {})
+    hooked = Recorder(0)
+    gated = Recorder(([], make_context(Path("."))))
+    monkeypatch.setattr(cli, "hook_command", hooked)
+    monkeypatch.setattr(cli, "run_gates_with_context", gated)
+    raised = suffix_exit(["gate", "--tier", "fast"])
+    assert str(raised.value) == SUFFIX
+    assert gated.calls == []
+    raised = suffix_exit(["gate", "--hook"])
+    assert str(raised.value) == SUFFIX
+    assert hooked.calls == []
+
+
+def test_gate_bad_suffix_beats_the_focus_clash(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["gate", "--scope", "all", "--focus", "a.py"])
+    assert str(raised.value) == SUFFIX
+    assert capsys.readouterr().err == ""
+
+
+def test_gate_valid_suffix_still_rejects_focus_with_scope_all(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["gate", "--scope", "all", "--focus", "a.py", "--run-suffix", "a1"]) == 2
+    assert capsys.readouterr().err == "--focus cannot be combined with --scope all\n"
+
+
+def test_gate_bad_tier_beats_a_bad_suffix(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["gate", "--tier", "nope"])
+    assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice: 'nope'" in err
+    assert SUFFIX not in err
+
+
+def test_gate_outside_a_repo_rejects_the_suffix_first(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["gate"])
+    assert str(raised.value) == SUFFIX
+    assert "marestail.toml" not in str(raised.value)
+
+
+def suffix_exit(argv: list[str]) -> pytest.ExceptionInfo[SystemExit]:
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    return raised
+
+
+def test_sonar_actions_include_prune() -> None:
+    assert cli.SONAR_ACTIONS == ("up", "down", "setup", "prune")
+
+
+def test_sonar_setup_suffixes_the_key_and_name(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    assert cli.main(["sonar", "setup"]) == 0
+    (repo / "marestail.toml").write_text('[sonar]\nproject_key = "key"\nproject_name = "N"\n')
+    assert cli.main(["sonar", "setup"]) == 0
+    assert fake.calls == [("key_a1", "repo (a1)"), ("key_a1", "N (a1)")]
+
+
+def test_sonar_setup_flag_beats_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    assert cli.main(["sonar", "--run-suffix", "a1", "setup"]) == 0
+    assert cli.main(["sonar", "setup", "--run-suffix", "a1"]) == 0
+    assert fake.calls == [("key_a1", "repo (a1)"), ("key_a1", "repo (a1)")]
+    assert os.environ[run_suffix.ENV] == "a1"
+
+
+def test_sonar_setup_requires_a_key_when_suffixed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (repo / "marestail.toml").write_text("[sonar]\n")
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "setup", fake)
+    raised = suffix_exit(["sonar", "setup"])
+    assert str(raised.value) == "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
+    assert fake.calls == []
+
+
+def test_sonar_up_and_down_ignore_the_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    fakes = {name: Recorder(None) for name in ("up", "down", "setup")}
+    for name, fake in fakes.items():
+        monkeypatch.setattr(setup, name, fake)
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    assert cli.main(["sonar", "up"]) == 0
+    assert cli.main(["sonar", "down"]) == 0
+    assert cli.main(["sonar", "up", "--run-suffix", "a1"]) == 0
+    assert cli.main(["sonar", "--run-suffix", "a1", "down"]) == 0
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    assert cli.main(["sonar", "up"]) == 0
+    assert fakes["up"].calls == [(), (), ()]
+    assert fakes["down"].calls == [(), ()]
+    assert fakes["setup"].calls == []
+
+
+def test_sonar_prune_needs_a_suffix(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = Recorder(None)
+    monkeypatch.setattr(setup, "prune", fake)
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == (
+        "sonar prune needs a run suffix: pass --run-suffix or set MARESTAIL_RUN_SUFFIX; it never deletes the unsuffixed project"
+    )
+    assert fake.calls == []
+
+
+def test_sonar_prune_rejects_a_bad_suffix(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == SUFFIX
+
+
+def test_sonar_prune_uses_the_flag_or_the_environment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(run_suffix.ENV, "zz")
+    fake = Recorder(None)
+    created = Recorder(None)
+    monkeypatch.setattr(setup, "prune", fake)
+    monkeypatch.setattr(setup, "setup", created)
+    assert cli.main(["sonar", "prune", "--run-suffix", "a1"]) == 0
+    monkeypatch.setenv(run_suffix.ENV, "b2")
+    assert cli.main(["sonar", "prune"]) == 0
+    assert fake.calls == [("key_a1",), ("key_b2",)]
+    assert created.calls == []
+
+
+def test_sonar_prune_requires_a_key(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (repo / "marestail.toml").write_text("[sonar]\n")
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    raised = suffix_exit(["sonar", "prune"])
+    assert str(raised.value) == "marestail.toml:1 [sonar] project_key is required when MARESTAIL_RUN_SUFFIX is set"
+
+
+def test_commands_that_never_read_the_suffix_ignore_a_bad_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(run_suffix.ENV, "A1")
+    (tmp_path / "marestail.toml").write_text("")
+    (tmp_path / "plain.md").write_text("# plain")
+    assert cli.main(["tasks", "check", "plain.md"]) == 1
+    assert cli.main(["status"]) == 0
+    assert cli.main(["graph"]) == 0
+    assert cli.main(["depth"]) == 0
+    for name in ("abandon", "watch", "dash", "visual", "remote", "install", "queue"):
+        assert help_text(capsys, name)
+    monkeypatch.setattr(route, "installed", lambda: False)
+    assert cli.main(["route", "--help"]) == 127
+    assert "suffix" not in events._FIELDS["run-start"]
+    assert "suffix" not in status_module._KEYS
+    assert_queue_child(monkeypatch, tmp_path)
+
+
+def assert_queue_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    task = TaskFile("a", tmp_path / "tasks" / "a.md", (), None, "", True)
+    child = queue._ChildOptions(None, None, None, None, [], None, None)
+    argv = queue._build_child_argv(task, tmp_path, None, child)
+    assert "run" in argv
+    assert "--run-suffix" not in argv
+    monkeypatch.setenv(run_suffix.ENV, "a1")
+    assert queue._build_child_env()[run_suffix.ENV] == "a1"
+    monkeypatch.delenv(run_suffix.ENV)
+    assert run_suffix.ENV not in queue._build_child_env()

@@ -413,11 +413,29 @@ TOML = (
 TOML_ADDED = [
     "# [run]",
     "# nice = 19  # 0 leaves the process at the shell's priority; MARESTAIL_NICE overrides; children inherit",
+    "# jobs = 4  # parallel workers for every mutation gate; MARESTAIL_JOBS wins over it",
     "# [design]",
     "# enabled = true  # the design judge runs between architect and practices unless false; skips repos with no guidance/patterns/*.md",
+    "# mutation_workers = 4  # wins over [run] jobs for mutmut",
     'runner = "vitest"  # or "jest" / "playwright"; then list sources = ["app", "components", "lib"]',
+    "# mutation_jobs = 2  # wins over [run] jobs for cargo-mutants",
+    "# mutation_threads = 2  # wins over [run] jobs for PIT",
+    "[go]",
+    'root = "."  # the folder that holds go.mod',
+    "crap_max = 4",
+    'coverage_exclude = []  # repo-relative globs, e.g. ["cmd/app/main.go"]; also skipped by go.crap, and by go.mutation unless mutation_exclude is set',
+    "# build_tags = []  # passed to go test, golangci-lint and gremlins",
+    "# test_args = []  # extra go test arguments",
+    '# golangci_config = ""  # default: marestail\'s pinned marestail/go/golangci.yml',
+    "# deadcode_ignore = []  # exported names deadcode never reports",
+    "# mutation_timeout = 7200",
 ]
-TOML_REMOVED = ['runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]']
+TOML_REMOVED = [
+    "mutation_workers = 4",
+    'runner = "vitest"  # or "jest" for a Next.js repo; then list sources = ["app", "components", "lib"]',
+    "mutation_jobs = 2",
+    "mutation_threads = 2",
+]
 README = (
     "<rule id> <file:line>",
     "bounces to the architect",

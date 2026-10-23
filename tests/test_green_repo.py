@@ -103,12 +103,15 @@ SCANNER_SOURCES = [
     "marestail/jvm/Scan.java",
     "marestail/rb/scan.rb",
     "marestail/rs/scan/main.rs",
+    "marestail/go/scan/main.go",
 ]
 FROZEN_SCANNER_PROJECTS = [
     "marestail/cs/scan/Scan.csproj",
     "marestail/jvm/pmd-ruleset.xml",
     "marestail/jvm/tools/pom.xml",
     "marestail/rs/scan/Cargo.toml",
+    "marestail/go/scan/go.mod",
+    "marestail/go/golangci.yml",
 ]
 HERMETIC_BINARIES = ("git", "sh")
 
@@ -221,9 +224,12 @@ def test_help_lists_every_subcommand() -> None:
         "gate",
         "run",
         "tasks",
+        "queue",
         "install",
         "sonar",
         "watch",
+        "status",
+        "abandon",
         "dash",
         "perf",
         "visual",
@@ -586,7 +592,7 @@ def test_readme_documents_every_environment_variable() -> None:
 def test_readme_documents_junie() -> None:
     text = (ROOT / "README.md").read_text()
     assert "`MARESTAIL_JUNIE`" in text
-    run_line = text.split("marestail run tasks/001.md", 1)[1].splitlines()[0]
+    run_line = text.split("marestail run tasks/001.md   # Claude (default)", 1)[1].splitlines()[0]
     assert "junie" in run_line
     assert "Junie as `--effort` (`low`, `medium`, `high`)" in text
     assert "`agy`, `kimi`, `grok`, `cursor`, `junie` and `hermes` run their own CLIs" in text
@@ -598,7 +604,7 @@ def test_readme_documents_junie() -> None:
 def test_readme_documents_hermes() -> None:
     text = (ROOT / "README.md").read_text()
     assert "`MARESTAIL_HERMES`" in text
-    run_line = text.split("marestail run tasks/001.md", 1)[1].splitlines()[0]
+    run_line = text.split("marestail run tasks/001.md   # Claude (default)", 1)[1].splitlines()[0]
     assert "hermes" in run_line
     assert "Hermes as `--reasoning`" in text
     assert "`agy`, `kimi`, `grok`, `cursor`, `junie` and `hermes` run their own CLIs" in text
@@ -747,6 +753,7 @@ def test_package_mutation_patterns_cover_every_module() -> None:
     assert "marestail.java.*" in patterns
     assert "marestail.ruby.*" in patterns
     assert "marestail.rust.*" in patterns
+    assert "marestail.golang.*" in patterns
     assert "marestail.javascript.*" in patterns
     assert "marestail.perf.db.*" in patterns
     assert "marestail.tui.app.*" in patterns

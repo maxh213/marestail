@@ -23,6 +23,7 @@ DOTNET = "dotnet"
 ERLANG = "erlang"
 RUST = "rust"
 JAVA = "java"
+GO = "go"
 
 Runner = Callable[[Context], Result]
 
@@ -69,6 +70,10 @@ GATE_SPECS: tuple[tuple[str, str, str | None, str], ...] = (
     ("java.crap", FAST, JAVA, "java_crap"),
     ("java.lint", FAST, JAVA, "java_lint"),
     ("java.deps", FAST, JAVA, "java_deps"),
+    ("go.tests", FAST, GO, "go_tests"),
+    ("go.crap", FAST, GO, "go_crap"),
+    ("go.lint", FAST, GO, "go_lint"),
+    ("go.deps", FAST, GO, "go_deps"),
     ("comments", FAST, None, "comments"),
     ("depth", FAST, None, "depth"),
     ("deadcode", FAST, None, "deadcode"),
@@ -81,6 +86,7 @@ GATE_SPECS: tuple[tuple[str, str, str | None, str], ...] = (
     ("er.mutation", FULL, ERLANG, "er_mutation"),
     ("rs.mutation", FULL, RUST, "rs_mutation"),
     ("java.mutation", FULL, JAVA, "java_mutation"),
+    ("go.mutation", FULL, GO, "go_mutation"),
     ("sonar", SONAR, SONAR, "sonar"),
     ("qa", QA, QA, "qa"),
     ("visual", QA, "visual", "visual"),
