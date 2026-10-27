@@ -1349,6 +1349,19 @@ def test_run_logs_lists_overnight_logs_then_pipeline_logs(tmp_path: Path) -> Non
     assert collect.run_logs(tmp_path / "gone") == []
 
 
+def test_animus_home(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("DANDELION_CLAUDE_ANIMUS_CONFIG_DIR", raising=False)
+    assert collect.animus_home() == tmp_path / ".claude-animus"
+    monkeypatch.setenv("DANDELION_CLAUDE_ANIMUS_CONFIG_DIR", "")
+    assert collect.animus_home() == tmp_path / ".claude-animus"
+    monkeypatch.setenv("DANDELION_CLAUDE_ANIMUS_CONFIG_DIR", "~/an")
+    assert collect.animus_home() == tmp_path / "an"
+    monkeypatch.setenv("DANDELION_CLAUDE_ANIMUS_CONFIG_DIR", "/opt/an")
+    assert collect.animus_home() == Path("/opt/an")
+    assert collect.claude_homes()[2] == Path("/opt/an")
+
+
 def test_deepseek_home(monkeypatch: Any, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", raising=False)
@@ -1359,7 +1372,7 @@ def test_deepseek_home(monkeypatch: Any, tmp_path: Path) -> None:
     assert collect.deepseek_home() == tmp_path / "ds"
     monkeypatch.setenv("DANDELION_CLAUDE_DEEPSEEK_CONFIG_DIR", "/opt/ds")
     assert collect.deepseek_home() == Path("/opt/ds")
-    assert collect.claude_homes()[2] == Path("/opt/ds")
+    assert collect.claude_homes()[3] == Path("/opt/ds")
 
 
 def test_ollama_home(monkeypatch: Any, tmp_path: Path) -> None:
@@ -1372,7 +1385,7 @@ def test_ollama_home(monkeypatch: Any, tmp_path: Path) -> None:
     assert collect.ollama_home() == tmp_path / "ol"
     monkeypatch.setenv("DANDELION_CLAUDE_OLLAMA_CONFIG_DIR", "/opt/ol")
     assert collect.ollama_home() == Path("/opt/ol")
-    assert collect.claude_homes()[3] == Path("/opt/ol")
+    assert collect.claude_homes()[4] == Path("/opt/ol")
 
 
 ALIAS = ["-o", "HostKeyAlias=box"]

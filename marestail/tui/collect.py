@@ -36,6 +36,8 @@ ERRORS_IGNORE = "ignore"
 ERRORS_REPLACE = "replace"
 WORK_CONFIG_ENV = "DANDELION_CLAUDE_WORK_CONFIG_DIR"
 WORK_HOME_DEFAULT = "~/.claude-work"
+ANIMUS_CONFIG_ENV = "DANDELION_CLAUDE_ANIMUS_CONFIG_DIR"
+ANIMUS_HOME_DEFAULT = "~/.claude-animus"
 CLAUDE_CONFIG_ENV = "CLAUDE_CONFIG_DIR"
 CLAUDE_HOME = ".claude"
 NO_HOME: list[Path] = []
@@ -581,6 +583,10 @@ def work_home() -> Path:
     return home_from(WORK_CONFIG_ENV, WORK_HOME_DEFAULT)
 
 
+def animus_home() -> Path:
+    return home_from(ANIMUS_CONFIG_ENV, ANIMUS_HOME_DEFAULT)
+
+
 def deepseek_home() -> Path:
     return home_from(DEEPSEEK_CONFIG_ENV, DEEPSEEK_HOME_DEFAULT)
 
@@ -598,7 +604,7 @@ def configured_home(home: Path | None) -> list[Path]:
 
 
 def claude_homes() -> list[Path]:
-    return [Path.home() / CLAUDE_HOME, work_home(), deepseek_home(), ollama_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
+    return [Path.home() / CLAUDE_HOME, work_home(), animus_home(), deepseek_home(), ollama_home(), *configured_home(expanded_env(CLAUDE_CONFIG_ENV))]
 
 
 def project_jsonl(root: Path, home: Path) -> list[Path]:
