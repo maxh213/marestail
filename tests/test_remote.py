@@ -41,7 +41,6 @@ JOB_KEYS = ["ts", "event", "instance", "gate", "repo", "result", "seconds", "usd
 FIXED_NOW = datetime(2026, 10, 10, 12, 34, 59, 500000, tzinfo=UTC)
 ALL_EXCLUDES = [
     "--exclude=/.git/",
-    "--exclude=/.marestail/",
     "--exclude=.stryker-tmp/",
     "--exclude=.elixir_ls/",
     "--exclude=node_modules/",
@@ -51,6 +50,9 @@ ALL_EXCLUDES = [
     "--exclude=cover/",
     "--exclude=erl_crash.dump",
     "--exclude=target/",
+    "--include=/.marestail/",
+    "--include=/.marestail/tooling/***",
+    "--exclude=/.marestail/*",
 ]
 PY_EXCLUDES = [pattern for pattern in ALL_EXCLUDES if pattern != "--exclude=.venv/"]
 META = {"pkg.a.f__mutmut_1": 1, "pkg.a.f__mutmut_2": 36}
@@ -798,10 +800,10 @@ def job_id(monkeypatch: pytest.MonkeyPatch) -> str:
 
 def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch, job_id: str) -> None:
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    remote._execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100)
-    session = "/var/lib/marestail-jobs/job-abc"
+    remote._execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100, "prepare")
+    session = f"{home}/.cache/marestail-jobs/job-abc"
     inner = (
-        f"mkdir -p -m 700 /var/lib/marestail-jobs && echo $$ > {session}; " + remote.PREPARE + "; "
+        f"mkdir -p -m 700 {home}/.cache/marestail-jobs && echo $$ > {session}; prepare; "
         f"timeout -k 30 100 mutmut run 'x y'; code=$?; rm -f {session}; exit $code"
     )
     docker = (
@@ -820,7 +822,7 @@ def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder,
 
 
 def test_execute_without_a_timeout_runs_unbounded(recorder: Recorder, job_id: str) -> None:
-    remote._execute(box_settings(), IP, ["mutmut"], Path("/repo"), None, None)
+    remote._execute(box_settings(), IP, ["mutmut"], Path("/repo"), None, None, remote.PREPARE)
     ((_ip, script, timeout, tty),) = recorder.ssh_calls
     assert (timeout, tty) == (None, True)
     assert "timeout -k" not in script
@@ -1185,7 +1187,27 @@ def test_prepare_installs_node_modules_only_when_the_lock_changes() -> None:
     assert remote.PREPARE == (
         "if [ -f package-lock.json ]; then lock=$(sha256sum package-lock.json | cut -c1-16); "
         'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
-        'npm ci --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; fi; fi'
+        'npm ci --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; fi; '
+        "elif [ -f pnpm-lock.yaml ]; then lock=$(sha256sum pnpm-lock.yaml | cut -c1-16); "
+        'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
+        "want=$(node -p \"(require('./package.json').packageManager || 'pnpm@latest').split('@')[1]\"); "
+        'npx --yes "pnpm@$want" install --frozen-lockfile --reporter=silent >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+        "fi; fi"
+    )
+
+
+def test_prepare_without_tooling_installs_only_the_repo() -> None:
+    assert remote._prepare(make_context(Path("/repo"))) == remote.PREPARE
+
+
+def test_prepare_with_tooling_also_installs_the_tooling_folder() -> None:
+    ctx = make_context(Path("/my repo"), {"ts": {"tooling": ".marestail/tooling"}})
+    folder = "'/my repo/.marestail/tooling'"
+    assert remote._prepare(ctx) == (
+        f"{remote.PREPARE}; if [ -f {folder}/package-lock.json ]; then lock=$(sha256sum {folder}/package-lock.json | cut -c1-16); "
+        f'if [ "$(cat {folder}/node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
+        f'npm ci --prefix {folder} --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > {folder}/node_modules/.marestail-lock || exit 97; '
+        "fi; fi"
     )
 
 

@@ -27,7 +27,6 @@ BUSY = "/var/lib/marestail/busy.d"
 JOB_LOCK = "/var/lib/marestail/job.lock"
 EXCLUDES = (
     "/.git/",
-    "/.marestail/",
     ".stryker-tmp/",
     ".elixir_ls/",
     "node_modules/",
@@ -38,11 +37,25 @@ EXCLUDES = (
     "erl_crash.dump",
     "target/",
 )
+TOOLING_SYNC = ("--include=/.marestail/", "--include=/.marestail/tooling/***", "--exclude=/.marestail/*")
 PREPARE = (
     "if [ -f package-lock.json ]; then "
     "lock=$(sha256sum package-lock.json | cut -c1-16); "
     'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
     'npm ci --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+    "fi; "
+    "elif [ -f pnpm-lock.yaml ]; then "
+    "lock=$(sha256sum pnpm-lock.yaml | cut -c1-16); "
+    'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
+    "want=$(node -p \"(require('./package.json').packageManager || 'pnpm@latest').split('@')[1]\"); "
+    'npx --yes "pnpm@$want" install --frozen-lockfile --reporter=silent >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+    "fi; fi"
+)
+TOOLING_PREPARE = (
+    "if [ -f {folder}/package-lock.json ]; then "
+    "lock=$(sha256sum {folder}/package-lock.json | cut -c1-16); "
+    'if [ "$(cat {folder}/node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
+    'npm ci --prefix {folder} --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > {folder}/node_modules/.marestail-lock || exit 97; '
     "fi; fi"
 )
 BOOT_WAIT = 240
@@ -188,7 +201,14 @@ def _locally(job: _Job, where: str) -> Outcome:
 
 
 def _remotely(found: Settings, ip: str, job: _Job) -> tuple[int, str]:
-    return _execute(found, ip, job.build(found.workers.get(job.gate, job.workers)), job.cwd, job.env, job.timeout)
+    return _execute(found, ip, job.build(found.workers.get(job.gate, job.workers)), job.cwd, job.env, job.timeout, _prepare(job.ctx))
+
+
+def _prepare(ctx: Context) -> str:
+    folder = ctx.ts("tooling")
+    if folder is None:
+        return PREPARE
+    return f"{PREPARE}; {TOOLING_PREPARE.format(folder=shlex.quote(str(ctx.root / str(folder))))}"
 
 
 def _record_job(found: Settings, job: _Job, started: float, result: str) -> float:
@@ -353,7 +373,7 @@ def _push(found: Settings, ip: str, root: Path, gate: str) -> str:
 
 
 def _excludes(keep: set[str]) -> list[str]:
-    return [f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep]
+    return [*(f"--exclude={pattern}" for pattern in EXCLUDES if pattern not in keep), *TOOLING_SYNC]
 
 
 def _copy_toolchains(found: Settings, ip: str, found_toolchains: list[Path]) -> None:
@@ -390,15 +410,17 @@ def _fetch(found: Settings, ip: str, root: Path, path: str) -> None:
     rsync(found, [f"{found.user}@{ip}:{target}{trailing}", f"{target}{trailing}"])
 
 
-def _execute(found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None) -> tuple[int, str]:
+def _execute(
+    found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None, prepare: str
+) -> tuple[int, str]:
     flags = _env_flags(found, env)
     job = uuid.uuid4().hex
-    jobs = "/var/lib/marestail-jobs"
+    jobs = f"{Path.home()}/.cache/marestail-jobs"
     session = f"{jobs}/job-{job}"
     inner = shlex.join(command)
     if timeout:
         inner = f"timeout -k 30 {int(timeout)} {inner}"
-    inner = f"mkdir -p -m 700 {jobs} && echo $$ > {session}; {PREPARE}; {inner}; code=$?; rm -f {session}; exit $code"
+    inner = f"mkdir -p -m 700 {jobs} && echo $$ > {session}; {prepare}; {inner}; code=$?; rm -f {session}; exit $code"
     docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} setsid -w bash -c {shlex.quote(inner)}"
     stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
     cleanup = f"sg docker -c {shlex.quote(f'docker exec {found.container} bash -c {shlex.quote(stop)}')}"
