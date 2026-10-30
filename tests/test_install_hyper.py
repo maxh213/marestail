@@ -384,17 +384,17 @@ def test_package_json_depends_on_the_runner(tmp_path: Path) -> None:
 
 
 def test_package_json_text_is_pinned(tmp_path: Path) -> None:
-    head = '{\n  "name": "marestail-tooling",\n  "private": true,\n  "devDependencies": {\n    "@stryker-mutator/core": "^9.0.0",\n'
+    head = '{\n  "name": "marestail-tooling",\n  "private": true,\n  "devDependencies": {\n    "@stryker-mutator/core": "^10.1.1",\n'
     tail = (
         '    "dependency-cruiser": "^16.0.0",\n    "eslint": "^9.0.0",\n    "knip": "^5.0.0",\n'
         '    "typescript": "^5.8.0",\n    "typescript-eslint": "^8.0.0"'
     )
     vitest_tail = ',\n    "vitest": "^3.2.0"\n  }\n}\n'
-    vitest_mid = '    "@stryker-mutator/vitest-runner": "^9.0.0",\n    "@vitest/coverage-v8": "^3.2.0",\n'
+    vitest_mid = '    "@stryker-mutator/vitest-runner": "^10.1.1",\n    "@vitest/coverage-v8": "^3.2.0",\n'
 
     assert _tooling.package_json(tooling(tmp_path)) == head + vitest_mid + tail + vitest_tail
     assert _tooling.package_json(tooling(tmp_path, {"runner": "jest"})) == (
-        head + '    "@stryker-mutator/jest-runner": "^9.0.0",\n' + tail + "\n  }\n}\n"
+        head + '    "@stryker-mutator/jest-runner": "^10.1.1",\n' + tail + "\n  }\n}\n"
     )
 
 

@@ -22,7 +22,7 @@ SOURCE_FILES = ["<S>/**/*.{ts,tsx}"]
 TEST_FILES = ["<S>/**/*.{test,spec}.{ts,tsx}"]
 MUTATED_FILES = ["<S>/**/*.ts", "<S>/**/*.tsx", "!<S>/**/*.test.*", "!<S>/**/*.spec.*"]
 ENTRY_FILES = ["<S>/index.{ts,tsx}", "<S>/main.{ts,tsx}"]
-STRYKER_VERSION = "^9.0.0"
+STRYKER_VERSION = "^10.1.1"
 BASE_DEPENDENCIES = {
     "@stryker-mutator/core": STRYKER_VERSION,
     "dependency-cruiser": "^16.0.0",

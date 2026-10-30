@@ -63,8 +63,8 @@ PACKAGE = """{
   "name": "marestail-tooling",
   "private": true,
   "devDependencies": {
-    "@stryker-mutator/core": "^9.0.0",
-    "@stryker-mutator/vitest-runner": "^9.0.0",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "@vitest/coverage-v8": "^3.2.0",
     "dependency-cruiser": "^16.0.0",
     "eslint": "^9.0.0",
@@ -390,7 +390,7 @@ def jest_target_gets_jest_runner() -> None:
         wanted = json.loads(PACKAGE)["devDependencies"]
         for name in ("vitest", "@vitest/coverage-v8", "@stryker-mutator/vitest-runner"):
             del wanted[name]
-        wanted["@stryker-mutator/jest-runner"] = "^9.0.0"
+        wanted["@stryker-mutator/jest-runner"] = "^10.1.1"
         expect("jest-package", package, wanted)
         expect("jest-stryker", (box.tooling / "stryker.config.json").read_text(), JEST_STRYKER)
         expect("jest-tsconfig", (box.tooling / "tsconfig.json").read_text(), JEST_TSCONFIG)
