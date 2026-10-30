@@ -69,6 +69,15 @@ GATE_CONFIG = [
     "**/lombok.config",
     "**/pmd-ruleset.xml",
     ".java-layers.json",
+    "**/go.mod",
+    "**/go.sum",
+    "go.work",
+    "go.work.sum",
+    "**/.golangci.yml",
+    "**/.golangci.yaml",
+    "**/.golangci.toml",
+    "**/.golangci.json",
+    ".go-layers.json",
     ".claude/settings.json",
     "CLAUDE.md",
     "AGENTS.md",
@@ -98,6 +107,7 @@ ALLOWED = {
         ".dotnet-layers.json",
         ".rust-layers.json",
         ".java-layers.json",
+        ".go-layers.json",
     ],
 }
 

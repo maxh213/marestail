@@ -1,0 +1,5 @@
+{
+  "layers": [
+    {"from": "internal/domain", "forbid": ["internal/store"]}
+  ]
+}

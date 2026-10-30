@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from marestail import dotnet, elixir, erlang, java, ruby, rust
+from marestail import dotnet, elixir, erlang, golang, java, ruby, rust
 from marestail.gates import deadcode
 from tests.conftest import checked, gate_shape, make_context, reject_none, required_timeout
 
@@ -496,3 +496,31 @@ def test_hyper_filters_ruby_structured_elixir_and_erlang_entries(tmp_path: Path)
     ]
     entries = [{"file": "app/a.rb", "line": 9, "module": "M", "function": "f", "arity": 0}]
     assert deadcode.elixir_entries(entries, tmp_path, ctx) == []
+
+
+def test_go_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "internal" / "store" / "store.go"
+    test = tmp_path / "internal" / "store" / "store_test.go"
+    source.parent.mkdir(parents=True)
+    source.write_text("package store\n")
+    test.write_text("package store\n")
+    records = [
+        {"file": str(source), "line": 23, "kind": "function", "name": "UnusedHelper"},
+        {"file": str(source), "line": 30, "kind": "type", "name": "Spare's"},
+    ]
+    calls: list[tuple[str, list[Path], list[Path]]] = []
+
+    def scan(ctx: object, mode: str, files: list[Path], uses: list[Path]) -> tuple[Any, Any]:
+        calls.append((mode, files, uses))
+        return records, None
+
+    monkeypatch.setattr(golang, "scan", reject_none(scan))
+    assert deadcode.go_findings(make_context(tmp_path, {"go": {}})) == [
+        "internal/store/store.go:23 unused function 'UnusedHelper'",
+        "internal/store/store.go:30 unused type 'Spare's'",
+    ]
+    assert calls == [("dead", [source], [test])]
+    ignoring = make_context(tmp_path, {"go": {"deadcode_ignore": ["UnusedHelper", "Spare"]}})
+    assert deadcode.go_findings(ignoring) == ["internal/store/store.go:30 unused type 'Spare's'"]
+    monkeypatch.setattr(golang, "scan", reject_none(lambda ctx, mode, files, uses: (None, "boom")))
+    assert deadcode.go_findings(ignoring) == ["go deadcode scanner failed: boom"]

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet
+from marestail import dotnet, jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context
 from marestail.report import Result, elapsed, mutation_summary
 from marestail.shell import tail
@@ -179,6 +179,7 @@ def command(ctx: Context, product: Path, tests: Path, out: Path, targets: list[s
         "json",
         "-r",
         "progress",
+        *jobs.worker_args(ctx.config, "--concurrency"),
         *mutate(excludes + includes),
     ]
 

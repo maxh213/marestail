@@ -86,6 +86,7 @@ def scanners() -> list[tuple[str, Callable[[Config], list[Module]]]]:
         ("dotnet", dotnet_modules),
         ("rust", rust_modules),
         ("java", java_modules),
+        ("go", go_modules),
     ]
 
 
@@ -382,6 +383,19 @@ def java_modules(config: Config) -> list[Module]:
     if error:
         raise SystemExit(f"java depth analysis failed: {error}")
     return [targeted_module(item, item["file"]) for item in scanned_items(data)]
+
+
+def go_modules(config: Config) -> list[Module]:
+    from marestail import golang
+
+    ctx = Context(config=config)
+    files = golang.sources(ctx)
+    if not files:
+        return []
+    data, error = golang.scan(ctx, MODE, files)
+    if error:
+        raise SystemExit(f"go depth analysis failed: {error}")
+    return [targeted_module(item, golang.rel(ctx, item["file"])) for item in scanned_items(data)]
 
 
 def rule_breaks(modules: list[Module]) -> list[str]:

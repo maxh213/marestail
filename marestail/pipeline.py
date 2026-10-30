@@ -76,11 +76,21 @@ def names(mode: str | None = None, visual: bool = False) -> list[str]:
     return [step.name for step in steps(mode, visual)]
 
 
+def _unknown_message(name: str, mode: str | None, visual: bool) -> str:
+    return f"unknown role {name}; choose from {', '.join(names(mode, visual))}"
+
+
+def unknown_role(name: str | None, mode: str | None = None, visual: bool = False) -> str | None:
+    if name is None or name in names(mode, visual):
+        return None
+    return _unknown_message(name, mode, visual)
+
+
 def find(name: str, mode: str | None = None, visual: bool = False) -> Step:
     for step in steps(mode, visual):
         if step.name == name:
             return step
-    raise SystemExit(f"unknown role {name}; choose from {', '.join(names(mode, visual))}")
+    raise SystemExit(_unknown_message(name, mode, visual))
 
 
 def _check_role(name: str | None, mode: str | None, visual: bool) -> None:

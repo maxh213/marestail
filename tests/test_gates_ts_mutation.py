@@ -135,6 +135,25 @@ def test_full_run_reports_survivors(tmp_path: Path, offload: Any) -> None:
     assert not (tmp_path / "web" / ".stryker-tmp").exists()
 
 
+def test_findings_keep_the_report_order(tmp_path: Path, offload: Any) -> None:
+    prepare(tmp_path)
+    report = {
+        "files": {
+            "src/b.ts": {"mutants": [mutant("Survived", 2)]},
+            "src/a.ts": {"mutants": [mutant("Survived", 10), mutant("Survived", 9)]},
+        }
+    }
+    offload(stryker(tmp_path, report, []))
+
+    result = checked(ts_mutation.run_gate(full_context(tmp_path)), ts_mutation.GATE)
+
+    assert result.findings == [
+        "web/src/b.ts:2 BooleanLiteral Survived: x",
+        "web/src/a.ts:10 BooleanLiteral Survived: x",
+        "web/src/a.ts:9 BooleanLiteral Survived: x",
+    ]
+
+
 def test_missing_report_fails_and_cleans_up(tmp_path: Path, offload: Any) -> None:
     prepare(tmp_path)
     offload(stryker(tmp_path, None, []))
@@ -512,6 +531,93 @@ def test_the_gate_offers_its_local_concurrency_and_builds_with_the_count_it_is_g
     assert fake.calls == [BASE]
     assert fake.workers == [0]
     assert fake.builds[0](10) == [*BASE, "--concurrency", "10"]
+
+
+def knob_raw(key: int | None, ts: dict[str, Any]) -> dict[str, Any]:
+    raw: dict[str, Any] = {"ts": {"root": "web", **ts}}
+    if key is not None:
+        raw["run"] = {"jobs": key}
+    return raw
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_appends_concurrency(
+    tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    prepare(tmp_path)
+    fake = offload(stryker(tmp_path, {"files": {}}, []))
+
+    ts_mutation.run_gate(make_context(tmp_path, knob_raw(key, {"mutation_scope": "all"})))
+
+    assert fake.calls == [[*BASE, "--concurrency", "3"]]
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_comes_before_the_mutate_targets(
+    tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    for name in ["a.ts", "b.ts"]:
+        (tmp_path / "web").mkdir(exist_ok=True)
+        (tmp_path / "web" / name).write_text("")
+    fake = offload(stryker(tmp_path, {"files": {}}, []))
+    ctx = make_context(tmp_path, knob_raw(key, {}), scope_changed=True, changed={"web/a.ts", "web/b.ts"})
+
+    ts_mutation.run_gate(ctx)
+
+    assert fake.calls == [[*BASE, "--concurrency", "3", "--mutate", "a.ts,b.ts"]]
+
+
+@pytest.mark.parametrize(("env", "key"), [(None, 3), ("3", None)])
+def test_the_knob_beats_a_configured_concurrency(
+    tmp_path: Path, offload: Any, monkeypatch: pytest.MonkeyPatch, env: str | None, key: int | None
+) -> None:
+    if env is not None:
+        monkeypatch.setenv("MARESTAIL_JOBS", env)
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "a.ts").write_text("")
+    fake = offload(stryker(tmp_path, {"files": {}}, []))
+    section = {"mutation_concurrency": "9", "mutation_incremental": True}
+    ctx = make_context(tmp_path, knob_raw(key, section), scope_changed=True, changed={"web/a.ts"})
+
+    ts_mutation.run_gate(ctx)
+
+    command = fake.calls[0]
+    assert command == [
+        *BASE,
+        "--concurrency",
+        "3",
+        "--incremental",
+        "--incrementalFile",
+        "reports/stryker-incremental.json",
+        "--mutate",
+        "a.ts",
+    ]
+
+
+def test_a_configured_concurrency_stays_when_jobs_are_unset(tmp_path: Path, offload: Any) -> None:
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "a.ts").write_text("")
+    fake = offload(stryker(tmp_path, {"files": {}}, []))
+    section = {"mutation_concurrency": "9", "mutation_incremental": True}
+    ctx = make_context(tmp_path, knob_raw(None, section), scope_changed=True, changed={"web/a.ts"})
+
+    ts_mutation.run_gate(ctx)
+
+    command = fake.calls[0]
+    assert command == [
+        *BASE,
+        "--concurrency",
+        "9",
+        "--incremental",
+        "--incrementalFile",
+        "reports/stryker-incremental.json",
+        "--mutate",
+        "a.ts",
+    ]
 
 
 def test_mutation_command_sets_concurrency_and_incremental(tmp_path: Path) -> None:

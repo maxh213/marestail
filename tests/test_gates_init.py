@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,7 @@ from marestail import config as config_module
 from marestail import gates
 from marestail.context import Context
 from marestail.gates import Gate
-from marestail.report import Result
+from marestail.report import Result, render_one
 from tests.conftest import make_context
 
 LANGUAGES = [
@@ -18,6 +19,7 @@ LANGUAGES = [
     ("er", "erlang"),
     ("rs", "rust"),
     ("java", "java"),
+    ("go", "go"),
 ]
 FAST_KINDS = ["tests", "crap", "lint", "deps"]
 
@@ -68,8 +70,8 @@ def test_tiers_for_unknown() -> None:
 
 def test_select_by_tier() -> None:
     assert [gate.name for gate in gates.select("qa", None) if gate.tier != "fast"] == ["qa", "visual"]
-    assert len(gates.select("fast", set())) == 37
-    assert len(gates.select("all", None)) == 48
+    assert len(gates.select("fast", set())) == 41
+    assert len(gates.select("all", None)) == 53
 
 
 def test_select_only() -> None:
@@ -164,14 +166,16 @@ def test_skip_list(raw: dict[str, object], expected: set[str], tmp_path: Path) -
 
 @pytest.mark.parametrize("skip", ["ts.mutation", [1], ["ts.mutation", None], {"ts.mutation": True}])
 def test_skip_list_refuses_anything_but_a_list_of_names(skip: object, tmp_path: Path) -> None:
+    config = config_with({"gates": {"skip": skip}}, tmp_path)
     with pytest.raises(SystemExit) as raised:
-        gates.skip_list(config_with({"gates": {"skip": skip}}, tmp_path))
+        gates.skip_list(config)
     assert str(raised.value) == '[gates] skip must be a list of gate names, for example skip = ["ts.mutation"]'
 
 
 def test_skip_list_refuses_names_that_are_not_gates(tmp_path: Path) -> None:
+    config = config_with({"gates": {"skip": ["ts.mutations", "sonar", "a.b"]}}, tmp_path)
     with pytest.raises(SystemExit) as raised:
-        gates.skip_list(config_with({"gates": {"skip": ["ts.mutations", "sonar", "a.b"]}}, tmp_path))
+        gates.skip_list(config)
     message = str(raised.value)
     assert message.startswith("[gates] skip names gates that do not exist: a.b, ts.mutations; known gates: comments, cs.crap, ")
     assert message.endswith(", ts.tests, visual")
@@ -209,6 +213,29 @@ def test_run_one_appends_the_file_level_count(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, file_level=5)
     result = gates.run_one(Gate("x", "fast", None, run), ctx)
     assert (result.summary, ctx.file_level) == ("1 problems; 2 file-level findings not gated under hyper", 0)
+
+
+def test_a_mutation_gate_crash_does_not_stop_the_next_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "marestail.toml").write_text("[python]\n")
+    monkeypatch.chdir(tmp_path)
+
+    def boom(_ctx: Context) -> Result:
+        raise SystemExit("MARESTAIL_JOBS must be a whole number 1 or more, got '0'")
+
+    def skipped(_ctx: Context) -> Result:
+        return Result.skipped("ts.mutation", "no changed typescript sources")
+
+    planned = [Gate("py.mutation", "full", "python", boom), Gate("ts.mutation", "full", "ts", skipped)]
+    monkeypatch.setattr(gates, "configured_gates", lambda *args: planned)
+    results, _ = gates.run_gates_with_context("full", False, None)
+    first, second = results
+
+    summary = "py.mutation crashed: SystemExit MARESTAIL_JOBS must be a whole number 1 or more, got '0'"
+    assert (first.gate, first.ok, first.summary) == ("py.mutation", False, summary)
+    head = render_one(first).splitlines()[0]
+    assert re.fullmatch(rf"\[FAIL\] py\.mutation    {re.escape(summary)}  \(\d+\.\ds\)", head)
+    assert (second.ok, second.summary) == (True, "skipped: no changed typescript sources")
+    assert render_one(second) == "[ok  ] ts.mutation    skipped: no changed typescript sources  (0.0s)"
 
 
 def capture_run_gates(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, ...]]:

@@ -42,6 +42,7 @@ ERLANG_SUFFIXES = (".erl", ".hrl")
 RUBY_SUFFIXES = (".rb", ".rake")
 RUST_SUFFIXES = (".rs",)
 JAVA_SUFFIXES = (".java",)
+GO_SUFFIXES = (".go",)
 PYTHON_SUFFIXES = (".py",)
 MARKUP_SUFFIXES = (".html", ".jinja", ".j2", ".css")
 COMMENTS_MODE = "comments"
@@ -233,6 +234,20 @@ def java_findings(ctx: Context) -> list[str]:
     return structured(ctx, java, files(ctx, JAVA_SUFFIXES), "java comment scanner failed")
 
 
+def go_findings(ctx: Context) -> list[str]:
+    if ctx.config.section("go") is None:
+        return []
+    from marestail import golang
+
+    return structured(ctx, golang, go_paths(ctx), "go comment scanner failed", partial(golang.rel, ctx))
+
+
+def go_paths(ctx: Context) -> list[Path]:
+    from marestail import golang
+
+    return [path for path in files(ctx, GO_SUFFIXES) if golang.kept(ctx, path)]
+
+
 def markup_findings(ctx: Context) -> list[str]:
     return [finding for path in files(ctx, MARKUP_SUFFIXES) for finding in markup_file_findings(path, ctx)]
 
@@ -257,5 +272,6 @@ SCANNERS = [
     dotnet_findings,
     rust_findings,
     java_findings,
+    go_findings,
     markup_findings,
 ]

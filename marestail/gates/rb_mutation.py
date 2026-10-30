@@ -6,8 +6,9 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from marestail import jobs
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope, is_benchmark
-from marestail.report import Result, elapsed
+from marestail.report import Result, elapsed, finding_order
 from marestail.ruby import SKIP_DIRS, bundle, listify, relative
 from marestail.shell import run, tail
 
@@ -68,7 +69,8 @@ def bundle_problem(ctx: Context, started: float) -> Result | None:
 def mutate(ctx: Context, subjects: list[str], note: str, started: float) -> Result:
     root = ctx.ruby_root()
     before = sessions(root)
-    code, output = run(bundle(ctx, "mutant", "run", *subjects), cwd=root, timeout=7200)
+    command = bundle(ctx, "mutant", "run", *jobs.worker_args(ctx.config, "--jobs"), *subjects)
+    code, output = run(command, cwd=root, timeout=7200)
     created = sessions(root) - before
     if created:
         return session_result(ctx, created, output, started, note)
@@ -146,9 +148,14 @@ def mutation_kind(result: dict[str, Any]) -> str:
 def verdict(total: int, failures: list[Failure], output: str, started: float, note: str = "") -> Result:
     if total == 0:
         return Result(GATE, False, "no mutants were generated", tail(output), elapsed(started))
-    findings = [describe(*failure, count) for failure, count in Counter(failures).items()]
+    findings = sorted_findings(failures)
     summary = f"{len(failures)} of {total} mutants not killed" if findings else f"all {total} mutants killed"
     return Result(GATE, not findings, with_note(summary, note), findings[:MAX_FINDINGS], elapsed(started))
+
+
+def sorted_findings(failures: list[Failure]) -> list[str]:
+    described = [describe(*failure, count) for failure, count in Counter(failures).items()]
+    return sorted(described, key=finding_order)
 
 
 def with_note(summary: str, note: str) -> str:

@@ -139,6 +139,12 @@ class Context:
     def java_root(self) -> Path:
         return self.section_root("java")
 
+    def go(self, key: str, default: Any = None) -> Any:
+        return self.config.get("go", key, default)
+
+    def go_root(self) -> Path:
+        return self.section_root("go")
+
     def changed_under(self, folder: Path, suffixes: tuple[str, ...]) -> list[str]:
         relative = folder.relative_to(self.root)
         paths = {path for path in self.changed if matches(path, relative, suffixes)}

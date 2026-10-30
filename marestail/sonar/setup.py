@@ -118,6 +118,21 @@ def admin_client(password: str) -> Client:
     return Client(DEFAULT_URL, ADMIN, password)
 
 
+def prune(key: str) -> None:
+    stored = credentials()
+    if stored is None:
+        raise SystemExit("sonar is not set up; run: marestail sonar setup")
+    _delete_found(Client(stored["url"], stored["token"]), key)
+
+
+def _delete_found(client: Client, key: str) -> None:
+    if not client.get("api/projects/search", projects=key).get("components"):
+        print(f"no sonar project {key}")
+        return
+    client.post("api/projects/delete", project=key)
+    print(f"deleted sonar project {key}")
+
+
 def ensure_project(admin: Client, key: str, name: str) -> None:
     existing = admin.get("api/projects/search", projects=key)["components"]
     if not existing:

@@ -9,7 +9,7 @@ from marestail.config import Config
 from marestail.context import Context, MutationScope
 from tests.conftest import FakeRun, commit_all, git, make_context
 
-LANGUAGES = ["python", "ts", "elixir", "ruby", "dotnet", "erlang", "rust", "java"]
+LANGUAGES = ["python", "ts", "elixir", "ruby", "dotnet", "erlang", "rust", "java", "go"]
 
 
 def tree(root: Path, *paths: str) -> None:

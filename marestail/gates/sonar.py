@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet, erlang, java, rust
+from marestail import dotnet, erlang, golang, java, run_suffix, rust
 from marestail.context import Context
 from marestail.javascript import tooling_file
 from marestail.report import Result, elapsed
@@ -79,18 +79,33 @@ def run_gate(ctx: Context) -> Result:
 
 
 def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
+    raw = ctx.config.get(SECTION, "project_key")
+    if _suffix_blocks(raw):
+        return Result(GATE, False, "no project key", [run_suffix.SONAR_KEY_REQUIRED])
     client = Client(creds["url"], creds["token"])
-    key = ctx.config.get(SECTION, "project_key")
-    code, output, task_file = scan(ctx, creds, key)
+    code, output, task_file = scan(ctx, creds, raw)
     if code != 0:
         return Result(GATE, False, "scanner failed", tail(output), elapsed(started))
     error = wait_for_analysis(client, task_file)
     if error:
         return Result(GATE, False, "analysis did not complete", [error, *analysis_tail(output)], elapsed(started))
+    key = _api_key(raw)
     collected, status = collect(ctx, client, key)
     extra = language_findings(ctx, client, key)
     findings = collected + extra
     return Result(GATE, not findings, summarize(ctx, findings, status), findings, elapsed(started))
+
+
+def _suffix_blocks(raw: Any) -> bool:
+    if raw:
+        return False
+    return run_suffix.current() is not None
+
+
+def _api_key(raw: Any) -> Any:
+    if not raw:
+        return raw
+    return run_suffix.named(str(raw))
 
 
 def analysis_tail(output: str) -> list[str]:
@@ -149,13 +164,35 @@ def docker_arguments(ctx: Context, creds: Credentials) -> list[str]:
 def scanner_properties(ctx: Context, key: str) -> list[str]:
     root = str(ctx.root)
     return [
-        f"-Dsonar.projectKey={key}",
+        f"-Dsonar.projectKey={run_suffix.named(str(key))}",
+        *_project_name_argument(ctx, key),
         f"-Dsonar.projectBaseDir={root}",
         f"-Dsonar.working.directory={root}/.marestail/scannerwork",
         f"-Dsonar.exclusions={scanner_exclusions(ctx)}",
         *settings_property(ctx),
         *java_properties(ctx),
+        *go_properties(ctx),
     ]
+
+
+def _project_name_argument(ctx: Context, key: str) -> list[str]:
+    if run_suffix.current() is None:
+        return []
+    return [f"-Dsonar.projectName={run_suffix.titled(_project_title(ctx, key))}"]
+
+
+def _project_title(ctx: Context, key: str) -> str:
+    configured = ctx.config.get(SECTION, "project_name")
+    if configured:
+        return str(configured)
+    return _properties_name(ctx) or str(key)
+
+
+def _properties_name(ctx: Context) -> str:
+    for name, value in project_properties(ctx):
+        if name == "sonar.projectName":
+            return value
+    return ""
 
 
 def settings_property(ctx: Context) -> list[str]:
@@ -190,8 +227,37 @@ def declared_properties(ctx: Context) -> set[str]:
 
 
 def scanner_exclusions(ctx: Context) -> str:
-    patterns = project_exclusions(ctx)
-    return ",".join(patterns if BENCHMARKS in patterns else [*patterns, BENCHMARKS])
+    return ",".join(with_go(ctx, with_benchmarks(project_exclusions(ctx))))
+
+
+def with_benchmarks(patterns: list[str]) -> list[str]:
+    if BENCHMARKS in patterns:
+        return patterns
+    return [*patterns, BENCHMARKS]
+
+
+GO_EXCLUSIONS = ("**/*_test.go", "**/vendor/**", "**/testdata/**")
+
+
+def with_go(ctx: Context, patterns: list[str]) -> list[str]:
+    if ctx.config.section("go") is None:
+        return patterns
+    return [*patterns, *[item for item in GO_EXCLUSIONS if item not in patterns]]
+
+
+def go_properties(ctx: Context) -> list[str]:
+    if ctx.config.section("go") is None:
+        return []
+    declared = declared_properties(ctx)
+    return [f"-D{name}={value}" for name, value in go_values(ctx).items() if name not in declared]
+
+
+def go_values(ctx: Context) -> dict[str, str]:
+    values = {"sonar.go.coverage.reportPaths": str(ctx.work / "go-sonar-cover.out")}
+    patterns = golang.listify(ctx.go("coverage_exclude"))
+    if patterns:
+        values["sonar.coverage.exclusions"] = ",".join(patterns)
+    return values
 
 
 def project_exclusions(ctx: Context) -> list[str]:
@@ -262,7 +328,6 @@ def build_target(ctx: Context, product: Path | None) -> Path | None:
 
 
 def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, build: Path | None) -> Path:
-    name = ctx.config.get(SECTION, "project_name", key)
     script = ctx.work / "sonar-dotnet.sh"
     script.write_text(
         "\n".join(
@@ -270,7 +335,7 @@ def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, b
                 "set -e",
                 f'export PATH="$PATH:{tools}"',
                 f'cd "{ctx.root}" && rm -rf .sonarqube',
-                f'{DOTNET_SCANNER} begin /k:"{key}" /n:"{name}" /s:"{write_settings(ctx)}" /d:sonar.host.url="{creds["url"]}" /d:sonar.token="$SONAR_TOKEN" /d:sonar.projectBaseDir="{ctx.root}"',
+                _begin_scan(ctx, creds, key),
                 f'dotnet build "{build}" -t:Rebuild --nologo',
                 f'{DOTNET_SCANNER} end /d:sonar.token="$SONAR_TOKEN"',
                 "",
@@ -278,6 +343,21 @@ def write_scan_script(ctx: Context, creds: Credentials, key: str, tools: Path, b
         )
     )
     return script
+
+
+def _begin_scan(ctx: Context, creds: Credentials, key: str) -> str:
+    name = ctx.config.get(SECTION, "project_name", key)
+    flags = " ".join(
+        [
+            f'/k:"{run_suffix.named(key)}"',
+            f'/n:"{run_suffix.titled(str(name))}"',
+            f'/s:"{write_settings(ctx)}"',
+            f'/d:sonar.host.url="{creds["url"]}"',
+            '/d:sonar.token="$SONAR_TOKEN"',
+            f'/d:sonar.projectBaseDir="{ctx.root}"',
+        ]
+    )
+    return f"{DOTNET_SCANNER} begin {flags}"
 
 
 def write_settings(ctx: Context) -> Path:
@@ -340,6 +420,10 @@ def java_where(ctx: Context) -> str:
     return java.rel(ctx, ctx.java_root())
 
 
+def go_where(ctx: Context) -> str:
+    return golang.rel(ctx, ctx.go_root())
+
+
 LANGUAGE_CHECKS = (
     LanguageCheck(
         "dotnet",
@@ -372,6 +456,14 @@ LANGUAGE_CHECKS = (
         java_where,
         "; put the sources in sonar.sources",
         "marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists",
+    ),
+    LanguageCheck(
+        "go",
+        "go=",
+        "Go",
+        go_where,
+        "; put the module in sonar.sources",
+        "marestail.toml:1 SonarQube imported no go coverage; run go.tests first so .marestail/go-sonar-cover.out exists",
     ),
 )
 

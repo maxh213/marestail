@@ -2,11 +2,12 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote mutation box, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, the queue, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote mutation box, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
     marestail.cli
+    marestail.queue
     marestail.runner : marestail.install : marestail.route : marestail.perf : marestail.sonar.setup : marestail.backends
     marestail._hyper
     marestail._install | marestail._tooling
@@ -15,9 +16,9 @@ layers =
     marestail.gates
     marestail.remote
     marestail.depth : marestail.graph
-    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
-    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice
-    marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events
+    marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.golang : marestail.javascript : marestail.elixir
+    marestail.context : marestail.pipeline : marestail.freeze : marestail.sonar.client : marestail.timeline : marestail.ran_against : marestail.worktree : marestail.nice : marestail.status : marestail.jobs
+    marestail.report : marestail.config : marestail.changes : marestail._location : marestail.task_file : marestail.events : marestail.run_suffix
     marestail.shell
 
 [importlinter:contract:gates-do-not-reach-up]
@@ -57,12 +58,14 @@ source_modules =
     marestail._location
     marestail.task_file
     marestail.events
+    marestail.run_suffix
     marestail.pipeline
     marestail.freeze
     marestail.sonar.client
     marestail.timeline
     marestail.ran_against
     marestail.worktree
+    marestail.status
 forbidden_modules =
     marestail.hunks
     marestail.gates
@@ -87,6 +90,7 @@ forbidden_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
     marestail.sonar.setup
@@ -101,6 +105,7 @@ source_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
 forbidden_modules =
@@ -153,6 +158,7 @@ allowed_importers =
     marestail.gates.java_crap
     marestail.gates.ex_crap
     marestail.gates.er_crap
+    marestail.gates.go_crap
 
 [importlinter:contract:hyper-crap-above-crap]
 name = Hyper CRAP builds on CRAP scoring, never the other way
@@ -194,6 +200,11 @@ modules =
     marestail.gates.ex_lint
     marestail.gates.ex_mutation
     marestail.gates.ex_tests
+    marestail.gates.go_crap
+    marestail.gates.go_deps
+    marestail.gates.go_lint
+    marestail.gates.go_mutation
+    marestail.gates.go_tests
     marestail.gates.java_crap
     marestail.gates.java_deps
     marestail.gates.java_lint
@@ -499,13 +510,22 @@ forbidden_modules =
     marestail.timeline
 
 [importlinter:contract:pipeline-belongs-to-orchestration]
-name = The role list and how a scope reshapes it are known only to the runner and the prompt builder
+name = The role list and how a scope reshapes it are known only to the runner, the prompt builder and the queue
 type = protected
 protected_modules =
     marestail.pipeline
 allowed_importers =
     marestail.runner
     marestail.prompts
+    marestail.queue
+
+[importlinter:contract:queue-does-not-import-the-runner]
+name = The queue starts marestail run as a child process and does not import the runner
+type = forbidden
+source_modules =
+    marestail.queue
+forbidden_modules =
+    marestail.runner
 
 [importlinter:contract:nice-belongs-to-a-run]
 name = The run's priority, I/O class and OOM score are set only by the runner
@@ -610,6 +630,7 @@ forbidden_modules =
     marestail.java
     marestail.ruby
     marestail.rust
+    marestail.golang
     marestail.javascript
     marestail.elixir
     marestail.depth

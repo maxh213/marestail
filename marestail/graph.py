@@ -41,6 +41,7 @@ def render(config: Config) -> str:
             dotnet_graph(config),
             rust_graph(config),
             java_graph(config),
+            go_graph(config),
         ]
         if part
     )
@@ -169,6 +170,36 @@ def java_body(ctx: Context, files: list[Path]) -> str:
 
     data, error = java.scan(ctx, DEPS, files)
     return error or deps_lines(data)
+
+
+def go_graph(config: Config) -> str:
+    from marestail import golang
+
+    return scanned_graph(config, "go", "Go", golang.sources, go_body)
+
+
+def go_body(ctx: Context, files: list[Path]) -> str:
+    from marestail import golang
+
+    records, error = golang.scan(ctx, "imports", files)
+    if error:
+        return error
+    return go_lines(ctx, golang.module(ctx), records or [])
+
+
+def go_lines(ctx: Context, module: str, records: list[Any]) -> str:
+    from marestail import golang
+
+    return LINE_JOIN.join(
+        go_edge(ctx, module, record) for record in records if golang.import_folder(ctx, module, record["path"]) is not None
+    )
+
+
+def go_edge(ctx: Context, module: str, record: dict[str, Any]) -> str:
+    from marestail import golang
+
+    folder = golang.import_folder(ctx, module, record["path"])
+    return f"{golang.rel(ctx, record['file'])} -> {folder} ({record['path']})"
 
 
 def erlang_graph(config: Config) -> str:

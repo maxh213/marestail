@@ -5,7 +5,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from marestail import remote
+from marestail import jobs, remote
 from marestail.context import NO_CHANGED_MUTANTS, Context, MutationScope
 from marestail.elixir import project_files
 from marestail.report import Result, elapsed, mutation_summary
@@ -82,7 +82,7 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
         GATE,
         lambda workers: guarded(ctx, command(ctx, files, workers)),
         root,
-        ctx.elixir("muex_concurrency", 4),
+        jobs.pick(ctx.config, "elixir", "muex_concurrency", 4),
         env={"MIX_ENV": "test"},
         timeout=mutation_timeout(ctx),
     )

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from marestail import config as config_module
+from marestail import run_suffix
 from marestail.config import Config
 from marestail.freeze import matches_any
 from marestail.perf import image as perf_image
@@ -38,6 +39,7 @@ __all__ = [
 ]
 
 DEFAULT_PREFIX = "marestail-perf-"
+RUN_SUFFIX_LABEL = "marestail.run-suffix"
 DEFAULT_VOLUME = "marestail-perf-pgdata"
 DEFAULT_PORT = 55432
 DEFAULT_MIN_FREE_GB = 50
@@ -93,6 +95,7 @@ class Database:
     prefix: str
     volume: str
     home: Path
+    suffix: str | None = None
 
     @property
     def repo_key(self) -> str:
@@ -100,22 +103,23 @@ class Database:
 
     @property
     def helper(self) -> str:
-        return f"{self.prefix}files"
+        return _with_suffix(f"{self.prefix}files", self.suffix)
 
     def tree_container(self, tree: str) -> str:
-        return f"{self.prefix}db-{self.repo_key}-{tree}"
+        return _with_suffix(f"{self.prefix}db-{self.repo_key}-{tree}", self.suffix)
 
     def golden_container(self, name: str) -> str:
-        return f"{self.prefix}golden-{name}"
+        return _with_suffix(f"{self.prefix}golden-{name}", self.suffix)
 
     def tree_port(self, tree: str) -> int:
         return self.port + TREE_PORT_OFFSETS[tree]
 
     def work_dir(self, tree: str) -> str:
-        return f"/perf/work/{self.repo_key}-{tree}"
+        return _with_suffix(f"/perf/work/{self.repo_key}-{tree}", self.suffix)
 
 
 def build_database(config: Config, section: dict[str, Any], rows: int, rows_source: str, image: str, image_source: str) -> Database:
+    suffix = run_suffix.current()
     return Database(
         root=config.root,
         migrate=str(section.get(MIGRATE, EMPTY)),
@@ -127,11 +131,42 @@ def build_database(config: Config, section: dict[str, Any], rows: int, rows_sour
         min_free_gb=float(section.get("min_free_gb", DEFAULT_MIN_FREE_GB)),
         image=image,
         image_source=image_source,
-        port=int(os.environ.get("MARESTAIL_PERF_DB_PORT", section.get("port", DEFAULT_PORT))),
+        port=_host_port(section, suffix),
         prefix=os.environ.get("MARESTAIL_PERF_DB_PREFIX", DEFAULT_PREFIX),
         volume=os.environ.get("MARESTAIL_PERF_DB_VOLUME", DEFAULT_VOLUME),
         home=Path(os.environ.get("MARESTAIL_PERF_DB_HOME", Path.home() / ".config" / "marestail")),
+        suffix=suffix,
     )
+
+
+def _with_suffix(name: str, suffix: str | None) -> str:
+    if suffix is None:
+        return name
+    return f"{name}_{suffix}"
+
+
+def _host_port(section: dict[str, Any], suffix: str | None) -> int:
+    given = os.environ.get("MARESTAIL_PERF_DB_PORT")
+    if given is not None:
+        return int(given)
+    return int(section.get("port", DEFAULT_PORT)) + len(TREE_PORT_OFFSETS) * _port_slot(suffix)
+
+
+def _port_slot(suffix: str | None) -> int:
+    if suffix is None:
+        return 0
+    hashed = int(hashlib.sha256(suffix.encode()).hexdigest()[:8], 16)
+    return 1 + (hashed % 1000)
+
+
+def _run_label(database: Database) -> list[str]:
+    if database.suffix is None:
+        return []
+    return ["--label", _suffix_label(database)]
+
+
+def _suffix_label(database: Database) -> str:
+    return f"{RUN_SUFFIX_LABEL}={database.suffix}"
 
 
 MILLISECONDS = 1000
@@ -246,7 +281,18 @@ def ensure_helper(database: Database) -> None:
     ensure_image(database, image)
     step(
         docker(
-            database, "run", "-d", "--name", database.helper, "-v", f"{database.volume}:/perf", "--entrypoint", "sleep", image, "infinity"
+            database,
+            "run",
+            "-d",
+            "--name",
+            database.helper,
+            *_run_label(database),
+            "-v",
+            f"{database.volume}:/perf",
+            "--entrypoint",
+            "sleep",
+            image,
+            "infinity",
         ),
         "starting the file helper",
     )
@@ -301,6 +347,7 @@ def start_postgres(database: Database, name: str, pgdata: str, port: int | None,
             "-d",
             "--name",
             name,
+            *_run_label(database),
             "-v",
             f"{database.volume}:/perf",
             "-p",
@@ -707,11 +754,26 @@ def prune(database: Database, needed: set[str]) -> list[str]:
 
 
 def down(database: Database) -> list[str]:
-    _, output = docker(database, "ps", "-a", "--format", "{{.Names}}")
-    names = [name for name in output.split() if name.startswith(database.prefix)]
+    names = _down_names(database)
     for name in names:
         remove_container(database, name)
     return names
+
+
+def _down_names(database: Database) -> list[str]:
+    if database.suffix is None:
+        return _prefixed_names(database)
+    return _labelled_names(database)
+
+
+def _prefixed_names(database: Database) -> list[str]:
+    _, output = docker(database, "ps", "-a", "--format", "{{.Names}}")
+    return [name for name in output.split() if name.startswith(database.prefix)]
+
+
+def _labelled_names(database: Database) -> list[str]:
+    _, output = docker(database, "ps", "-a", "--filter", f"label={_suffix_label(database)}", "--format", "{{.Names}}")
+    return output.split()
 
 
 @dataclass(frozen=True)
