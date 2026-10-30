@@ -21,12 +21,7 @@ from marestail import cli, graph, report, route
 from marestail import config as config_module
 from marestail.gates import comments, configured_gates, py_mutation, py_runtime
 from marestail.report import Result
-from tests.conftest import ForbiddenCallError, checked, make_context, untimed
-
-
-def repo_root() -> Path:
-    return Path(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip())
-
+from tests.conftest import ForbiddenCallError, checked, make_context, repo_root, untimed
 
 ROOT = repo_root()
 ROUTE_SCRIPT = "test-route.py"
@@ -550,7 +545,7 @@ def test_full_tier_runs_mutation_before_sonar() -> None:
     assert "py.mutation" in names
 
 
-def test_repo_root_is_the_git_toplevel() -> None:
+def test_repo_root_is_the_folder_with_marestail_toml() -> None:
     assert repo_root() == ROOT
     assert (ROOT / "marestail.toml").is_file()
 

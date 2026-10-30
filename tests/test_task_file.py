@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 from marestail import install, task_file
+from tests.conftest import repo_root
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 NO_FRONT = "no front matter: line 1 must be +++"
 UNCLOSED = "front matter is not closed: no +++ line after line 1"
 BAD_VALUE = "front matter is not valid TOML: Invalid value (at line 1, column 12)"

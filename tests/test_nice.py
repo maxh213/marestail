@@ -9,8 +9,9 @@ import pytest
 
 from marestail import nice
 from marestail.config import Config
+from tests.conftest import repo_root
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 REAL_SCORE_PATH = nice._score_path
 PARAGRAPH = (
     "`marestail run` starts at nice 19 with idle I/O and a raised OOM score, so a fleet of pipelines "

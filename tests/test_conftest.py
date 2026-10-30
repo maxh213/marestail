@@ -9,6 +9,9 @@ import pytest
 from marestail.report import Result
 from tests import conftest
 
+NO_CHECKOUT = conftest.git_toplevel() is None
+NO_CHECKOUT_REASON = "needs a git checkout; the remote box syncs the tree without .git"
+
 
 def test_clock_advances_from_the_start_by_the_step() -> None:
     clock = conftest.Clock(10.0, 0.5)
@@ -88,12 +91,14 @@ def test_required_timeout_rejects_none() -> None:
         conftest.required_timeout(None)
 
 
+@pytest.mark.skipif(NO_CHECKOUT, reason=NO_CHECKOUT_REASON)
 def test_git_try_show_toplevel() -> None:
     completed = conftest.git_try("rev-parse", "--show-toplevel")
     assert completed.returncode == 0
     assert Path(completed.stdout.strip()).is_dir()
 
 
+@pytest.mark.skipif(NO_CHECKOUT, reason=NO_CHECKOUT_REASON)
 def test_git_toplevel_is_this_repo() -> None:
     root = conftest.git_toplevel()
     assert root is not None

@@ -37,3 +37,4 @@ max-complexity = 4
 
 [tool.mutmut]
 source_paths = ["marestail"]
+also_copy = ["roles", "templates"]

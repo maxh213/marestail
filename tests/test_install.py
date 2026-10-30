@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 
 from marestail import _guidance, _hyper, _install, install
+from tests.conftest import repo_root
 
 TEMPLATES = _install.TEMPLATES
 GATE = {"type": "command", "command": "marestail gate --hook", "timeout": 900}
 CURSOR_GATE = {"command": "marestail gate --hook", "timeout": 900, "loop_limit": 5}
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 INSTALLED_DIRECTORIES = [
     ".agents",
     ".claude",
@@ -518,7 +519,7 @@ def test_install_fetches_playwright_only_when_visual_is_on(
     fake = fake_run(_install)
     assert install.install(target) == 0
     assert fake.calls == steps
-    assert all(option["cwd"] == ROOT / "marestail" / "js" for option in fake.options)
+    assert all(option["cwd"] == _install.JS_DIR for option in fake.options)
     assert all(option["timeout"] == 1800 for option in fake.options)
 
 

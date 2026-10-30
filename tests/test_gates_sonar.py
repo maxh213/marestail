@@ -8,7 +8,7 @@ import pytest
 from marestail import dotnet
 from marestail.gates import sonar
 from marestail.sonar.client import Client
-from tests.conftest import checked, make_context, reject_none, untimed
+from tests.conftest import checked, make_context, reject_none, repo_root, untimed
 
 CREDS = {"url": "http://sonar:9000", "token": "tok"}
 KEY = "proj"
@@ -302,7 +302,7 @@ def declared_exclusions(text: str) -> list[str]:
 
 
 def test_this_repo_scanner_exclusions_follow_the_properties_file() -> None:
-    root = Path(__file__).resolve().parent.parent
+    root = repo_root()
     declared = declared_exclusions((root / "sonar-project.properties").read_text())
     assert "perf/**" in declared
     assert sonar.scanner_exclusions(make_context(root)).split(",") == declared

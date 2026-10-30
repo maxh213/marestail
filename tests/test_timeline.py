@@ -16,10 +16,10 @@ from marestail.pipeline import Judge, Worker
 from marestail.report import Result
 from marestail.route import Choice
 from marestail.runner import JudgeProgress, Run
-from tests.conftest import commit_all, git, make_context
+from tests.conftest import commit_all, git, make_context, repo_root
 from tests.test_green_repo import restricted_path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 CODER = Worker("coder", None)
 CRITIC = Judge("critic", None, bounce_to="specifier")
 

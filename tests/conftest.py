@@ -131,6 +131,10 @@ def commit_all(root: Path, message: str = "commit") -> None:
     git(root, "commit", "-q", "--allow-empty", "-m", message)
 
 
+def repo_root() -> Path:
+    return next(folder for folder in Path(__file__).resolve().parents if (folder / "marestail.toml").is_file())
+
+
 def make_context(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -> Context:
     return Context(config=Config(root=root, raw=raw or {}), **fields)
 

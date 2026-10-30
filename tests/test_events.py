@@ -27,10 +27,11 @@ from marestail.pipeline import Judge, Step
 from marestail.report import Result
 from marestail.route import Choice
 from marestail.runner import Run
+from tests.conftest import repo_root
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 PY = sys.executable
-CLI = str(ROOT / "marestail" / "cli.py")
+CLI = str(Path(events.__file__).resolve().with_name("cli.py"))
 ENV_KEYS = (
     "MARESTAIL_AGENT",
     "MARESTAIL_NICE",

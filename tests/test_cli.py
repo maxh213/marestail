@@ -23,7 +23,7 @@ from marestail.gates import Gate, visual
 from marestail.perf import db, samples
 from marestail.report import Result, to_json
 from marestail.sonar import setup
-from tests.conftest import make_context
+from tests.conftest import make_context, repo_root
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
@@ -1134,7 +1134,7 @@ def test_perf_tree_and_db_commands_are_required() -> None:
 
 
 def test_readme_scope_section_describes_hyper_next_to_changed_and_hard() -> None:
-    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+    readme = (repo_root() / "README.md").read_text()
     difference = (
         "In one line: `changed` gates the files the diff touches, `hard` gates the focus paths as fully changed and nothing else, "
         "and `hyper` gates only the lines the diff touches."

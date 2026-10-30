@@ -8,10 +8,10 @@ import pytest
 
 from marestail import _hyper, _install, _tooling, install, runner, shell
 from marestail.config import Config
-from tests.conftest import commit_all, git
+from tests.conftest import commit_all, git, repo_root
 
 TEMPLATES = _install.TEMPLATES
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = repo_root()
 TOOLED = {"root": "web", "tooling": ".marestail/tooling"}
 NPM = ["npm", "install", "--prefix", ".marestail/tooling"]
 
