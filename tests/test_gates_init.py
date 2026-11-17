@@ -164,14 +164,16 @@ def test_skip_list(raw: dict[str, object], expected: set[str], tmp_path: Path) -
 
 @pytest.mark.parametrize("skip", ["ts.mutation", [1], ["ts.mutation", None], {"ts.mutation": True}])
 def test_skip_list_refuses_anything_but_a_list_of_names(skip: object, tmp_path: Path) -> None:
+    config = config_with({"gates": {"skip": skip}}, tmp_path)
     with pytest.raises(SystemExit) as raised:
-        gates.skip_list(config_with({"gates": {"skip": skip}}, tmp_path))
+        gates.skip_list(config)
     assert str(raised.value) == '[gates] skip must be a list of gate names, for example skip = ["ts.mutation"]'
 
 
 def test_skip_list_refuses_names_that_are_not_gates(tmp_path: Path) -> None:
+    config = config_with({"gates": {"skip": ["ts.mutations", "sonar", "a.b"]}}, tmp_path)
     with pytest.raises(SystemExit) as raised:
-        gates.skip_list(config_with({"gates": {"skip": ["ts.mutations", "sonar", "a.b"]}}, tmp_path))
+        gates.skip_list(config)
     message = str(raised.value)
     assert message.startswith("[gates] skip names gates that do not exist: a.b, ts.mutations; known gates: comments, cs.crap, ")
     assert message.endswith(", ts.tests, visual")
