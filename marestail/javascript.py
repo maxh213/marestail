@@ -22,6 +22,7 @@ __all__ = [
     "rel",
     "scan",
     "tool",
+    "tooling",
     "tooling_file",
 ]
 

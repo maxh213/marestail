@@ -63,6 +63,72 @@ def test_vitest_command_with_tooling(tmp_path: Path) -> None:
     assert ts_tests.vitest_command(ctx)[:5] == [vitest, "run", "--config", str(folder / "vitest.config.ts"), "--coverage.enabled=true"]
 
 
+COVERAGE_ALL = ["--coverage.all=true"]
+SOURCE_INCLUDE = ["--coverage.include=src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"]
+TOOLED = {"ts": {"tooling": ".marestail/tooling"}}
+
+
+def install_vitest(folder: Path, version: str | None) -> None:
+    (folder / "node_modules" / "vitest").mkdir(parents=True)
+    manifest = {"name": "vitest"} if version is None else {"name": "vitest", "version": version}
+    (folder / "node_modules" / "vitest" / "package.json").write_text(json.dumps(manifest))
+
+
+def test_vitest_4_and_later_include_the_ts_sources_in_place_of_coverage_all(tmp_path: Path) -> None:
+    tooling = tmp_path / ".marestail" / "tooling"
+    install_vitest(tooling, "5.0.5")
+    ctx = make_context(tmp_path, {"ts": {"sources": ["packages", "apps"], "source": "x", "tooling": ".marestail/tooling"}})
+
+    assert ts_tests.vitest_command(ctx) == [
+        str(tooling / "node_modules" / ".bin" / "vitest"),
+        "run",
+        "--coverage.enabled=true",
+        "--coverage.include=packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+        "--coverage.include=apps/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+        "--coverage.reporter=json",
+        "--coverage.reporter=lcov",
+        f"--coverage.reportsDirectory={tmp_path / '.marestail' / 'ts-coverage'}",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("version", "flags"),
+    [
+        ("3.2.7", COVERAGE_ALL),
+        ("4.0.0", SOURCE_INCLUDE),
+        ("4.0.0-beta.3", SOURCE_INCLUDE),
+        ("10.1.0", SOURCE_INCLUDE),
+        ("", COVERAGE_ALL),
+        ("next", COVERAGE_ALL),
+        (None, COVERAGE_ALL),
+    ],
+)
+def test_untested_files_follow_the_tooling_vitest_major(tmp_path: Path, version: str | None, flags: list[str]) -> None:
+    install_vitest(tmp_path / ".marestail" / "tooling", version)
+
+    assert ts_tests.untested_files(make_context(tmp_path, TOOLED)) == flags
+
+
+def test_untested_files_read_the_tooling_vitest_not_the_repos(tmp_path: Path) -> None:
+    install_vitest(tmp_path, "5.0.5")
+    install_vitest(tmp_path / ".marestail" / "tooling", "3.2.7")
+
+    assert ts_tests.untested_files(make_context(tmp_path, TOOLED)) == COVERAGE_ALL
+
+
+def test_untested_files_without_tooling_read_the_vitest_npx_finds(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "web").mkdir(parents=True)
+    install_vitest(tmp_path, "5.0.5")
+    ctx = make_context(repo, TS)
+
+    assert ts_tests.untested_files(ctx) == COVERAGE_ALL
+    install_vitest(repo, "4.1.0")
+    assert ts_tests.untested_files(ctx) == SOURCE_INCLUDE
+    install_vitest(repo / "web", "3.2.7")
+    assert ts_tests.untested_files(ctx) == COVERAGE_ALL
+
+
 def test_jest_command_ignores_tooling(tmp_path: Path) -> None:
     ctx = make_context(tmp_path, {"ts": {"runner": "jest", "tooling": ".marestail/tooling"}})
 

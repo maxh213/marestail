@@ -1,7 +1,7 @@
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -33,14 +33,18 @@ BASE_DEPENDENCIES = {
 }
 VITEST_DEPENDENCIES = {"@stryker-mutator/vitest-runner": STRYKER_VERSION, "@vitest/coverage-v8": "^3.2.0", "vitest": "^3.2.0"}
 JEST_DEPENDENCIES = {"@stryker-mutator/jest-runner": STRYKER_VERSION}
+OVERRIDES = "marestail.toml [tooling]"
+NOT_A_TABLE = f'{OVERRIDES} must be a table of package = "version" lines, got {{shown}}'
+NOT_A_VERSION = f'{OVERRIDES} {{name}} must be a non-empty version string such as "5.0.5", got {{shown}}'
 
-__all__ = ["TOOLING", "Tooling", "write_tooling"]
+__all__ = ["TOOLING", "Tooling", "overrides", "write_tooling"]
 
 
 @dataclass(frozen=True)
 class Tooling:
     target: Path
     ts: dict[str, Any]
+    overrides: dict[str, str] = field(default_factory=dict)
 
     @property
     def folder(self) -> Path:
@@ -82,6 +86,20 @@ class Tooling:
         return json_list([pattern.replace(SOURCE, source) for pattern in patterns for source in self.sources])
 
 
+def overrides(table: object) -> dict[str, str]:
+    if table is None:
+        return {}
+    if not isinstance(table, dict):
+        raise SystemExit(NOT_A_TABLE.format(shown=repr(table)))
+    return {str(name): version(str(name), value) for name, value in table.items()}
+
+
+def version(name: str, value: object) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    raise SystemExit(NOT_A_VERSION.format(name=name, shown=repr(value)))
+
+
 def json_list(items: list[str]) -> str:
     return "[" + ", ".join(json.dumps(item) for item in items) + "]"
 
@@ -95,7 +113,7 @@ def fill(name: str, values: dict[str, str]) -> str:
 
 def package_json(tooling: Tooling) -> str:
     extra = JEST_DEPENDENCIES if tooling.jest else VITEST_DEPENDENCIES
-    dependencies = dict(sorted({**BASE_DEPENDENCIES, **extra}.items()))
+    dependencies = dict(sorted({**BASE_DEPENDENCIES, **extra, **tooling.overrides}.items()))
     return json.dumps({"name": "marestail-tooling", "private": True, "devDependencies": dependencies}, indent=2) + "\n"
 
 

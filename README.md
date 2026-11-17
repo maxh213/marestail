@@ -154,6 +154,16 @@ It does everything `--scope hard` does and then goes further. It changes no trac
 
 TypeScript tooling lives out of tree under `.marestail/tooling`: its own `package.json` and `node_modules`, installed with `npm install --prefix .marestail/tooling` (npm's output goes to `.marestail/tooling/npm.log`). It also holds the ESLint, tsconfig, dependency-cruiser, Stryker, knip, Vitest and Sonar configs, except for any kind the repo already has. The target's own `package.json` and lockfile are not touched. A new `marestail.toml` gets `[ts] tooling = ".marestail/tooling"`. With that key set, every gate runs the binaries in `.marestail/tooling/node_modules/.bin` and passes the tooling configs by path: ESLint `-c`, `tsc -p`, depcruise `--config`, the Stryker config argument, knip `--config`, vitest `--config`, the complexity, depth and comments scanners' `typescript` lookup, and Sonar's `-Dproject.settings=`. A config missing from `.marestail/tooling` falls back to the repo's own. A jest repo keeps its own jest. An existing `marestail.toml` is never edited, and install prints a line telling you to add the key. With the key unset, every gate looks where it looks today.
 
+An optional `[tooling]` table overrides the versions in that `package.json`. Each line maps a package to an npm version, and install merges the table over marestail's own list; a package marestail does not install is added. A repo whose own Vitest is newer than marestail's pins the tooling to it, as eu-parasol does for Vitest 5:
+
+```toml
+[tooling]
+vitest = "5.0.5"
+"@vitest/coverage-v8" = "5.0.5"
+```
+
+With no table, nothing changes. A value that is not a non-empty string stops install before the tooling is written, with `marestail.toml [tooling] vitest must be a non-empty version string such as "5.0.5", got 5`. Run install again after changing the table. `ts.tests` reads the version of the Vitest it runs: the tooling's, or with no `[ts] tooling`, the nearest `node_modules/vitest` from `[ts] root` up to the repo root. Below 4 it passes `--coverage.all=true`. Vitest 4 removed that option, so from 4 on it passes `--coverage.include=<source>/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` for each `[ts]` source, and a file no test loads still counts against 100% coverage. Stryker's Vitest runner loads the repo's own Vitest when the repo has one, and the tooling's otherwise, so pin the tooling to the repo's version and `ts.tests` and `ts.mutation` run the same Vitest. The remote mutation box installs the tooling with `npm ci` from the synced `package.json` and `package-lock.json`, so it gets the override once the local install has rewritten the lock.
+
 The Claude Stop hook goes to `.claude/settings.local.json`. A hook file that is already tracked is left alone, and install says `no Stop hook for <backend>`. The runner already untracks any excluded file a worker force-adds, so marestail files cannot slip into a commit during a run.
 
 A reviewer of the pull request sees only the fix and its tests. They will not see `marestail.toml`, Sonar properties, guidance, task files, tool configs, a lockfile, a `.gitignore` block or agent docs. A repository that already committed marestail files keeps them, because hyper removes nothing. Python targets still keep their venv and their tool lookups where they are today; moving those out of tree is left for a later task.

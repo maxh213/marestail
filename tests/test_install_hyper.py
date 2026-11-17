@@ -324,7 +324,32 @@ def test_apply_local_hooks_skips_tracked_files(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("text", "expected"), [("[ts]\nroot = 'web'\n", {"root": "web"}), ("ts = 1\n", {}), ("[git]\n", {})])
 def test_ts_section(tmp_path: Path, text: str, expected: dict[str, Any]) -> None:
     (tmp_path / "marestail.toml").write_text(text)
-    assert _hyper.ts_section(tmp_path) == expected
+    assert _hyper.ts_section(_hyper.read_settings(tmp_path)) == expected
+
+
+def test_hyper_install_writes_the_tooling_overrides(seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    npm = fake_npm(monkeypatch)
+    (seeded / "marestail.toml").write_text(
+        '[ts]\ntooling = ".marestail/tooling"\n\n[tooling]\nvitest = "5.0.5"\n"@vitest/coverage-v8" = "5.0.5"\n'
+    )
+
+    assert _hyper.install_hyper(seeded) == 0
+
+    dependencies = json.loads((seeded / ".marestail" / "tooling" / "package.json").read_text())["devDependencies"]
+    assert (dependencies["vitest"], dependencies["@vitest/coverage-v8"], dependencies["typescript"]) == ("5.0.5", "5.0.5", "^5.8.0")
+    assert npm.calls == [(NPM, seeded, 1800)]
+
+
+def test_hyper_install_refuses_a_bad_override_before_npm(seeded: Path, grok: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    npm = fake_npm(monkeypatch)
+    (seeded / "marestail.toml").write_text('[ts]\ntooling = ".marestail/tooling"\n\n[tooling]\nvitest = 5\n')
+
+    with pytest.raises(SystemExit) as refused:
+        _hyper.install_hyper(seeded)
+
+    assert str(refused.value) == 'marestail.toml [tooling] vitest must be a non-empty version string such as "5.0.5", got 5'
+    assert not (seeded / ".marestail" / "tooling").exists()
+    assert npm.calls == []
 
 
 def test_tooling_defaults(tmp_path: Path) -> None:
@@ -396,6 +421,43 @@ def test_package_json_text_is_pinned(tmp_path: Path) -> None:
     assert _tooling.package_json(tooling(tmp_path, {"runner": "jest"})) == (
         head + '    "@stryker-mutator/jest-runner": "^10.1.1",\n' + tail + "\n  }\n}\n"
     )
+
+
+VITEST_5 = {"vitest": "5.0.5", "@vitest/coverage-v8": "5.0.5"}
+
+
+def test_package_json_takes_the_tooling_overrides(tmp_path: Path) -> None:
+    defaults = json.loads(_tooling.package_json(tooling(tmp_path)))["devDependencies"]
+    overridden = _tooling.Tooling(tmp_path, TOOLED, {**VITEST_5, "left-pad": "1.3.0"})
+
+    dependencies = json.loads(_tooling.package_json(overridden))["devDependencies"]
+
+    assert dependencies == {**defaults, **VITEST_5, "left-pad": "1.3.0"}
+    assert list(dependencies) == sorted(dependencies)
+    assert tooling(tmp_path).overrides == {}
+
+
+@pytest.mark.parametrize(("table", "expected"), [(None, {}), ({}, {}), (VITEST_5, VITEST_5), ({"knip": " 5.1.0"}, {"knip": " 5.1.0"})])
+def test_overrides_read_the_tooling_table(table: object, expected: dict[str, str]) -> None:
+    assert _tooling.overrides(table) == expected
+
+
+@pytest.mark.parametrize(
+    ("table", "shown"),
+    [
+        ({"vitest": 5}, 'vitest must be a non-empty version string such as "5.0.5", got 5'),
+        ({"vitest": ""}, "vitest must be a non-empty version string such as \"5.0.5\", got ''"),
+        ({"vitest": "  "}, "vitest must be a non-empty version string such as \"5.0.5\", got '  '"),
+        ({"@vitest/coverage-v8": ["5.0.5"]}, "@vitest/coverage-v8 must be a non-empty version string such as \"5.0.5\", got ['5.0.5']"),
+        ({"knip": "5", "vitest": True}, 'vitest must be a non-empty version string such as "5.0.5", got True'),
+        ("5.0.5", "must be a table of package = \"version\" lines, got '5.0.5'"),
+    ],
+)
+def test_overrides_refuse_anything_but_version_strings(table: object, shown: str) -> None:
+    with pytest.raises(SystemExit) as refused:
+        _tooling.overrides(table)
+
+    assert str(refused.value) == f"marestail.toml [tooling] {shown}"
 
 
 def test_tsconfig_types_follow_the_runner(tmp_path: Path) -> None:

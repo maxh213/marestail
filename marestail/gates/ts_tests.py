@@ -7,7 +7,7 @@ from typing import Any
 from marestail.context import Context
 from marestail.gates._coverage import TS_COVERAGE_DIR
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
-from marestail.javascript import config_flag, labelled, tool
+from marestail.javascript import config_flag, labelled, tool, tooling
 from marestail.report import Result, elapsed
 from marestail.shell import run, tail
 
@@ -31,6 +31,11 @@ PLAYWRIGHT_JSON = "PLAYWRIGHT_JSON_OUTPUT_NAME"
 FAILED_STATUSES = {"failed", "timedOut", "interrupted"}
 INVALID_REPORT = f"{JEST_RESULTS}:1 playwright JSON report is not valid JSON"
 UNREPORTED = {"status": "failed"}
+VITEST_MANIFEST = Path("node_modules") / "vitest" / "package.json"
+MAJOR = re.compile(r"\d+")
+WITHOUT_COVERAGE_ALL = 4
+COVERAGE_ALL = ["--coverage.all=true"]
+COVERED_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -143,15 +148,48 @@ def vitest_command(ctx: Context) -> list[str]:
         "run",
         *config_flag(ctx, "vitest.config.ts", "--config"),
         "--coverage.enabled=true",
-        "--coverage.all=true",
+        *untested_files(ctx),
         "--coverage.reporter=json",
         "--coverage.reporter=lcov",
         f"--coverage.reportsDirectory={report_dir}",
     ]
 
 
+def untested_files(ctx: Context) -> list[str]:
+    if vitest_major(ctx) < WITHOUT_COVERAGE_ALL:
+        return COVERAGE_ALL
+    return [f"--coverage.include={folder}/{COVERED_FILES}" for folder in ts_sources(ctx)]
+
+
+def vitest_major(ctx: Context) -> int:
+    found = vitest_manifest(ctx)
+    return 0 if found is None else major(str(json.loads(found.read_text()).get("version", EMPTY)))
+
+
+def vitest_manifest(ctx: Context) -> Path | None:
+    manifests = [home / VITEST_MANIFEST for home in vitest_homes(ctx)]
+    return next((manifest for manifest in manifests if manifest.exists()), None)
+
+
+def vitest_homes(ctx: Context) -> list[Path]:
+    folder = tooling(ctx)
+    if folder is not None:
+        return [folder]
+    root = ctx.ts_root()
+    return [root, *(parent for parent in root.parents if parent.is_relative_to(ctx.root))]
+
+
+def major(version: str) -> int:
+    found = MAJOR.match(version)
+    return 0 if found is None else int(found.group())
+
+
+def ts_sources(ctx: Context) -> list[str]:
+    return [str(folder) for folder in ctx.ts("sources") or [ctx.ts("source", "src")]]
+
+
 def jest_command(ctx: Context) -> list[str]:
-    sources = ctx.ts("sources") or [ctx.ts("source", "src")]
+    sources = ts_sources(ctx)
     return [
         str(ctx.ts_root() / "node_modules" / ".bin" / "jest"),
         "--ci",
@@ -178,7 +216,7 @@ def playwright_command(ctx: Context) -> list[str]:
     root = ctx.ts_root()
     coverage = ctx.work / COVERAGE_DIR
     coverage.mkdir(parents=True, exist_ok=True)
-    sources = ctx.ts("sources") or [ctx.ts("source", "src")]
+    sources = ts_sources(ctx)
     command = [
         str(root / "node_modules" / ".bin" / "c8"),
         "--reporter=json",

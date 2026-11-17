@@ -148,6 +148,9 @@ KNIP = """{
 """
 WEB_TOML = '[ts]\nroot = "web"\nsource = "src"\ntooling = ".marestail/tooling"\n'
 JEST_TOML = '[ts]\nroot = "web"\nrunner = "jest"\nsources = ["app"]\ntooling = ".marestail/tooling"\n'
+VITEST_5 = {"vitest": "5.0.5", "@vitest/coverage-v8": "5.0.5"}
+OVERRIDE_TOML = WEB_TOML + '\n[tooling]\nvitest = "5.0.5"\n"@vitest/coverage-v8" = "5.0.5"\n'
+BAD_OVERRIDE = "marestail.toml [tooling] vitest must be a non-empty version string such as \"5.0.5\", got ''\n"
 REPORTERS = ["--reporters", "json,progress", "--tempDirName", ".stryker-tmp", "--cleanTempDir", "always", "--dryRunTimeoutMinutes", "120"]
 
 
@@ -340,6 +343,26 @@ def tooling_files_per_source() -> None:
         knip = (box.tooling / "knip.json").read_text()
         expect("sources-knip", '"project": ["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"]' in knip, True)
         expect("sources-tsconfig", '"include": ["../../web/app", "../../web/lib"]' in (box.tooling / "tsconfig.json").read_text(), True)
+
+
+def tooling_overrides_reach_package_json() -> None:
+    with sandbox() as box:
+        (box.target / "marestail.toml").write_text(OVERRIDE_TOML)
+        done = box.hyper()
+        expect("override-exit", done.returncode, 0)
+        package = json.loads((box.tooling / "package.json").read_text())["devDependencies"]
+        expect("override-package", package, {**json.loads(PACKAGE)["devDependencies"], **VITEST_5})
+        expect("override-npm", box.npm_calls(), [f"{box.target}|install --prefix .marestail/tooling"])
+
+
+def bad_override_refused() -> None:
+    with sandbox() as box:
+        (box.target / "marestail.toml").write_text(WEB_TOML + '\n[tooling]\nvitest = ""\n')
+        done = box.hyper()
+        expect("bad-override-exit", done.returncode, 1)
+        expect("bad-override-stderr", done.stderr, BAD_OVERRIDE)
+        expect("bad-override-tooling", box.tooling.exists(), False)
+        expect("bad-override-npm", box.npm_calls(), [])
 
 
 def global_modules() -> str:
@@ -627,6 +650,8 @@ CASES = [
     tooling_lives_out_of_tree,
     tooling_files_pinned,
     tooling_files_per_source,
+    tooling_overrides_reach_package_json,
+    bad_override_refused,
     jest_target_gets_jest_runner,
     own_configs_not_duplicated,
     tracked_hook_left_alone,

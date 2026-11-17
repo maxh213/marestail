@@ -18,7 +18,7 @@ from marestail._install import (
     merge_hook,
     trust_grok_folder,
 )
-from marestail._tooling import TOOLING, Tooling, write_tooling
+from marestail._tooling import TOOLING, Tooling, overrides, write_tooling
 from marestail.shell import ensure_dir, run
 
 HYPER_START = "# marestail (install --scope hyper)"
@@ -71,9 +71,11 @@ def install_hyper(target: Path) -> int:
         return 1
     tracked = tracked_paths(target)
     write_hyper_tree(target, tracked)
+    settings = read_settings(target)
+    versions = overrides(settings.get("tooling"))
     skipped = apply_local_hooks(target, tracked)
-    ts = ts_section(target)
-    write_tooling(Tooling(target, ts))
+    ts = ts_section(settings)
+    write_tooling(Tooling(target, ts, versions))
     extend_exclude(target / exclude)
     trust_grok_folder(target)
     print_notes(tracked, skipped, ts)
@@ -142,9 +144,13 @@ def local_hook(target: Path, hook: Hook, tracked: set[str]) -> list[str]:
     return []
 
 
-def ts_section(target: Path) -> dict[str, Any]:
+def read_settings(target: Path) -> dict[str, Any]:
     with (target / CONFIG).open("rb") as handle:
-        ts = tomllib.load(handle).get("ts")
+        return tomllib.load(handle)
+
+
+def ts_section(settings: dict[str, Any]) -> dict[str, Any]:
+    ts = settings.get("ts")
     return ts if isinstance(ts, dict) else {}
 
 
