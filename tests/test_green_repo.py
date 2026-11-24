@@ -210,7 +210,7 @@ def test_this_repo_graph_starts_with_python_modules() -> None:
 
 def test_help_lists_every_subcommand() -> None:
     text = cli.build_parser().format_help()
-    listed = re.search(r"\{([a-z,]+)\}", text)
+    listed = re.search(r"\{([a-z,-]+)\}", text)
     assert listed is not None
     assert listed.group(1).split(",") == [
         "gate",
@@ -224,6 +224,8 @@ def test_help_lists_every_subcommand() -> None:
         "visual",
         "route",
         "remote",
+        "offload",
+        "shims-path",
         "graph",
         "depth",
     ]

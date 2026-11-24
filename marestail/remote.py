@@ -10,7 +10,7 @@ import tomllib
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -74,7 +74,8 @@ PREPARE = (
     "lock=$(sha256sum pnpm-lock.yaml | cut -c1-16); "
     'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
     "want=$(node -p \"(require('./package.json').packageManager || 'pnpm@latest').split('@')[1]\"); "
-    'npx --yes "pnpm@$want" install --frozen-lockfile --reporter=silent >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+    'out=$(npx --yes "pnpm@$want" install --frozen-lockfile --reporter=append-only 2>&1) '
+    '&& echo "$lock" > node_modules/.marestail-lock || { printf "%s\\n" "$out" >&2; exit 97; }; '
     "fi; fi"
 )
 TOOLING_PREPARE = (
@@ -95,7 +96,7 @@ for f in /var/lib/marestail/busy.d/*; do
   gate=$(echo "$args" | grep -oE 'MARESTAIL_GATE=[^ ]+' | head -1 | cut -d= -f2)
   tool=${gate:-$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)}
   state=running; q=$(pgrep -P "$p" -x flock) && ! pgrep -P "$q" >/dev/null && state=queued
-  echo "${repo:-?} ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
+  echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
 done
 echo "idle $(( $(date +%s) - $(stat -c %Y /var/lib/marestail/last) )) $(grep -oP '^IDLE_MIN=\K[0-9]+' /usr/local/bin/marestail-idle-check)"
 """
@@ -140,6 +141,7 @@ class _Job:
     timeout: int | None
     pull: tuple[str, ...]
     send: tuple[Path, ...] = ()
+    stream: bool = False
     fresh: tuple[str, ...] = ()
 
 
@@ -270,6 +272,14 @@ def run_job(
     return _offloaded(found, job)
 
 
+def run_streamed(ctx: Context, gate: str, build: Callable[[int], list[str]], cwd: Path, pull: tuple[str, ...]) -> Outcome:
+    found = _settings(ctx)
+    job = _Job(ctx, gate, build, cwd, 0, None, 7200, pull, stream=True)
+    if found is None:
+        return _locally(job, "")
+    return _offloaded(found, job)
+
+
 def _offloaded(found: Settings, job: _Job) -> Outcome:
     waits = _Waits(found)
     attempt = _attempt(found, job)
@@ -311,7 +321,20 @@ def _finished(found: Settings, job: _Job, attempt: _Try, waits: _Waits) -> Outco
 
 
 def _locally(job: _Job, where: str) -> Outcome:
-    return _local(job.build(job.workers), job.cwd, {**(job.env or {}), GUARD: "1"}, job.timeout, where)
+    env = {**(job.env or {}), GUARD: "1"}
+    command = job.build(job.workers)
+    if job.stream:
+        return Outcome(_passthrough(command, job.cwd, env), "", where)
+    return _local(command, job.cwd, env, job.timeout, where)
+
+
+def _passthrough(command: list[str], cwd: Path, env: dict[str, str]) -> int:
+    path = without_shims(os.environ.get("PATH", ""))
+    try:
+        return subprocess.run(command, cwd=cwd, env={**os.environ, **env, "PATH": path}, check=False).returncode
+    except FileNotFoundError:
+        _say(f"{command[0]}: not found")
+        return 127
 
 
 def without_shims(path: str) -> str:
@@ -346,6 +369,13 @@ def _unbounded(command: list[str], cwd: Path, env: dict[str, str] | None) -> tup
 
 
 def ensure_up(found: Settings) -> tuple[str | None, str]:
+    status, ip = describe(found)
+    if status == "RUNNING" and ip:
+        return _reachable(found, ip)
+    return _locked_boot(found)
+
+
+def _locked_boot(found: Settings) -> tuple[str | None, str]:
     LOCK.parent.mkdir(parents=True, exist_ok=True)
     with LOCK.open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -526,6 +556,8 @@ def _sent(found: Settings, ip: str, path: Path) -> str:
 
 def _execute(found: Settings, ip: str, job: _Job) -> tuple[int | None, str]:
     script = _script(found, job, job.build(found.workers.get(job.gate, job.workers)))
+    if job.stream:
+        return _streamed(found, ip, script)
     code, output = ssh(found, ip, script, timeout=(job.timeout * 3 + 120) if job.timeout else None, tty=True)
     return _concluded(code, output)
 
@@ -541,6 +573,53 @@ def _unfinished(code: int, output: str) -> tuple[int | None, str]:
     if code == TIMED_OUT and output.startswith(SSH_TIMEOUT):
         return code, output
     return None, output
+
+
+def _streamed(found: Settings, ip: str, script: str) -> tuple[int | None, str]:
+    relay = _Relay()
+    process = subprocess.Popen(
+        ["ssh", "-tt", "-q", *_ssh_options(found), f"{found.user}@{ip}", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+    )
+    try:
+        relay.feed_all(process.stdout or ())
+    finally:
+        process.kill()
+        returned = process.wait()
+    return relay.code, "" if relay.code is not None else f"ssh exit {returned}"
+
+
+class _Relay:
+    def __init__(self) -> None:
+        self.held = ""
+        self.code: int | None = None
+
+    def feed_all(self, lines: Iterable[str]) -> None:
+        for line in lines:
+            self.feed(clean(line))
+        sys.stdout.write(self.held)
+        sys.stdout.flush()
+
+    def feed(self, text: str) -> None:
+        if text.startswith(EXIT_MARK):
+            self.held, self.code = "", _exit_code(text)
+            return
+        sys.stdout.write(self.held + _shown(text))
+        self.held = "" if text.strip() else text
+        sys.stdout.flush()
+
+
+def _shown(text: str) -> str:
+    return text if text.strip() else ""
+
+
+def _exit_code(text: str) -> int | None:
+    value = text[len(EXIT_MARK) :].strip()
+    return int(value) if value.isdigit() else None
 
 
 def _script(found: Settings, job: _Job, command: list[str]) -> str:
@@ -607,7 +686,10 @@ def _prepare(ctx: Context, cwd: Path) -> str:
 
 def _node_install(root: Path, cwd: Path) -> list[str]:
     folder = _lock_folder(root, cwd)
-    return [] if folder is None else [f"( cd {shlex.quote(str(folder))} && {PREPARE} ) || exit 97"]
+    if folder is None:
+        return []
+    quoted = shlex.quote(str(folder))
+    return [f'( cd {quoted} && {PREPARE} ) || {{ echo "marestail: dependencies did not install in "{quoted} >&2; exit 97; }}']
 
 
 def _lock_folder(root: Path, cwd: Path) -> Path | None:

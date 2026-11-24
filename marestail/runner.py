@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from marestail import audit, backends, freeze, hunks, nice, practices, prompts, ran_against, reported, task_file, timeline
+from marestail import audit, backends, freeze, hunks, nice, offload, practices, prompts, ran_against, reported, task_file, timeline
 from marestail import config as config_module
 from marestail import events as events_module
 from marestail import route as dandelion
@@ -1812,9 +1812,10 @@ def backend_effort(state: Run) -> str | None:
 
 
 def agent_env(state: Run) -> dict[str, str]:
+    shimmed = offload.agent_env(state.config)
     if resolve_agent(state) == CLAUDE:
-        return {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", **state.account_env}
-    return dict(state.account_env)
+        return {**shimmed, "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", **state.account_env}
+    return {**shimmed, **state.account_env}
 
 
 def agent_command(state: Run) -> list[str]:

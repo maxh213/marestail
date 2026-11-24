@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from marestail import offload
 from marestail.config import Config
 from marestail.shell import clean
 
@@ -129,7 +130,7 @@ def spawn(command: list[str], state: AgentRun, env: Mapping[str, str], stdin: st
         return subprocess.run(
             command,
             cwd=state.config.root,
-            env=env,
+            env=shimmed(env, state.config),
             input=stdin,
             capture_output=True,
             text=True,
@@ -140,6 +141,11 @@ def spawn(command: list[str], state: AgentRun, env: Mapping[str, str], stdin: st
         return 127, f"{command[0]}: not found ({error})"
     except subprocess.TimeoutExpired:
         return 124, f"{shown}: timed out after {AGENT_TIMEOUT}s"
+
+
+def shimmed(env: Mapping[str, str], config: Config) -> Mapping[str, str]:
+    extra = offload.agent_env(config)
+    return {**env, **extra} if extra else env
 
 
 def session_result(spawned: Spawned, text_of: Callable[[subprocess.CompletedProcess[str]], str]) -> tuple[int, str]:

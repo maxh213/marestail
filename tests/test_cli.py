@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from marestail import cli, depth, graph, install, nice, remote, route, runner
+from marestail import cli, depth, graph, install, nice, offload, remote, route, runner
 from marestail import config as config_module
 from marestail import context as context_module
 from marestail import gates as gates_module
@@ -27,7 +27,7 @@ from tests.conftest import make_context, repo_root
 
 PASS = Result("lint", True, "clean", [], 0.0)
 FAIL = Result("tests", False, "2 failing", [], 0.0)
-COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,dash,perf,visual,route,remote,graph,depth}"
+COMMAND_CHOICES = "{gate,run,tasks,install,sonar,watch,dash,perf,visual,route,remote,offload,shims-path,graph,depth}"
 Gates = tuple[list[Result], Context]
 
 
@@ -175,6 +175,23 @@ def test_remote_status_without_a_config_says_so(
     monkeypatch.setattr(remote, "CONFIG", missing)
     assert cli.main(["remote", "status"]) == 1
     assert capsys.readouterr() == (f"no remote configured ({missing})\n", "")
+
+
+def test_offload_hands_the_command_and_the_pulls_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], list[str]]] = []
+    monkeypatch.setattr(offload, "offload_command", lambda argv, pulls: [*noted_call(calls, (argv, pulls)), 5][-1])
+    assert cli.main(["offload", "--pull", "a", "--pull", "b", "--", "pnpm", "test", "--run"]) == 5
+    assert calls == [(["--", "pnpm", "test", "--run"], ["a", "b"])]
+
+
+def noted_call(calls: list[Any], entry: Any) -> list[Any]:
+    calls.append(entry)
+    return calls
+
+
+def test_shims_path_prints_the_shim_folder(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["shims-path"]) == 0
+    assert capsys.readouterr().out == f"{remote.SHIMS}\n"
 
 
 def test_check_paths_defaults_to_the_tasks_folder() -> None:
@@ -980,6 +997,8 @@ def test_root_parser_help_and_subcommands() -> None:
         "visual",
         "route",
         "remote",
+        "offload",
+        "shims-path",
         "graph",
         "depth",
     ]

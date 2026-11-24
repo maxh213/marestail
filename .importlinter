@@ -2,7 +2,7 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote box, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates and the offload command (independent of each other), the remote box, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
@@ -12,7 +12,7 @@ layers =
     marestail._install | marestail._tooling
     marestail._guidance
     marestail.prompts : marestail.audit : marestail.practices : marestail.hunks : marestail.reported
-    marestail.gates
+    marestail.gates : marestail.offload
     marestail.remote
     marestail.depth : marestail.graph
     marestail.dotnet : marestail.erlang : marestail.java : marestail.ruby : marestail.rust : marestail.javascript : marestail.elixir
@@ -586,12 +586,13 @@ forbidden_modules =
 allow_indirect_imports = True
 
 [importlinter:contract:remote-box-belongs-to-offloading-gates]
-name = The remote box is reached only by the gates that offload to it and by the CLI's remote command
+name = The remote box is reached only by the gates that offload to it, by the offload command and the agents' shims, and by the CLI's remote command
 type = protected
 protected_modules =
     marestail.remote
 allowed_importers =
     marestail.cli
+    marestail.offload
     marestail.gates._stryker
     marestail.gates.py_mutation
     marestail.gates.ex_mutation

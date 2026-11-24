@@ -100,6 +100,9 @@ marestail run tasks/001.md --scope hard --focus src/render/terminal.ts   # hard 
 marestail run tasks/001.md --model dandelion/route        # ask dandelion route before every session
 marestail run tasks/001.md --model dandelion/route-best   # ask dandelion route --high before every session
 marestail tasks check          # front matter and dependencies of every task in tasks/; or pass folders and .md files
+marestail remote status        # the remote box: its state, the jobs on it now, its spend today and this month
+marestail offload --pull coverage -- pnpm test   # run a command for this tree on the remote box, stream its output, copy coverage/ back
+marestail shims-path           # the folder of PATH shims that send test runs to the remote box
 ```
 
 `marestail run` starts at nice 19 with idle I/O and a raised OOM score, so a fleet of pipelines yields the CPU and disk to you and is first in line if the kernel needs memory. Children inherit. `[run] nice = 0` or `MARESTAIL_NICE=0` turns it off; any other integer 1–19 is the level (`MARESTAIL_NICE` wins over the file). `marestail watch` and `marestail gate` stay at the shell's priority.
@@ -242,6 +245,43 @@ One task is one vertical slice: a user-visible outcome, thin, through every laye
 
 A task file may open with a `+++` TOML block holding `depends` and `stack`. `depends` lists task ids, the file names in that folder without the `.md` suffix, and `depends = []` means the task needs nothing. `stack = true` runs the task on its one dependency's branch, after it; `stack = false` starts the task on its own branch once every dependency is merged. Leave `stack` out when `depends` is empty. `marestail tasks check` checks a folder of task files. `marestail run` never requires the block. Roles see one sentence naming the dependencies, not the block.
 
+## Remote box
+
+Every test run, mutation run and Sonar scan can run on one big GCE VM instead of the machine marestail runs on. `~/.config/marestail/remote.toml` names the box. Without that file, with `MARESTAIL_REMOTE=0`, or with `enabled = false` under `[remote]` in that file or in a repo's `marestail.toml`, everything runs where marestail runs, shims included: that is the laptop fallback, and it is the only way anything runs locally while a box is configured.
+
+```toml
+[remote]
+enabled = true
+instance = "marestail-mutation-usw4"
+project = "otwarte-klatki"
+zone = "us-west4-a"
+container = "mt"
+gates = ["ts.tests", "py.tests", "qa", "sonar", "ts.mutation", "py.mutation", "ex.mutation", "java.mutation"]
+usd_per_hour = 1.67
+max_wait_hours = 6
+sonar_host_url = "http://10.182.0.5:9000"
+run_in = { default = "host", "ts.mutation" = "mt", "py.mutation" = "mt", "ex.mutation" = "mt", "java.mutation" = "mt" }
+
+[remote.workers]
+"ts.mutation" = 150
+"py.mutation" = 180
+"ts.tests" = 32
+
+[remote.env]
+PGHOST = "127.0.0.1"
+```
+
+- **Which gates.** A gate named in `gates` (or in `MARESTAIL_REMOTE_GATES`, comma-separated, for one command) runs its command on the box and copies back exactly what it reads afterwards: `ts.tests` the coverage folder and the Jest or Playwright results (`.marestail/ts-coverage/`, `.marestail/ts-tests.json`), and under `[hyper] test_cmd` just the exit code and output; `py.tests` `.marestail/py-coverage.json` and `.xml`; `ex.tests` the `cover/` folder (the coverage export then runs here); `java.tests` the surefire reports, the JaCoCo site and `.marestail/java-jacoco.exec`, cleared on the box first; `qa` the app log; `sonar` the scanner's `report-task.txt`; the mutation gates their reports. The CRAP gates read the pulled coverage, so they follow. `rb.tests`, `cs.tests`, `er.tests` and `rs.tests` stay local: their Docker fallbacks map this machine's uid and the box has none of their toolchains. `visual` stays local too: it builds a base worktree and drives marestail's own Playwright. Lint, deps and the other fast gates are cheap and run here.
+- **Where on the box.** `run_in` says where jobs run: `"host"` or a container name, as one string for every gate or a table with a `default` and per-gate entries. Without it every job runs in `container` (`mt`), as mutation always has. Host jobs load nvm (the box's default Node) and run with the box's Docker, which Testcontainers needs, and the Playwright browsers installed there. `marestail offload` jobs run on the host unless `run_in` names `offload`.
+- **The tree.** The repo is copied with `rsync -a --delete` to the same absolute path, without `/.git/`, `node_modules/`, `.venv/` (kept for `py.*` gates), `_build/`, `cover/`, `target/` and the other build folders, and without `.marestail/` apart from `tooling/` and `stryker/`. Node dependencies are installed where the nearest `package-lock.json` (`npm ci`) or `pnpm-lock.yaml` (`pnpm install --frozen-lockfile`, at the `packageManager` version) is, only when the lockfile's hash changed, under a per-tree lock so two jobs on one tree never install at once; a failed install prints the installer's output and fails the job with exit 97. A pnpm 11 repo must approve its build scripts (`allowBuilds` in `pnpm-workspace.yaml`) as it must anywhere. The ts tooling folder is installed the same way.
+- **Workers.** `[remote.workers]` sizes a gate on the box: Stryker `--concurrency`, mutmut `--max-children`, muex `--concurrency`, PIT threads, and for `ts.tests` Vitest and Jest `--maxWorkers` or Playwright `--workers`. A gate without an entry keeps its local size, and test runners their own default.
+- **Queueing.** Starting the box is serialised by a lock on this machine, taken only when the box is not already running, so jobs from many trees reach a running box at once. Mutation jobs size themselves to the whole box, so they queue behind `flock /var/lib/marestail/job.lock` one at a time. Test, qa, Sonar and `marestail offload` jobs do not take that lock, so jobs from many trees run side by side. Every job, queued or running, keeps a marker in `/var/lib/marestail/busy.d/`, which keeps the box up. Each job runs in its own session; the box-side script traps hangup, interrupt and terminate and kills that session, so a job stopped here, or one that times out, leaves nothing behind. Jobs get `MARESTAIL_NO_OFFLOAD=1`, `MARESTAIL_GATE`, `LANG`, `TERM=dumb`, `NO_COLOR=1`, `[remote.env]` and the gate's own environment, with stdin from `/dev/null` so no runner falls into watch mode.
+- **Waiting, never local.** A box that will not start (a spot stockout, say), a copy that fails or a connection that drops mid-job is retried: the job waits 30 s, then 1, 2, 4 and 5 minutes between tries, printing each wait on stderr, until `max_wait_hours` (default 6) has passed, and then fails with ` (gave up after waiting <time>: <reason>; not run locally)`. A job reruns from the start after a drop; the box prints its exit code after the job's output, so an exit 255 from the job itself is not mistaken for a drop. A job that ran says ` (on <instance>, <n>s)`, plus how long it waited for the box.
+- **Sonar.** The scanner runs on the box in Docker as the box's user and reports to `sonar_host_url`, the SonarQube on this machine as the box sees it (open the port to the box); marestail then polls that server from here as before. The coverage reports and the git metadata the scanner reads are copied over first. The .NET scanner stays local.
+- **`marestail offload [--pull PATH]... -- COMMAND...`** runs any command for the current tree on the box: it copies the repo root (the git top level), installs dependencies, runs the command in the same absolute working directory, streams its output live, exits with its exit code and copies each `--pull` path (relative to the working directory) back. A mutation tool (Stryker, mutmut, muex, PIT) is run as its mutation gate: in that gate's place, queued, and for Stryker sized by `[remote.workers]` with `reports/mutation/` and the incremental file pulled back, for mutmut with `mutants/` pulled back. With the box switched off it runs the command here.
+- **Shims.** `marestail/shims/` holds `pnpm`, `npm`, `npx`, `yarn`, `vitest`, `playwright`, `jest`, `stryker`, `mutmut`, `mix`, `mvn` and `mvnw`; `marestail shims-path` prints the folder. Put first on PATH, from any shell, they send a test run to `marestail offload`: `pnpm test`, `pnpm test:*`, `pnpm t`, `pnpm check`, `pnpm run test*` or `run check`, `pnpm vitest|jest ...`, `pnpm playwright test`, `pnpm exec|dlx vitest|jest|playwright test|stryker run`, `npx vitest|jest|playwright test|stryker run`, `npm test`, `npm run test*`, `npm exec <runner>`, `yarn test*`, `yarn run test*|check`, `yarn <runner>`, and `vitest`, `jest`, `playwright test`, `stryker run`, `mutmut run`, `mix muex` and a PIT `mvn` called directly. Options before the script name (`--filter web`, `-C dir`) are skipped. Everything else, `pnpm install` say, runs the real tool, the next one on PATH once every shim folder is taken off it. `MARESTAIL_NO_OFFLOAD=1` makes every shim pass through: marestail sets it for its own gate runs (which offload by gate instead) and for every job on the box, so nothing loops. `MARESTAIL_REMOTE=0` passes through as well. When a box is configured, every agent `marestail run` starts gets the shims first on PATH and `BASH_ENV` set to `marestail/offload.bash`, which routes the same tools through the shims in a bash shell that put another Node ahead of them.
+- **Cost and status.** Every box start and every job appends a line to `~/.config/marestail/remote-usage.jsonl`; `marestail remote status` prints the box's state, each job on it now (`running: <gate> for <repo>, <age>`, `(queued)` while it waits for the lock) and the spend today and this month.
+
 ## Environment variables
 
 Every variable marestail reads. The `docs` gate ignores common ones such as `HOME` and `PATH`.
@@ -284,6 +324,11 @@ Every variable marestail reads. The `docs` gate ignores common ones such as `HOM
 | `GROK_HOME` | Grok home whose trust store `marestail install` updates (default `~/.grok`) |
 | `JAVA_HOME` | JDK the Java gates use when `[java] java_home` is not set |
 | `USER` | ssh user on the remote box when `remote.toml` has no `user` key (default `max` when `USER` is unset) |
+| `MARESTAIL_REMOTE` | `0`, `off`, `false` or `no` runs every gate and every shimmed command where marestail runs, whatever `remote.toml` says |
+| `MARESTAIL_REMOTE_GATES` | comma-separated gates to run on the remote box for one command, instead of `[remote] gates` |
+| `MARESTAIL_NO_OFFLOAD` | `1` makes the shims run the real tool; set by marestail for its own gate runs and on every job on the box, cleared for agents |
+| `MARESTAIL_GATE` | set on every job on the remote box to the gate it runs (`offload` for `marestail offload`) |
+| `BASH_ENV` | set to `marestail/offload.bash` for every agent when a remote box is configured |
 
 ## Adapting for new languages
 

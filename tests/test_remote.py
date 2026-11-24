@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -268,7 +269,7 @@ def test_a_box_that_will_not_start_is_waited_for_and_never_run_locally(
     assert offload(repo) == remote.Outcome(75, "", f" (gave up after waiting 3m: {unavailable}; not run locally)")
     assert clock.slept == [30, 60, 90]
     assert mutmut.calls == []
-    assert box.gcloud_calls == [DESCRIBE, START] * 4
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, START] * 4
     assert box.ssh_calls == []
     assert not remote.USAGE.exists()
     assert capsys.readouterr().err.splitlines() == [
@@ -279,12 +280,12 @@ def test_a_box_that_will_not_start_is_waited_for_and_never_run_locally(
 
 
 def test_a_stockout_that_clears_runs_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
-    box.statuses = ["TERMINATED", "TERMINATED", "RUNNING"]
+    box.statuses = ["TERMINATED"] * 4 + ["RUNNING"]
     box.starts = [(1, "ZONE_RESOURCE_POOL_EXHAUSTED"), (0, "")]
     assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s, after waiting 30s for the box)")
     assert clock.slept == [30]
     assert mutmut.calls == []
-    assert box.gcloud_calls == [DESCRIBE, START, DESCRIBE, START, DESCRIBE]
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, START, DESCRIBE, DESCRIBE, START, DESCRIBE]
 
 
 def test_waiting_backs_off_to_five_minutes(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
@@ -322,14 +323,14 @@ def test_a_silent_power_on_failure_names_the_verb(
     box.start = (1, " \n")
     assert offload(repo).where == f" (gave up after waiting 0s: {INSTANCE} is unavailable: {verb} failed; not run locally)"
     assert mutmut.calls == []
-    assert box.gcloud_calls == [DESCRIBE, args]
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, args]
 
 
 def test_a_terminated_box_is_started_and_the_start_is_recorded(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.statuses = ["TERMINATED", "RUNNING"]
+    box.statuses = ["TERMINATED", "TERMINATED", "RUNNING"]
     assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
     assert mutmut.calls == []
-    assert box.gcloud_calls == [DESCRIBE, START, DESCRIBE]
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, START, DESCRIBE]
     first, second = usage_lines()
     assert list(first) == ["ts", "event", "instance", "usd_per_hour"]
     assert without_stamp(first) == {"event": "vm-start", "instance": INSTANCE, "usd_per_hour": 1.2}
@@ -337,18 +338,18 @@ def test_a_terminated_box_is_started_and_the_start_is_recorded(box: FakeBox, mut
 
 
 def test_a_suspended_box_is_resumed_not_started(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.statuses = ["SUSPENDED", "RUNNING"]
+    box.statuses = ["SUSPENDED", "SUSPENDED", "RUNNING"]
     assert offload(repo).where == f" (on {INSTANCE}, 0s)"
-    assert box.gcloud_calls == [DESCRIBE, RESUME, DESCRIBE]
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, RESUME, DESCRIBE]
     assert without_stamp(usage_lines()[0])["event"] == "vm-start"
 
 
 @pytest.mark.parametrize("stopping", ["STOPPING", "SUSPENDING"])
 def test_a_stopping_box_is_waited_for_then_started(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime, stopping: str) -> None:
-    box.statuses = [stopping, stopping, "TERMINATED", "RUNNING"]
+    box.statuses = [stopping, stopping, stopping, "TERMINATED", "RUNNING"]
     assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
     assert clock.slept == [5]
-    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, DESCRIBE, START, DESCRIBE]
+    assert box.gcloud_calls == [DESCRIBE, DESCRIBE, DESCRIBE, DESCRIBE, START, DESCRIBE]
     assert mutmut.calls == []
 
 
@@ -1011,6 +1012,10 @@ def test_execute_queues_a_mutation_job_in_the_container(
     assert recorder.ssh_calls == [(IP, wrapped(home, runner, cleanup), 420, True)]
 
 
+def failed(root: Path) -> str:
+    return f'{{ echo "marestail: dependencies did not install in "{shlex.quote(str(root))} >&2; exit 97; }}'
+
+
 def test_execute_runs_a_test_job_on_the_host_unqueued_with_nvm(home: Path, recorder: Recorder, job_id: str, tmp_path: Path) -> None:
     root = tmp_path / "web app"
     root.mkdir()
@@ -1021,7 +1026,7 @@ def test_execute_runs_a_test_job_on_the_host_unqueued_with_nvm(home: Path, recor
     session = f"{home}/.cache/marestail-jobs/job-abc"
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     prepare = (
-        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || exit 97; }} "
+        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || {failed(root)}; }} "
         f"9>{home}/.cache/marestail-jobs/prepare-{digest}.lock"
     )
     inner = (
@@ -1112,6 +1117,84 @@ def test_the_prepare_lock_folder_is_the_nearest_with_a_lockfile(tmp_path: Path) 
     assert remote._lock_folder(root, web) == root / "apps"
 
 
+class FakeProcess:
+    def __init__(self, lines: list[str], code: int = 0) -> None:
+        self.stdout: list[str] | None = lines
+        self.code = code
+        self.killed = 0
+
+    def kill(self) -> None:
+        self.killed += 1
+
+    def wait(self) -> int:
+        return self.code
+
+
+@pytest.fixture
+def popen(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[tuple[list[str], dict[str, Any]]]]:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def install(process: FakeProcess) -> list[tuple[list[str], dict[str, Any]]]:
+        def started(command: list[str], **options: Any) -> FakeProcess:
+            calls.append((command, options))
+            return process
+
+        monkeypatch.setattr("marestail.remote.subprocess.Popen", started)
+        return calls
+
+    return install
+
+
+def test_streamed_relays_output_live_and_keeps_the_job_exit_code(home: Path, popen: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    process = FakeProcess(["one\r\n", "\r\n", "two\r\n", "\r\n", "marestail-exit 4\r\n"], code=4)
+    calls = popen(process)
+    assert remote._streamed(box_settings(), IP, "script") == (4, "")
+    assert capsys.readouterr().out == "one\n\ntwo\n"
+    ((command, kwargs),) = calls
+    assert command == ["ssh", "-tt", "-q", *options(home), f"max@{IP}", "script"]
+    assert kwargs == {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "errors": "replace",
+    }
+    assert process.killed == 1
+
+
+def test_streamed_without_a_trailer_is_a_drop(popen: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    popen(FakeProcess(["partial\n", "\n"], code=255))
+    assert remote._streamed(box_settings(), IP, "script") == (None, "ssh exit 255")
+    assert capsys.readouterr().out == "partial\n\n"
+
+
+def test_streamed_with_a_garbled_trailer_is_a_drop(popen: Any) -> None:
+    popen(FakeProcess(["marestail-exit x\n"], code=0))
+    assert remote._streamed(box_settings(), IP, "script") == (None, "ssh exit 0")
+
+
+def interrupted() -> Iterator[str]:
+    yield "started\n"
+    raise KeyboardInterrupt
+
+
+def test_streamed_kills_ssh_when_interrupted(popen: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    process = FakeProcess([])
+    process.stdout = interrupted()  # type: ignore[assignment]
+    popen(process)
+    with pytest.raises(KeyboardInterrupt):
+        remote._streamed(box_settings(), IP, "script")
+    assert process.killed == 1
+    assert capsys.readouterr().out == "started\n"
+
+
+def test_streamed_without_a_pipe_reads_nothing(popen: Any) -> None:
+    process = FakeProcess([])
+    process.stdout = None
+    popen(process)
+    assert remote._streamed(box_settings(), IP, "script") == (None, "ssh exit 0")
+
+
 def test_record_appends_a_stamped_line() -> None:
     remote._record({"event": "x", "n": 1})
     remote._record({"event": "y"})
@@ -1150,6 +1233,13 @@ def test_ensure_up_returns_the_address_once_ssh_answers(box: FakeBox, clock: Fak
     box.probe = (0, "")
     assert remote.ensure_up(box_settings()) == (IP, "")
     assert clock.slept == []
+
+
+def test_a_running_box_is_used_without_the_start_lock(box: FakeBox, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(remote.fcntl, "flock", lambda _handle, _how: pytest.fail("took the start lock"))
+    assert remote.ensure_up(box_settings()) == (IP, "")
+    assert not remote.LOCK.exists()
+    assert box.gcloud_calls == [DESCRIBE]
 
 
 @pytest.mark.parametrize(("text", "expected"), [("a\nb\n", "b"), ("  \n", "fallback"), ("", "fallback")])
@@ -1456,6 +1546,38 @@ def test_idle_line_says_when_the_box_powers_off(monkeypatch: pytest.MonkeyPatch)
     assert remote._idle_line(3000, 15) == f"no jobs: idle for 50 min, powers itself off after 15 idle min (about {now:%H:%M})"
 
 
+def test_run_streamed_without_a_box_runs_here_with_the_shims_off(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", f"{remote.SHIMS}:{os.environ['PATH']}")
+    command = ["sh", "-c", 'echo "$MARESTAIL_NO_OFFLOAD $(pwd)"; case ":$PATH:" in *shims*) echo shimmed;; esac; exit 3']
+    outcome = remote.run_streamed(make_context(tmp_path), "offload", lambda _workers: command, tmp_path, ())
+    assert outcome == remote.Outcome(3, "", "")
+    assert capfd.readouterr().out == f"1 {tmp_path}\n"
+
+
+def test_passthrough_reports_a_missing_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert remote._passthrough(["/nonexistent/tool"], tmp_path, {}) == 127
+    assert capsys.readouterr().err == "/nonexistent/tool: not found\n"
+
+
+def test_run_streamed_offloads_even_an_unlisted_gate_and_pulls_back(
+    box: FakeBox, repo: Path, popen: Any, home: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(remote, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="abc")))
+    calls = popen(FakeProcess(["PASS 3 tests\n", "\n", "marestail-exit 0\n"]))
+    outcome = remote.run_streamed(make_context(repo), "offload", lambda _workers: ["pnpm", "test"], repo, ("coverage",))
+    assert outcome == remote.Outcome(0, "", f" (on {INSTANCE}, 0s)")
+    assert capsys.readouterr().out == "PASS 3 tests\n"
+    ((command, _options),) = calls
+    assert command[-1].startswith("echo $$ > /var/lib/marestail/busy.d/abc;")
+    assert f"env -C {repo} " in command[-1]
+    assert "flock /var/lib/marestail/job.lock" not in command[-1]
+    assert "timeout -k 30 7200 pnpm test </dev/null" in command[-1]
+    assert box.rsync_calls[-1] == [f"max@{IP}:{repo}/coverage/", f"{repo}/coverage/"]
+    assert without_stamp(usage_lines()[0])["gate"] == "offload"
+
+
 def test_prepare_installs_node_modules_only_when_the_lock_changes() -> None:
     assert remote.PREPARE == (
         "if [ -f package-lock.json ]; then lock=$(sha256sum package-lock.json | cut -c1-16); "
@@ -1464,7 +1586,8 @@ def test_prepare_installs_node_modules_only_when_the_lock_changes() -> None:
         "elif [ -f pnpm-lock.yaml ]; then lock=$(sha256sum pnpm-lock.yaml | cut -c1-16); "
         'if [ "$(cat node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
         "want=$(node -p \"(require('./package.json').packageManager || 'pnpm@latest').split('@')[1]\"); "
-        'npx --yes "pnpm@$want" install --frozen-lockfile --reporter=silent >&2 && echo "$lock" > node_modules/.marestail-lock || exit 97; '
+        'out=$(npx --yes "pnpm@$want" install --frozen-lockfile --reporter=append-only 2>&1) '
+        '&& echo "$lock" > node_modules/.marestail-lock || { printf "%s\\n" "$out" >&2; exit 97; }; '
         "fi; fi"
     )
 
@@ -1481,7 +1604,7 @@ def test_prepare_with_tooling_also_installs_the_tooling_folder(home: Path, tmp_p
     folder = shlex.quote(f"{root}/.marestail/tooling")
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
     assert remote._prepare(ctx, root) == (
-        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || exit 97; "
+        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || {failed(root)}; "
         f"if [ -f {folder}/package-lock.json ]; then lock=$(sha256sum {folder}/package-lock.json | cut -c1-16); "
         f'if [ "$(cat {folder}/node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
         f'npm ci --prefix {folder} --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > {folder}/node_modules/.marestail-lock || exit 97; '

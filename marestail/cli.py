@@ -54,6 +54,7 @@ HELP_RUN_SCOPE = (
     "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
     "the smallest supporting edits. hyper gates only the changed lines of the diff"
 )
+HELP_PULL = "a file or folder (relative to the working directory) to copy back from the box afterwards; repeatable"
 HELP_FOCUS = "add a file or directory to the gate scope (repeatable); implies --scope changed"
 HELP_MODEL = "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
 HELP_RETRIES = "attempts per role; 0 means unlimited (default)"
@@ -114,6 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
     remote_parser.add_subparsers(dest="remote_command", required=True).add_parser(
         "status", help="box state, uptime and estimated spend today and this month"
     ).set_defaults(handler=remote_status_command)
+    add_offload(commands.add_parser("offload", help="run a command for this tree on the remote box and stream its output"))
+    commands.add_parser("shims-path", help="print the folder of PATH shims that send test runs to the remote box").set_defaults(
+        handler=shims_path_command
+    )
     commands.add_parser("graph", help="print the module dependency graph").set_defaults(handler=graph_command)
     commands.add_parser("depth", help="print module interface width and depth").set_defaults(handler=depth_command)
     return parser
@@ -262,6 +267,24 @@ def add_dash(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dandelion-every", type=float, default=600.0, help=HELP_DASH_EVERY)
     parser.add_argument("--runs-script", help=HELP_DASH_RUNS)
     parser.set_defaults(handler=dash_command)
+
+
+def add_offload(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--pull", action="append", default=[], metavar="PATH", help=HELP_PULL)
+    parser.add_argument("argv", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
+    parser.set_defaults(handler=offload_command)
+
+
+def offload_command(args: argparse.Namespace) -> int:
+    from marestail import offload
+
+    return offload.offload_command(args.argv, args.pull)
+
+
+def shims_path_command(_args: argparse.Namespace) -> int:
+    from marestail import offload
+
+    return offload.shims_path_command()
 
 
 def remote_status_command(args: argparse.Namespace) -> int:
