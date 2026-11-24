@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from marestail import audit, freeze, task_file
+from marestail import audit, freeze, offload, task_file
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker
 
@@ -75,6 +75,11 @@ TESTS_RULE = (
     "first. If the repository has a runner, use it. If it has tests but no runner, write the same kind of script. If it "
     "has no tests at all, write dependency-free tests for the language's standard runtime and say so in your handoff. A "
     "test that loads code with vm must pass process into the sandbox, so mutation testing can switch mutants."
+)
+REMOTE_TESTS = (
+    "Tests and gates run on the remote test box: `marestail gate` and test commands such as `pnpm test` send their runs "
+    "there and print the results here. The box may take a minute or two to start; waiting for it is expected, so let each "
+    "command run until it finishes."
 )
 HYPER_ROLE_SCOPE = {
     "specifier": "Write one scenario for the behaviour the task asks for, and regression scenarios only for behaviour the "
@@ -152,6 +157,7 @@ def judge_prompt(
             section(SPECIFICATION, judge_specification(config, judge, task_name)),
             *review_sections(review or {}),
             *optional_section("Gate report", gate_report),
+            *judge_tests(config, judge),
             *optional_section("Trees", trees),
             section(HANDOFFS, handoffs(config, task_name)),
             *optional_section("Benches frozen", BENCHES_FROZEN if judge.name == "perf" else ""),
@@ -234,7 +240,7 @@ def handoffs_from_history(config: Config) -> str:
 def finishing(config: Config, worker: Worker, task_name: str, report: Path, label: str = EMPTY, gate_flags: str = EMPTY) -> str:
     steps = [
         *audit_step(config, worker, task_name),
-        *gate_step(worker, gate_flags),
+        *gate_step(config, worker, gate_flags),
         f"Commit tracked changes with a message {commit_opening(label)}ending in `By {worker.name}.` "
         "Do not use `git add -f` or `--force`. Paths ignored by `.gitignore` stay untracked on disk; "
         "the next role still reads them. The runner drops any gitignored path you force-add.",
@@ -262,8 +268,18 @@ def audit_step(config: Config, worker: Worker, task_name: str) -> list[str]:
     return [audit.instructions(config, task_name)] if worker.audit else []
 
 
-def gate_step(worker: Worker, gate_flags: str) -> list[str]:
-    return [f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED."] if worker.tier else []
+def gate_step(config: Config, worker: Worker, gate_flags: str) -> list[str]:
+    if not worker.tier:
+        return []
+    return [f"Run `marestail gate --tier {worker.tier}{gate_flags}` and keep working until it prints GATE PASSED.{on_the_box(config)}"]
+
+
+def on_the_box(config: Config) -> str:
+    return f" {REMOTE_TESTS}" if offload.box_configured(config) else EMPTY
+
+
+def judge_tests(config: Config, judge: Judge) -> list[str]:
+    return optional_section("Tests and gates", REMOTE_TESTS) if judge.tier and offload.box_configured(config) else []
 
 
 def commit_opening(label: str) -> str:

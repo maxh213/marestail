@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from marestail import audit, freeze, prompts, shell
+from marestail import audit, freeze, offload, prompts, shell
 from marestail.config import Config
 from marestail.pipeline import Judge, Worker, find
 from tests.conftest import FakeRun, make_context
@@ -123,6 +123,55 @@ def test_worker_prompt(repo: Path) -> None:
         + CONFIG_STEP,
         "# Why the work came back to you\nfix it",
     ]
+
+
+REMOTE_TESTS = (
+    "Tests and gates run on the remote test box: `marestail gate` and test commands such as `pnpm test` send their runs "
+    "there and print the results here. The box may take a minute or two to start; waiting for it is expected, so let each "
+    "command run until it finishes."
+)
+
+
+@pytest.fixture
+def box(monkeypatch: pytest.MonkeyPatch) -> list[Config]:
+    asked: list[Config] = []
+
+    def configured(config: Config) -> bool:
+        asked.append(config)
+        return True
+
+    monkeypatch.setattr(offload, "box_configured", configured)
+    return asked
+
+
+def test_a_tiered_worker_is_told_its_tests_and_gate_run_on_the_box(repo: Path, box: list[Config]) -> None:
+    text = prompts.worker_prompt(config(repo), cast(Worker, find("coder")), repo / "tasks" / "t.md", "t", report(repo, "03-coder"), "")
+    gate = "\n2. Run `marestail gate --tier fast` and keep working until it prints GATE PASSED. " + REMOTE_TESTS + "\n3. Commit"
+    assert gate in text
+    assert box == [config(repo)]
+
+
+def test_a_worker_without_a_tier_hears_nothing_of_the_box(repo: Path, box: list[Config]) -> None:
+    spec = prompts.worker_prompt(config(repo), cast(Worker, find("specifier")), repo / "tasks" / "t.md", "t", report(repo, "01"), "")
+    assert ("remote test box" in spec, box) == (False, [])
+
+
+def test_without_a_box_the_gate_step_ends_at_gate_passed(repo: Path) -> None:
+    lines = prompts.finishing(config(repo), Worker("w", "fast"), "t", report(repo, "x")).split("\n")
+    assert lines[0] == "1. Run `marestail gate --tier fast` and keep working until it prints GATE PASSED."
+
+
+def test_a_tiered_judge_reads_where_tests_run_after_the_gate_report(repo: Path, box: list[Config]) -> None:
+    text = prompts.judge_prompt(config(repo), cast(Judge, find("hardener")), repo / "tasks" / "t.md", "t", report(repo, "05"), "gates")
+    assert "\n\n# Gate report\ngates\n\n# Tests and gates\n" + REMOTE_TESTS + "\n\n# Handoffs so far\n" in text
+    assert box == [config(repo)]
+
+
+def test_a_judge_with_no_tier_or_no_box_has_no_tests_section(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hardener = prompts.judge_prompt(config(repo), cast(Judge, find("hardener")), repo / "tasks" / "t.md", "t", report(repo, "05"), "g")
+    monkeypatch.setattr(offload, "box_configured", lambda _config: True)
+    critic = prompts.judge_prompt(config(repo), cast(Judge, find("critic")), repo / "tasks" / "t.md", "t", report(repo, "02"), "g")
+    assert ("# Tests and gates" in hardener, "# Tests and gates" in critic) == (False, False)
 
 
 def test_worker_prompt_with_hard_scope_and_no_feedback(repo: Path) -> None:
