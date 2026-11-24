@@ -54,7 +54,7 @@ def execute(
     drop_tree(temp)
     report.unlink(missing_ok=True)
     try:
-        outcome = remote.run_mutation(ctx, gate, build, ctx.ts_root(), workers, timeout=RUN_SECONDS, pull=pull)
+        outcome = remote.run_job(ctx, gate, build, ctx.ts_root(), workers, timeout=RUN_SECONDS, pull=pull)
         return Proof(outcome.code, outcome.output, json.loads(report.read_text()) if report.exists() else None, outcome.where)
     finally:
         drop_tree(temp)

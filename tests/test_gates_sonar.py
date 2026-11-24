@@ -1,11 +1,12 @@
 import os
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from marestail import dotnet
+from marestail import dotnet, remote
 from marestail.gates import sonar
 from marestail.sonar.client import Client
 from tests.conftest import checked, make_context, reject_none, repo_root, untimed
@@ -569,7 +570,7 @@ def test_measure_findings(values: dict[str, float], expected: list[str]) -> None
 
 def test_analyse_keeps_collect_and_language_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = make_context(tmp_path, {"sonar": {"project_key": KEY}})
-    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task", ""))
     monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
     monkeypatch.setattr(sonar, "collect", lambda *args: (["from-collect"], "OK"))
     monkeypatch.setattr(sonar, "language_findings", lambda *args: ["from-lang"])
@@ -684,7 +685,7 @@ def hyper_analysis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, respond: Responder, raw: dict[str, Any]
 ) -> tuple[Any, list[FakeClient]]:
     made = install_client(monkeypatch, respond)
-    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task"))
+    monkeypatch.setattr(sonar, "scan", lambda *args: (0, "out", tmp_path / "task", ""))
     monkeypatch.setattr(sonar, "wait_for_analysis", lambda *args: None)
     ctx = make_context(
         tmp_path,
@@ -729,3 +730,58 @@ def test_hyper_language_diagnostics_still_fail(tmp_path: Path, monkeypatch: pyte
         ["marestail.toml:1 SonarQube imported no java coverage; run java.tests first so .marestail/java-jacoco.xml exists"],
     )
     assert "file-level" not in result.summary
+
+
+def test_an_offloaded_scan_runs_on_the_box_and_reports_to_the_sonar_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_run: Any, sleeps: list[float]
+) -> None:
+    clients = install_client(monkeypatch, healthy)
+    fake_run(sonar, lambda _command: (0, "/shared/main/.git\n"))
+    monkeypatch.setattr(remote, "offloaded", lambda _ctx, gate: gate == "sonar")
+    monkeypatch.setattr(remote, "sonar_url", lambda _ctx, fallback: "http://10.0.0.5:9000" if fallback == CREDS["url"] else "")
+    task_file = tmp_path / ".marestail" / "scannerwork" / "report-task.txt"
+    task_file.parent.mkdir(parents=True)
+    task_file.write_text("ceTaskId=STALE\n")
+    jobs: list[dict[str, Any]] = []
+
+    def run_job(ctx: Any, gate: str, build: Callable[[int], list[str]], cwd: Path, **options: Any) -> remote.Outcome:
+        jobs.append({"gate": gate, "command": build(0), "cwd": cwd, "stale": task_file.exists(), **options})
+        task_file.write_text("ceTaskId=T1\n")
+        return remote.Outcome(0, "scan out", " (on box, 30s)")
+
+    monkeypatch.setattr(remote, "run_job", run_job)
+    result = checked(sonar.run_gate(make_context(tmp_path, {"sonar": {"project_key": KEY}})), sonar.GATE)
+    assert (result.ok, result.summary, result.findings) == (True, "sonar clean (on box, 30s)", [])
+    ((job),) = jobs
+    root = str(tmp_path)
+    command = job.pop("command")
+    assert job == {
+        "gate": "sonar",
+        "cwd": tmp_path,
+        "stale": False,
+        "timeout": 1800,
+        "pull": (".marestail/scannerwork/report-task.txt",),
+        "send": (
+            tmp_path / ".marestail" / "ts-coverage",
+            tmp_path / ".marestail" / "py-coverage.xml",
+            tmp_path / ".marestail" / "java-jacoco.xml",
+            Path("/shared/main/.git"),
+        ),
+    }
+    assert command[:2] == ["sh", "-c"]
+    docker = shlex.split(command[2])
+    assert docker[:4] == ["exec", "docker", "run", "--user"]
+    assert docker[4] == "$(id -u):$(id -g)"
+    assert docker[5:9] == ["--rm", "--network", "host", "-e"]
+    assert "SONAR_HOST_URL=http://10.0.0.5:9000" in docker
+    assert "-u" not in docker
+    assert docker[docker.index("/shared/main/.git:/shared/main/.git:ro") - 1 :][:2] == ["-v", "/shared/main/.git:/shared/main/.git:ro"]
+    assert f"-Dsonar.projectBaseDir={root}" in docker
+    assert command[2].startswith('exec docker run --user "$(id -u):$(id -g)" --rm ')
+    assert len(clients) == 1
+
+
+def test_scanner_inputs_add_java_classes(tmp_path: Path, fake_run: Any) -> None:
+    fake_run(sonar, [(1, "")])
+    ctx = make_context(tmp_path, {"java": {"build_dir": "out"}})
+    assert sonar.scanner_inputs(ctx)[-1] == tmp_path / "out" / "classes"

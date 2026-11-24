@@ -58,7 +58,7 @@ class Offload(FakeRun):
 def offload(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Offload]:
     def install(replies: Replies | None = None, where: str = "") -> Offload:
         fake = Offload([] if replies is None else replies, where)
-        monkeypatch.setattr(remote, "run_mutation", fake.run_mutation)
+        monkeypatch.setattr(remote, "run_job", fake.run_mutation)
         return fake
 
     return install

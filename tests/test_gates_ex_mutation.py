@@ -59,7 +59,7 @@ class FakeMutation:
 def muex(fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch, code: int, output: str, where: str = "") -> FakeMutation:
     fake_run(ex_mutation, [(0, "")])
     fake = FakeMutation(code, output, where)
-    monkeypatch.setattr(remote, "run_mutation", fake)
+    monkeypatch.setattr(remote, "run_job", fake)
     return fake
 
 

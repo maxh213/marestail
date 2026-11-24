@@ -761,7 +761,7 @@ SPLIT_FUNCTIONS = [
     "playwright_failures",
     "playwright_spec_findings",
     "count_tests",
-    "run_mutation",
+    "run_job",
     "ensure_up",
     "status_command",
     "_running_jobs",

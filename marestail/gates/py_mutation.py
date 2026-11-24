@@ -57,7 +57,7 @@ def nothing_to_mutate(scope: MutationScope, patterns: list[str]) -> bool:
 
 def mutate(ctx: Context, patterns: list[str], note: str, started: float) -> Result:
     shutil.rmtree(ctx.python_root() / "mutants", ignore_errors=True)
-    outcome = remote.run_mutation(
+    outcome = remote.run_job(
         ctx,
         GATE,
         lambda workers: command(ctx, patterns, workers),

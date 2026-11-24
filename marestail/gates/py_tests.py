@@ -2,11 +2,12 @@ import json
 import time
 from typing import Any
 
+from marestail import remote
 from marestail.context import Context
 from marestail.gates._coverage import PY_COVERAGE
 from marestail.gates._coverage import scoped_lines as scoped_lines
 from marestail.report import Result, elapsed
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 COVERAGE_JSON = PY_COVERAGE
 GATE = "py.tests"
@@ -15,15 +16,23 @@ COVERAGE_XML = "py-coverage.xml"
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
-    code, output = run(pytest_command(ctx), cwd=ctx.python_root(), timeout=1800)
-    if code != 0:
-        return Result(GATE, False, "tests failed", tail(output), elapsed(started))
+    outcome = remote.run_job(ctx, GATE, lambda _workers: pytest_command(ctx), ctx.python_root(), timeout=1800, pull=reports(ctx))
+    if outcome.code != 0:
+        return Result(GATE, False, "tests failed", tail(outcome.output), elapsed(started)).with_where(outcome.where)
+    return covered(ctx, outcome.output, started).with_where(outcome.where)
+
+
+def covered(ctx: Context, output: str, started: float) -> Result:
     coverage = load_coverage(ctx)
     findings = coverage_findings(coverage, ctx)
     percent = coverage["totals"]["percent_covered"]
     scope = " on changed lines" if ctx.scoped else ""
     summary = f"{count_tests(output)} passed, coverage {percent:.1f}%, {len(findings)} gaps{scope} (need 0)"
     return Result(GATE, not findings, summary, findings, elapsed(started))
+
+
+def reports(ctx: Context) -> tuple[str, ...]:
+    return tuple(str((ctx.work / name).relative_to(ctx.root)) for name in (COVERAGE_JSON, COVERAGE_XML))
 
 
 def pytest_command(ctx: Context) -> list[str]:

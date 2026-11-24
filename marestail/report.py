@@ -26,6 +26,10 @@ class Result:
     def skipped(cls, gate: str, why: str) -> "Result":
         return cls(gate=gate, ok=True, summary=f"skipped: {why}")
 
+    def with_where(self, where: str) -> "Result":
+        self.summary += where
+        return self
+
 
 def mutation_summary(failing: int, total: int, note: str, timed_out: int = 0) -> str:
     summary = f"{failing} of {total} mutants not killed" if failing else f"all {total} mutants killed"

@@ -113,7 +113,7 @@ def fake_ssh(_found: Any, _ip: str, command: str, timeout: int | None = None, tt
         if drops["left"]:
             drops["left"] -= 1
             return 255, ""
-        return 0, "mutants: 40 killed\n" * 20
+        return 0, "mutants: 40 killed\n" * 20 + "\nmarestail-exit 0\n"
     return 0, ""
 
 
@@ -153,13 +153,18 @@ def builder(command: list[str]) -> Any:
     return lambda _workers: command
 
 
+def job_runner() -> Any:
+    return getattr(remote, "run_job", None) or remote.run_mutation
+
+
 def caller() -> Any:
     command = ["mutmut", "run", "marestail.x*", "--max-children", "4"]
-    takes_workers = "workers" in inspect.signature(remote.run_mutation).parameters
+    runner = job_runner()
+    takes_workers = "workers" in inspect.signature(runner).parameters
     pull = ("mutants",)
     if takes_workers:
-        return lambda ctx: remote.run_mutation(ctx, GATE, builder(command), repo, 4, timeout=7200, pull=pull)
-    return lambda ctx: remote.run_mutation(ctx, GATE, builder(command), repo, timeout=7200, pull=pull)
+        return lambda ctx: runner(ctx, GATE, builder(command), repo, 4, timeout=7200, pull=pull)
+    return lambda ctx: runner(ctx, GATE, builder(command), repo, timeout=7200, pull=pull)
 
 
 def offloaded_run(call: Any, ctx: Context) -> Any:
@@ -202,6 +207,8 @@ def measure_remote() -> None:
     remote.USAGE = config_dir / "remote-usage.jsonl"
     remote.LOCK = config_dir / "remote.lock"
     remote.gcloud, remote.ssh, remote.rsync, remote.run = fake_gcloud, fake_ssh, fake_rsync, fake_run
+    if hasattr(remote, "BACKOFF"):
+        remote.BACKOFF = (0,)
     ctx = Context(config=Config(root=repo, raw={}))
     call = caller()
     harness.emit("remote.run_mutation local", harness.measure(lambda: call(ctx)))

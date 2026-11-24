@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import re
@@ -36,6 +37,8 @@ START = ["compute", "instances", "start", INSTANCE]
 RESUME = ["compute", "instances", "resume", INSTANCE]
 PROBE = "sg docker -c 'docker exec mt true'"
 JOB_LOCK = "flock /var/lib/marestail/job.lock"
+JOB = "/var/lib/marestail/busy.d/"
+GUARDED = {remote.GUARD: "1"}
 STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$")
 JOB_KEYS = ["ts", "event", "instance", "gate", "repo", "result", "seconds", "usd_per_hour", "usd"]
 FIXED_NOW = datetime(2026, 10, 10, 12, 34, 59, 500000, tzinfo=UTC)
@@ -99,8 +102,9 @@ class FakeBox:
         self.clock = clock
         self.statuses: list[str | None] = ["RUNNING"]
         self.start: Reply = (0, "")
+        self.starts: list[Reply] = []
         self.probe: Reply = (0, "")
-        self.jobs: list[Reply] = [(0, "done")]
+        self.jobs: list[Reply | None] = [(0, "done")]
         self.job_seconds = 0.0
         self.sync: Reply = (0, "")
         self.on_fetch: Callable[[list[str]], None] = lambda _args: None
@@ -112,16 +116,16 @@ class FakeBox:
         assert found.instance == INSTANCE
         self.gcloud_calls.append(args)
         if args[2] != "describe":
-            return self.start
+            return self.starts.pop(0) if self.starts else self.start
         status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
         return described(status)
 
     def ssh(self, found: remote.Settings, ip: str, command: str, timeout: int | None = None, tty: bool = False) -> Reply:
         same_box(found)
         self.ssh_calls.append((ip, command, timeout, tty))
-        if JOB_LOCK in command:
+        if JOB in command:
             self.clock.now += self.job_seconds
-            return self.jobs.pop(0)
+            return finished(self.jobs.pop(0))
         return self.probe if command == PROBE else (0, "")
 
     def rsync(self, found: remote.Settings, args: list[str]) -> Reply:
@@ -131,7 +135,14 @@ class FakeBox:
         return self.sync if args[-1].endswith("/repo/") else (0, "")
 
     def job_commands(self) -> list[str]:
-        return [command for _ip, command, _timeout, _tty in self.ssh_calls if JOB_LOCK in command]
+        return [command for _ip, command, _timeout, _tty in self.ssh_calls if JOB in command]
+
+
+def finished(reply: Reply | None) -> Reply:
+    if reply is None:
+        return 255, ""
+    code, output = reply
+    return code, f"{output}\nmarestail-exit {code}\n"
 
 
 def same_box(found: remote.Settings) -> None:
@@ -210,7 +221,7 @@ def build(workers: int) -> list[str]:
 
 def offload(repo: Path) -> remote.Outcome:
     ctx = make_context(repo)
-    return remote.run_mutation(ctx, "py.mutation", build, repo, 4, env={"A": "1"}, timeout=7200, pull=("mutants",))
+    return remote.run_job(ctx, "py.mutation", build, repo, 4, env={"A": "1"}, timeout=7200, pull=("mutants",))
 
 
 def usage_lines() -> list[dict[str, Any]]:
@@ -236,31 +247,69 @@ def without_stamp(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def local_call(repo: Path) -> list[dict[str, Any]]:
-    return [{"cwd": repo, "env": {"A": "1"}, "timeout": 7200}]
+    return [{"cwd": repo, "env": {"A": "1", **GUARDED}, "timeout": 7200}]
 
 
 def gate_ctx(repo: Path) -> Any:
     return make_context(repo, {"python": {"mutation_scope": "all"}})
 
 
-def test_start_failure_runs_locally_and_names_the_gcloud_error(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+def patience(hours: float) -> None:
+    configure(TOML + f"max_wait_hours = {hours}\n")
+
+
+def test_a_box_that_will_not_start_is_waited_for_and_never_run_locally(
+    box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime, capsys: pytest.CaptureFixture[str]
+) -> None:
+    patience(0.05)
     box.statuses = ["TERMINATED"]
-    box.start = (1, "WARNING: retrying\nPERMISSION_DENIED\n")
-    assert offload(repo) == remote.Outcome(0, "local mutmut", " (remote unavailable: PERMISSION_DENIED; ran locally)")
-    assert mutmut.calls == [["mutmut", "run", "--max-children", "4"]]
-    assert mutmut.options == local_call(repo)
-    assert box.gcloud_calls == [DESCRIBE, START]
+    box.start = (1, "WARNING: retrying\nZONE_RESOURCE_POOL_EXHAUSTED\n")
+    unavailable = f"{INSTANCE} is unavailable: ZONE_RESOURCE_POOL_EXHAUSTED"
+    assert offload(repo) == remote.Outcome(75, "", f" (gave up after waiting 3m: {unavailable}; not run locally)")
+    assert clock.slept == [30, 60, 90]
+    assert mutmut.calls == []
+    assert box.gcloud_calls == [DESCRIBE, START] * 4
     assert box.ssh_calls == []
     assert not remote.USAGE.exists()
+    assert capsys.readouterr().err.splitlines() == [
+        f"marestail: {unavailable}; trying again in 30s (waited 0s of 3m)",
+        f"marestail: {unavailable}; trying again in 1m (waited 30s of 3m)",
+        f"marestail: {unavailable}; trying again in 1m30s (waited 1m30s of 3m)",
+    ]
 
 
-def test_start_failure_through_the_python_gate(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+def test_a_stockout_that_clears_runs_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
+    box.statuses = ["TERMINATED", "TERMINATED", "RUNNING"]
+    box.starts = [(1, "ZONE_RESOURCE_POOL_EXHAUSTED"), (0, "")]
+    assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s, after waiting 30s for the box)")
+    assert clock.slept == [30]
+    assert mutmut.calls == []
+    assert box.gcloud_calls == [DESCRIBE, START, DESCRIBE, START, DESCRIBE]
+
+
+def test_waiting_backs_off_to_five_minutes(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
+    patience(0.5)
+    box.statuses = [None]
+    assert offload(repo).where == f" (gave up after waiting 30m: {INSTANCE} is unavailable: instance is unknown; not run locally)"
+    assert clock.slept == [30, 60, 120, 240, 300, 300, 300, 300, 150]
+    assert mutmut.calls == []
+
+
+def test_the_default_patience_is_six_hours(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
+    box.statuses = [None]
+    assert offload(repo).where.startswith(" (gave up after waiting 6h: ")
+    assert sum(clock.slept) == 6 * 3600
+    assert remote.MAX_WAIT_HOURS == 6.0
+
+
+def test_a_box_that_will_not_start_fails_the_python_gate(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    patience(0)
     box.statuses = ["TERMINATED"]
     box.start = (1, "PERMISSION_DENIED")
     result = py_mutation.run_gate(gate_ctx(repo))
-    assert result.ok is True
-    assert result.summary == "all 2 mutants killed (1 killed by timeout) (remote unavailable: PERMISSION_DENIED; ran locally)"
-    assert mutmut.calls == [[str(repo / ".venv" / "bin" / "mutmut"), "run", "--max-children", "4"]]
+    assert result.ok is False
+    assert result.summary == f"mutmut failed (gave up after waiting 0s: {INSTANCE} is unavailable: PERMISSION_DENIED; not run locally)"
+    assert mutmut.calls == []
     assert not remote.USAGE.exists()
 
 
@@ -268,10 +317,11 @@ def test_start_failure_through_the_python_gate(box: FakeBox, mutmut: FakeRun, re
 def test_a_silent_power_on_failure_names_the_verb(
     box: FakeBox, mutmut: FakeRun, repo: Path, status: str, verb: str, args: list[str]
 ) -> None:
+    patience(0)
     box.statuses = [status]
     box.start = (1, " \n")
-    assert offload(repo).where == f" (remote unavailable: {verb} failed; ran locally)"
-    assert mutmut.calls == [["mutmut", "run", "--max-children", "4"]]
+    assert offload(repo).where == f" (gave up after waiting 0s: {INSTANCE} is unavailable: {verb} failed; not run locally)"
+    assert mutmut.calls == []
     assert box.gcloud_calls == [DESCRIBE, args]
 
 
@@ -306,15 +356,16 @@ def test_boot_wait_is_four_minutes() -> None:
     assert remote.BOOT_WAIT == 240
 
 
-def test_ssh_that_never_comes_up_runs_locally(
+def test_ssh_that_never_comes_up_is_waited_for(
     box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    patience(0)
     monkeypatch.setattr(remote, "BOOT_WAIT", 10)
     box.probe = (255, "")
-    assert offload(repo).where == " (remote unavailable: ssh never came up; ran locally)"
+    assert offload(repo).where == f" (gave up after waiting 0s: {INSTANCE} is unavailable: ssh never came up; not run locally)"
     assert box.ssh_calls == [(IP, PROBE, 20, False), (IP, PROBE, 20, False)]
     assert clock.slept == [5, 5]
-    assert mutmut.calls == [["mutmut", "run", "--max-children", "4"]]
+    assert mutmut.calls == []
 
 
 def test_a_running_box_runs_the_job_and_records_it(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
@@ -333,12 +384,13 @@ def test_a_running_box_runs_the_job_and_records_it(box: FakeBox, mutmut: FakeRun
         " mt setsid",
         JOB_LOCK,
         "/var/lib/marestail/busy.d/",
-        "npm ci --no-audit --no-fund --loglevel=error",
         f"docker exec -w {repo} -e PATH=",
         " -e A=1 mt setsid",
-        "timeout -k 30 7200 mutmut run --max-children 8;",
+        "timeout -k 30 7200 mutmut run --max-children 8 </dev/null;",
+        "printf '\\nmarestail-exit %s\\n' \"$code\"",
     ):
         assert part in job
+    assert "npm ci" not in job
     assert box.rsync_calls == [[*PY_EXCLUDES, f"{repo}/", f"max@{IP}:{repo}/"], [f"max@{IP}:{repo}/mutants/", f"{repo}/mutants/"]]
     (line,) = usage_lines()
     assert list(line) == JOB_KEYS
@@ -374,19 +426,25 @@ def test_a_gate_that_is_not_offloaded_runs_locally(box: FakeBox, mutmut: FakeRun
 
 
 @pytest.mark.parametrize(("reply", "problem"), [((1, "warning\nconnection reset\n"), "connection reset"), ((23, "  "), "rsync exit 23")])
-def test_a_failed_sync_runs_locally(box: FakeBox, mutmut: FakeRun, repo: Path, reply: Reply, problem: str) -> None:
+def test_a_failed_sync_is_retried_and_never_run_locally(
+    box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime, reply: Reply, problem: str
+) -> None:
+    patience(0.01)
     box.sync = reply
-    assert offload(repo) == remote.Outcome(0, "local mutmut", f" (remote sync failed: {problem}; ran locally)")
-    assert mutmut.calls == [["mutmut", "run", "--max-children", "4"]]
+    assert offload(repo) == remote.Outcome(
+        75, "", f" (gave up after waiting 36s: copying the tree to {INSTANCE} failed: {problem}; not run locally)"
+    )
+    assert clock.slept == [30, 6]
+    assert mutmut.calls == []
     assert box.job_commands() == []
     assert not remote.USAGE.exists()
 
 
 def test_a_drop_without_the_box_coming_back_fails(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.statuses = ["RUNNING", None]
-    box.jobs = [(255, "")]
+    patience(0)
+    box.jobs = [None]
     assert offload(repo) == remote.Outcome(
-        255, "", f" (connection to {INSTANCE} dropped mid-run and it did not come back: instance is unknown)"
+        75, "", f" (gave up after waiting 0s: the connection to {INSTANCE} dropped mid-run; not run locally)"
     )
     assert mutmut.calls == []
     assert len(box.job_commands()) == 1
@@ -395,47 +453,64 @@ def test_a_drop_without_the_box_coming_back_fails(box: FakeBox, mutmut: FakeRun,
 
 
 def test_a_drop_through_the_python_gate_fails(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.statuses = ["RUNNING", None]
-    box.jobs = [(255, "")]
+    patience(0)
+    box.jobs = [None]
     result = py_mutation.run_gate(gate_ctx(repo))
     assert result.ok is False
-    assert result.summary == f"mutmut failed (connection to {INSTANCE} dropped mid-run and it did not come back: instance is unknown)"
+    assert result.summary == f"mutmut failed (gave up after waiting 0s: the connection to {INSTANCE} dropped mid-run; not run locally)"
     assert mutmut.calls == []
 
 
-def test_a_second_drop_is_not_rerun_locally(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.jobs = [(255, ""), (255, " \n")]
-    assert offload(repo) == remote.Outcome(255, " \n", f" (connection to {INSTANCE} dropped twice mid-run; not rerun locally)")
-    assert len(box.job_commands()) == 2
+def test_drops_are_retried_on_the_box_until_the_patience_runs_out(box: FakeBox, mutmut: FakeRun, repo: Path, clock: FakeTime) -> None:
+    patience(0.03)
+    box.jobs = [None, None, None, None]
+    assert offload(repo).where == f" (gave up after waiting 1m48s: the connection to {INSTANCE} dropped mid-run; not run locally)"
+    assert len(box.job_commands()) == 4
+    assert clock.slept == [30, 60, 18]
     assert mutmut.calls == []
-    (line,) = usage_lines()
-    assert without_stamp(line) == job_line(repo, "dropped")
+    assert [without_stamp(line)["result"] for line in usage_lines()] == ["dropped"] * 4
 
 
 def test_a_drop_that_recovers_reruns_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    box.jobs = [(255, ""), (0, "done")]
-    assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
+    box.jobs = [None, (0, "done")]
+    assert offload(repo) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s, after waiting 30s for the box)")
     assert len(box.job_commands()) == 2
     assert box.gcloud_calls == [DESCRIBE, DESCRIBE]
     assert {call[0] for call in box.ssh_calls} == {IP}
     assert box.rsync_calls[-1] == [f"max@{IP}:{repo}/mutants/", f"{repo}/mutants/"]
     assert mutmut.calls == []
-    (line,) = usage_lines()
-    assert without_stamp(line) == job_line(repo, "ok")
+    assert [without_stamp(line) for line in usage_lines()] == [job_line(repo, "dropped"), job_line(repo, "ok")]
 
 
-def test_run_mutation_defaults_to_two_hours_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 4) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
+def test_a_job_that_exits_255_with_its_trailer_is_not_a_drop(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    box.jobs = [(255, "")]
+    assert offload(repo) == remote.Outcome(255, "", f" (on {INSTANCE}, 0s)")
+    assert len(box.job_commands()) == 1
+
+
+def test_an_ssh_timeout_is_not_retried(box: FakeBox, mutmut: FakeRun, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def ssh(found: remote.Settings, ip: str, command: str, timeout: int | None = None, tty: bool = False) -> Reply:
+        reply = box.ssh(found, ip, command, timeout, tty)
+        return (124, "ssh timed out after 21720s") if JOB in command else reply
+
+    monkeypatch.setattr(remote, "ssh", ssh)
+    assert offload(repo) == remote.Outcome(124, "ssh timed out after 21720s", f" (on {INSTANCE}, 0s)")
+    assert without_stamp(usage_lines()[0])["result"] == "exit 124"
+
+
+def test_run_job_defaults_to_two_hours_on_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo, 4) == remote.Outcome(0, "done", f" (on {INSTANCE}, 0s)")
     (job,) = box.job_commands()
     assert "timeout -k 30 7200 mutmut" in job
     assert box.ssh_calls[-1][2:] == (21720, True)
     assert box.rsync_calls == [[*PY_EXCLUDES, f"{repo}/", f"max@{IP}:{repo}/"]]
 
 
-def test_run_mutation_defaults_to_two_hours_locally(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+def test_run_job_defaults_to_two_hours_and_no_workers_locally(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
     configure(TOML.replace('gates = ["py.mutation"]', "gates = []"))
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 4) == remote.Outcome(0, "local mutmut", "")
-    assert mutmut.options == [{"cwd": repo, "env": None, "timeout": 7200}]
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo) == remote.Outcome(0, "local mutmut", "")
+    assert mutmut.calls == [["mutmut", "run", "--max-children", "0"]]
+    assert mutmut.options == [{"cwd": repo, "env": GUARDED, "timeout": 7200}]
 
 
 def test_a_failing_job_reports_its_output_from_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
@@ -453,16 +528,40 @@ def test_a_failing_job_through_the_python_gate(box: FakeBox, mutmut: FakeRun, re
     assert mutmut.calls == []
 
 
+def test_sent_paths_follow_the_tree_to_the_box(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    coverage = repo / ".marestail" / "py-coverage.xml"
+    coverage.parent.mkdir(parents=True)
+    coverage.write_text("<x/>")
+    folder = repo / ".marestail" / "ts-coverage"
+    folder.mkdir()
+    missing = repo / "absent"
+    sent = (coverage, folder, missing)
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo, 4, send=sent).code == 0
+    assert box.rsync_calls[1:] == [[str(coverage), f"max@{IP}:{coverage}"], [f"{folder}/", f"max@{IP}:{folder}/"]]
+    assert (IP, f"mkdir -p {coverage.parent}", 30, False) in box.ssh_calls
+
+
+def test_a_failed_send_is_a_failed_sync(box: FakeBox, mutmut: FakeRun, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    patience(0)
+    sent = repo / "pkg"
+    monkeypatch.setattr(remote, "rsync", lambda _found, args: (12, "denied") if args[0] == f"{sent}/" else (0, ""))
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo, 4, send=(sent,)).where == (
+        f" (gave up after waiting 0s: copying the tree to {INSTANCE} failed: denied; not run locally)"
+    )
+
+
 @pytest.mark.parametrize("value", ["0", "off", "false", "no", "OFF", "No"])
 def test_a_switched_off_remote_ignores_the_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     configure()
     monkeypatch.setenv(remote.ENV, value)
     assert remote._settings(make_context(tmp_path)) is None
+    assert remote.switched_off() is True
 
 
 def test_settings_load_the_config_when_remote_is_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
     configure()
     monkeypatch.setenv(remote.ENV, "1")
+    assert remote.switched_off() is False
     assert remote._settings(make_context(tmp_path)) == box_settings(key=home / ".ssh" / "google_compute_engine")
 
 
@@ -502,6 +601,9 @@ def test_load_fills_defaults(monkeypatch: pytest.MonkeyPatch, home: Path) -> Non
         usd_per_hour=0.0,
         user="alice",
         key=home / ".ssh" / "google_compute_engine",
+        run_in={},
+        max_wait=21600.0,
+        sonar_host_url="",
     )
     monkeypatch.delenv("USER")
     loaded = remote._load()
@@ -514,12 +616,40 @@ def test_load_converts_values(home: Path, monkeypatch: pytest.MonkeyPatch) -> No
     configure(
         '[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\ncontainer = "c"\nkey = "~/k"\n'
         'workers = { g = "3" }\nenv = { A = 1 }\nusd_per_hour = 2\nuser = "bob"\nUSER = "carol"\n'
+        'max_wait_hours = 0.5\nsonar_host_url = "http://10.0.0.2:9000"\nrun_in = { default = "host", "py.mutation" = 7 }\n'
     )
     loaded = remote._load()
     assert loaded is not None
     assert (loaded.container, loaded.key, loaded.workers, loaded.env, loaded.usd_per_hour) == ("c", home / "k", {"g": 3}, {"A": "1"}, 2.0)
     assert loaded.user == "bob"
     assert isinstance(loaded.usd_per_hour, float)
+    assert (loaded.max_wait, loaded.sonar_host_url) == (1800.0, "http://10.0.0.2:9000")
+    assert loaded.run_in == {"default": "host", "py.mutation": "7"}
+
+
+def test_run_in_may_be_one_place_for_every_gate() -> None:
+    configure('[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\nrun_in = "host"\n')
+    loaded = remote._load()
+    assert loaded is not None
+    assert loaded.run_in == {"default": "host"}
+    assert (loaded.place("py.mutation"), loaded.place("offload")) == ("host", "host")
+
+
+@pytest.mark.parametrize(
+    ("run_in", "gate", "place"),
+    [
+        ({}, "ts.tests", "mt"),
+        ({}, "offload", "host"),
+        ({"default": "host"}, "ts.mutation", "host"),
+        ({"default": "host", "ts.mutation": "mt"}, "ts.mutation", "mt"),
+        ({"ts.tests": "host"}, "ts.tests", "host"),
+        ({"ts.tests": "host"}, "py.tests", "mt"),
+        ({"offload": "other"}, "offload", "other"),
+        ({"default": "mt"}, "offload", "host"),
+    ],
+)
+def test_place_reads_the_gate_then_the_default_then_the_container(run_in: dict[str, str], gate: str, place: str) -> None:
+    assert box_settings(run_in=run_in).place(gate) == place
 
 
 def test_the_gates_variable_overrides_the_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -532,23 +662,59 @@ def test_the_gates_variable_overrides_the_config(monkeypatch: pytest.MonkeyPatch
     assert remote._offloaded_gates({"gates": ["a"]}) == ("a",)
 
 
+@pytest.mark.parametrize(
+    ("toml", "url"),
+    [
+        ('gates = ["sonar"]\nsonar_host_url = "http://10.1.2.3:9000"\n', "http://10.1.2.3:9000"),
+        ('gates = ["sonar"]\n', "http://localhost:9000"),
+        ('gates = ["py.mutation"]\nsonar_host_url = "http://10.1.2.3:9000"\n', "http://localhost:9000"),
+    ],
+)
+def test_sonar_url_points_the_box_at_the_sonar_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml: str, url: str) -> None:
+    monkeypatch.delenv(remote.ENV, raising=False)
+    configure('[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\n' + toml)
+    assert remote.sonar_url(make_context(tmp_path), "http://localhost:9000") == url
+
+
+def test_sonar_url_without_a_box_is_the_fallback(tmp_path: Path) -> None:
+    assert remote.sonar_url(make_context(tmp_path), "http://localhost:9000") == "http://localhost:9000"
+
+
 def test_a_box_without_a_count_for_the_gate_keeps_the_local_workers(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
     configure(TOML.replace('workers = { "py.mutation" = 8 }', 'workers = { "ts.mutation" = 8 }'))
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 3).where == f" (on {INSTANCE}, 0s)"
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo, 3).where == f" (on {INSTANCE}, 0s)"
     (job,) = box.job_commands()
-    assert "mutmut run --max-children 3;" in job
+    assert "mutmut run --max-children 3 </dev/null;" in job
     assert mutmut.calls == []
 
 
 def test_a_local_run_builds_with_the_local_workers(box: FakeBox, mutmut: FakeRun, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(remote.ENV, "off")
-    assert remote.run_mutation(make_context(repo), "py.mutation", build, repo, 3) == remote.Outcome(0, "local mutmut", "")
+    assert remote.run_job(make_context(repo), "py.mutation", build, repo, 3) == remote.Outcome(0, "local mutmut", "")
     assert mutmut.calls == [["mutmut", "run", "--max-children", "3"]]
 
 
-@pytest.mark.parametrize(("code", "output", "expected"), [(255, "", True), (255, " \n", True), (255, "x", False), (254, "", False)])
-def test_dropped_means_255_and_no_output(code: int, output: str, expected: bool) -> None:
-    assert remote._dropped(code, output) is expected
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, "a\nb\nmarestail-exit 3\n", (3, "a\nb")),
+        (0, "a\n\nmarestail-exit 0\n", (0, "a\n")),
+        (255, "\nmarestail-exit 255", (255, "")),
+        (255, "", (None, "")),
+        (255, "partial output", (None, "partial output")),
+        (0, "a\nmarestail-exit x\n", (None, "a\nmarestail-exit x\n")),
+        (124, "ssh timed out after 9s", (124, "ssh timed out after 9s")),
+        (124, "job said ssh timed out after", (None, "job said ssh timed out after")),
+        (1, "ssh timed out after 9s", (None, "ssh timed out after 9s")),
+    ],
+)
+def test_concluded_reads_the_exit_trailer(code: int, output: str, expected: tuple[int | None, str]) -> None:
+    assert remote._concluded(code, output) == expected
+
+
+@pytest.mark.parametrize(("seconds", "text"), [(0, "0s"), (30, "30s"), (60, "1m"), (90, "1m30s"), (3600, "1h"), (21599.9, "5h59m59s")])
+def test_span_reads_like_a_duration(seconds: float, text: str) -> None:
+    assert remote.span(seconds) == text
 
 
 def test_local_with_a_timeout_uses_the_shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -799,45 +965,151 @@ def job_id(monkeypatch: pytest.MonkeyPatch) -> str:
     return "abc"
 
 
-def test_execute_queues_the_job_in_the_container(home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch, job_id: str) -> None:
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    remote._execute(box_settings(), IP, ["mutmut", "run", "x y"], Path("/repo/a b"), {"A": "1"}, 100, "prepare")
+def job_of(root: Path, gate: str, command: list[str], **changes: Any) -> remote._Job:
+    fields: dict[str, Any] = {
+        "ctx": make_context(root),
+        "gate": gate,
+        "build": lambda workers: [*command, *([str(workers)] if workers else [])],
+        "cwd": root,
+        "workers": 0,
+        "env": None,
+        "timeout": 100,
+        "pull": (),
+    }
+    return remote._Job(**{**fields, **changes})
+
+
+def wrapped(home: Path, runner: str, cleanup: str) -> str:
+    marker = "/var/lib/marestail/busy.d/abc"
+    return (
+        f"echo $$ > {marker}; stop() {{ {cleanup} >/dev/null 2>&1; rm -f {marker}; }}; "
+        "trap 'stop; exit 129' HUP INT TERM; "
+        f"{runner} & wait $!; code=$?; rm -f {marker}; touch /var/lib/marestail/last; "
+        "printf '\\nmarestail-exit %s\\n' \"$code\"; exit $code"
+    )
+
+
+def test_execute_queues_a_mutation_job_in_the_container(
+    home: Path, recorder: Recorder, monkeypatch: pytest.MonkeyPatch, job_id: str
+) -> None:
+    monkeypatch.setenv("PATH", f"/usr/bin:{remote.SHIMS}:/bin")
+    root = Path("/repo/a b")
+    job = job_of(root, "py.mutation", ["mutmut", "run", "x y"], env={"A": "1"})
+    assert remote._execute(box_settings(), IP, job) == (None, "")
     session = f"{home}/.cache/marestail-jobs/job-abc"
     inner = (
-        f"mkdir -p -m 700 {home}/.cache/marestail-jobs && echo $$ > {session}; prepare; "
-        f"timeout -k 30 100 mutmut run 'x y'; code=$?; rm -f {session}; exit $code"
+        f"mkdir -p -m 700 {home}/.cache/marestail-jobs && echo $$ > {session}; "
+        f"timeout -k 30 100 mutmut run 'x y' 8 </dev/null; code=$?; rm -f {session}; exit $code"
     )
     docker = (
-        f"docker exec -w '/repo/a b' -e PATH=/usr/bin:/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=dumb -e NO_COLOR=1 -e A=1 "
-        f"mt setsid -w bash -c {shlex.quote(inner)}"
+        f"docker exec -w '/repo/a b' -e PATH=/usr/bin:/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=dumb -e NO_COLOR=1 "
+        f"-e MARESTAIL_NO_OFFLOAD=1 -e MARESTAIL_GATE=py.mutation -e A=1 mt setsid -w bash -c {shlex.quote(inner)}"
     )
     stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
     cleanup = "sg docker -c " + shlex.quote("docker exec mt bash -c " + shlex.quote(stop))
-    script = (
-        f"echo $$ > /var/lib/marestail/busy.d/abc; stop() {{ {cleanup} >/dev/null 2>&1; rm -f /var/lib/marestail/busy.d/abc; }}; "
-        "trap 'stop; exit 129' HUP INT TERM; "
-        f"flock /var/lib/marestail/job.lock sg docker -c {shlex.quote(docker)} & wait $!; code=$?; "
-        "rm -f /var/lib/marestail/busy.d/abc; touch /var/lib/marestail/last; exit $code"
+    runner = f"flock /var/lib/marestail/job.lock sg docker -c {shlex.quote(docker)}"
+    assert recorder.ssh_calls == [(IP, wrapped(home, runner, cleanup), 420, True)]
+
+
+def test_execute_runs_a_test_job_on_the_host_unqueued_with_nvm(home: Path, recorder: Recorder, job_id: str, tmp_path: Path) -> None:
+    root = tmp_path / "web app"
+    root.mkdir()
+    (root / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n")
+    job = job_of(root, "ts.tests", ["npx", "vitest", "run"], env={"PLAYWRIGHT_JSON_OUTPUT_NAME": "/x/r.json"})
+    found = box_settings(env={"PGPORT": "5432"}, run_in={"ts.tests": "host"}, workers={"ts.tests": 16})
+    remote._execute(found, IP, job)
+    session = f"{home}/.cache/marestail-jobs/job-abc"
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    prepare = (
+        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || exit 97; }} "
+        f"9>{home}/.cache/marestail-jobs/prepare-{digest}.lock"
     )
-    assert recorder.ssh_calls == [(IP, script, 420, True)]
+    inner = (
+        f"mkdir -p -m 700 {home}/.cache/marestail-jobs && echo $$ > {session}; {remote.NVM}; {prepare}; "
+        f"timeout -k 30 100 npx vitest run 16 </dev/null; code=$?; rm -f {session}; exit $code"
+    )
+    assignments = (
+        f"HOME={home} LANG=C.UTF-8 TERM=dumb NO_COLOR=1 MARESTAIL_NO_OFFLOAD=1 MARESTAIL_GATE=ts.tests PGPORT=5432 "
+        "PLAYWRIGHT_JSON_OUTPUT_NAME=/x/r.json"
+    )
+    runner = f"env -C {shlex.quote(str(root))} {assignments} setsid -w bash -c {shlex.quote(inner)}"
+    cleanup = f"{{ [ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}; }}"
+    assert recorder.ssh_calls == [(IP, wrapped(home, runner, cleanup), 420, True)]
 
 
-def test_execute_without_a_timeout_runs_unbounded(recorder: Recorder, job_id: str) -> None:
-    remote._execute(box_settings(), IP, ["mutmut"], Path("/repo"), None, None, remote.PREPARE)
+def test_execute_without_a_timeout_runs_unbounded(recorder: Recorder, job_id: str, tmp_path: Path) -> None:
+    remote._execute(box_settings(), IP, job_of(tmp_path, "py.mutation", ["mutmut"], timeout=None))
     ((_ip, script, timeout, tty),) = recorder.ssh_calls
     assert (timeout, tty) == (None, True)
     assert "timeout -k" not in script
-    assert "; mutmut; code=$?" in script
+    assert f"{tmp_path}/.cache" not in script
+    assert "; mutmut 8 </dev/null; code=$?" in script
 
 
-def test_env_flags_let_the_box_and_the_caller_override(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_execute_reads_the_trailer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job_id: str) -> None:
+    monkeypatch.setattr(remote, "ssh", lambda _found, _ip, _script, timeout=None, tty=False: (3, "out\nmarestail-exit 3\n"))
+    assert remote._execute(box_settings(), IP, job_of(tmp_path, "ts.tests", ["true"])) == (3, "out")
+
+
+def test_a_job_in_another_container_cleans_up_there(home: Path, recorder: Recorder, job_id: str, tmp_path: Path) -> None:
+    remote._execute(box_settings(run_in={"default": "other"}), IP, job_of(tmp_path, "ts.tests", ["true"]))
+    ((_ip, script, _timeout, _tty),) = recorder.ssh_calls
+    assert "sg docker -c 'docker exec other bash -c" in script
+    assert " other setsid -w bash -c " in script
+    assert "flock /var/lib/marestail/job.lock" not in script
+
+
+def test_env_flags_let_the_box_and_the_caller_override(home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PATH", "/bin")
     found = box_settings(env={"TERM": "xterm", "A": "1"})
-    assert remote._env_flags(found, {"A": "2", "B": "x y"}) == (
-        f"-e PATH=/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=xterm -e NO_COLOR=1 -e A=2 -e 'B=x y'"
+    assert remote._env_flags(found, job_of(tmp_path, "g", [], env={"A": "2", "B": "x y"})) == (
+        f"-e PATH=/bin -e HOME={home} -e LANG=C.UTF-8 -e TERM=xterm -e NO_COLOR=1 -e MARESTAIL_NO_OFFLOAD=1 "
+        "-e MARESTAIL_GATE=g -e A=2 -e 'B=x y'"
     )
     monkeypatch.delenv("PATH")
-    assert remote._env_flags(box_settings(), None).startswith("-e PATH= -e HOME=")
+    assert remote._env_flags(box_settings(), job_of(tmp_path, "g", [])).startswith("-e PATH= -e HOME=")
+
+
+def test_fresh_paths_are_cleared_on_the_box_before_the_job(tmp_path: Path) -> None:
+    root = tmp_path / "my repo"
+    job = job_of(root, "java.tests", ["mvn", "test"], fresh=("target/surefire-reports", ".marestail/j.exec"))
+    reports, data = (shlex.quote(str(root / path)) for path in ("target/surefire-reports", ".marestail/j.exec"))
+    assert remote._setup(box_settings(), job) == f"rm -rf {reports} {data}; "
+
+
+def test_run_job_passes_fresh_paths_through(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
+    remote.run_job(make_context(repo), "py.mutation", build, repo, 4, fresh=("mutants",))
+    (job,) = box.job_commands()
+    assert f"rm -rf {repo}/mutants; " in job
+
+
+def test_offloaded_names_the_listed_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    configure()
+    monkeypatch.delenv(remote.ENV)
+    ctx = make_context(tmp_path)
+    assert (remote.offloaded(ctx, "py.mutation"), remote.offloaded(ctx, "ts.tests")) == (True, False)
+    monkeypatch.setenv(remote.ENV, "0")
+    assert remote.offloaded(ctx, "py.mutation") is False
+
+
+def test_without_shims_drops_every_shim_entry() -> None:
+    assert remote.without_shims(f"{remote.SHIMS}:/usr/bin:{remote.SHIMS}:/bin") == "/usr/bin:/bin"
+    assert remote.SHIMS.name == "shims"
+
+
+def test_the_prepare_lock_folder_is_the_nearest_with_a_lockfile(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    web = root / "apps" / "web"
+    web.mkdir(parents=True)
+    assert remote._lock_folder(root, web) is None
+    (tmp_path / "package-lock.json").write_text("{}")
+    assert remote._lock_folder(root, web) is None
+    (root / "pnpm-lock.yaml").write_text("")
+    assert remote._lock_folder(root, web) == root
+    (web / "package-lock.json").mkdir()
+    assert remote._lock_folder(root, web) == root
+    (root / "apps" / "package-lock.json").write_text("{}")
+    assert remote._lock_folder(root, web) == root / "apps"
 
 
 def test_record_appends_a_stamped_line() -> None:
@@ -1197,19 +1469,29 @@ def test_prepare_installs_node_modules_only_when_the_lock_changes() -> None:
     )
 
 
-def test_prepare_without_tooling_installs_only_the_repo() -> None:
-    assert remote._prepare(make_context(Path("/repo"))) == remote.PREPARE
+def test_prepare_without_a_lockfile_or_tooling_is_nothing(tmp_path: Path) -> None:
+    assert remote._prepare(make_context(tmp_path), tmp_path) == ""
 
 
-def test_prepare_with_tooling_also_installs_the_tooling_folder() -> None:
-    ctx = make_context(Path("/my repo"), {"ts": {"tooling": ".marestail/tooling"}})
-    folder = "'/my repo/.marestail/tooling'"
-    assert remote._prepare(ctx) == (
-        f"{remote.PREPARE}; if [ -f {folder}/package-lock.json ]; then lock=$(sha256sum {folder}/package-lock.json | cut -c1-16); "
+def test_prepare_with_tooling_also_installs_the_tooling_folder(home: Path, tmp_path: Path) -> None:
+    root = tmp_path / "my repo"
+    root.mkdir()
+    (root / "package-lock.json").write_text("{}")
+    ctx = make_context(root, {"ts": {"tooling": ".marestail/tooling"}})
+    folder = shlex.quote(f"{root}/.marestail/tooling")
+    digest = hashlib.sha256(str(root).encode()).hexdigest()[:16]
+    assert remote._prepare(ctx, root) == (
+        f"{{ flock 9; ( cd {shlex.quote(str(root))} && {remote.PREPARE} ) || exit 97; "
+        f"if [ -f {folder}/package-lock.json ]; then lock=$(sha256sum {folder}/package-lock.json | cut -c1-16); "
         f'if [ "$(cat {folder}/node_modules/.marestail-lock 2>/dev/null)" != "$lock" ]; then '
         f'npm ci --prefix {folder} --no-audit --no-fund --loglevel=error >&2 && echo "$lock" > {folder}/node_modules/.marestail-lock || exit 97; '
-        "fi; fi"
+        f"fi; fi; }} 9>{home}/.cache/marestail-jobs/prepare-{digest}.lock"
     )
+
+
+def test_prepare_with_tooling_alone(tmp_path: Path) -> None:
+    ctx = make_context(tmp_path, {"ts": {"tooling": "t"}})
+    assert remote._prepare(ctx, tmp_path).startswith(f"{{ flock 9; if [ -f {tmp_path}/t/package-lock.json ]")
 
 
 def test_the_remote_module_has_no_offloads_helper() -> None:

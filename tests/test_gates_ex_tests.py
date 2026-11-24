@@ -9,7 +9,7 @@ from marestail import elixir
 from marestail.context import Context
 from marestail.gates import ex_tests
 from marestail.report import Result
-from tests.conftest import FakeRun, checked, gate_shape, make_context
+from tests.conftest import GUARDED, FakeRun, checked, gate_shape, make_context
 
 Reply = tuple[int, str]
 COVERAGE = {
@@ -81,7 +81,7 @@ def test_reports_gaps(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
         ["mix", "test", "--cover", "--export-coverage", "default"],
         ["elixir", str(elixir.COVERAGE), coverdata, out_json],
     ]
-    assert fake.options == [{"cwd": tmp_path, "timeout": 1800}, {"cwd": tmp_path, "timeout": 300}]
+    assert fake.options == [{"cwd": tmp_path, "env": GUARDED, "timeout": 1800}, {"cwd": tmp_path, "timeout": 300}]
 
 
 def test_scoped_percent_on_changed_lines(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
@@ -134,3 +134,19 @@ def test_counted_defaults_missing_keys_to_zero() -> None:
 
 def test_passed_before_without_passed_is_blank() -> None:
     assert ex_tests.passed_before("nothing here") == ""
+
+
+def test_mix_test_runs_on_the_box_and_pulls_the_cover_folder(tmp_path: Path, box_job: Any, fake_run: Callable[..., FakeRun]) -> None:
+    ctx = project(tmp_path)
+    fake_run(ex_tests, mix((0, "")))
+    fake = box_job(0, "Finished\n4 passed\n", " (on box, 9s)")
+    result = checked(ex_tests.run_gate(ctx), ex_tests.GATE)
+    assert result.summary == "4 passed, coverage 75.0%, 2 gaps (need 0) (on box, 9s)"
+    (job,) = fake.calls
+    assert (job["gate"], job["command"], job["cwd"], job["timeout"], job["pull"]) == (
+        "ex.tests",
+        ex_tests.MIX_TEST,
+        tmp_path,
+        1800,
+        ("cover",),
+    )

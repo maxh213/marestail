@@ -2,7 +2,7 @@
 root_package = marestail
 
 [importlinter:contract:layers]
-name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote mutation box, depth/graph, language adapters, context, then shell
+name = Dependencies point down: TUI, CLI, pipeline commands, the hyper install, then the classic install and the tooling renderer (independent of each other), the language rulebook copy, prompts and the hunk check, gates, the remote box, depth/graph, language adapters, context, then shell
 type = layers
 layers =
     marestail.tui
@@ -586,7 +586,7 @@ forbidden_modules =
 allow_indirect_imports = True
 
 [importlinter:contract:remote-box-belongs-to-offloading-gates]
-name = The remote mutation box is reached only by the mutation gates that offload to it and by the CLI's remote command
+name = The remote box is reached only by the gates that offload to it and by the CLI's remote command
 type = protected
 protected_modules =
     marestail.remote
@@ -596,6 +596,12 @@ allowed_importers =
     marestail.gates.py_mutation
     marestail.gates.ex_mutation
     marestail.gates.java_mutation
+    marestail.gates.ts_tests
+    marestail.gates.py_tests
+    marestail.gates.ex_tests
+    marestail.gates.java_tests
+    marestail.gates.qa
+    marestail.gates.sonar
 
 [importlinter:contract:remote-box-knows-no-language]
 name = The remote box runs whatever command a gate builds; it knows no language, no gate verdict and no orchestration

@@ -1,15 +1,17 @@
 import json
 import re
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from marestail import remote
 from marestail.context import Context
 from marestail.gates._coverage import TS_COVERAGE_DIR
 from marestail.gates._coverage import in_scope_findings as in_scope_findings
 from marestail.javascript import config_flag, labelled, tool, tooling
 from marestail.report import Result, elapsed
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 COVERAGE_DIR = TS_COVERAGE_DIR
 relative_path = labelled
@@ -36,6 +38,8 @@ MAJOR = re.compile(r"\d+")
 WITHOUT_COVERAGE_ALL = 4
 COVERAGE_ALL = ["--coverage.all=true"]
 COVERED_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+WORKER_FLAGS = {VITEST: "--maxWorkers", JEST: "--maxWorkers", PLAYWRIGHT: "--workers"}
+RUN_SECONDS = 1800
 
 
 def chosen_runner(ctx: Context) -> str:
@@ -52,10 +56,10 @@ def run_gate(ctx: Context) -> Result:
 
 
 def command_tests(ctx: Context, command: str, started: float) -> Result:
-    code, output = run(["bash", "-lc", command], cwd=ctx.root, timeout=1800)
-    summary = f"test_cmd exited {code}"
-    if code != 0:
-        return Result(GATE, False, summary, tail(output), elapsed(started))
+    outcome = remote.run_job(ctx, GATE, lambda _workers: ["bash", "-lc", command], ctx.root, timeout=RUN_SECONDS)
+    summary = f"test_cmd exited {outcome.code}{outcome.where}"
+    if outcome.code != 0:
+        return Result(GATE, False, summary, tail(outcome.output), elapsed(started))
     return Result(GATE, True, summary + ADVISORY, [], elapsed(started))
 
 
@@ -86,10 +90,20 @@ def runner_problem(ctx: Context, runner: str) -> str:
 
 def ran_tests(ctx: Context, runner: str, started: float) -> Result:
     env = playwright_env(ctx) if runner == PLAYWRIGHT else None
-    code, output = run(command_for(ctx, runner), cwd=ctx.ts_root(), env=env, timeout=1800)
-    if code != 0:
-        return Result(GATE, False, "tests failed", failure_findings(ctx, runner) or tail(output), elapsed(started))
-    return passed(ctx, output, started, runner)
+    build = partial(worked_command, ctx, runner)
+    outcome = remote.run_job(ctx, GATE, build, ctx.ts_root(), env=env, timeout=RUN_SECONDS, pull=results(ctx))
+    if outcome.code != 0:
+        findings = failure_findings(ctx, runner) or tail(outcome.output)
+        return Result(GATE, False, "tests failed", findings, elapsed(started)).with_where(outcome.where)
+    return passed(ctx, outcome.output, started, runner).with_where(outcome.where)
+
+
+def worked_command(ctx: Context, runner: str, workers: int) -> list[str]:
+    return [*command_for(ctx, runner), *([f"{WORKER_FLAGS[runner]}={workers}"] if workers else [])]
+
+
+def results(ctx: Context) -> tuple[str, ...]:
+    return tuple(str((ctx.work / name).relative_to(ctx.root)) for name in (COVERAGE_DIR, JEST_RESULTS))
 
 
 def passed(ctx: Context, output: str, started: float, runner: str) -> Result:

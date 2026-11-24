@@ -15,6 +15,7 @@ from marestail.report import Result
 os.environ["MARESTAIL_REMOTE"] = "0"
 
 Reply = tuple[int, str]
+GUARDED = {"MARESTAIL_NO_OFFLOAD": "1"}
 MUTMUT_COPIES = (
     "templates",
     "roles",
@@ -93,10 +94,42 @@ def check_fake_run(command: list[str], cwd: Path, options: dict[str, Any]) -> No
 def fake_run(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeRun]:
     def install(module: object, replies: list[Reply] | Callable[[list[str]], Reply] | None = None) -> FakeRun:
         fake = FakeRun([] if replies is None else replies)
-        monkeypatch.setattr(module, "run", fake)
+        for target in run_targets(module):
+            monkeypatch.setattr(target, "run", fake)
         return fake
 
     return install
+
+
+class FakeJob:
+    def __init__(self, outcome: Any, written: Callable[[Any], None] = lambda _ctx: None) -> None:
+        self.outcome = outcome
+        self.written = written
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, ctx: Any, gate: str, build: Callable[[int], list[str]], cwd: Path, **options: Any) -> Any:
+        self.calls.append({"gate": gate, "command": build(0), "sized": build(16), "cwd": cwd, **options})
+        self.written(ctx)
+        return self.outcome
+
+
+@pytest.fixture
+def box_job(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeJob]:
+    def install(code: int, output: str, where: str, written: Callable[[Any], None] = lambda _ctx: None) -> FakeJob:
+        from marestail import remote
+
+        fake = FakeJob(remote.Outcome(code, output, where), written)
+        monkeypatch.setattr(remote, "run_job", fake)
+        monkeypatch.setattr(remote, "offloaded", lambda _ctx, _gate: True)
+        return fake
+
+    return install
+
+
+def run_targets(module: object) -> list[object]:
+    own = [module] if hasattr(module, "run") else []
+    offloading = [module.remote] if hasattr(module, "remote") else []
+    return [*own, *offloading]
 
 
 @pytest.fixture(autouse=True)

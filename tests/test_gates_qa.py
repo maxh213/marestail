@@ -1,5 +1,6 @@
 import email.message
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -17,7 +18,7 @@ import pytest
 
 from marestail.gates import _serve, qa
 from marestail.report import Result
-from tests.conftest import FakeRun, checked, make_context, untimed
+from tests.conftest import GUARDED, FakeRun, checked, make_context, untimed
 
 
 def write(root: Path, relative: str, text: str) -> Path:
@@ -41,7 +42,7 @@ def test_passes(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
     result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "make qa"}})), "qa")
     assert (result.gate, result.ok, result.summary, result.findings) == ("qa", True, "qa passed", [])
     assert fake.calls == [["bash", "-lc", "make qa"]]
-    assert fake.options == [{"cwd": tmp_path / ".", "timeout": 3600}]
+    assert fake.options == [{"cwd": tmp_path / ".", "env": GUARDED, "timeout": 3600}]
     assert result.seconds >= 0
 
 
@@ -347,7 +348,7 @@ def test_run_with_app_failure_and_success(tmp_path: Path, fake_run: Callable[...
     result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "true", "start": "python3 app.py"}})), "qa")
     assert result.ok is True
     assert result.summary == "qa passed"
-    assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:3456", "PORT": "3456"}
+    assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:3456", "PORT": "3456", **GUARDED}
 
 
 def recorded_app(monkeypatch: pytest.MonkeyPatch, failure: str | None, port: int) -> list[tuple[Any, ...]]:
@@ -390,7 +391,7 @@ def test_run_with_app_passes_configured_keys(tmp_path: Path, fake_run: Callable[
     assert calls == [("yarn dev", tmp_path / "web", 5000, "/health", 7, {"LOCALE": "en-gb"}, log_path)]
     assert fake.calls == [["bash", "-lc", "npx playwright test"]]
     assert fake.options[0]["cwd"] == tmp_path / "web"
-    assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:5001", "PORT": "5001"}
+    assert fake.options[0]["env"] == {"MARESTAIL_APP_URL": "http://localhost:5001", "PORT": "5001", **GUARDED}
 
 
 def test_run_with_app_not_ready_skips_cmd(tmp_path: Path, fake_run: Callable[..., FakeRun], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,3 +462,126 @@ def test_run_logged_times_out_and_kills_the_group(tmp_path: Path) -> None:
     time.sleep(0.5)
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_an_offloaded_command_runs_on_the_box(tmp_path: Path, box_job: Any) -> None:
+    fake = box_job(0, "ok", " (on box, 2s)")
+    result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "make qa"}})), "qa")
+    assert (result.ok, result.summary, result.findings) == (True, "qa passed (on box, 2s)", [])
+    command = ["bash", "-lc", "make qa"]
+    assert fake.calls == [{"gate": "qa", "command": command, "sized": command, "cwd": tmp_path / ".", "env": None, "timeout": 3600}]
+
+
+def test_an_offloaded_app_starts_and_is_tested_on_the_box(tmp_path: Path, box_job: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    fake = box_job(1, "boom", " (on box, 4s)")
+    section = {"cmd": "npx playwright test", "start": "pnpm dev", "port": 5000, "ready": "/health", "ready_timeout": 7, "env": {"A": 1}}
+    result = checked(qa.run_gate(make_context(tmp_path, {"qa": section})), "qa")
+    assert (result.ok, result.summary, result.findings) == (False, "qa failed (exit 1) (on box, 4s)", ["boom"])
+    log_path = tmp_path / ".marestail" / "qa-app.log"
+    (job,) = fake.calls
+    served_command = _serve.served_command("pnpm dev", "npx playwright test", "/health", 5000, 7, log_path, {"A": "1"})
+    assert job == {
+        "gate": "qa",
+        "command": served_command,
+        "sized": served_command,
+        "cwd": tmp_path / ".",
+        "timeout": 3600 + 7 + 60,
+        "pull": (".marestail/qa-app.log",),
+    }
+
+
+def test_an_app_that_never_answers_on_the_box_fails_with_its_log(tmp_path: Path, box_job: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MARESTAIL_TASK", raising=False)
+    (tmp_path / ".marestail").mkdir()
+    (tmp_path / ".marestail" / "qa-app.log").write_text("listening\ncrashed\n")
+    box_job(90, "noise\nmarestail-serve: app did not answer on http://localhost:3400/ within 180s\n", " (on box, 1s)")
+    result = checked(qa.run_gate(make_context(tmp_path, {"qa": {"cmd": "t", "start": "s"}})), "qa")
+    assert (result.ok, result.summary) == (False, "qa: app did not answer on http://localhost:3400/ within 180s (on box, 1s)")
+    assert result.findings == ["listening", "crashed"]
+
+
+def test_served_command_hands_the_app_its_settings() -> None:
+    log_path = Path("/r/.marestail/qa-app.log")
+    assert _serve.served_command("s", "c", "/r", 7, 9, log_path, {"A": "1", "B": "x y"}) == [
+        "bash",
+        "-c",
+        _serve.BOX_SCRIPT,
+        "marestail-serve",
+        "s",
+        "c",
+        "/r",
+        "7",
+        "9",
+        str(log_path),
+        "A=1",
+        "B=x y",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("output", "failure"),
+    [("a\nmarestail-serve: app exited with 3 before answering\n", "app exited with 3 before answering"), ("a\n", None)],
+)
+def test_serve_failure_reads_the_marker(output: str, failure: str | None) -> None:
+    assert _serve.serve_failure(output) == failure
+
+
+def served(tmp_path: Path, start: str, command: str, seconds: int = 20) -> tuple[int, str, int]:
+    port = _serve._free_port()
+    log_path = tmp_path / "logs" / "app.log"
+    served_command = _serve.served_command(start, command, "/", port, seconds, log_path, {"LOCALE": "en-gb"})
+    completed = subprocess.run(served_command, cwd=tmp_path, capture_output=True, text=True, timeout=120, check=False)
+    return completed.returncode, completed.stdout + completed.stderr, port
+
+
+BOX_TOOLS = pytest.mark.skipif(shutil.which("curl") is None or shutil.which("python3") is None, reason="needs curl and python3")
+
+
+def gone(pid: int) -> bool:
+    deadline = time.time() + 20
+    while alive(pid) and time.time() < deadline:
+        time.sleep(0.1)
+    return not alive(pid)
+
+
+def alive(pid: int) -> bool:
+    status = Path(f"/proc/{pid}/status")
+    return status.exists() and "zombie" not in status.read_text().lower()
+
+
+@BOX_TOOLS
+def test_the_box_script_starts_the_app_runs_the_command_and_stops_the_app(tmp_path: Path) -> None:
+    marker = tmp_path / "app.pid"
+    start = f'echo "app sees $LOCALE"; echo $$ > {marker}; exec python3 -m http.server "$PORT" --bind 127.0.0.1'
+    command = 'echo "url=$MARESTAIL_APP_URL port=$PORT locale=${LOCALE:-none}"; exit 3'
+    code, output, port = served(tmp_path, start, command)
+    assert (code, output) == (3, f"url=http://localhost:{port} port={port} locale=none\n")
+    assert (tmp_path / "logs" / "app.log").read_text().startswith("app sees en-gb\n")
+    assert gone(int(marker.read_text())) is True
+
+
+@BOX_TOOLS
+def test_the_box_script_reports_an_app_that_exits(tmp_path: Path) -> None:
+    code, output, _port = served(tmp_path, "exit 4", "echo never")
+    assert (code, output) == (90, "marestail-serve: app exited with 4 before answering\n")
+
+
+@BOX_TOOLS
+def test_the_box_script_gives_up_on_an_app_that_never_answers_and_kills_it(tmp_path: Path) -> None:
+    marker = tmp_path / "child"
+    code, output, port = served(tmp_path, f"sleep 300 & echo $! > {marker}; wait", "echo never", seconds=1)
+    assert (code, output) == (90, f"marestail-serve: app did not answer on http://localhost:{port}/ within 1s\n")
+    assert gone(int(marker.read_text())) is True
+
+
+@BOX_TOOLS
+def test_the_box_script_takes_another_port_when_the_preferred_one_is_busy(tmp_path: Path) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as taken:
+        taken.bind(("127.0.0.1", 0))
+        busy = taken.getsockname()[1]
+        log_path = tmp_path / "app.log"
+        command = _serve.served_command('exec python3 -m http.server "$PORT" --bind 127.0.0.1', "echo $PORT", "/", busy, 20, log_path, {})
+        completed = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=120, check=False)
+    assert completed.returncode == 0
+    assert int(completed.stdout) != busy

@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from marestail import java
+from marestail import java, remote
 from marestail.context import Context
 from marestail.report import Result, elapsed
 from marestail.shell import tail
@@ -31,7 +31,11 @@ def run_gate(ctx: Context) -> Result:
         return Result(GATE, False, error)
     build = java.build_dir(ctx)
     reports, site = build / "surefire-reports", build / "site" / "jacoco"
-    code, output = run_maven(ctx, reports, site)
+    outcome = run_maven(ctx, reports, site)
+    return checked(ctx, reports, site, outcome.code, outcome.output, started).with_where(outcome.where)
+
+
+def checked(ctx: Context, reports: Path, site: Path, code: int, output: str, started: float) -> Result:
     passed, failures = read_suites(ctx, sorted(reports.glob("TEST-*.xml")))
     problem = test_problem(code, output, passed, failures, started)
     if problem is not None:
@@ -39,13 +43,15 @@ def run_gate(ctx: Context) -> Result:
     return check_coverage(ctx, site / "jacoco.xml", passed, output, started)
 
 
-def run_maven(ctx: Context, reports: Path, site: Path) -> tuple[int, str]:
+def run_maven(ctx: Context, reports: Path, site: Path) -> remote.Outcome:
     data = ctx.work / EXEC
     shutil.rmtree(reports, ignore_errors=True)
     shutil.rmtree(site, ignore_errors=True)
     data.unlink(missing_ok=True)
     plugin = f"{JACOCO}:{ctx.java('jacoco_version', JACOCO_VERSION)}"
-    return java.mvn(ctx, [f"{plugin}:prepare-agent", "test", f"{plugin}:report", f"-Djacoco.destFile={data}", f"-Djacoco.dataFile={data}"])
+    args = [f"{plugin}:prepare-agent", "test", f"{plugin}:report", f"-Djacoco.destFile={data}", f"-Djacoco.dataFile={data}"]
+    written = tuple(str(path.relative_to(ctx.root)) for path in (reports, site, data))
+    return remote.run_job(ctx, GATE, lambda _workers: java.mvn_args(ctx, args), ctx.java_root(), timeout=1800, pull=written, fresh=written)
 
 
 def failed(summary: str, findings: list[str], started: float) -> Result:

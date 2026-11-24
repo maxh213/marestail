@@ -1,21 +1,24 @@
 import fcntl
+import hashlib
 import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 import tomllib
 import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from marestail.config import Config
 from marestail.context import Context
-from marestail.shell import clean, run
+from marestail.shell import NO_OFFLOAD, clean, run
 
 FOLDER = Path.home() / ".config" / "marestail"
 CONFIG = FOLDER / "remote.toml"
@@ -23,8 +26,26 @@ USAGE = FOLDER / "remote-usage.jsonl"
 LOCK = FOLDER / "remote.lock"
 ENV = "MARESTAIL_REMOTE"
 GATES = "MARESTAIL_REMOTE_GATES"
+GUARD = NO_OFFLOAD
+GATE_NAME = "MARESTAIL_GATE"
+SHIMS = Path(__file__).resolve().parent / "shims"
+OFF = {"0", "off", "false", "no"}
+HOST = "host"
+OFFLOAD = "offload"
+SONAR = "sonar"
+DEFAULT_PLACE = "default"
+QUEUED = ".mutation"
 BUSY = "/var/lib/marestail/busy.d"
 JOB_LOCK = "/var/lib/marestail/job.lock"
+JOBS_DIR = ".cache/marestail-jobs"
+EXIT_MARK = "marestail-exit "
+SSH_TIMEOUT = "ssh timed out after"
+UNAVAILABLE = 75
+TIMED_OUT = 124
+MAX_WAIT_HOURS = 6.0
+BACKOFF = (30, 60, 120, 240, 300)
+LOCKFILES = ("package-lock.json", "pnpm-lock.yaml")
+NVM = 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1'
 EXCLUDES = (
     "/.git/",
     ".stryker-tmp/",
@@ -70,10 +91,11 @@ for f in /var/lib/marestail/busy.d/*; do
   [ -e "$f" ] || continue
   p=$(cat "$f"); kill -0 "$p" 2>/dev/null || continue
   args=$(tr '\0' ' ' < /proc/$p/cmdline)
-  repo=$(echo "$args" | grep -oE 'docker exec -w [^ ]+' | head -1 | awk '{print $4}')
-  tool=$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)
-  state=running; pgrep -P "$p" -x flock >/dev/null && ! pgrep -f "docker exec -w $repo" >/dev/null && state=queued
-  echo "$repo ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
+  repo=$(echo "$args" | grep -oE '(docker exec -w|env -C) [^ ]+' | head -1 | awk '{print $NF}')
+  gate=$(echo "$args" | grep -oE 'MARESTAIL_GATE=[^ ]+' | head -1 | cut -d= -f2)
+  tool=${gate:-$(echo "$args" | grep -oE 'muex|stryker|mutmut|pitest' | head -1)}
+  state=running; q=$(pgrep -P "$p" -x flock) && ! pgrep -P "$q" >/dev/null && state=queued
+  echo "${repo:-?} ${tool:-job} $(ps -o etime= -p $p | tr -d ' ') $state"
 done
 echo "idle $(( $(date +%s) - $(stat -c %Y /var/lib/marestail/last) )) $(grep -oP '^IDLE_MIN=\K[0-9]+' /usr/local/bin/marestail-idle-check)"
 """
@@ -91,6 +113,13 @@ class Settings:
     usd_per_hour: float
     user: str
     key: Path
+    run_in: dict[str, str] = field(default_factory=dict)
+    max_wait: float = MAX_WAIT_HOURS * 3600
+    sonar_host_url: str = ""
+
+    def place(self, gate: str) -> str:
+        fallback = HOST if gate == OFFLOAD else self.run_in.get(DEFAULT_PLACE, self.container)
+        return self.run_in.get(gate, fallback)
 
 
 @dataclass(frozen=True)
@@ -110,14 +139,65 @@ class _Job:
     env: dict[str, str] | None
     timeout: int | None
     pull: tuple[str, ...]
+    send: tuple[Path, ...] = ()
+    fresh: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _Try:
+    ip: str = ""
+    code: int = UNAVAILABLE
+    output: str = ""
+    problem: str = ""
+    started: float = 0.0
+
+
+class _Waits:
+    def __init__(self, found: Settings) -> None:
+        self.found = found
+        self.waited = 0.0
+        self.tries = 0
+
+    def another(self, problem: str) -> bool:
+        delay = min(BACKOFF[min(self.tries, len(BACKOFF) - 1)], self.found.max_wait - self.waited)
+        if delay <= 0:
+            return False
+        self.tries += 1
+        _say(f"marestail: {problem}; trying again in {span(delay)} (waited {span(self.waited)} of {span(self.found.max_wait)})")
+        time.sleep(delay)
+        self.waited += delay
+        return True
+
+    def note(self) -> str:
+        return f", after waiting {span(self.waited)} for the box" if self.waited else ""
+
+    def gave_up(self, problem: str) -> str:
+        return f" (gave up after waiting {span(self.waited)}: {problem}; not run locally)"
+
+
+def span(seconds: float) -> str:
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [f"{value}{unit}" for value, unit in ((hours, "h"), (minutes, "m"), (secs, "s")) if value]
+    return "".join(parts) or "0s"
+
+
+def _say(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
+def switched_off() -> bool:
+    return os.environ.get(ENV, "").lower() in OFF
+
+
+def settings_for(config: Config) -> Settings | None:
+    if switched_off() or config.get("remote", "enabled") is False:
+        return None
+    return _load()
 
 
 def _settings(ctx: Context) -> Settings | None:
-    if ENV in os.environ and os.environ[ENV].lower() in {"0", "off", "false", "no"}:
-        return None
-    if ctx.config.get("remote", "enabled") is False:
-        return None
-    return _load()
+    return settings_for(ctx.config)
 
 
 def _load() -> Settings | None:
@@ -141,7 +221,16 @@ def _parsed(raw: dict[str, Any]) -> Settings:
         usd_per_hour=float(raw.get("usd_per_hour", 0)),
         user=raw.get("user", os.environ.get("USER", "max")),
         key=Path(raw.get("key", "~/.ssh/google_compute_engine")).expanduser(),
+        run_in=_places(raw.get("run_in", {})),
+        max_wait=float(raw.get("max_wait_hours", MAX_WAIT_HOURS)) * 3600,
+        sonar_host_url=str(raw.get("sonar_host_url", "")),
     )
+
+
+def _places(value: str | dict[str, Any]) -> dict[str, str]:
+    if isinstance(value, str):
+        return {DEFAULT_PLACE: value}
+    return {str(k): str(v) for k, v in value.items()}
 
 
 def _offloaded_gates(raw: dict[str, Any]) -> tuple[str, ...]:
@@ -150,70 +239,83 @@ def _offloaded_gates(raw: dict[str, Any]) -> tuple[str, ...]:
     return tuple(raw.get("gates", []))
 
 
-def run_mutation(
+def offloaded(ctx: Context, gate: str) -> bool:
+    found = _settings(ctx)
+    return found is not None and gate in found.gates
+
+
+def sonar_url(ctx: Context, fallback: str) -> str:
+    found = _settings(ctx)
+    if found is None or SONAR not in found.gates:
+        return fallback
+    return found.sonar_host_url or fallback
+
+
+def run_job(
     ctx: Context,
     gate: str,
     build: Callable[[int], list[str]],
     cwd: Path,
-    workers: int,
+    workers: int = 0,
     env: dict[str, str] | None = None,
     timeout: int | None = 7200,
     pull: tuple[str, ...] = (),
+    send: tuple[Path, ...] = (),
+    fresh: tuple[str, ...] = (),
 ) -> Outcome:
     found = _settings(ctx)
-    job = _Job(ctx, gate, build, cwd, workers, env, timeout, pull)
+    job = _Job(ctx, gate, build, cwd, workers, env, timeout, pull, send, fresh=fresh)
     if found is None or gate not in found.gates:
         return _locally(job, "")
     return _offloaded(found, job)
 
 
 def _offloaded(found: Settings, job: _Job) -> Outcome:
+    waits = _Waits(found)
+    attempt = _attempt(found, job)
+    while attempt.problem and waits.another(attempt.problem):
+        attempt = _attempt(found, job)
+    if attempt.problem:
+        return Outcome(UNAVAILABLE, attempt.output, waits.gave_up(attempt.problem))
+    return _finished(found, job, attempt, waits)
+
+
+def _attempt(found: Settings, job: _Job) -> _Try:
     ip, problem = ensure_up(found)
     if ip is None:
-        return _locally(job, f" (remote unavailable: {problem}; ran locally)")
+        return _Try(problem=f"{found.instance} is unavailable: {problem}")
+    return _synced(found, ip, job)
+
+
+def _synced(found: Settings, ip: str, job: _Job) -> _Try:
     started = time.time()
-    problem = _push(found, ip, job.ctx.root, job.gate)
+    problem = _push(found, ip, job.ctx.root, job.gate) or _send(found, ip, job.send)
     if problem:
-        return _locally(job, f" (remote sync failed: {problem}; ran locally)")
-    reply = _remotely(found, ip, job)
-    if _dropped(*reply):
-        return _retried(found, job, started, reply)
-    return _finished(found, ip, job, started, reply)
+        return _Try(ip, problem=f"copying the tree to {found.instance} failed: {problem}")
+    return _ran(found, ip, job, started)
 
 
-def _retried(found: Settings, job: _Job, started: float, reply: tuple[int, str]) -> Outcome:
-    ip, problem = ensure_up(found)
-    if ip is None:
+def _ran(found: Settings, ip: str, job: _Job, started: float) -> _Try:
+    code, output = _execute(found, ip, job)
+    if code is None:
         _record_job(found, job, started, "dropped")
-        return Outcome(*reply, f" (connection to {found.instance} dropped mid-run and it did not come back: {problem})")
-    reply = _remotely(found, ip, job)
-    if _dropped(*reply):
-        _record_job(found, job, started, "dropped")
-        return Outcome(*reply, f" (connection to {found.instance} dropped twice mid-run; not rerun locally)")
-    return _finished(found, ip, job, started, reply)
+        return _Try(ip, UNAVAILABLE, output, f"the connection to {found.instance} dropped mid-run", started)
+    return _Try(ip, code, output, "", started)
 
 
-def _finished(found: Settings, ip: str, job: _Job, started: float, reply: tuple[int, str]) -> Outcome:
-    code, output = reply
+def _finished(found: Settings, job: _Job, attempt: _Try, waits: _Waits) -> Outcome:
     for path in job.pull:
-        _fetch(found, ip, job.ctx.root, path)
-    seconds = _record_job(found, job, started, "ok" if code == 0 else f"exit {code}")
-    return Outcome(code, output, f" (on {found.instance}, {round(seconds)}s)")
+        _fetch(found, attempt.ip, job.ctx.root, path)
+    seconds = _record_job(found, job, attempt.started, "ok" if attempt.code == 0 else f"exit {attempt.code}")
+    return Outcome(attempt.code, attempt.output, f" (on {found.instance}, {round(seconds)}s{waits.note()})")
 
 
 def _locally(job: _Job, where: str) -> Outcome:
-    return _local(job.build(job.workers), job.cwd, job.env, job.timeout, where)
+    return _local(job.build(job.workers), job.cwd, {**(job.env or {}), GUARD: "1"}, job.timeout, where)
 
 
-def _remotely(found: Settings, ip: str, job: _Job) -> tuple[int, str]:
-    return _execute(found, ip, job.build(found.workers.get(job.gate, job.workers)), job.cwd, job.env, job.timeout, _prepare(job.ctx))
-
-
-def _prepare(ctx: Context) -> str:
-    folder = ctx.ts("tooling")
-    if folder is None:
-        return PREPARE
-    return f"{PREPARE}; {TOOLING_PREPARE.format(folder=shlex.quote(str(ctx.root / str(folder))))}"
+def without_shims(path: str) -> str:
+    return os.pathsep.join(part for part in path.split(os.pathsep) if part != str(SHIMS))
 
 
 def _record_job(found: Settings, job: _Job, started: float, result: str) -> float:
@@ -231,10 +333,6 @@ def _record_job(found: Settings, job: _Job, started: float, result: str) -> floa
         }
     )
     return seconds
-
-
-def _dropped(code: int, output: str) -> bool:
-    return code == 255 and not output.strip()
 
 
 def _local(command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None, where: str) -> Outcome:
@@ -415,39 +513,137 @@ def _fetch(found: Settings, ip: str, root: Path, path: str) -> None:
     rsync(found, [f"{found.user}@{ip}:{target}{trailing}", f"{target}{trailing}"])
 
 
-def _execute(
-    found: Settings, ip: str, command: list[str], cwd: Path, env: dict[str, str] | None, timeout: int | None, prepare: str
-) -> tuple[int, str]:
-    flags = _env_flags(found, env)
-    job = uuid.uuid4().hex
-    jobs = f"{Path.home()}/.cache/marestail-jobs"
-    session = f"{jobs}/job-{job}"
-    inner = shlex.join(command)
-    if timeout:
-        inner = f"timeout -k 30 {int(timeout)} {inner}"
-    inner = f"mkdir -p -m 700 {jobs} && echo $$ > {session}; {prepare}; {inner}; code=$?; rm -f {session}; exit $code"
-    docker = f"docker exec -w {shlex.quote(str(cwd))} {flags} {found.container} setsid -w bash -c {shlex.quote(inner)}"
-    stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
-    cleanup = f"sg docker -c {shlex.quote(f'docker exec {found.container} bash -c {shlex.quote(stop)}')}"
-    marker = f"{BUSY}/{job}"
-    queued = f"flock {JOB_LOCK} sg docker -c {shlex.quote(docker)}"
-    script = (
-        f"echo $$ > {marker}; stop() {{ {cleanup} >/dev/null 2>&1; rm -f {marker}; }}; trap 'stop; exit 129' HUP INT TERM; "
-        f"{queued} & wait $!; code=$?; rm -f {marker}; touch /var/lib/marestail/last; exit $code"
+def _send(found: Settings, ip: str, paths: tuple[Path, ...]) -> str:
+    return next(filter(None, (_sent(found, ip, path) for path in paths if path.exists())), "")
+
+
+def _sent(found: Settings, ip: str, path: Path) -> str:
+    trailing = "/" if path.is_dir() else ""
+    ssh(found, ip, f"mkdir -p {shlex.quote(str(path.parent))}", timeout=30)
+    code, error = rsync(found, [f"{path}{trailing}", f"{found.user}@{ip}:{path}{trailing}"])
+    return _last_line(error, f"rsync exit {code}") if code else ""
+
+
+def _execute(found: Settings, ip: str, job: _Job) -> tuple[int | None, str]:
+    script = _script(found, job, job.build(found.workers.get(job.gate, job.workers)))
+    code, output = ssh(found, ip, script, timeout=(job.timeout * 3 + 120) if job.timeout else None, tty=True)
+    return _concluded(code, output)
+
+
+def _concluded(code: int, output: str) -> tuple[int | None, str]:
+    body, mark, tail = output.rpartition("\n" + EXIT_MARK)
+    if mark and tail.strip().isdigit():
+        return int(tail.strip()), body
+    return _unfinished(code, output)
+
+
+def _unfinished(code: int, output: str) -> tuple[int | None, str]:
+    if code == TIMED_OUT and output.startswith(SSH_TIMEOUT):
+        return code, output
+    return None, output
+
+
+def _script(found: Settings, job: _Job, command: list[str]) -> str:
+    job_id = uuid.uuid4().hex
+    session = f"{Path.home()}/{JOBS_DIR}/job-{job_id}"
+    marker = f"{BUSY}/{job_id}"
+    runner = _queued(job.gate, _runner(found, job, _inner(found, job, command, session)))
+    return (
+        f"echo $$ > {marker}; stop() {{ {_cleanup(found.place(job.gate), session)} >/dev/null 2>&1; rm -f {marker}; }}; "
+        "trap 'stop; exit 129' HUP INT TERM; "
+        f"{runner} & wait $!; code=$?; rm -f {marker}; touch /var/lib/marestail/last; "
+        f"printf '\\n{EXIT_MARK}%s\\n' \"$code\"; exit $code"
     )
-    return ssh(found, ip, script, timeout=(timeout * 3 + 120) if timeout else None, tty=True)
 
 
-def _env_flags(found: Settings, env: dict[str, str] | None) -> str:
-    passed = {
-        "PATH": os.environ.get("PATH", ""),
+def _inner(found: Settings, job: _Job, command: list[str], session: str) -> str:
+    folder = f"{Path.home()}/{JOBS_DIR}"
+    line = shlex.join(command)
+    if job.timeout:
+        line = f"timeout -k 30 {int(job.timeout)} {line}"
+    return f"mkdir -p -m 700 {folder} && echo $$ > {session}; {_setup(found, job)}{line} </dev/null; code=$?; rm -f {session}; exit $code"
+
+
+def _setup(found: Settings, job: _Job) -> str:
+    return "".join(f"{step}; " for step in (_cleared(job), *_nvm(found, job), _prepare(job.ctx, job.cwd)) if step)
+
+
+def _cleared(job: _Job) -> str:
+    paths = [shlex.quote(str(job.ctx.root / path)) for path in job.fresh]
+    return f"rm -rf {' '.join(paths)}" if paths else ""
+
+
+def _nvm(found: Settings, job: _Job) -> tuple[str, ...]:
+    return (NVM,) if found.place(job.gate) == HOST else ()
+
+
+def _runner(found: Settings, job: _Job, inner: str) -> str:
+    place = found.place(job.gate)
+    cwd = shlex.quote(str(job.cwd))
+    if place == HOST:
+        return f"env -C {cwd} {_assignments(_passed(found, job))} setsid -w bash -c {shlex.quote(inner)}"
+    docker = f"docker exec -w {cwd} {_env_flags(found, job)} {place} setsid -w bash -c {shlex.quote(inner)}"
+    return f"sg docker -c {shlex.quote(docker)}"
+
+
+def _queued(gate: str, runner: str) -> str:
+    return f"flock {JOB_LOCK} {runner}" if gate.endswith(QUEUED) else runner
+
+
+def _cleanup(place: str, session: str) -> str:
+    stop = f"[ -f {session} ] && pkill -9 -s $(cat {session}); rm -f {session}"
+    if place == HOST:
+        return f"{{ {stop}; }}"
+    return f"sg docker -c {shlex.quote(f'docker exec {place} bash -c {shlex.quote(stop)}')}"
+
+
+def _prepare(ctx: Context, cwd: Path) -> str:
+    steps = [*_node_install(ctx.root, cwd), *_tooling_install(ctx)]
+    if not steps:
+        return ""
+    lock = f"{Path.home()}/{JOBS_DIR}/prepare-{hashlib.sha256(str(ctx.root).encode()).hexdigest()[:16]}.lock"
+    return f"{{ flock 9; {'; '.join(steps)}; }} 9>{lock}"
+
+
+def _node_install(root: Path, cwd: Path) -> list[str]:
+    folder = _lock_folder(root, cwd)
+    return [] if folder is None else [f"( cd {shlex.quote(str(folder))} && {PREPARE} ) || exit 97"]
+
+
+def _lock_folder(root: Path, cwd: Path) -> Path | None:
+    return next((folder for folder in (cwd, *cwd.parents) if folder.is_relative_to(root) and _locked(folder)), None)
+
+
+def _locked(folder: Path) -> bool:
+    return any((folder / name).is_file() for name in LOCKFILES)
+
+
+def _tooling_install(ctx: Context) -> list[str]:
+    folder = ctx.ts("tooling")
+    if folder is None:
+        return []
+    return [TOOLING_PREPARE.format(folder=shlex.quote(str(ctx.root / str(folder))))]
+
+
+def _passed(found: Settings, job: _Job) -> dict[str, str]:
+    return {
         "HOME": str(Path.home()),
         "LANG": "C.UTF-8",
         "TERM": "dumb",
         "NO_COLOR": "1",
+        GUARD: "1",
+        GATE_NAME: job.gate,
         **found.env,
-        **(env or {}),
+        **(job.env or {}),
     }
+
+
+def _assignments(passed: dict[str, str]) -> str:
+    return " ".join(shlex.quote(f"{key}={value}") for key, value in passed.items())
+
+
+def _env_flags(found: Settings, job: _Job) -> str:
+    passed = {"PATH": without_shims(os.environ.get("PATH", "")), **_passed(found, job)}
     return " ".join(f"-e {shlex.quote(f'{key}={value}')}" for key, value in passed.items())
 
 

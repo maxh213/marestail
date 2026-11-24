@@ -2,12 +2,13 @@ import itertools
 import json
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from marestail import java
+from marestail import java, remote
 from marestail.context import Context
 from marestail.gates import java_tests
 from marestail.report import Result
@@ -95,19 +96,24 @@ def fields(result: Result) -> tuple[str, bool, str, list[str], float]:
     return result.gate, result.ok, result.summary, result.findings, result.seconds
 
 
-def fake_mvn(monkeypatch: pytest.MonkeyPatch, suites: list[str], jacoco: str | None, reply: tuple[int, str] = (0, "")) -> list[Any]:
+def fake_mvn(
+    monkeypatch: pytest.MonkeyPatch, suites: list[str], jacoco: str | None, reply: tuple[int, str] = (0, ""), where: str = ""
+) -> list[Any]:
     calls: list[Any] = []
 
-    def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = None) -> tuple[int, str]:
-        calls.append(args)
-        build = java.build_dir(ctx)
+    def run_job(ctx: Context, gate: str, build: Callable[[int], list[str]], cwd: Path, **options: Any) -> remote.Outcome:
+        command = build(0)
+        assert (gate, cwd, command[:3], options["timeout"]) == (java_tests.GATE, ctx.java_root(), ["mvn", "-B", "-ntp"], 1800)
+        assert options["fresh"] == options["pull"]
+        calls.append(command[3:])
+        reports, site, _data = (ctx.root / path for path in options["pull"])
         for number, suite in enumerate(suites):
-            write(build / "surefire-reports" / f"TEST-app.Suite{number}.xml", suite)
+            write(reports / f"TEST-app.Suite{number}.xml", suite)
         if jacoco is not None:
-            write(build / "site" / "jacoco" / "jacoco.xml", jacoco)
-        return reply
+            write(site / "jacoco.xml", jacoco)
+        return remote.Outcome(*reply, where)
 
-    monkeypatch.setattr(java, "mvn", mvn)
+    monkeypatch.setattr(remote, "run_job", run_job)
     return calls
 
 
@@ -130,9 +136,9 @@ def test_green_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         write(tmp_path / "target/site/jacoco/index.html"),
         write(tmp_path / ".marestail/java-jacoco.exec", "old"),
     ]
-    calls = fake_mvn(monkeypatch, [PASSING, PASSING], JACOCO, (0, "BUILD SUCCESS"))
+    calls = fake_mvn(monkeypatch, [PASSING, PASSING], JACOCO, (0, "BUILD SUCCESS"), " (on box, 9s)")
     result = checked(java_tests.run_gate(make_context(tmp_path)), java_tests.GATE)
-    assert fields(result) == ("java.tests", False, "4 passed, coverage 80.0%, 3 gaps (need 0)", GAPS, 0.75)
+    assert fields(result) == ("java.tests", False, "4 passed, coverage 80.0%, 3 gaps (need 0) (on box, 9s)", GAPS, 0.75)
     data = tmp_path / ".marestail" / "java-jacoco.exec"
     plugin = "org.jacoco:jacoco-maven-plugin:0.8.15"
     assert calls == [[f"{plugin}:prepare-agent", "test", f"{plugin}:report", f"-Djacoco.destFile={data}", f"-Djacoco.dataFile={data}"]]

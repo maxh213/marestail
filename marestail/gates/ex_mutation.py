@@ -77,7 +77,7 @@ def with_muex(ctx: Context, root: Path, scope: MutationScope, files: list[str], 
     missing = muex_missing(root)
     if missing:
         return Result(GATE, False, *missing, elapsed(started))
-    outcome = remote.run_mutation(
+    outcome = remote.run_job(
         ctx,
         GATE,
         lambda workers: guarded(ctx, command(ctx, files, workers)),

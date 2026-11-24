@@ -58,7 +58,7 @@ def targeted(ctx: Context, relative: str, wanted: set[str] | None) -> bool:
 def mutate(ctx: Context, targets: list[Path], note: str, started: float) -> Result:
     out = ctx.work / "pit"
     shutil.rmtree(out, ignore_errors=True)
-    outcome = remote.run_mutation(
+    outcome = remote.run_job(
         ctx,
         GATE,
         lambda workers: [*java.mvn_command(ctx), "-B", "-ntp", *command(ctx, targets, out, workers)],

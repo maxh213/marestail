@@ -10,6 +10,7 @@ from marestail import config as config_module
 from marestail import context as context_module
 from marestail.context import Context, hook_focus, resolve_focus
 from marestail.report import Result, elapsed
+from marestail.shell import NO_OFFLOAD
 
 FAST = "fast"
 SONAR = "sonar"
@@ -129,6 +130,7 @@ def run_gates_with_context(
     tier: str, scope_changed: bool, only: set[str] | None, focus: set[str] | None = None, hard: bool = False, hyper: bool = False
 ) -> tuple[list[Result], Context]:
     os.environ["MARESTAIL_GATE_ACTIVE"] = "true"
+    os.environ[NO_OFFLOAD] = "1"
     config = config_module.load(Path.cwd())
     skipped = skip_list(config)
     ctx = context_module.build(config, scope_changed, gate_focus(config, focus or set(), hard), hard, hyper)

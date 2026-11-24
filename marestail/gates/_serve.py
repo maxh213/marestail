@@ -13,6 +13,44 @@ from typing import Any, TextIO
 
 from marestail.shell import ensure_dir
 
+FAILED = "marestail-serve: "
+BOX_SCRIPT = r"""start=$1 cmd=$2 ready=$3 port=$4 seconds=$5 log=$6; shift 6
+port=$(python3 -c 'import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])' "$port")
+mkdir -p "$(dirname "$log")"
+PORT=$port setsid env "$@" bash -lc "$start" >"$log" 2>&1 &
+app=$!
+stop() {
+  kill -TERM -- -$app 2>/dev/null
+  for _ in $(seq 75); do kill -0 -- -$app 2>/dev/null || return 0; sleep 0.2; done
+  kill -KILL -- -$app 2>/dev/null
+}
+url="http://localhost:$port$ready"
+deadline=$((SECONDS + seconds))
+until answer=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$url") && [ "$answer" -gt 0 ] && [ "$answer" -lt 500 ]; do
+  if ! kill -0 $app 2>/dev/null; then wait $app; echo "marestail-serve: app exited with $? before answering"; exit 90; fi
+  if [ $SECONDS -ge $deadline ]; then stop; echo "marestail-serve: app did not answer on $url within ${seconds}s"; exit 90; fi
+  sleep 0.2
+done
+MARESTAIL_APP_URL="http://localhost:$port" PORT=$port bash -lc "$cmd"; code=$?
+stop
+exit $code
+"""
+
+
+def served_command(start: str, command: str, ready: str, port: int, seconds: int, log_path: Path, env: dict[str, str]) -> list[str]:
+    settings = [f"{key}={value}" for key, value in env.items()]
+    return ["bash", "-c", BOX_SCRIPT, "marestail-serve", start, command, ready, str(port), str(seconds), str(log_path), *settings]
+
+
+def serve_failure(output: str) -> str | None:
+    return next((line.removeprefix(FAILED) for line in output.splitlines() if line.startswith(FAILED)), None)
+
 
 @contextmanager
 def ready_app(

@@ -1,12 +1,12 @@
 import os
 import time
 from pathlib import Path
-from typing import Any
 
+from marestail import remote
 from marestail.context import Context
 from marestail.gates import _serve
 from marestail.report import Result, elapsed
-from marestail.shell import run, tail
+from marestail.shell import tail
 
 _DEFAULT_PORT = 3400
 _DEFAULT_READY = "/"
@@ -16,6 +16,7 @@ _APP_URL = "MARESTAIL_APP_URL"
 _TASK_ENV = "MARESTAIL_TASK"
 _CMD_TIMEOUT_ENV = "MARESTAIL_QA_CMD_TIMEOUT"
 _LOG_NAME = "qa-app.log"
+_GATE = "qa"
 
 
 def run_gate(ctx: Context) -> Result:
@@ -30,6 +31,8 @@ def run_gate(ctx: Context) -> Result:
 
 
 def _run_with_app(ctx: Context, command: str, start: str, started: float) -> Result:
+    if remote.offloaded(ctx, _GATE):
+        return _served_on_box(ctx, command, start, started)
     cwd = _qa_cwd(ctx)
     preferred = int(ctx.config.get("qa", "port", _DEFAULT_PORT))
     ready = ctx.config.get("qa", "ready", _DEFAULT_READY)
@@ -41,12 +44,27 @@ def _run_with_app(ctx: Context, command: str, start: str, started: float) -> Res
         return _run_cmd(ctx, command, cwd, started, {_APP_URL: f"http://localhost:{port}", "PORT": str(port)})
 
 
+def _served_on_box(ctx: Context, command: str, start: str, started: float) -> Result:
+    seconds = int(ctx.config.get("qa", "ready_timeout", _DEFAULT_READY_TIMEOUT))
+    preferred = int(ctx.config.get("qa", "port", _DEFAULT_PORT))
+    log_path = _app_log_path(ctx.root)
+    ready = str(ctx.config.get("qa", "ready", _DEFAULT_READY))
+    served = _serve.served_command(start, command, ready, preferred, seconds, log_path, _qa_env(ctx))
+    pull = (str(log_path.relative_to(ctx.root)),)
+    outcome = remote.run_job(ctx, _GATE, lambda _workers: served, _qa_cwd(ctx), timeout=_cmd_timeout() + seconds + 60, pull=pull)
+    return _box_result(ctx, outcome, log_path, started).with_where(outcome.where)
+
+
+def _box_result(ctx: Context, outcome: remote.Outcome, log_path: Path, started: float) -> Result:
+    failure = _serve.serve_failure(outcome.output)
+    if failure:
+        return Result(_GATE, False, ctx.global_note(f"qa: {failure}"), _log_tail(log_path), elapsed(started))
+    return _qa_result(ctx, outcome.code, outcome.output, started)
+
+
 def _run_cmd(ctx: Context, command: str, cwd: Path, started: float, env: dict[str, str] | None = None) -> Result:
-    options: dict[str, Any] = {"cwd": cwd, "timeout": _cmd_timeout()}
-    if env is not None:
-        options["env"] = env
-    code, output = run(["bash", "-lc", command], **options)
-    return _qa_result(ctx, code, output, started)
+    outcome = remote.run_job(ctx, _GATE, lambda _workers: ["bash", "-lc", command], cwd, env=env, timeout=_cmd_timeout())
+    return _qa_result(ctx, outcome.code, outcome.output, started).with_where(outcome.where)
 
 
 def _qa_result(ctx: Context, code: int, output: str, started: float) -> Result:

@@ -81,7 +81,11 @@ def mvn_command(ctx: Context) -> list[str]:
 
 def mvn(ctx: Context, args: list[str], timeout: int = 1800, pom: Path | None = None) -> tuple[int, str]:
     target = ["-f", str(pom)] if pom else []
-    return run([*mvn_command(ctx), "-B", "-ntp", *target, *args], cwd=ctx.java_root(), timeout=timeout)
+    return run(mvn_args(ctx, [*target, *args]), cwd=ctx.java_root(), timeout=timeout)
+
+
+def mvn_args(ctx: Context, args: list[str]) -> list[str]:
+    return [*mvn_command(ctx), "-B", "-ntp", *args]
 
 
 def maven_hint(code: int, output: str) -> str | None:

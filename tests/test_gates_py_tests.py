@@ -105,3 +105,20 @@ def test_gated_intersect(lines: list[int], gated: set[int] | None, expected: lis
 )
 def test_count_tests(output: str, expected: str) -> None:
     assert py_tests.count_tests(output) == expected
+
+
+def test_tests_on_the_box_pull_both_coverage_reports(tmp_path: Path, box_job: Any) -> None:
+    clean = {"totals": {"percent_covered": 100.0}, "files": {"a.py": {"missing_lines": [], "missing_branches": []}}}
+    fake = box_job(0, "3 passed", " (on box, 7s)", lambda _ctx: write_coverage(tmp_path, clean))
+    result = checked(py_tests.run_gate(make_context(tmp_path)), py_tests.GATE)
+    assert (result.ok, result.summary) == (True, "3 passed, coverage 100.0%, 0 gaps (need 0) (on box, 7s)")
+    (job,) = fake.calls
+    assert (job["gate"], job["cwd"], job["timeout"]) == ("py.tests", tmp_path, 1800)
+    assert job["command"] == py_tests.pytest_command(make_context(tmp_path))
+    assert job["pull"] == (".marestail/py-coverage.json", ".marestail/py-coverage.xml")
+
+
+def test_failing_tests_on_the_box_say_where_they_ran(tmp_path: Path, box_job: Any) -> None:
+    box_job(1, "1 failed", " (on box, 7s)")
+    result = checked(py_tests.run_gate(make_context(tmp_path)), py_tests.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "tests failed (on box, 7s)", ["1 failed"])

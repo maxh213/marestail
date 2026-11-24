@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from marestail import remote
 from marestail.context import Context
 from marestail.elixir import COVERAGE
 from marestail.gates._coverage import EX_COVERAGE
@@ -15,13 +16,19 @@ COVERAGE_SCRIPT = COVERAGE
 COVERAGE_JSON = EX_COVERAGE
 GATE = "ex.tests"
 MISSING_COUNT = ""
+MIX_TEST = ["mix", "test", "--cover", "--export-coverage", "default"]
 
 
 def run_gate(ctx: Context) -> Result:
     started = time.time()
     root = ctx.elixir_root()
+    cover = str((root / "cover").relative_to(ctx.root))
+    outcome = remote.run_job(ctx, GATE, lambda _workers: MIX_TEST, root, timeout=1800, pull=(cover,))
+    return tested(ctx, root, outcome.code, outcome.output, started).with_where(outcome.where)
+
+
+def tested(ctx: Context, root: Path, code: int, output: str, started: float) -> Result:
     coverdata = root / "cover" / "default.coverdata"
-    code, output = run(["mix", "test", "--cover", "--export-coverage", "default"], cwd=root, timeout=1800)
     if code != 0:
         return Result(GATE, False, "tests failed", tail(output), elapsed(started))
     if not coverdata.exists():

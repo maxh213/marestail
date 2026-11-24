@@ -76,7 +76,7 @@ def fake_mvn(monkeypatch: pytest.MonkeyPatch, mutations: list[str] | None, reply
             )
         return remote.Outcome(*reply, where)
 
-    monkeypatch.setattr(remote, "run_mutation", reject_none(run_mutation))
+    monkeypatch.setattr(remote, "run_job", reject_none(run_mutation))
     return calls
 
 

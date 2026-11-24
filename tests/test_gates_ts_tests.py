@@ -6,7 +6,7 @@ import pytest
 
 from marestail import javascript
 from marestail.gates import _coverage, ts_tests
-from tests.conftest import checked, make_context
+from tests.conftest import GUARDED, checked, make_context
 
 TS = {"ts": {"root": "web"}}
 
@@ -172,7 +172,7 @@ def test_vitest_failure_shows_the_output_tail(tmp_path: Path, fake_run: Any) -> 
 
     assert (result.gate, result.ok, result.summary, result.findings) == ("ts.tests", False, "tests failed", lines[10:])
     assert fake.calls[0][:2] == ["npx", "vitest"]
-    assert fake.options[0] == {"cwd": tmp_path / "web", "env": None, "timeout": 1800}
+    assert fake.options[0] == {"cwd": tmp_path / "web", "env": GUARDED, "timeout": 1800}
 
 
 def test_jest_failure_reads_the_results(tmp_path: Path, fake_run: Any) -> None:
@@ -390,7 +390,7 @@ def test_hyper_test_cmd_passes_on_exit_zero_and_reads_no_coverage(tmp_path: Path
         [],
     )
     assert fake.calls == [["bash", "-lc", "node t.js"]]
-    assert fake.options == [{"cwd": tmp_path, "timeout": 1800}]
+    assert fake.options == [{"cwd": tmp_path, "env": GUARDED, "timeout": 1800}]
 
 
 def test_hyper_test_cmd_failure_shows_the_last_lines(tmp_path: Path, fake_run: Any) -> None:
@@ -582,7 +582,7 @@ def test_playwright_run_passes_with_c8_coverage(tmp_path: Path, fake_run: Any) -
 
     assert (result.ok, result.summary, result.findings) == (True, "5 passed, 0 uncovered lines/branches (need 0)", [])
     assert fake.calls == [playwright_call(tmp_path, bins)]
-    assert fake.options == [{"cwd": tmp_path / "web", "env": {"PLAYWRIGHT_JSON_OUTPUT_NAME": str(report)}, "timeout": 1800}]
+    assert fake.options == [{"cwd": tmp_path / "web", "env": {"PLAYWRIGHT_JSON_OUTPUT_NAME": str(report), **GUARDED}, "timeout": 1800}]
 
 
 def test_playwright_run_reports_c8_gaps(tmp_path: Path, fake_run: Any) -> None:
@@ -806,3 +806,36 @@ def test_line_count(line: str, expected: str | None) -> None:
 
 def test_the_removed_failure_helpers_stay_removed() -> None:
     assert (hasattr(ts_tests, "failures"), hasattr(ts_tests, "empty_failures")) == (False, False)
+
+
+@pytest.mark.parametrize(
+    ("section", "flag"),
+    [(TS, "--maxWorkers=16"), ({"ts": {"root": "web", "runner": "jest"}}, "--maxWorkers=16"), (PLAYWRIGHT, "--workers=16")],
+)
+def test_tests_on_the_box_pull_their_reports_and_size_their_workers(
+    tmp_path: Path, box_job: Any, section: dict[str, Any], flag: str
+) -> None:
+    install_playwright(tmp_path, "playwright", "c8")
+    clean = {str(tmp_path / "web" / "src" / "a.ts"): coverage_entry({"1": 1}, {})}
+    fake = box_job(0, "Tests 3 passed", " (on box, 5s)", lambda _ctx: write_coverage(tmp_path, clean))
+    result = checked(ts_tests.run_gate(make_context(tmp_path, section)), ts_tests.GATE)
+    assert (result.ok, result.findings) == (True, [])
+    assert result.summary.endswith("passed, 0 uncovered lines/branches (need 0) (on box, 5s)")
+    (job,) = fake.calls
+    assert (job["gate"], job["cwd"], job["timeout"]) == ("ts.tests", tmp_path / "web", 1800)
+    assert job["pull"] == (".marestail/ts-coverage", ".marestail/ts-tests.json")
+    assert flag not in job["command"]
+    assert job["sized"] == [*job["command"], flag]
+
+
+def test_failing_tests_on_the_box_say_where_they_ran(tmp_path: Path, box_job: Any) -> None:
+    box_job(1, "FAIL a.test.ts", " (on box, 5s)")
+    result = checked(ts_tests.run_gate(make_context(tmp_path, TS)), ts_tests.GATE)
+    assert (result.ok, result.summary, result.findings) == (False, "tests failed (on box, 5s)", ["FAIL a.test.ts"])
+
+
+def test_the_hyper_test_cmd_on_the_box_says_where_it_ran(tmp_path: Path, box_job: Any) -> None:
+    fake = box_job(0, "ok", " (on box, 2s)")
+    result = checked(ts_tests.run_gate(make_context(tmp_path, COMMAND, hyper=True)), ts_tests.GATE)
+    assert result.summary == "test_cmd exited 0 (on box, 2s); coverage advisory: not measured with [hyper] test_cmd"
+    assert [(job["command"], job["cwd"], job["timeout"]) for job in fake.calls] == [(["bash", "-lc", "node t.js"], tmp_path, 1800)]

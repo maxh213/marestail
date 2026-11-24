@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+NO_OFFLOAD = "MARESTAIL_NO_OFFLOAD"
 PARENTS = True
 EXIST_OK = True
 

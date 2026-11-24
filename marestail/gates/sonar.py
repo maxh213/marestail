@@ -1,11 +1,12 @@
 import os
+import shlex
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from marestail import dotnet, erlang, java, rust
+from marestail import dotnet, erlang, java, remote, rust
 from marestail.context import Context
 from marestail.javascript import tooling_file
 from marestail.report import Result, elapsed
@@ -79,9 +80,13 @@ def run_gate(ctx: Context) -> Result:
 
 
 def analyse(ctx: Context, creds: Credentials, started: float) -> Result:
-    client = Client(creds["url"], creds["token"])
     key = ctx.config.get(SECTION, "project_key")
-    code, output, task_file = scan(ctx, creds, key)
+    code, output, task_file, where = scan(ctx, creds, key)
+    return analysed(ctx, Client(creds["url"], creds["token"]), key, (code, output, task_file), started).with_where(where)
+
+
+def analysed(ctx: Context, client: Client, key: str, scanned: tuple[int, str, Path], started: float) -> Result:
+    code, output, task_file = scanned
     if code != 0:
         return Result(GATE, False, "scanner failed", tail(output), elapsed(started))
     error = wait_for_analysis(client, task_file)
@@ -97,12 +102,51 @@ def analysis_tail(output: str) -> list[str]:
     return tail(output, FAILED_TAIL)
 
 
-def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path]:
+def scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path, str]:
     if ctx.config.section("dotnet") is not None:
         code, output = dotnet_scan(ctx, creds, key)
-        return code, output, ctx.root / DOTNET_REPORT_TASK
+        return code, output, ctx.root / DOTNET_REPORT_TASK, EMPTY
+    if remote.offloaded(ctx, GATE):
+        return box_scan(ctx, creds, key)
     code, output = run(scanner_command(ctx, creds, key), cwd=ctx.root, timeout=1800)
-    return code, output, ctx.work / "scannerwork" / "report-task.txt"
+    return code, output, report_task_file(ctx), EMPTY
+
+
+def report_task_file(ctx: Context) -> Path:
+    return ctx.work / "scannerwork" / "report-task.txt"
+
+
+def box_scan(ctx: Context, creds: Credentials, key: str) -> tuple[int, str, Path, str]:
+    task_file = report_task_file(ctx)
+    task_file.unlink(missing_ok=True)
+    scanned = {**creds, "url": remote.sonar_url(ctx, creds["url"])}
+    pull = (str(task_file.relative_to(ctx.root)),)
+    outcome = remote.run_job(
+        ctx, GATE, lambda _workers: box_scanner_command(ctx, scanned, key), ctx.root, timeout=1800, pull=pull, send=scanner_inputs(ctx)
+    )
+    return outcome.code, outcome.output, task_file, outcome.where
+
+
+def box_scanner_command(ctx: Context, creds: Credentials, key: str) -> list[str]:
+    local = scanner_command(ctx, creds, key)
+    return ["sh", "-c", f'exec docker run --user "$(id -u):$(id -g)" {shlex.join(without_user(local[2:]))}']
+
+
+def without_user(arguments: list[str]) -> list[str]:
+    index = arguments.index("-u")
+    return [*arguments[:index], *arguments[index + 2 :]]
+
+
+def scanner_inputs(ctx: Context) -> tuple[Path, ...]:
+    reports = [ctx.work / name for name in ("ts-coverage", "py-coverage.xml", "java-jacoco.xml")]
+    classes = [java.build_dir(ctx) / "classes"] if ctx.config.section("java") is not None else []
+    return (*reports, *classes, *git_folders(ctx))
+
+
+def git_folders(ctx: Context) -> list[Path]:
+    code, output = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ctx.root)
+    lines = output.strip().splitlines()
+    return [Path(lines[-1]).resolve()] if code == 0 and lines else []
 
 
 def summarize(ctx: Context, findings: list[str], status: str) -> str:
@@ -164,14 +208,11 @@ def settings_property(ctx: Context) -> list[str]:
 
 
 def git_mounts(ctx: Context) -> list[str]:
-    code, output = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ctx.root)
-    lines = output.strip().splitlines()
-    if code != 0 or not lines:
-        return []
-    common = Path(lines[-1]).resolve()
-    if common.is_relative_to(ctx.root.resolve()):
-        return []
-    return ["-v", f"{common}:{common}:ro"]
+    return [flag for common in outside_root(ctx) for flag in ("-v", f"{common}:{common}:ro")]
+
+
+def outside_root(ctx: Context) -> list[Path]:
+    return [common for common in git_folders(ctx) if not common.is_relative_to(ctx.root.resolve())]
 
 
 def java_properties(ctx: Context) -> list[str]:
