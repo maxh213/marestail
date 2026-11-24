@@ -15,7 +15,7 @@ perf BOUNCE
 code good
 perf PASS
 judge BOUNCE specifier
-specify
+specify revise
 judge BOUNCE
 code good
 judge PASS

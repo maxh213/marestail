@@ -21,7 +21,7 @@ words = action.split()
 if words[0] == "specify":
     Path("features").mkdir(exist_ok=True); Path("qa").mkdir(exist_ok=True)
     Path("features/t.feature").write_text("Feature: t\n  Scenario: Adds one\n    Given x\n  Scenario Outline: Rejects bad input\n    Given y\n")
-    Path("qa/t.md").write_text("1. open\n")
+    Path("qa/t.md").write_text("1. open\n2. check the sum\n" if "revise" in words else "1. open\n")
     commit("specifier", "features", "qa")
     observed = "## Observed\nthe frame is 440px, the form inside is 425px\n- radius does not clip: does not hold, left corner round at 434,100\n" if "observed" in words else ""
     h = handoff_path(); h.parent.mkdir(parents=True, exist_ok=True); h.write_text("spec written\n" + observed)

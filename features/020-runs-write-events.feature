@@ -372,7 +372,7 @@ Feature: Runs write one event line at every step boundary
 
   Scenario: the judge round cap and the bounce cap stop without another rework
     Given `--from critic --to critic`, `runner.MAX_JUDGE_ROUNDS` set to 2 for the test only, and findings "1. finding A" then "1. finding B"
-    When each bounce reworks a specifier that writes a handoff
+    When each bounce reworks a specifier that commits a changed feature file and writes a handoff
     Then the events are 01-critic bounce, 02-specifier done, 03-critic bounce, 04-specifier done, run-end stopped
     And the reason is "critic ran 2 rounds without a pass"
     And stdout contains "pipeline stopped at critic" and does not contain "ran 2 rounds" or "ran 1000 rounds"
@@ -381,6 +381,14 @@ Feature: Runs write one event line at every step boundary
     Then after 03-critic bounce there is no 04-specifier
     And the reason is "critic still bouncing after 1 rounds; stopping for a human"
     And stdout contains that reason
+
+  Scenario: a judge bouncing a tree its worker left alone stops for a human
+    Given `--from critic --to critic` and a critic that bounces with findings worded differently each time
+    When the specifier writes only a handoff saying it made no code change
+    Then the events are 01-critic bounce, 02-specifier done, 03-critic bounce, run-end stopped
+    And run-end has exit_code 1, stopped_at "critic" and reason "critic bounced the same tree twice; specifier changed nothing in between, stopping for a human"
+    And stdout contains that reason and "pipeline stopped at critic"
+    And in `tools/dryrun-plan.txt` the specifier's rework after the hardener's `judge BOUNCE specifier` is `specify revise`, for which `tools/stub-claude` adds a second step to `qa/t.md`, so the dry run still changes the tree between the hardener's bounces and finishes its plan
 
   Scenario: a judge with no verdict writes no extra event for the made-up bounce
     Given `--from critic --to critic` and `--retries 1`

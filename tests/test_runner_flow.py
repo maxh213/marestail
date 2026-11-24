@@ -99,7 +99,7 @@ def test_disabled_reads_the_enabled_default(tmp_path: Path, monkeypatch: pytest.
 def test_judge_round_passes_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state = make_state(tmp_path)
     judged = patch(monkeypatch, runner, "run_judge", (runner.PASS, None, "ok"))
-    assert runner.judge_round(state, CRITIC, "", 0) == (True, "ok")
+    assert runner.judge_round(state, CRITIC, runner.NO_BOUNCE, 0) == (True, runner.NO_BOUNCE)
     assert judged.calls == [(state, CRITIC)]
 
 
@@ -711,9 +711,12 @@ def test_design_loop_stops_on_repeated_findings(tmp_path: Path, monkeypatch: pyt
 def test_judge_loop_passes_after_rework(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     patch(monkeypatch, runner, "run_judge", ("BOUNCE", "coder", "1. a"), ("BOUNCE", None, "1. b"), ("PASS", None, "ok"))
     worker = patch(monkeypatch, runner, "run_worker", True)
+    patch(monkeypatch, runner, "head", "tree-1", "tree-2")
+    trees = patch(monkeypatch, runner, "same_tree", False)
     state = make_state(tmp_path)
     assert runner.run_judge_loop(state, CRITIC) is True
     assert worker.calls == [(state, find("coder"), "1. a"), (state, find("specifier"), "1. b")]
+    assert trees.calls == [(state.config, "", "tree-1"), (state.config, "tree-1", "tree-2")]
 
 
 def test_judge_loop_stops_on_repeated_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
@@ -737,7 +740,7 @@ def test_judge_loop_stops_after_max_rounds(tmp_path: Path, monkeypatch: pytest.M
     rounds = patch(monkeypatch, runner, "judge_round", (None, "x"))
     assert runner.run_judge_loop(state, CRITIC) is False
     assert len(rounds.calls) == 1000
-    assert rounds.calls[0] == (state, CRITIC, "", 0)
+    assert rounds.calls[0] == (state, CRITIC, runner.NO_BOUNCE, 0)
     assert rounds.calls[1] == (state, CRITIC, "x", 1)
     assert rounds.calls[-1] == (state, CRITIC, "x", 999)
 
@@ -782,6 +785,97 @@ def test_judge_loop_stops_when_rework_fails(
     assert runner.run_judge_loop(make_state(tmp_path), CRITIC) is False
     assert len(worker.calls) == calls
     assert len(judged.calls) == 1
+
+
+def commit_file(root: Path, path: str, text: str) -> str:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(text)
+    commit_all(root, path)
+    return runner.head(Config(root=root, raw={}))
+
+
+def reworking(root: Path, path: str) -> Callable[..., bool]:
+    def rework(*_args: Any) -> bool:
+        commit_file(root, path, f"{path} {time.monotonic_ns()}\n")
+        return True
+
+    return rework
+
+
+def test_judge_loop_stops_when_the_worker_changed_nothing_outside_marestail(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    commit_file(git_repo, "src/a.py", "x = 1\n")
+    judged = patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("BOUNCE", None, "1. reworded a"), ("PASS", None, "ok"))
+    monkeypatch.setattr(runner, "run_worker", reworking(git_repo, ".marestail/handoffs/t/02-coder.md"))
+    state = make_state(git_repo)
+    hardener = Judge("hardener", "full", bounce_to="coder")
+    reason = "hardener bounced the same tree twice; coder changed nothing in between, stopping for a human"
+    assert runner.run_judge_loop(state, hardener) is False
+    assert len(judged.calls) == 2
+    assert state.stop_reason == reason
+    assert capsys.readouterr().out == reason + "\n"
+
+
+def test_judge_loop_names_the_worker_the_last_bounce_went_to(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commit_file(git_repo, "src/a.py", "x = 1\n")
+    patch(monkeypatch, runner, "run_judge", ("BOUNCE", "specifier", "1. a"), ("BOUNCE", "coder", "1. b"))
+    patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(git_repo)
+    assert runner.run_judge_loop(state, Judge("hardener", "full", bounce_to="coder")) is False
+    assert state.stop_reason == "hardener bounced the same tree twice; specifier changed nothing in between, stopping for a human"
+
+
+def test_judge_loop_goes_on_while_the_worker_changes_the_tree(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commit_file(git_repo, "src/a.py", "x = 1\n")
+    judged = patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("BOUNCE", None, "1. b"), ("PASS", None, "ok"))
+    monkeypatch.setattr(runner, "run_worker", reworking(git_repo, "src/a.py"))
+    state = make_state(git_repo)
+    assert runner.run_judge_loop(state, Judge("hardener", "full", bounce_to="coder")) is True
+    assert len(judged.calls) == 3
+    assert state.stop_reason is None
+
+
+def test_judge_loop_passes_after_a_rework_that_changed_nothing(git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    commit_file(git_repo, "src/a.py", "x = 1\n")
+    patch(monkeypatch, runner, "run_judge", ("BOUNCE", None, "1. a"), ("PASS", None, "ok"))
+    worker = patch(monkeypatch, runner, "run_worker", True)
+    state = make_state(git_repo)
+    assert runner.run_judge_loop(state, Judge("hardener", "full", bounce_to="coder")) is True
+    assert len(worker.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("findings", "expected"),
+    [("1.  a", "hardener repeated the same findings twice"), ("1. b", "hardener still bouncing after 1 rounds")],
+)
+def test_stall_reason_keeps_the_older_rules_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, findings: str, expected: str) -> None:
+    trees = patch(monkeypatch, runner, "same_tree", True)
+    judge = Judge("hardener", "full", bounce_to="coder", bounces=1)
+    previous, current = runner.Bounced("1. a", "t1", "coder"), runner.Bounced(findings, "t1", "coder")
+    assert runner.stall_reason(Config(root=tmp_path, raw={}), judge, previous, current, 1).startswith(expected)
+    assert trees.calls == []
+
+
+def test_same_tree_ignores_marestail_and_compares_everything_else(git_repo: Path) -> None:
+    config = Config(root=git_repo, raw={})
+    first = commit_file(git_repo, "src/a.py", "x = 1\n")
+    handoff = commit_file(git_repo, ".marestail/handoffs/t/01-coder.md", "done\n")
+    nested = commit_file(git_repo, "src/.marestail/kept.md", "kept\n")
+    assert runner.same_tree(config, first, handoff) is True
+    assert runner.same_tree(config, first, first) is True
+    assert runner.same_tree(config, handoff, nested) is False
+    assert runner.same_tree(config, "", first) is False
+    assert runner.same_tree(config, "not-a-commit", first) is False
+
+
+def test_same_tree_from_a_subfolder_root_still_sees_the_whole_repo(git_repo: Path) -> None:
+    first = commit_file(git_repo, "app/src/a.py", "x = 1\n")
+    outside = commit_file(git_repo, "lib/b.py", "y = 1\n")
+    handoff = commit_file(git_repo, "app/.marestail/handoffs/t/01-coder.md", "done\n")
+    config = Config(root=git_repo / "app", raw={})
+    assert runner.same_tree(config, first, outside) is False
+    assert runner.same_tree(config, outside, handoff) is True
 
 
 @pytest.mark.parametrize(

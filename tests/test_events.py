@@ -972,6 +972,7 @@ def test_judge_round_cap_and_bounce_cap(tmp_path: Path) -> None:
             letter = "A" if seen["n"] == 1 else "B"
             write_report(state, label, f"VERDICT: BOUNCE\n1. finding {letter}\n")
         else:
+            commit_feature(root, f"rework {label}", f"Feature: {label}\n")
             write_report(state, label, HANDOFF_BODY)
 
     got = drive(root, plan, start="critic", stop="critic", rounds=2)
@@ -1023,6 +1024,37 @@ def _check_bounce_cap(tmp_path: Path) -> None:
     reason = "critic still bouncing after 1 rounds; stopping for a human"
     assert got["rows"][-1]["reason"] == reason
     assert reason in got["out"]
+
+
+def test_judge_bouncing_a_tree_the_worker_left_alone_stops(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "unchanged")
+    seen = {"n": 0}
+
+    def plan(state: Run, label: str, prompt: str, rebuild: Any = None) -> None:
+        if "critic" in label:
+            seen["n"] += 1
+            write_report(state, label, f"VERDICT: BOUNCE\n1. finding worded {seen['n']}\n")
+        else:
+            write_report(state, label, "# Handoff\n\n## What I did\n\nI made no code change; this needs a human\n")
+
+    got = drive(root, plan, start="critic", stop="critic")
+    reason = "critic bounced the same tree twice; specifier changed nothing in between, stopping for a human"
+    assert got["exc"] is None
+    assert got["value"] == 1
+    assert sequence(got["rows"]) == [
+        ("run-start", None, None),
+        ("step-start", "01-critic", None),
+        ("step-end", "01-critic", "bounce"),
+        ("step-start", "02-specifier", None),
+        ("step-end", "02-specifier", "done"),
+        ("step-start", "03-critic", None),
+        ("step-end", "03-critic", "bounce"),
+        ("run-end", None, "stopped"),
+    ]
+    end = got["rows"][-1]
+    assert (end["exit_code"], end["stopped_at"], end["reason"]) == (1, "critic", reason)
+    assert reason in got["out"]
+    assert "pipeline stopped at critic" in got["out"]
 
 
 def test_judge_no_verdict_made_up_bounce(tmp_path: Path) -> None:

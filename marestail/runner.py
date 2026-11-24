@@ -709,10 +709,20 @@ def disabled(state: Run, judge: Judge) -> bool:
 
 
 MAX_JUDGE_ROUNDS = 1000
+OUTSIDE_RUN_FILES = ":(exclude).marestail"
+
+
+class Bounced(NamedTuple):
+    report: str
+    tree: str
+    worker: str
+
+
+NO_BOUNCE = Bounced(EMPTY, EMPTY, EMPTY)
 
 
 def run_judge_loop(state: Run, judge: Judge) -> bool:
-    previous = ""
+    previous = NO_BOUNCE
     for bounce in range(MAX_JUDGE_ROUNDS):
         done, previous = judge_round(state, judge, previous, bounce)
         if done is not None:
@@ -721,21 +731,26 @@ def run_judge_loop(state: Run, judge: Judge) -> bool:
     return False
 
 
-def judge_round(state: Run, judge: Judge, previous: str, bounce: int) -> tuple[bool | None, str]:
+def judge_round(state: Run, judge: Judge, previous: Bounced, bounce: int) -> tuple[bool | None, Bounced]:
     verdict, target, report = run_judge(state, judge)
     if verdict == PASS:
-        return True, report
-    stop = stall_reason(judge, previous, report, bounce)
+        return True, previous
+    current = Bounced(report, head(state.config), rework_role(judge, target))
+    stop = stall_reason(state.config, judge, previous, current, bounce)
     if stop:
         print(stop)
         state.stop_reason = stop
-        return False, report
+        return False, current
     if rework(state, judge, target, report):
-        return None, report
-    return False, report
+        return None, current
+    return False, current
 
 
-def stall_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
+def stall_reason(config: Config, judge: Judge, previous: Bounced, current: Bounced, bounce: int) -> str:
+    return repeat_reason(judge, previous.report, current.report, bounce) or unchanged_reason(config, judge, previous, current.tree)
+
+
+def repeat_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
     if same_findings(previous, report):
         return f"{judge.name} repeated the same findings twice; the worker is not making progress, stopping for a human"
     if judge.bounces and bounce >= judge.bounces:
@@ -743,8 +758,25 @@ def stall_reason(judge: Judge, previous: str, report: str, bounce: int) -> str:
     return ""
 
 
+def unchanged_reason(config: Config, judge: Judge, previous: Bounced, tree: str) -> str:
+    if not same_tree(config, previous.tree, tree):
+        return EMPTY
+    return f"{judge.name} bounced the same tree twice; {previous.worker} changed nothing in between, stopping for a human"
+
+
+def same_tree(config: Config, before: str, after: str) -> bool:
+    if not before:
+        return False
+    code, _ = run([GIT, DIFF, "--quiet", before, after, DOUBLE_DASH, OUTSIDE_RUN_FILES], cwd=config.root)
+    return code == 0
+
+
+def rework_role(judge: Judge, target: str | None) -> str:
+    return target or judge.bounce_to
+
+
 def rework(state: Run, judge: Judge, target: str | None, report: str) -> bool:
-    target_role = target or judge.bounce_to
+    target_role = rework_role(judge, target)
     worker = find(target_role, state.scope_name)
     if not isinstance(worker, Worker):
         state.stop_reason = f"{judge.name} bounced to {target_role}, which is not a worker"
