@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -133,10 +134,18 @@ def test_agent_env_without_a_box_adds_nothing(tmp_path: Path) -> None:
     assert offload.agent_env(make_context(tmp_path).config) == {}
 
 
-def test_agent_env_with_a_box_puts_the_shims_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+BOX = '[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\n'
+NEVER = BOX + 'local = "never"\n'
+
+
+def machine_remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
     config = tmp_path / "remote.toml"
-    config.write_text('[remote]\ninstance = "b"\nproject = "p"\nzone = "z"\n')
+    config.write_text(text)
     monkeypatch.setattr(remote, "CONFIG", config)
+
+
+def test_agent_env_with_a_box_puts_the_shims_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    machine_remote(tmp_path, monkeypatch, BOX)
     monkeypatch.delenv(remote.ENV)
     monkeypatch.setenv("PATH", f"/usr/bin:{remote.SHIMS}:/bin")
     assert offload.agent_env(make_context(tmp_path).config) == {
@@ -147,9 +156,33 @@ def test_agent_env_with_a_box_puts_the_shims_first(tmp_path: Path, monkeypatch: 
     assert offload.agent_env(make_context(tmp_path, {"remote": {"enabled": False}}).config) == {}
 
 
+@pytest.mark.parametrize(("text", "configured"), [(BOX, False), (NEVER, True)])
+def test_a_switched_off_remote_counts_only_where_local_runs_are_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], text: str, configured: bool
+) -> None:
+    machine_remote(tmp_path, monkeypatch, text)
+    off = make_context(tmp_path, {"remote": {"enabled": False}}).config
+    assert (offload.box_configured(off), bool(offload.agent_env(off))) == (configured, configured)
+    assert ("ignored" in capsys.readouterr().err) is configured
+
+
+def test_box_configured_follows_the_machine_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_context(tmp_path).config
+    assert offload.box_configured(config) is False
+    machine_remote(tmp_path, monkeypatch, BOX)
+    monkeypatch.delenv(remote.ENV)
+    assert offload.box_configured(config) is True
+
+
 def test_every_shim_is_an_executable_script() -> None:
     assert sorted(path.name for path in remote.SHIMS.iterdir()) == sorted([*TOOLS, "_offload.sh"])
     assert [tool for tool in TOOLS if not os.access(remote.SHIMS / tool, os.X_OK)] == []
+
+
+FAKE_MARESTAIL = """case "$1 $2" in
+  "remote policy") [ -n "${POLICY_ASKED:-}" ] && echo asked >> "$POLICY_ASKED"; echo "${FAKE_POLICY-allowed}" ;;
+  *) echo "offloaded: $*" ;;
+esac"""
 
 
 @pytest.fixture
@@ -158,7 +191,7 @@ def shimmed(tmp_path: Path) -> Path:
     shutil.copytree(remote.SHIMS, home / "marestail" / "shims")
     shutil.copy(ROOT / "marestail" / "offload.bash", home / "marestail" / "offload.bash")
     (home / "bin").mkdir()
-    fake(home / "bin", "marestail", 'echo "offloaded: $*"')
+    fake(home / "bin", "marestail", FAKE_MARESTAIL)
     real = tmp_path / "real"
     real.mkdir()
     for tool in TOOLS:
@@ -270,6 +303,55 @@ def test_the_guard_or_a_switched_off_remote_passes_test_runs_through(shimmed: Pa
     assert run_shim(shimmed, "pnpm test", **env).startswith("real pnpm test guard=")
 
 
+@pytest.mark.parametrize("command", ["pnpm test", "npx vitest run", "mutmut run", "playwright test"])
+@pytest.mark.parametrize("value", ["0", "off", "FALSE", "no"])
+def test_a_switched_off_remote_still_offloads_test_runs_under_never(shimmed: Path, command: str, value: str) -> None:
+    tool, _, rest = command.partition(" ")
+    assert run_shim(shimmed, command, MARESTAIL_REMOTE=value, FAKE_POLICY="never") == f"offloaded: offload -- {tool} {rest}"
+
+
+@pytest.mark.parametrize("answer", ["", "Allowed", "error"])
+def test_a_policy_that_is_not_allowed_word_for_word_offloads(shimmed: Path, answer: str) -> None:
+    assert run_shim(shimmed, "pnpm test", MARESTAIL_REMOTE="0", FAKE_POLICY=answer) == "offloaded: offload -- pnpm test"
+
+
+def test_the_guard_still_passes_through_under_never(shimmed: Path) -> None:
+    out = run_shim(shimmed, "pnpm test", MARESTAIL_NO_OFFLOAD="1", MARESTAIL_REMOTE="0", FAKE_POLICY="never")
+    assert out.startswith("real pnpm test guard=1 ")
+
+
+def test_the_policy_is_asked_only_for_a_switched_off_test_run(shimmed: Path, tmp_path: Path) -> None:
+    asked = tmp_path / "asked"
+    for command, env in [
+        ("pnpm test", {}),
+        ("pnpm install", {"MARESTAIL_REMOTE": "0"}),
+        ("npm run build", {"MARESTAIL_REMOTE": "off"}),
+        ("pnpm test", {"MARESTAIL_NO_OFFLOAD": "1", "MARESTAIL_REMOTE": "0"}),
+    ]:
+        run_shim(shimmed, command, POLICY_ASKED=str(asked), **env)
+    assert not asked.exists()
+    assert run_shim(shimmed, "pnpm test", POLICY_ASKED=str(asked), MARESTAIL_REMOTE="0").startswith("real pnpm test guard= ")
+    assert asked.read_text() == "asked\n"
+
+
+def test_bash_env_routes_a_switched_off_test_run_to_the_box_under_never(shimmed: Path) -> None:
+    real = shimmed.parent / "real"
+    bash_env = str(shimmed / "marestail" / "offload.bash")
+    command = f'PATH="{real}:$PATH"; pnpm test; vitest run; pnpm install'
+    assert run_shim(shimmed, command, BASH_ENV=bash_env, MARESTAIL_REMOTE="off", FAKE_POLICY="never").splitlines() == [
+        "offloaded: offload -- pnpm test",
+        "offloaded: offload -- vitest run",
+        f"real pnpm install guard= path={real}:{real}:{os.environ['PATH']}",
+    ]
+
+
+def test_bash_env_passes_a_switched_off_test_run_through_where_allowed(shimmed: Path) -> None:
+    real = shimmed.parent / "real"
+    bash_env = str(shimmed / "marestail" / "offload.bash")
+    command = f'PATH="{real}:$PATH"; pnpm test'
+    assert run_shim(shimmed, command, BASH_ENV=bash_env, MARESTAIL_REMOTE="off").startswith("real pnpm test guard= ")
+
+
 def test_bash_env_routes_a_tool_that_comes_before_the_shims(shimmed: Path) -> None:
     real = shimmed.parent / "real"
     bash_env = str(shimmed / "marestail" / "offload.bash")
@@ -290,7 +372,7 @@ def test_a_missing_real_tool_is_not_found(shimmed: Path) -> None:
 
 
 def test_marestail_offload_runs_locally_when_the_remote_is_off(tmp_path: Path) -> None:
-    env = {**os.environ, remote.ENV: "0", "PATH": f"{remote.SHIMS}:{os.environ['PATH']}"}
+    env = {**os.environ, "HOME": str(tmp_path), remote.ENV: "0", "PATH": f"{remote.SHIMS}:{os.environ['PATH']}"}
     command = 'echo "$MARESTAIL_NO_OFFLOAD $(pwd)"; case ":$PATH:" in *marestail/shims*) echo shimmed;; esac; exit 3'
     completed = subprocess.run(
         [sys.executable, str(ROOT / "marestail" / "cli.py"), "offload", "--", "sh", "-c", command],
@@ -301,3 +383,46 @@ def test_marestail_offload_runs_locally_when_the_remote_is_off(tmp_path: Path) -
         timeout=60,
     )
     assert (completed.returncode, completed.stdout, completed.stderr) == (3, f"1 {tmp_path}\n", "")
+
+
+def machine(tmp_path: Path, remote_toml: str | None) -> dict[str, str]:
+    home = tmp_path / "home"
+    folder = home / ".config" / "marestail"
+    folder.mkdir(parents=True)
+    if remote_toml is not None:
+        (folder / "remote.toml").write_text(remote_toml)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    fake(tools, "python3", f'exec {shlex.quote(sys.executable)} "$@"')
+    fake(tools, "gcloud", "echo 'ERROR: (gcloud) no such instance' >&2; exit 1")
+    fake(tools, "pnpm", 'echo "real pnpm $*"')
+    clean = {key: value for key, value in os.environ.items() if key not in {remote.GUARD, remote.ENV, remote.GATES, "BASH_ENV"}}
+    return {**clean, "HOME": str(home), "PATH": f"{remote.SHIMS}:{tools}:{os.environ['PATH']}"}
+
+
+@pytest.mark.parametrize(("remote_toml", "policy"), [(None, "allowed"), (BOX, "allowed"), (NEVER, "never")])
+def test_marestail_remote_policy_reads_the_machine_config(tmp_path: Path, remote_toml: str | None, policy: str) -> None:
+    completed = subprocess.run(
+        [str(ROOT / "bin" / "marestail"), "remote", "policy"],
+        env={**machine(tmp_path, remote_toml), remote.ENV: "0"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert (completed.returncode, completed.stdout, completed.stderr) == (0, f"{policy}\n", "")
+
+
+def test_the_real_shim_runs_a_switched_off_test_run_here_where_allowed(tmp_path: Path) -> None:
+    env = {**machine(tmp_path, BOX), remote.ENV: "0"}
+    completed = subprocess.run(["pnpm", "test"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert (completed.returncode, completed.stdout, completed.stderr) == (0, "real pnpm test\n", "")
+
+
+def test_the_real_shim_sends_a_switched_off_test_run_to_the_box_under_never(tmp_path: Path) -> None:
+    env = {**machine(tmp_path, NEVER + "max_wait_hours = 0\n"), remote.ENV: "off"}
+    completed = subprocess.run(["pnpm", "test"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert (completed.returncode, completed.stdout) == (75, "")
+    assert completed.stderr.splitlines() == [
+        'MARESTAIL_REMOTE=off ignored: ~/.config/marestail/remote.toml sets [remote] local = "never"',
+        "marestail offload: (gave up after waiting 0s: b is unavailable: instance is unknown; not run locally)",
+    ]

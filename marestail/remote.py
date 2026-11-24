@@ -13,10 +13,11 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from pathlib import Path
 from typing import Any
 
-from marestail.config import Config
+from marestail.config import FILENAME, Config
 from marestail.context import Context
 from marestail.shell import NO_OFFLOAD, clean, run
 
@@ -30,6 +31,9 @@ GUARD = NO_OFFLOAD
 GATE_NAME = "MARESTAIL_GATE"
 SHIMS = Path(__file__).resolve().parent / "shims"
 OFF = {"0", "off", "false", "no"}
+LOCAL = "local"
+ALLOWED = "allowed"
+NEVER = "never"
 HOST = "host"
 OFFLOAD = "offload"
 SONAR = "sonar"
@@ -188,14 +192,20 @@ def _say(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+@cache
+def _say_once(message: str) -> None:
+    _say(message)
+
+
 def switched_off() -> bool:
     return os.environ.get(ENV, "").lower() in OFF
 
 
 def settings_for(config: Config) -> Settings | None:
-    if switched_off() or config.get("remote", "enabled") is False:
+    raw = _enabled_section()
+    if raw is None or _opted_out(config, raw):
         return None
-    return _load()
+    return _parsed(raw)
 
 
 def _settings(ctx: Context) -> Settings | None:
@@ -203,12 +213,55 @@ def _settings(ctx: Context) -> Settings | None:
 
 
 def _load() -> Settings | None:
+    raw = _enabled_section()
+    return None if raw is None else _parsed(raw)
+
+
+def _enabled_section() -> dict[str, Any] | None:
+    raw = _section()
+    return raw if raw is not None and raw.get("enabled", True) else None
+
+
+def _section() -> dict[str, Any] | None:
     if not CONFIG.exists():
         return None
-    raw = tomllib.loads(CONFIG.read_text()).get("remote", {})
-    if not raw.get("enabled", True):
-        return None
-    return _parsed(raw)
+    section: dict[str, Any] = tomllib.loads(CONFIG.read_text()).get("remote", {})
+    return section
+
+
+def _forbids_local(raw: dict[str, Any]) -> bool:
+    return str(raw.get(LOCAL, ALLOWED)) != ALLOWED
+
+
+def _opted_out(config: Config, raw: dict[str, Any]) -> bool:
+    opt_outs = _opt_outs(config)
+    if not _forbids_local(raw):
+        return bool(opt_outs)
+    for opt_out in opt_outs:
+        _say_once(f"{opt_out} ignored: {_policy_source()}")
+    return False
+
+
+def _opt_outs(config: Config) -> list[str]:
+    found = [f"{ENV}={os.environ[ENV]}"] if switched_off() else []
+    if config.get("remote", "enabled") is False:
+        found.append(f"[remote] enabled = false in {config.root / FILENAME}")
+    return found
+
+
+def _policy_source() -> str:
+    return f'{_from_home(CONFIG)} sets [remote] {LOCAL} = "{NEVER}"'
+
+
+def _from_home(path: Path) -> str:
+    home = Path.home()
+    return f"~/{path.relative_to(home)}" if path.is_relative_to(home) else str(path)
+
+
+def policy_command(_args: object) -> int:
+    raw = _section()
+    print(NEVER if raw is not None and _forbids_local(raw) else ALLOWED)
+    return 0
 
 
 def _parsed(raw: dict[str, Any]) -> Settings:
@@ -236,9 +289,23 @@ def _places(value: str | dict[str, Any]) -> dict[str, str]:
 
 
 def _offloaded_gates(raw: dict[str, Any]) -> tuple[str, ...]:
-    if os.environ.get(GATES):
-        return tuple(os.environ[GATES].split(","))
-    return tuple(raw.get("gates", []))
+    configured = tuple(raw.get("gates", []))
+    if not os.environ.get(GATES):
+        return configured
+    return _chosen_gates(raw, configured, tuple(os.environ[GATES].split(",")))
+
+
+def _chosen_gates(raw: dict[str, Any], configured: tuple[str, ...], chosen: tuple[str, ...]) -> tuple[str, ...]:
+    if not _forbids_local(raw):
+        return chosen
+    _say_dropped(configured, chosen)
+    return tuple(dict.fromkeys([*configured, *chosen]))
+
+
+def _say_dropped(configured: tuple[str, ...], chosen: tuple[str, ...]) -> None:
+    dropped = [gate for gate in configured if gate not in chosen]
+    if dropped:
+        _say_once(f"{GATES}={','.join(chosen)} ignored for {', '.join(dropped)}: {_policy_source()}")
 
 
 def offloaded(ctx: Context, gate: str) -> bool:

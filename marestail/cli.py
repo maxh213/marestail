@@ -54,6 +54,7 @@ HELP_RUN_SCOPE = (
     "and it joins the diff. hard gates only the focus paths and tells every role to leave the rest alone apart from "
     "the smallest supporting edits. hyper gates only the changed lines of the diff"
 )
+HELP_REMOTE_POLICY = 'print whether tests may run here: "allowed", or "never" under [remote] local = "never"'
 HELP_PULL = "a file or folder (relative to the working directory) to copy back from the box afterwards; repeatable"
 HELP_FOCUS = "add a file or directory to the gate scope (repeatable); implies --scope changed"
 HELP_MODEL = "the model, or dandelion/route or dandelion/route-best to ask dandelion before every session"
@@ -111,10 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "route", help="print the subscription to use now: runs dandelion route with the same arguments, e.g. --high", add_help=False
     )
-    remote_parser = commands.add_parser("remote", help="the remote box that offloaded gates run on")
-    remote_parser.add_subparsers(dest="remote_command", required=True).add_parser(
-        "status", help="box state, uptime and estimated spend today and this month"
-    ).set_defaults(handler=remote_status_command)
+    add_remote(commands.add_parser("remote", help="the remote box that offloaded gates run on"))
     add_offload(commands.add_parser("offload", help="run a command for this tree on the remote box and stream its output"))
     commands.add_parser("shims-path", help="print the folder of PATH shims that send test runs to the remote box").set_defaults(
         handler=shims_path_command
@@ -269,6 +267,14 @@ def add_dash(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=dash_command)
 
 
+def add_remote(parser: argparse.ArgumentParser) -> None:
+    actions = parser.add_subparsers(dest="remote_command", required=True)
+    actions.add_parser("status", help="box state, uptime and estimated spend today and this month").set_defaults(
+        handler=remote_status_command
+    )
+    actions.add_parser("policy", help=HELP_REMOTE_POLICY).set_defaults(handler=remote_policy_command)
+
+
 def add_offload(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pull", action="append", default=[], metavar="PATH", help=HELP_PULL)
     parser.add_argument("argv", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
@@ -291,6 +297,12 @@ def remote_status_command(args: argparse.Namespace) -> int:
     from marestail import remote
 
     return remote.status_command(args)
+
+
+def remote_policy_command(args: argparse.Namespace) -> int:
+    from marestail import remote
+
+    return remote.policy_command(args)
 
 
 def gate_command(args: argparse.Namespace) -> int:

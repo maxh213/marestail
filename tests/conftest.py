@@ -8,11 +8,13 @@ from typing import Any
 
 import pytest
 
+from marestail import remote
 from marestail.config import Config
 from marestail.context import Context
 from marestail.report import Result
 
 os.environ["MARESTAIL_REMOTE"] = "0"
+NO_MACHINE_REMOTE = Path(__file__).resolve().parent / "no-machine-remote.toml"
 
 Reply = tuple[int, str]
 GUARDED = {"MARESTAIL_NO_OFFLOAD": "1"}
@@ -255,6 +257,8 @@ def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(socket.socket, "connect", refuse_network)
     monkeypatch.setattr(socket, "create_connection", refuse_network)
+    monkeypatch.setattr(remote, "CONFIG", NO_MACHINE_REMOTE)
+    remote._say_once.cache_clear()
 
 
 def checked(result: Result, gate: str) -> Result:

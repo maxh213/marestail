@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 
+from marestail import remote
 from marestail.report import Result
 from tests import conftest
 
@@ -187,3 +188,8 @@ def test_the_box_binaries_stay_forbidden() -> None:
 
 def test_the_suite_switches_the_remote_off() -> None:
     assert os.environ["MARESTAIL_REMOTE"] == "0"
+
+
+def test_the_suite_never_reads_this_machines_remote_config() -> None:
+    assert remote.CONFIG == conftest.NO_MACHINE_REMOTE
+    assert not remote.CONFIG.exists()

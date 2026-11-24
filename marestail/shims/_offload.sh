@@ -2,7 +2,8 @@
 # it for every agent it starts; `marestail shims-path` prints it for anyone else), so a test run started by
 # name goes to the remote box through `marestail offload`. Anything else, every run with MARESTAIL_NO_OFFLOAD=1
 # (set by marestail's own gate runs and by every job on the box) and every run with MARESTAIL_REMOTE=0 execs
-# the real tool: the next one on PATH once every shim folder is taken off it.
+# the real tool: the next one on PATH once every shim folder is taken off it. MARESTAIL_REMOTE=0 counts only
+# while `marestail remote policy` says "allowed"; under [remote] local = "never" the test run goes to the box.
 shim_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 marestail_bin="$shim_dir/../../bin/marestail"
 
@@ -21,6 +22,14 @@ remote_off() {
     0|off|false|no) return 0 ;;
   esac
   return 1
+}
+
+local_allowed() {
+  [ "$("$marestail_bin" remote policy 2>/dev/null)" = allowed ]
+}
+
+runs_here() {
+  [ "${MARESTAIL_NO_OFFLOAD:-}" = 1 ] || { remote_off && local_allowed; }
 }
 
 # WORD is the first argument that is not an option, REST what follows it; $1 lists the options that take a value.
@@ -119,7 +128,7 @@ offload_or_exec() {
   local tool=$1
   shift
   strip_shims
-  if [ "${MARESTAIL_NO_OFFLOAD:-}" != 1 ] && ! remote_off && offloads "$tool" "$@"; then
+  if offloads "$tool" "$@" && ! runs_here; then
     exec "$marestail_bin" offload -- "$tool" "$@"
   fi
   exec "$tool" "$@"

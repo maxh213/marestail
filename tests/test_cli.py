@@ -150,10 +150,12 @@ def test_help_lists_remote_and_status_and_queue_stay_absent(capsys: pytest.Captu
     assert exit_code(["remote"]) == 2
     assert capsys.readouterr() == (
         "",
-        "usage: marestail remote [-h] {status} ...\nmarestail remote: error: the following arguments are required: remote_command\n",
+        "usage: marestail remote [-h] {status,policy} ...\nmarestail remote: error: the following arguments are required: remote_command\n",
     )
     assert exit_code(["remote", "--help"]) == 0
-    assert "    status    box state, uptime and estimated spend today and this month\n" in capsys.readouterr().out
+    remote_help = capsys.readouterr().out
+    assert "    status         box state, uptime and estimated spend today and this month\n" in remote_help
+    assert '    policy         print whether tests may run here: "allowed", or "never"\n' in remote_help
     for absent in ("status", "queue"):
         assert exit_code([absent]) == 2
         assert f"invalid choice: '{absent}'" in capsys.readouterr().err
@@ -166,6 +168,19 @@ def test_remote_status_hands_the_arguments_to_the_remote_module(monkeypatch: pyt
     assert len(fake.calls) == 1
     (args,) = fake.calls[0]
     assert (args.command, args.remote_command, args.handler) == ("remote", "status", cli.remote_status_command)
+
+
+def test_remote_policy_hands_the_arguments_to_the_remote_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = Recorder(0)
+    monkeypatch.setattr(remote, "policy_command", fake)
+    assert cli.main(["remote", "policy"]) == 0
+    ((args,),) = fake.calls
+    assert (args.command, args.remote_command, args.handler) == ("remote", "policy", cli.remote_policy_command)
+
+
+def test_remote_policy_without_a_config_is_allowed(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["remote", "policy"]) == 0
+    assert capsys.readouterr() == ("allowed\n", "")
 
 
 def test_remote_status_without_a_config_says_so(

@@ -417,6 +417,19 @@ def test_a_switched_off_remote_runs_locally(box: FakeBox, mutmut: FakeRun, repo:
     assert (box.gcloud_calls, box.ssh_calls, box.rsync_calls) == ([], [], [])
 
 
+def test_a_switched_off_remote_still_runs_the_gate_on_the_box_under_never(
+    box: FakeBox, mutmut: FakeRun, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, "off")
+    box.on_fetch = lambda args: write_meta(repo / "mutants") if args[-1].endswith("/mutants/") else None
+    result = py_mutation.run_gate(gate_ctx(repo))
+    assert result.summary == f"all 2 mutants killed (1 killed by timeout) (on {INSTANCE}, 0s)"
+    assert mutmut.calls == []
+    assert len(box.job_commands()) == 1
+    assert capsys.readouterr().err == f"MARESTAIL_REMOTE=off ignored: {POLICY}\n"
+
+
 def test_a_gate_that_is_not_offloaded_runs_locally(box: FakeBox, mutmut: FakeRun, repo: Path) -> None:
     configure(TOML.replace('gates = ["py.mutation"]', 'gates = ["ts.mutation"]'))
     assert offload(repo) == remote.Outcome(0, "local mutmut", "")
@@ -571,6 +584,123 @@ def test_a_repo_can_switch_remote_off(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.delenv(remote.ENV)
     assert remote._settings(make_context(tmp_path, {"remote": {"enabled": False}})) is None
     assert remote._settings(make_context(tmp_path, {"remote": {"enabled": 0}})) is not None
+
+
+NEVER = TOML + 'local = "never"\n'
+POLICY = '~/.config/marestail/remote.toml sets [remote] local = "never"'
+
+
+@pytest.mark.parametrize(
+    ("text", "policy"),
+    [
+        (None, "allowed"),
+        (TOML, "allowed"),
+        (TOML + 'local = "allowed"\n', "allowed"),
+        (NEVER, "never"),
+        (TOML + 'local = "no"\n', "never"),
+        (NEVER.replace("enabled = true", "enabled = false"), "never"),
+        ('[other]\nlocal = "never"\n', "allowed"),
+    ],
+)
+def test_policy_prints_never_only_when_remote_toml_forbids_local_runs(
+    capsys: pytest.CaptureFixture[str], text: str | None, policy: str
+) -> None:
+    if text is not None:
+        configure(text)
+    assert remote.policy_command(None) == 0
+    assert capsys.readouterr() == (f"{policy}\n", "")
+
+
+@pytest.mark.parametrize("value", ["0", "off", "OFF", "false", "no"])
+def test_never_ignores_a_switched_off_remote_and_says_so_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], home: Path, value: str
+) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, value)
+    ctx = make_context(tmp_path)
+    assert remote._settings(ctx) == box_settings(key=home / ".ssh" / "google_compute_engine")
+    assert remote.offloaded(ctx, "py.mutation") is True
+    assert capsys.readouterr() == ("", f"MARESTAIL_REMOTE={value} ignored: {POLICY}\n")
+
+
+def test_never_ignores_a_repo_opt_out_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure(NEVER)
+    monkeypatch.delenv(remote.ENV)
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": False}})) is not None
+    assert capsys.readouterr().err == f"[remote] enabled = false in {tmp_path}/marestail.toml ignored: {POLICY}\n"
+
+
+def test_never_names_both_opt_outs_on_their_own_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, "off")
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": False}})) is not None
+    assert capsys.readouterr().err.splitlines() == [
+        f"MARESTAIL_REMOTE=off ignored: {POLICY}",
+        f"[remote] enabled = false in {tmp_path}/marestail.toml ignored: {POLICY}",
+    ]
+
+
+def test_never_with_nothing_switched_off_says_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, "1")
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": 0}})) is not None
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("local", ["", 'local = "allowed"\n'])
+def test_allowed_honours_both_opt_outs_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], local: str
+) -> None:
+    configure(TOML + local)
+    monkeypatch.setenv(remote.ENV, "off")
+    assert remote._settings(make_context(tmp_path)) is None
+    monkeypatch.delenv(remote.ENV)
+    assert remote._settings(make_context(tmp_path, {"remote": {"enabled": False}})) is None
+    assert capsys.readouterr() == ("", "")
+
+
+def test_never_still_obeys_remote_toml_switching_the_box_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure(NEVER.replace("enabled = true", "enabled = false"))
+    monkeypatch.setenv(remote.ENV, "off")
+    assert remote._settings(make_context(tmp_path)) is None
+    assert capsys.readouterr() == ("", "")
+
+
+def test_the_policy_names_a_config_outside_home_by_its_full_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    elsewhere = tmp_path / "etc" / "remote.toml"
+    monkeypatch.setattr(remote, "CONFIG", elsewhere)
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, "no")
+    assert remote._settings(make_context(tmp_path)) is not None
+    assert capsys.readouterr().err == f'MARESTAIL_REMOTE=no ignored: {elsewhere} sets [remote] local = "never"\n'
+
+
+def test_never_keeps_every_configured_gate_on_the_box(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    configure(NEVER.replace('gates = ["py.mutation"]', 'gates = ["py.mutation", "ts.tests", "qa"]'))
+    monkeypatch.setenv(remote.GATES, "ts.mutation,ts.tests")
+    loaded = remote._load()
+    assert loaded is not None
+    assert loaded.gates == ("py.mutation", "ts.tests", "qa", "ts.mutation")
+    assert capsys.readouterr().err == f"MARESTAIL_REMOTE_GATES=ts.mutation,ts.tests ignored for py.mutation, qa: {POLICY}\n"
+
+
+def test_never_lets_the_gates_variable_add_gates_quietly(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.GATES, "ts.mutation,py.mutation")
+    loaded = remote._load()
+    assert loaded is not None
+    assert loaded.gates == ("py.mutation", "ts.mutation")
+    assert capsys.readouterr() == ("", "")
 
 
 def test_load_without_a_config_is_none() -> None:
@@ -1554,6 +1684,22 @@ def test_run_streamed_without_a_box_runs_here_with_the_shims_off(
     outcome = remote.run_streamed(make_context(tmp_path), "offload", lambda _workers: command, tmp_path, ())
     assert outcome == remote.Outcome(3, "", "")
     assert capfd.readouterr().out == f"1 {tmp_path}\n"
+
+
+def test_run_streamed_goes_to_the_box_under_never_whatever_the_switches_say(
+    box: FakeBox, repo: Path, popen: Any, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(NEVER)
+    monkeypatch.setenv(remote.ENV, "0")
+    calls = popen(FakeProcess(["PASS 1 test\n", "marestail-exit 0\n"]))
+    ctx = make_context(repo, {"remote": {"enabled": False}})
+    outcome = remote.run_streamed(ctx, "offload", lambda _workers: ["pnpm", "test"], repo, ())
+    assert outcome == remote.Outcome(0, "", f" (on {INSTANCE}, 0s)")
+    assert len(calls) == 1
+    assert capsys.readouterr() == (
+        "PASS 1 test\n",
+        f"MARESTAIL_REMOTE=0 ignored: {POLICY}\n[remote] enabled = false in {repo}/marestail.toml ignored: {POLICY}\n",
+    )
 
 
 def test_passthrough_reports_a_missing_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

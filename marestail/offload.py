@@ -82,8 +82,12 @@ def shims_path_command() -> int:
     return 0
 
 
+def box_configured(config: Config) -> bool:
+    return remote.settings_for(config) is not None
+
+
 def agent_env(config: Config) -> dict[str, str]:
-    if remote.settings_for(config) is None:
+    if not box_configured(config):
         return {}
     path = remote.without_shims(os.environ.get("PATH", ""))
     return {"PATH": f"{remote.SHIMS}{os.pathsep}{path}", "BASH_ENV": str(OFFLOAD_BASH), remote.GUARD: ""}
