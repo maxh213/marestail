@@ -38,6 +38,7 @@ MAJOR = re.compile(r"\d+")
 WITHOUT_COVERAGE_ALL = 4
 COVERAGE_ALL = ["--coverage.all=true"]
 COVERED_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 WORKER_FLAGS = {VITEST: "--maxWorkers", JEST: "--maxWorkers", PLAYWRIGHT: "--workers"}
 RUN_SECONDS = 1800
 
@@ -451,7 +452,8 @@ def count_tests(output: str, ctx: Context | None = None, runner: str = EMPTY) ->
     counted = playwright_count(ctx, runner)
     if counted is not None:
         return counted
-    return next(filter(None, map(line_count, output.splitlines())), "?")
+    lines = ANSI_ESCAPE.sub(EMPTY, output).replace("\r", "\n").splitlines()
+    return next(filter(None, map(line_count, reversed(lines))), "?")
 
 
 def line_count(line: str) -> str | None:

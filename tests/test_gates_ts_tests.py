@@ -319,6 +319,20 @@ def test_count_tests(output: str, expected: str) -> None:
     assert ts_tests.count_tests(output) == expected
 
 
+TTY_VITEST = (
+    "\x1b[2m Test Files \x1b[22m 0 passed (164)\r\n"
+    "\x1b[2m      Tests \x1b[22m 0 passed (0)\r\n"
+    "\x1b[2m Test Files \x1b[22m 119 passed (164)\r\n"
+    "\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m164 passed\x1b[39m\x1b[22m\x1b[90m (164)\x1b[39m\r\n"
+    "\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m1623 passed\x1b[39m\x1b[22m\x1b[90m (1623)\x1b[39m\r\n"
+    "\x1b[2m   Duration \x1b[22m 9.81s\r\n"
+)
+
+
+def test_count_tests_reads_the_final_summary_of_a_terminal_run() -> None:
+    assert ts_tests.count_tests(TTY_VITEST) == "1623"
+
+
 @pytest.mark.parametrize(
     ("path", "expected"),
     [("src/a.ts", "web/src/a.ts"), ("/elsewhere/a.ts", "/elsewhere/a.ts"), ("../web/b.ts", "web/b.ts")],
