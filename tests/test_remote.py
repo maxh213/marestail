@@ -52,6 +52,7 @@ ALL_EXCLUDES = [
     "--exclude=target/",
     "--include=/.marestail/",
     "--include=/.marestail/tooling/***",
+    "--include=/.marestail/stryker/***",
     "--exclude=/.marestail/*",
 ]
 PY_EXCLUDES = [pattern for pattern in ALL_EXCLUDES if pattern != "--exclude=.venv/"]

@@ -66,10 +66,25 @@ def command_targets(ctx: Context) -> list[str]:
 
 def command_proof(ctx: Context, mutate: list[str]) -> Proof:
     if MEMO not in ctx.memo:
-        command = [*tool(ctx, "stryker"), "run", str(command_config(ctx, mutate))]
-        ctx.memo[MEMO] = execute(ctx, lambda _workers: command, ctx.ts_root() / COMMAND_TEMP, ctx.work / COMMAND_REPORT)
+        config = str(command_config(ctx, mutate))
+        report = ctx.work / COMMAND_REPORT
+        ctx.memo[MEMO] = execute(
+            ctx,
+            lambda workers: command_line(ctx, config, workers),
+            ctx.ts_root() / COMMAND_TEMP,
+            report,
+            "ts.mutation",
+            pull=(str(report.relative_to(ctx.root)),),
+        )
     found: Proof = ctx.memo[MEMO]
     return found
+
+
+def command_line(ctx: Context, config: str, workers: int) -> list[str]:
+    command = [*tool(ctx, "stryker"), "run", config]
+    if not workers:
+        return command
+    return [*command, "--concurrency", str(workers)]
 
 
 def command_config(ctx: Context, mutate: list[str]) -> Path:

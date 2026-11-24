@@ -306,9 +306,17 @@ def test_command_proof_runs_stryker_from_tooling_with_the_written_config(tmp_pat
     assert (result.ok, result.summary, result.findings) == (True, "all mutants killed (proof: mutation via [hyper] test_cmd)", [])
     command = [str(tmp_path / TOOLING / "node_modules" / ".bin" / "stryker"), "run", str(config)]
     assert fake.calls == [command]
-    assert fake.builds[0](8) == command
+    assert fake.builds[0](8) == [*command, "--concurrency", "8"]
     assert fake.workers == [0]
-    assert fake.options == [{"cwd": tmp_path / "web", "gate": "", "env": None, "timeout": 7200, "pull": ()}]
+    assert fake.options == [
+        {
+            "cwd": tmp_path / "web",
+            "gate": "ts.mutation",
+            "env": None,
+            "timeout": 7200,
+            "pull": (".marestail/stryker/mutation.json",),
+        }
+    ]
     assert json.loads(config.read_text()) == {
         "testRunner": "command",
         "commandRunner": {"command": "node t.js"},

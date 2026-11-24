@@ -37,7 +37,12 @@ EXCLUDES = (
     "erl_crash.dump",
     "target/",
 )
-TOOLING_SYNC = ("--include=/.marestail/", "--include=/.marestail/tooling/***", "--exclude=/.marestail/*")
+TOOLING_SYNC = (
+    "--include=/.marestail/",
+    "--include=/.marestail/tooling/***",
+    "--include=/.marestail/stryker/***",
+    "--exclude=/.marestail/*",
+)
 PREPARE = (
     "if [ -f package-lock.json ]; then "
     "lock=$(sha256sum package-lock.json | cut -c1-16); "
