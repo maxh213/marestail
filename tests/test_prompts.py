@@ -15,9 +15,14 @@ COMMIT = (
     "the next role still reads them. The runner drops any gitignored path you force-add."
 )
 REPORT = "what you did, what is left, what the next role must know. Under 40 lines, plus the audit section if one is required."
+RESTORE = (
+    " You may put a frozen file back exactly as it is at `origin/master` (`git checkout $(git merge-base origin/master HEAD) -- <path>`), "
+    "or untrack one `origin/master` does not track (`git rm --cached <path>`); the runner keeps that, because it takes the file "
+    "out of the change. A frozen gate configuration or spec file may only be untracked that way, never edited."
+)
 CONFIG_TAIL = (
     "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
-    "sees it after the run. Then find a way within the current configuration."
+    "sees it after the run. Then find a way within the current configuration." + RESTORE
 )
 FROZEN_RULE = "Do not change gate configuration, the feature files, or the QA procedure; the runner reverts such changes. "
 CONFIG_STEP = FROZEN_RULE + CONFIG_TAIL
@@ -252,6 +257,11 @@ def test_finishing_mentions_csproj_for_dotnet(repo: Path) -> None:
 def test_csproj_note(repo: Path) -> None:
     assert prompts.csproj_note(config(repo)) == ""
     assert prompts.csproj_note(config(repo, {"dotnet": {"x": 1}})) == CSPROJ
+
+
+def test_restore_note_names_the_configured_base(repo: Path) -> None:
+    assert prompts.restore_note(config(repo)) == RESTORE
+    assert prompts.restore_note(config(repo, {"git": {"base": "origin/main"}})) == RESTORE.replace("origin/master", "origin/main")
 
 
 def test_commit_opening() -> None:

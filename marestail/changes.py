@@ -103,6 +103,17 @@ def base_exists(root: Path, base: str) -> bool:
     return code == 0
 
 
+def outside_diff(root: Path, base: str, path: str) -> bool:
+    code, _ = run(["git", "diff", "--quiet", f"{base}...HEAD", "--", path], cwd=root)
+    return code == 0
+
+
+def same_bytes(root: Path, commit: str, path: str) -> bool:
+    _, disk = run(["git", "hash-object", "--no-filters", "--", path], cwd=root)
+    code, stored = run(["git", "rev-parse", "--verify", "--quiet", f"{commit}:./{path}"], cwd=root)
+    return code == 0 and disk == stored
+
+
 def file_lines(path: Path) -> set[int] | None:
     try:
         raw = path.read_bytes()

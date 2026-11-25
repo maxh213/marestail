@@ -6,12 +6,12 @@ import shutil
 import signal
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from marestail import audit, backends, freeze, hunks, nice, offload, practices, prompts, ran_against, reported, task_file, timeline
+from marestail import audit, backends, changes, freeze, hunks, nice, offload, practices, prompts, ran_against, reported, task_file, timeline
 from marestail import config as config_module
 from marestail import events as events_module
 from marestail import route as dandelion
@@ -35,7 +35,7 @@ from marestail.backends import (
     kilo_variant,
 )
 from marestail.config import Config
-from marestail.context import focus_clash, hook_focus, resolve_focus
+from marestail.context import DEFAULT_BASE, focus_clash, hook_focus, resolve_focus
 from marestail.gates import run_gates
 from marestail.gates import visual as visual_gate
 from marestail.perf import db as perf_db
@@ -1370,18 +1370,37 @@ def dirty_problems(dirty: list[str]) -> list[str]:
 
 def frozen_problems(state: Run, worker: Worker, report: Path, before: str, dirty: list[str]) -> list[str]:
     touched = changed_paths(state.config, [GIT, DIFF, NAME_ONLY, f"{before}..{HEAD_REF}"]) + dirty
-    frozen = frozen_changes(state.config, worker, before, touched, hunk_checked(state, worker))
+    frozen = frozen_changes(state.config, worker, before, touched, hunk_checked(state, worker), dirty)
     if frozen and not dirty:
         return reject_config_change(state, worker, report, before, frozen)
     return [f"{path} is frozen for {worker.name}" for path in frozen]
 
 
-def frozen_changes(config: Config, worker: Worker, before: str, touched: list[str], hyper: bool = False) -> list[str]:
-    return [
-        path
-        for path in freeze.frozen_paths(config, worker.name, touched, hyper)
-        if not freeze.tolerated(path, file_diff(config, before, path))
-    ]
+def frozen_changes(
+    config: Config, worker: Worker, before: str, touched: list[str], hyper: bool = False, dirty: Collection[str] = ()
+) -> list[str]:
+    frozen = freeze.frozen_paths(config, worker.name, touched, hyper)
+    return [path for path in frozen if still_frozen(config, before, path, dirty)]
+
+
+def still_frozen(config: Config, before: str, path: str, dirty: Collection[str]) -> bool:
+    return not freeze.tolerated(path, file_diff(config, before, path)) and not back_at_base(config, before, path, dirty)
+
+
+def back_at_base(config: Config, before: str, path: str, dirty: Collection[str]) -> bool:
+    if path in dirty or not outside_branch(config, path):
+        return False
+    return freeze.gates_unchanged(config, path, changes.same_bytes(config.root, before, path))
+
+
+def outside_branch(config: Config, path: str) -> bool:
+    base = resolved_base(config)
+    return base is not None and changes.outside_diff(config.root, base, path)
+
+
+def resolved_base(config: Config) -> str | None:
+    base = config.get("git", "base", DEFAULT_BASE)
+    return base if changes.base_exists(config.root, base) else None
 
 
 def hunk_checked(state: Run, worker: Worker) -> bool:
@@ -1391,7 +1410,7 @@ def hunk_checked(state: Run, worker: Worker) -> bool:
 def hunk_problems(state: Run, worker: Worker, report: Path) -> list[str]:
     if not hunk_checked(state, worker):
         return []
-    found = hunks.problems(state.config, state.start, read_or_empty(report))
+    found = hunks.problems(state.config, state.start, read_or_empty(report), resolved_base(state.config))
     return ["\n".join(found)] if found else []
 
 

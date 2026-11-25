@@ -33,6 +33,15 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
   Any other changed file is frozen under hyper. It is reverted and recorded exactly as a frozen file is
   today, with the same texts. Every other finding sends the attempt back to the role that was checked, coder or architect. The runner never
   reverts part of a file.
+  One change to a frozen file is kept: one that takes it out of the branch's diff, so that after the role's commits
+  `git diff --quiet <[git] base>...HEAD -- <path>` exits 0. A file frozen only by hyper (matched by neither `[freeze] paths`
+  nor `[freeze] spec`) may be put back as it is at the base, or deleted when the base does not have it. A gate configuration
+  or spec file may only be untracked: it must also have the same bytes on disk as at the role's start commit, so every gate
+  reads what it read before. Editing one, or restoring it to the base with other bytes, is reverted as before. Nothing is kept
+  this way when the base does not resolve or the path has uncommitted changes, and a mixed change reverts only the paths
+  that do not qualify. A deletion kept this way gets no deletion finding from the hunk check; a deleted source or test file
+  still does. Every worker's finishing step says so, naming the base: `git checkout $(git merge-base <base> HEAD) -- <path>`
+  and `git rm --cached <path>`.
 
   `tools/stub-claude` actions that this feature relies on. Each `code` variant does what `code` does today, plus the listed extra:
     `code`                   handoff also has `## Hunks` with `- src.py:1-2 — the fix needs it`
@@ -172,6 +181,36 @@ Feature: under `--scope hyper` a tool check and the `blast` judge reject changes
     And `git log --format=%B` has a line matching `Revert change to frozen files by \d+-coder, recorded as a proposal` and a line matching `Proposed by \d+-coder: package\.json`
     And `git cat-file -e HEAD:package.json` fails
     And the exit code is 0 and the last non-empty stdout line is `pipeline complete`
+
+  Scenario: a coder that puts a hyper-frozen file back as it is at the base keeps the change
+    Given `[git] base` names a branch where `packages/views/assets/site.css` has a comment that an earlier commit on this branch deleted
+    When the coder runs `git checkout $(git merge-base <base> HEAD) -- packages/views/assets/site.css` and commits
+    Then the runner reports no problem, makes no revert commit, and the file has its comment back
+
+  Scenario: a coder that untracks a gate config the base does not track keeps the change
+    Given `marestail.toml` is committed on the branch, absent at the base, and ignored through `.git/info/exclude`
+    When the coder runs `git rm --cached marestail.toml` and commits
+    Then the runner reports no problem and no `deleted` finding, and `marestail.toml` stays on disk, untracked
+
+  Scenario Outline: a gate config change that is not only untracking it is still reverted
+    Given `pyproject.toml` is tracked at the base and the coder is not allowed to change it
+    When the coder <change> and commits
+    Then stdout contains `pyproject.toml is frozen for coder; reverted.` and the file is as it was at the coder's start
+
+    Examples:
+      | change                                                                         |
+      | edits it                                                                       |
+      | restores it to the base after an earlier role on the branch added a line to it |
+
+  Scenario: a mixed change reverts only the paths that do not go back to the base
+    When the coder puts `packages/views/assets/site.css` back as it is at the base and adds `package.json` in one commit
+    Then stdout contains `package.json is frozen for coder; reverted.` and does not name the CSS file
+    And the CSS file keeps its restored content
+
+  Scenario: nothing is kept when the base does not resolve
+    Given `[git] base` is `origin/nope`
+    When the coder puts a hyper-frozen file back as it was where the branch started
+    Then that file is reverted as a frozen file
 
   Scenario Outline: files that are neither source nor test are frozen under hyper
     When the hunk check classifies the changed path `<path>`

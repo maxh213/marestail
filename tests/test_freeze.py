@@ -51,6 +51,23 @@ def test_frozen_paths_by_role(role: str, expected: list[str]) -> None:
     assert freeze.frozen_paths(config(), role, paths) == expected
 
 
+@pytest.mark.parametrize(
+    ("raw", "path", "same_bytes", "expected"),
+    [
+        (None, "packages/views/assets/site.css", False, True),
+        (None, "marestail.toml", False, False),
+        (None, "marestail.toml", True, True),
+        (None, "features/a.feature", False, False),
+        ({"freeze": {"paths": ["src/**"], "spec": ["docs/**"]}}, "docs/x.md", False, False),
+        ({"freeze": {"paths": ["src/**"], "spec": ["docs/**"]}}, "marestail.toml", False, True),
+    ],
+)
+def test_gates_unchanged_unless_a_gate_or_spec_file_changed_its_bytes(
+    raw: dict[str, object] | None, path: str, same_bytes: bool, expected: bool
+) -> None:
+    assert freeze.gates_unchanged(config(raw), path, same_bytes) is expected
+
+
 def test_frozen_paths_follow_configuration() -> None:
     raw: dict[str, object] = {"freeze": {"paths": ["src/**"], "spec": ["docs/**"], "allow": {"coder": ["src/ok.py"]}}}
     paths = ["src/a.py", "src/ok.py", "docs/x.md", "pyproject.toml"]

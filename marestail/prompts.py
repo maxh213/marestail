@@ -2,6 +2,7 @@ from pathlib import Path
 
 from marestail import audit, freeze, offload, task_file
 from marestail.config import Config
+from marestail.context import DEFAULT_BASE
 from marestail.pipeline import Judge, Worker
 
 EMPTY = ""
@@ -248,7 +249,7 @@ def finishing(config: Config, worker: Worker, task_name: str, report: Path, labe
         "Under 40 lines, plus the audit section if one is required.",
         change_rule(config, worker)
         + "If you believe one is needed, say so under `## Config change` in the handoff with the reason; a human "
-        "sees it after the run. Then find a way within the current configuration." + csproj_note(config),
+        "sees it after the run. Then find a way within the current configuration." + restore_note(config) + csproj_note(config),
     ]
     return "\n".join(f"{number}. {step}" for number, step in enumerate(steps, start=1))
 
@@ -261,6 +262,15 @@ def change_rule(config: Config, worker: Worker) -> str:
     return (
         f"You may change {patterns}; the runner keeps those changes. "
         "Do not change any other gate configuration, feature file or QA procedure; the runner reverts such changes. "
+    )
+
+
+def restore_note(config: Config) -> str:
+    base = config.get("git", "base", DEFAULT_BASE)
+    return (
+        f" You may put a frozen file back exactly as it is at `{base}` (`git checkout $(git merge-base {base} HEAD) -- <path>`), "
+        f"or untrack one `{base}` does not track (`git rm --cached <path>`); the runner keeps that, because it takes the file "
+        "out of the change. A frozen gate configuration or spec file may only be untracked that way, never edited."
     )
 
 

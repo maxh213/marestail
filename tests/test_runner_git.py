@@ -18,9 +18,9 @@ LABEL = "m e"
 STAMP_WAIT = 2
 
 
-def make_state(root: Path, **fields: Any) -> Run:
+def make_state(root: Path, raw: dict[str, Any] | None = None, **fields: Any) -> Run:
     base: dict[str, Any] = {"model": "m", "effort": "e", "agent": "claude", "retries": 1}
-    return Run(config=Config(root=root, raw={}), task=root / "tasks" / "task.md", **{**base, **fields})
+    return Run(config=Config(root=root, raw=raw or {}), task=root / "tasks" / "task.md", **{**base, **fields})
 
 
 def write(root: Path, path: str, text: str = "x\n") -> Path:
@@ -646,3 +646,123 @@ def test_blast_review_only_for_the_blast_judge(repo: Path) -> None:
     blast = runner.blast_review(state, Judge("blast", None, bounce_to="coder"))
     assert blast == {"Diff stat": "", "Diff": "", "Hunks": ""}
     assert runner.blast_review(state, Judge("hardener", "full", bounce_to="coder")) is None
+
+
+BASED = {"git": {"base": "base"}}
+CSS = "packages/views/assets/site.css"
+COMMENTED = "/* layout */\nbody { margin: 0; }\n"
+
+
+def hyper_coder(repo: Path, raw: dict[str, Any] | None = None) -> tuple[Run, Path]:
+    state = make_state(repo, raw or BASED, hyper=True, start=runner.head(Config(root=repo, raw={})))
+    report = state.next_report("coder")
+    report.write_text("done")
+    return state, report
+
+
+def stripped_css(repo: Path) -> None:
+    write(repo, CSS, COMMENTED)
+    commit_all(repo, "css")
+    git(repo, "branch", "base")
+    write(repo, CSS, "body { margin: 0; }\n")
+    commit_all(repo, "drop the comments a gate complained about")
+
+
+def back_to_base(repo: Path, *paths: str) -> None:
+    git(repo, "checkout", "-q", git(repo, "merge-base", "base", "HEAD").strip(), "--", *paths)
+
+
+def test_verify_worker_under_hyper_keeps_a_frozen_file_put_back_as_it_is_at_base(repo: Path) -> None:
+    stripped_css(repo)
+    state, report = hyper_coder(repo)
+    back_to_base(repo, CSS)
+    commit_all(repo, "restore the comments")
+    assert runner.verify_worker(state, Worker("coder", None), report, state.start) == ""
+    assert ((repo / CSS).read_text(), last_message(repo)) == (COMMENTED, "restore the comments")
+
+
+def test_verify_worker_under_hyper_keeps_deleting_a_file_the_base_does_not_have(repo: Path) -> None:
+    git(repo, "branch", "base")
+    write(repo, "notes/plan.md")
+    commit_all(repo, "notes")
+    state, report = hyper_coder(repo)
+    git(repo, "rm", "-q", "notes/plan.md")
+    commit_all(repo, "drop the notes")
+    assert runner.verify_worker(state, Worker("coder", None), report, state.start) == ""
+    assert "notes/plan.md" not in tracked(repo)
+
+
+def test_verify_worker_under_hyper_keeps_untracking_a_gate_config_the_base_does_not_track(repo: Path) -> None:
+    git(repo, "branch", "base")
+    write(repo, "marestail.toml", "[git]\nbase = 'base'\n")
+    commit_all(repo, "toml on the branch")
+    write(repo, ".git/info/exclude", "marestail.toml\n")
+    state, report = hyper_coder(repo)
+    git(repo, "rm", "-q", "--cached", "marestail.toml")
+    commit_all(repo, "untrack the toml")
+    assert runner.verify_worker(state, Worker("coder", None), report, state.start) == ""
+    assert ("marestail.toml" in tracked(repo), (repo / "marestail.toml").read_text()) == (False, "[git]\nbase = 'base'\n")
+
+
+def gate_config_edit(repo: Path, branch: str) -> tuple[Run, Path]:
+    write(repo, "pyproject.toml", "[base]\n")
+    commit_all(repo, "pyproject")
+    git(repo, "branch", "base")
+    write(repo, "pyproject.toml", branch)
+    commit_all(repo, "branch pyproject")
+    return hyper_coder(repo)
+
+
+def test_verify_worker_still_reverts_a_gate_config_edited_with_a_base(repo: Path) -> None:
+    state, report = gate_config_edit(repo, "[base]\n")
+    write(repo, "pyproject.toml", "[loose]\n")
+    commit_all(repo, "loosen")
+    problems = runner.verify_worker(state, Worker("coder", None), report, state.start)
+    assert problems == "pyproject.toml is frozen for coder; reverted. Work within the current configuration."
+    assert (repo / "pyproject.toml").read_text() == "[base]\n"
+
+
+def test_verify_worker_still_reverts_a_gate_config_restored_to_base_with_other_bytes(repo: Path) -> None:
+    state, report = gate_config_edit(repo, "[base]\n[layers]\n")
+    back_to_base(repo, "pyproject.toml")
+    commit_all(repo, "drop the architect's layer")
+    problems = runner.verify_worker(state, Worker("coder", None), report, state.start)
+    assert problems == "pyproject.toml is frozen for coder; reverted. Work within the current configuration."
+    assert (repo / "pyproject.toml").read_text() == "[base]\n[layers]\n"
+
+
+def test_verify_worker_reverts_only_the_paths_a_mixed_change_does_not_put_back(repo: Path) -> None:
+    stripped_css(repo)
+    state, report = hyper_coder(repo)
+    back_to_base(repo, CSS)
+    write(repo, "package.json", "{}\n")
+    commit_all(repo, "restore the comments and add a package")
+    problems = runner.verify_worker(state, Worker("coder", None), report, state.start)
+    assert problems == "package.json is frozen for coder; reverted. Work within the current configuration."
+    assert ((repo / CSS).read_text(), (repo / "package.json").exists()) == (COMMENTED, False)
+
+
+def test_verify_worker_reverts_a_restore_when_the_base_does_not_resolve(repo: Path) -> None:
+    stripped_css(repo)
+    state, report = hyper_coder(repo, {"git": {"base": "origin/nope"}})
+    back_to_base(repo, CSS)
+    commit_all(repo, "restore the comments")
+    problems = runner.verify_worker(state, Worker("coder", None), report, state.start)
+    assert problems == f"{CSS} is frozen for coder; reverted. Work within the current configuration."
+
+
+def test_frozen_changes_do_not_keep_a_restored_path_that_is_dirty(repo: Path) -> None:
+    stripped_css(repo)
+    state, _ = hyper_coder(repo)
+    back_to_base(repo, CSS)
+    commit_all(repo, "restore the comments")
+    write(repo, CSS, "body { margin: 1px; }\n")
+    coder = Worker("coder", None)
+    assert runner.frozen_changes(state.config, coder, state.start, [CSS], True, [CSS]) == [CSS]
+    assert runner.frozen_changes(state.config, coder, state.start, [CSS], True) == []
+
+
+def test_resolved_base_defaults_to_origin_master(repo: Path) -> None:
+    git(repo, "update-ref", "refs/remotes/origin/master", "HEAD")
+    assert runner.resolved_base(Config(root=repo, raw={})) == "origin/master"
+    assert runner.resolved_base(Config(root=repo, raw={"git": {"base": "origin/nope"}})) is None

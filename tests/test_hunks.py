@@ -97,6 +97,19 @@ def test_problems_reports_a_deletion_alone(repo: tuple[Config, str]) -> None:
     assert hunks.problems(config, start, "") == [f"util.py: deleted; {NO_MOVES}"]
 
 
+def test_problems_keep_a_frozen_file_deleted_back_to_the_base(repo: tuple[Config, str]) -> None:
+    config, _ = repo
+    git(config.root, "branch", "base")
+    change(config, {"marestail.toml": "[a]\n", "notes.md": "x\n", "extra.py": "x = 1\n"})
+    start = git(config.root, "rev-parse", "HEAD").strip()
+    git(config.root, "rm", "-q", "--cached", "marestail.toml")
+    git(config.root, "rm", "-q", "notes.md", "extra.py", "util.py")
+    git(config.root, "commit", "-q", "-m", "back to base")
+    deleted = [f"{path}: deleted; {NO_MOVES}" for path in ("extra.py", "marestail.toml", "notes.md", "util.py")]
+    assert hunks.problems(config, start, "", "base") == [deleted[0], deleted[3]]
+    assert hunks.problems(config, start, "") == deleted
+
+
 def test_problems_ignore_features_qa_and_non_source_hunks(repo: tuple[Config, str]) -> None:
     config, start = repo
     change(config, {"features/t.feature": "Feature: t\n", "qa/t.md": "1. x\n", "notes.txt": "x\n"})

@@ -113,9 +113,18 @@ def allowed_paths(config: Config, role: str) -> list[str]:
 
 
 def frozen_paths(config: Config, role: str, paths: list[str], hyper: bool = False) -> list[str]:
-    frozen = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
+    frozen = frozen_lists(config)
     allowed = allowed_paths(config, role)
     return [path for path in paths if frozen_under(path, frozen, hyper) and not matches_any(path, allowed)]
+
+
+def frozen_lists(config: Config) -> list[str]:
+    frozen: list[str] = config.get("freeze", "paths", GATE_CONFIG) + config.get("freeze", "spec", SPEC)
+    return frozen
+
+
+def gates_unchanged(config: Config, path: str, same_bytes: bool) -> bool:
+    return same_bytes or not matches_any(path, frozen_lists(config))
 
 
 def frozen_under(path: str, frozen: list[str], hyper: bool) -> bool:

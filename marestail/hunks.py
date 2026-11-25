@@ -2,7 +2,7 @@ import re
 from itertools import takewhile
 from pathlib import Path
 
-from marestail import freeze
+from marestail import changes, freeze
 from marestail.config import Config
 from marestail.shell import run
 
@@ -27,8 +27,8 @@ _DELETED = "D"
 _TAB = "\t"
 
 
-def problems(config: Config, start: str, handoff: str) -> list[str]:
-    move_findings = dict(_moved_files(config, start))
+def problems(config: Config, start: str, handoff: str, base: str | None = None) -> list[str]:
+    move_findings = dict(_moved_files(config, start, base))
     changed = _changed_hunks(config, start, set(move_findings.values()))
     reformatted = _whitespace_only(changed, _parse_hunks(_git_diff(config, start, "-U0", "-w")))
     unlisted = _unlisted_hunks(changed, reformatted, _listed_hunks(handoff))
@@ -56,9 +56,21 @@ def _git_diff(config: Config, start: str, *options: str) -> str:
     return output
 
 
-def _moved_files(config: Config, start: str) -> list[tuple[str, str]]:
+def _moved_files(config: Config, start: str, base: str | None) -> list[tuple[str, str]]:
+    return [_moved_file(fields) for fields in _moved_rows(config, start) if not _deleted_back_to_base(config, base, fields)]
+
+
+def _moved_rows(config: Config, start: str) -> list[list[str]]:
     status = _git_diff(config, start, "--name-status", "-M")
-    return [_moved_file(line.split(_TAB)) for line in status.splitlines() if line[:1] in _MOVED_STATUS]
+    return [line.split(_TAB) for line in status.splitlines() if line[:1] in _MOVED_STATUS]
+
+
+def _deleted_back_to_base(config: Config, base: str | None, fields: list[str]) -> bool:
+    return fields[0] == _DELETED and base is not None and _frozen_back_to_base(config, base, fields[1])
+
+
+def _frozen_back_to_base(config: Config, base: str, path: str) -> bool:
+    return freeze.frozen_under(path, freeze.frozen_lists(config), True) and changes.outside_diff(config.root, base, path)
 
 
 def _moved_file(fields: list[str]) -> tuple[str, str]:

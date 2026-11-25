@@ -156,3 +156,45 @@ def test_base_text_reads_the_file_at_base_relative_to_the_root(git_repo: Path) -
     assert changes.base_text(git_repo, "base", "pkg/a.py") == "old\n"
     assert changes.base_text(git_repo / "pkg", "base", "a.py") == "old\n"
     assert changes.base_text(git_repo, "base", "pkg/missing.py") is None
+
+
+def test_outside_diff_and_same_bytes_commands(tmp_path: Path, fake_run: Callable[..., FakeRun]) -> None:
+    fake = fake_run(changes, [(1, ""), (0, "abc\n"), (0, "abc\n")])
+    assert changes.outside_diff(tmp_path, "origin/x", "a.css") is False
+    assert changes.same_bytes(tmp_path, "before", "a.css") is True
+    assert fake.calls == [
+        ["git", "diff", "--quiet", "origin/x...HEAD", "--", "a.css"],
+        ["git", "hash-object", "--no-filters", "--", "a.css"],
+        ["git", "rev-parse", "--verify", "--quiet", "before:./a.css"],
+    ]
+
+
+def test_outside_diff_measures_the_branch_from_where_it_left_the_base(git_repo: Path) -> None:
+    (git_repo / "a.css").write_text("/* kept */\n")
+    commit_all(git_repo, "base")
+    git(git_repo, "checkout", "-q", "-b", "work")
+    (git_repo / "a.css").write_text("stripped\n")
+    (git_repo / "added.md").write_text("x\n")
+    commit_all(git_repo, "branch")
+    git(git_repo, "checkout", "-q", "main")
+    (git_repo / "a.css").write_text("moved on\n")
+    commit_all(git_repo, "base moves on")
+    git(git_repo, "checkout", "-q", "work")
+    assert [changes.outside_diff(git_repo, "main", path) for path in ("a.css", "added.md", "never.txt")] == [False, False, True]
+    git(git_repo, "checkout", "-q", git(git_repo, "merge-base", "main", "HEAD").strip(), "--", "a.css")
+    git(git_repo, "rm", "-q", "added.md")
+    commit_all(git_repo, "back to base")
+    assert [changes.outside_diff(git_repo, "main", path) for path in ("a.css", "added.md")] == [True, True]
+
+
+def test_same_bytes_compares_the_file_on_disk_with_the_commit(git_repo: Path) -> None:
+    (git_repo / "marestail.toml").write_text("[a]\n")
+    commit_all(git_repo, "toml")
+    before = git(git_repo, "rev-parse", "HEAD").strip()
+    git(git_repo, "rm", "-q", "--cached", "marestail.toml")
+    (git_repo / "absent.toml").write_text("[a]\n")
+    assert changes.same_bytes(git_repo, before, "marestail.toml") is True
+    assert changes.same_bytes(git_repo, before, "absent.toml") is False
+    assert changes.same_bytes(git_repo, before, "missing.toml") is False
+    (git_repo / "marestail.toml").write_text("[b]\n")
+    assert changes.same_bytes(git_repo, before, "marestail.toml") is False
