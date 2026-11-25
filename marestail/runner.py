@@ -144,6 +144,8 @@ class Run:
     route: str | None = None
     account_env: dict[str, str] = field(default_factory=dict)
     account: str = ""
+    routed_to: str = ""
+    next_route: dandelion.Choice | None = None
     labels: set[str] = field(default_factory=set)
     attempt_waits: list[dict[str, Any]] = field(default_factory=list)
     attempt_agent: dict[str, Any] | None = None
@@ -1700,6 +1702,7 @@ def invoke(state: Run, label: str, prompt: str, rebuild: Callable[[], str] | Non
         prompt, finished = invoke_once(state, label, prompt, prompt_file, rebuild)
         if finished:
             return
+    state.next_route = None
     print(f"   {label}: still rate limited after {LIMIT_WAITS} waits")
 
 
@@ -1749,16 +1752,42 @@ def wait(message: str) -> None:
 def run_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     if not limited_session(state, label, prompt, prompt_file):
         return True
-    note_wait(state, "rate-limit")
-    wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
+    if not rerouted(state, label):
+        note_wait(state, "rate-limit")
+        wait(f"   rate limited; waiting {LIMIT_WAIT_SECONDS // 60} min before retrying {label}")
     return False
+
+
+def rerouted(state: Run, label: str) -> bool:
+    if not state.route:
+        return False
+    until, failure = dandelion.hit(state.routed_to, output_file(state, label))
+    if failure:
+        print(f"   {failure}")
+        return False
+    return moved(state, until, label)
+
+
+def moved(state: Run, until: str, label: str) -> bool:
+    held = f"   {state.routed_to} hit its limit; dandelion holds it until {until}"
+    choice, _ = dandelion.choose(str(state.route), state.config.root)
+    if choice is None or choice.line.split()[-1] == state.routed_to:
+        print(held)
+        return False
+    print(f"{held}; retrying {label} on {choice.line}")
+    state.next_route = choice
+    return True
+
+
+def output_file(state: Run, label: str) -> Path:
+    return state.folder / f"{label}.json"
 
 
 def limited_session(state: Run, label: str, prompt: str, prompt_file: Path) -> bool:
     backend = resolve_agent(state)
     started = time.time()
     code, output = run_backend(state, backend, prompt, prompt_file)
-    (state.folder / f"{label}.json").write_text(output)
+    output_file(state, label).write_text(output)
     if backend == GROK and grok_always_approve_locked(code, output):
         print(f"   {label}: grok always-approve is locked; cannot run unattended")
         remember_agent(state, backend, started, "")
@@ -1785,15 +1814,23 @@ def remember_agent(state: Run, backend: str, started: float, summary: str) -> No
 
 def routed(state: Run, prompt: str) -> tuple[str, str]:
     before = agent_label(state)
-    choice, unrouted = dandelion.choose(str(state.route), state.config.root)
+    choice, unrouted = next_choice(state)
     if choice is None:
         return prompt, unrouted
     state.agent, state.model, state.effort, state.account_env = choice.backend, choice.model, choice.effort, choice.env
-    state.account = choice.line.split()[-1] if choice.env else ""
+    state.routed_to = choice.line.split()[-1]
+    state.account = state.routed_to if choice.env else ""
     after = agent_label(state)
     state.labels.add(after)
     print(f"   {state.route}: {choice.line}")
     return prompt.replace(f"[{before}] ", f"[{after}] "), ""
+
+
+def next_choice(state: Run) -> tuple[dandelion.Choice | None, str]:
+    pending, state.next_route = state.next_route, None
+    if pending:
+        return pending, ""
+    return dandelion.choose(str(state.route), state.config.root)
 
 
 def run_backend(state: Run, backend: str, prompt: str, prompt_file: Path) -> tuple[int, str]:

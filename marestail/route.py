@@ -82,6 +82,25 @@ def choose(model: str, cwd: Path) -> tuple[Choice | None, str]:
     return interpret(completed)
 
 
+def hit(provider: str, output: Path) -> tuple[str, str]:
+    try:
+        completed = subprocess.run(
+            [binary(), "hit", provider, "--output", str(output)], capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
+        )
+    except subprocess.TimeoutExpired:
+        return "", f"dandelion hit timed out after {TIMEOUT_SECONDS}s"
+    except OSError as error:
+        return "", f"dandelion hit could not run: {error}"
+    return held(completed)
+
+
+def held(completed: subprocess.CompletedProcess[str]) -> tuple[str, str]:
+    line = last_line(completed.stdout)
+    if completed.returncode != 0 or not line:
+        return "", f"dandelion hit failed with exit {completed.returncode}: {failure_detail(completed.stderr, line)}"
+    return line.split()[-1], ""
+
+
 def interpret(completed: subprocess.CompletedProcess[str]) -> tuple[Choice | None, str]:
     line = last_line(completed.stdout)
     if line == NO_ROUTE:

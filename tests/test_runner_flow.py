@@ -1493,9 +1493,11 @@ def test_invoke_success(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any)
     assert invoke_env["sleep"].calls == []
 
 
-def test_invoke_waits_on_rate_limit(tmp_path: Path, invoke_env: dict[str, Any], capsys: Any) -> None:
+def test_invoke_waits_on_rate_limit(tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    hit = patch(monkeypatch, dandelion, "hit")
     invoke_env["backend"].replies = [(1, "rate limit"), (0, "done")]
     runner.invoke(make_state(tmp_path), "x", "p")
+    assert hit.calls == []
     assert invoke_env["sleep"].calls == [(120,)]
     assert capsys.readouterr().out == "   rate limited; waiting 2 min before retrying x\n   x finished in 0.5 min: done\n"
 
@@ -1556,6 +1558,103 @@ def test_invoke_routes_each_session(tmp_path: Path, invoke_env: dict[str, Any], 
         "   dandelion/route: no quota left; waiting 2 min before retrying x",
         "   dandelion/route: picked claude opus",
     ]
+
+
+GROK_LIMIT = (
+    '{"type":"error","message":"You\u2019ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, '
+    'or try again later: https://grok.com/supergrok?referrer=grok-build"}\n'
+)
+CLAUDE_DONE = '{"total_cost_usd": 0.5, "num_turns": 2, "result": "ok"}'
+GROK_ROUTE = dandelion.parse("grok-4.7 xhigh grok")
+CLAUDE_ROUTE = dandelion.parse("claude-opus-5-5 high claude")
+HELD = "2026-11-25T01:10:00.000Z"
+GROK_HELD = f"   grok hit its limit; dandelion holds it until {HELD}"
+LIMIT_WAIT = {"reason": "rate-limit", "seconds": 120}
+
+
+class FakeHit:
+    def __init__(self, reply: tuple[str, str]) -> None:
+        self.reply = reply
+        self.calls: list[tuple[str, Path, str]] = []
+
+    def __call__(self, provider: str, output: Path) -> tuple[str, str]:
+        self.calls.append((provider, output, output.read_text()))
+        return self.reply
+
+
+def routed_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hit: tuple[str, str], *routes: Any) -> tuple[Run, Recorder, FakeHit]:
+    choose = patch(monkeypatch, dandelion, "choose", *routes)
+    fake = FakeHit(hit)
+    monkeypatch.setattr(dandelion, "hit", fake)
+    return make_state(tmp_path, agent=None, model=None, effort=None, route="dandelion/route"), choose, fake
+
+
+def test_invoke_reports_a_routed_limit_to_dandelion_and_retries_at_once_on_the_next_account(
+    tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    invoke_env["backend"].replies = [(1, GROK_LIMIT), (0, CLAUDE_DONE)]
+    state, choose, hit = routed_run(tmp_path, monkeypatch, (HELD, ""), (GROK_ROUTE, ""), (CLAUDE_ROUTE, ""))
+    runner.invoke(state, "81-hardener", "p")
+    assert hit.calls == [("grok", state.folder / "81-hardener.json", GROK_LIMIT)]
+    assert choose.calls == [("dandelion/route", tmp_path), ("dandelion/route", tmp_path)]
+    assert [call[1] for call in invoke_env["backend"].calls] == ["grok", "claude"]
+    assert (invoke_env["sleep"].calls, state.attempt_waits, state.next_route, state.routed_to) == ([], [], None, "claude")
+    assert capsys.readouterr().out.splitlines() == [
+        "   dandelion/route: grok-4.7 xhigh grok",
+        f"{GROK_HELD}; retrying 81-hardener on claude-opus-5-5 high claude",
+        "   dandelion/route: claude-opus-5-5 high claude",
+        "   81-hardener finished in 0.5 min: turns=2 api-equivalent=$0.50 'ok'",
+    ]
+
+
+@pytest.mark.parametrize(
+    "after_hit",
+    [(dandelion.parse("grok-4.6 high grok"), ""), (None, "no subscription has quota left")],
+    ids=["the same account", "none"],
+)
+def test_invoke_waits_when_dandelion_names_the_limited_account_again_or_none(
+    tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any, after_hit: tuple[Choice | None, str]
+) -> None:
+    invoke_env["backend"].replies = [(1, GROK_LIMIT), (0, CLAUDE_DONE)]
+    state, choose, hit = routed_run(tmp_path, monkeypatch, (HELD, ""), (GROK_ROUTE, ""), after_hit, (CLAUDE_ROUTE, ""))
+    runner.invoke(state, "x", "p")
+    assert [call[0] for call in hit.calls] == ["grok"]
+    assert len(choose.calls) == 3
+    assert (invoke_env["sleep"].calls, state.attempt_waits, state.next_route) == ([(120,)], [LIMIT_WAIT], None)
+    assert capsys.readouterr().out.splitlines()[:4] == [
+        "   dandelion/route: grok-4.7 xhigh grok",
+        GROK_HELD,
+        "   rate limited; waiting 2 min before retrying x",
+        "   dandelion/route: claude-opus-5-5 high claude",
+    ]
+
+
+def test_invoke_logs_a_failing_dandelion_hit_and_waits(
+    tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    invoke_env["backend"].replies = [(1, GROK_LIMIT), (0, CLAUDE_DONE)]
+    failure = "dandelion hit failed with exit 2: dandelion: hit: unknown account grok"
+    state, choose, _ = routed_run(tmp_path, monkeypatch, ("", failure), (GROK_ROUTE, ""), (CLAUDE_ROUTE, ""))
+    runner.invoke(state, "x", "p")
+    assert len(choose.calls) == 2
+    assert (invoke_env["sleep"].calls, state.attempt_waits) == ([(120,)], [LIMIT_WAIT])
+    assert capsys.readouterr().out.splitlines()[:4] == [
+        "   dandelion/route: grok-4.7 xhigh grok",
+        f"   {failure}",
+        "   rate limited; waiting 2 min before retrying x",
+        "   dandelion/route: claude-opus-5-5 high claude",
+    ]
+
+
+def test_invoke_drops_the_next_account_when_it_gives_up(
+    tmp_path: Path, invoke_env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    monkeypatch.setattr(runner, "LIMIT_WAITS", 1)
+    invoke_env["backend"].replies = [(1, GROK_LIMIT)]
+    state, _, _ = routed_run(tmp_path, monkeypatch, (HELD, ""), (GROK_ROUTE, ""), (CLAUDE_ROUTE, ""))
+    runner.invoke(state, "x", "p")
+    assert (invoke_env["sleep"].calls, state.next_route) == ([], None)
+    assert capsys.readouterr().out.splitlines()[-1] == "   x: still rate limited after 1 waits"
 
 
 class FakeStdin:

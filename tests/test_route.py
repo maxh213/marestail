@@ -115,6 +115,48 @@ def test_choose_timeout(dandelion: str, monkeypatch: pytest.MonkeyPatch) -> None
     assert route.choose("dandelion/route", Path()) == (None, "dandelion route timed out after 300s")
 
 
+def test_hit_reports_the_session_output_and_returns_the_time_dandelion_holds_the_account_until(
+    dandelion: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = fake_process(monkeypatch, completed(0, "grok hit its limit; not routed until 2026-11-25T01:10:00.000Z\n"))
+    output = tmp_path / "81-hardener.json"
+    assert route.hit("grok", output) == ("2026-11-25T01:10:00.000Z", "")
+    options = {"capture_output": True, "text": True, "timeout": 300, "check": False}
+    assert fake.calls == [([dandelion, "hit", "grok", "--output", str(output)], options)]
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (subprocess.TimeoutExpired("dandelion", 300), "dandelion hit timed out after 300s"),
+        (FileNotFoundError("no dandelion"), "dandelion hit could not run: no dandelion"),
+        (PermissionError("denied"), "dandelion hit could not run: denied"),
+    ],
+)
+def test_hit_that_cannot_finish(dandelion: str, monkeypatch: pytest.MonkeyPatch, error: Exception, failure: str) -> None:
+    fake_process(monkeypatch, error)
+    assert route.hit("grok", Path("x.json")) == ("", failure)
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (
+            completed(0, "noise\n claude-work hit its limit; not routed until 2026-11-25T22:00:00.000Z \n\n"),
+            ("2026-11-25T22:00:00.000Z", ""),
+        ),
+        (
+            completed(2, "", "dandelion: hit: unknown account groc\n"),
+            ("", "dandelion hit failed with exit 2: dandelion: hit: unknown account groc"),
+        ),
+        (completed(1, "grok hit its limit\n"), ("", "dandelion hit failed with exit 1: grok hit its limit")),
+        (completed(0, " \n"), ("", "dandelion hit failed with exit 0: no output")),
+    ],
+)
+def test_held(result: subprocess.CompletedProcess[str], expected: tuple[str, str]) -> None:
+    assert route.held(result) == expected
+
+
 @pytest.mark.parametrize(
     ("result", "expected"),
     [

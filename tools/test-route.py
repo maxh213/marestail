@@ -197,7 +197,10 @@ def reroutes(folder: Path) -> None:
     stub_dandelion(folder)
     os.environ["DANDELION_CLAUDE_WORK_CONFIG_DIR"] = "/srv/work-claude"
     os.environ["SEEN"] = str(folder / "seen")
-    (folder / "plan").write_text("0 grok-4.6 xhigh grok\n1 none\n0 claude-opus-5 high claude-work\n0 kimi-k3-max cursor\n")
+    held = "0 grok hit its limit; not routed until 2026-11-25T01:10:00.000Z\n"
+    (folder / "plan").write_text(
+        f"0 grok-4.6 xhigh grok\n{held}1 none\n0 claude-opus-5 high claude-work\n0 grok-4.6 xhigh grok\n{held}0 kimi-k3-max cursor\n"
+    )
     os.environ["MARESTAIL_GROK"] = str(script(folder / "grok", 'echo \'{"type":"error","message":"rate limit exceeded"}\'; exit 1\n'))
     os.environ["MARESTAIL_CURSOR"] = str(
         script(folder / "cursor-agent", 'cat > /dev/null; echo \'{"type":"result","result":"cursor stub"}\'\n')
@@ -232,9 +235,12 @@ def reroutes(folder: Path) -> None:
         expect("claude-work-config", "config=/srv/work-claude " in output, True)
         expect("claude-model-effort", "--model claude-opus-5 --effort high" in output, True)
         expect("claude-work-env", agent_env(state)["CLAUDE_CONFIG_DIR"], "/srv/work-claude")
+        expect("waits-when-none-is-left", [wait["reason"] for wait in state.attempt_waits], ["rate-limit"])
         invoke(state, "02-cleaner", "no stamp here")
         expect("cursor-state", (state.agent, state.model, state.effort, agent_env(state)), ("cursor", "kimi-k3-max", None, {}))
-        expect("route-calls", (folder / "calls").read_text(), "route\nroute\nroute\nroute\n")
+        expect("retries-at-once-on-another-account", [wait["reason"] for wait in state.attempt_waits], ["rate-limit"])
+        hits = [f"hit grok --output {state.folder / label}.json\n" for label in ("01-coder", "02-cleaner")]
+        expect("route-calls", (folder / "calls").read_text(), f"route\n{hits[0]}route\nroute\nroute\n{hits[1]}route\n")
     finally:
         runner.LIMIT_WAIT_SECONDS = previous_wait
     expect(
